@@ -81,8 +81,8 @@ def upgrade() -> None:
     op.execute(
         """
         CREATE POLICY tenant_isolation ON suggestion_dismissals
-        USING (tenant_id = current_setting('app.current_tenant_id')::uuid)
-        WITH CHECK (tenant_id = current_setting('app.current_tenant_id')::uuid)
+        USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+        WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid)
         """
     )
 

@@ -371,7 +371,7 @@ async def dismiss_suggestion(
     # RLS ensures tenant_id is set via session context
     # We need to get tenant_id from the session context
     tenant_result = await session.execute(
-        select(func.current_setting("app.current_tenant_id", True))
+        select(func.current_setting("app.tenant_id", True))
     )
     tenant_id_str = tenant_result.scalar_one_or_none()
     if not tenant_id_str:
