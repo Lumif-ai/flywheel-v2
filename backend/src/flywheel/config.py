@@ -11,6 +11,14 @@ class Settings(BaseSettings):
     debug: bool = True
     cors_origins: list[str] = ["http://localhost:5173"]
 
+    # Supabase
+    supabase_url: str = ""
+    supabase_service_key: str = ""
+    supabase_jwt_secret: str = ""
+
+    # BYOK encryption (Fernet-compatible base64 key)
+    encryption_key: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

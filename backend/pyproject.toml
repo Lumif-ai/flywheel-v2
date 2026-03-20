@@ -12,6 +12,9 @@ dependencies = [
     "pydantic>=2.0",
     "pydantic-settings>=2.0",
     "python-dotenv>=1.0",
+    "pyjwt>=2.12.1",
+    "cryptography>=46.0.5",
+    "supabase>=2.28.2",
 ]
 
 [dependency-groups]
