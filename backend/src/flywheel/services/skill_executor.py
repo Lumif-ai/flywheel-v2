@@ -24,8 +24,10 @@ from uuid import UUID
 from sqlalchemy import text as sa_text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from flywheel.db.models import SkillRun, User
+from flywheel.db.models import ContextEntry, SkillRun, User
 from flywheel.db.session import get_session_factory
+from sqlalchemy import select
+
 from flywheel.services.circuit_breaker import anthropic_breaker
 from flywheel.services.cost_tracker import calculate_cost
 
@@ -38,6 +40,66 @@ _env_lock = threading.Lock()
 
 # Path to the engines directory (v1 execution gateway location)
 _ENGINES_DIR = Path(__file__).resolve().parents[3] / "engines"
+
+
+async def _build_attribution(
+    tenant_id: UUID, user_id: UUID, skill_name: str
+) -> dict:
+    """Build attribution data from recent context entries for the tenant.
+
+    Queries the most recent non-deleted ContextEntry rows to show users
+    which prior context informed a skill run. Returns a structured dict
+    with entry counts, files consulted, and source breakdown.
+
+    This function must NEVER raise -- attribution is informational and
+    must not block skill execution results.
+    """
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            # Set tenant RLS context
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+
+            # Query up to 50 most recent non-deleted entries
+            result = await session.execute(
+                select(ContextEntry)
+                .where(
+                    ContextEntry.tenant_id == tenant_id,
+                    ContextEntry.deleted_at.is_(None),
+                )
+                .order_by(ContextEntry.updated_at.desc())
+                .limit(50)
+            )
+            rows = result.scalars().all()
+
+            if not rows:
+                return {
+                    "entry_count": 0,
+                    "files_consulted": [],
+                    "sources": [],
+                    "entries_read": [],
+                }
+
+            return {
+                "entry_count": len(rows),
+                "files_consulted": list(set(r.file_name for r in rows)),
+                "sources": list(set(r.source for r in rows if r.source)),
+                "entries_read": [
+                    {"id": str(r.id), "file": r.file_name, "source": r.source}
+                    for r in rows[:20]  # Cap detail at 20
+                ],
+            }
+    except Exception as exc:
+        logger.warning("Attribution building failed: %s", exc)
+        return {
+            "entry_count": 0,
+            "files_consulted": [],
+            "sources": [],
+            "entries_read": [],
+        }
 
 
 async def execute_run(run: SkillRun) -> None:
@@ -139,6 +201,26 @@ async def execute_run(run: SkillRun) -> None:
                 )
             )
             await session.commit()
+
+        # Build attribution from context entries (post-completion, per Pitfall 4)
+        try:
+            db_attribution = await _build_attribution(
+                run.tenant_id, run.user_id, run.skill_name
+            )
+            if db_attribution.get("entry_count", 0) > 0:
+                # Merge DB attribution with any gateway-provided attribution
+                merged = {**(result.context_attribution or {}), **db_attribution}
+                async with factory() as session:
+                    await session.execute(
+                        update(SkillRun)
+                        .where(SkillRun.id == run.id)
+                        .values(attribution=merged)
+                    )
+                    await session.commit()
+        except Exception as attr_err:
+            logger.warning(
+                "Attribution enrichment failed for run %s: %s", run.id, attr_err
+            )
 
         # Emit "done" event with cost data (rendered_html omitted to avoid bloating events_log)
         await _append_event_atomic(factory, run.id, {
