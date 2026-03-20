@@ -4,6 +4,8 @@ interface Tenant {
   id: string
   name: string
   slug: string
+  plan: string
+  member_limit: number
 }
 
 interface TenantState {
