@@ -26,6 +26,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from flywheel.db.models import SkillRun, User
 from flywheel.db.session import get_session_factory
+from flywheel.services.circuit_breaker import anthropic_breaker
 from flywheel.services.cost_tracker import calculate_cost
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,18 @@ async def execute_run(run: SkillRun) -> None:
     start_time = time.time()
 
     try:
+        # Circuit breaker check -- if API is down, set to waiting_for_api
+        if not anthropic_breaker.can_execute():
+            async with factory() as session:
+                await session.execute(
+                    update(SkillRun)
+                    .where(SkillRun.id == run.id)
+                    .values(status="waiting_for_api")
+                )
+                await session.commit()
+            logger.info("Run %s deferred: circuit breaker is open", run.id)
+            return
+
         # Emit "started" event
         await _append_event_atomic(factory, run.id, {
             "event": "stage",
@@ -78,9 +91,20 @@ async def execute_run(run: SkillRun) -> None:
         from flywheel.engines.execution_gateway import execute_skill
 
         # Thread-safe env var manipulation: set BYOK key, execute, restore
-        result = await asyncio.to_thread(
-            _execute_with_api_key, api_key, run.skill_name, run.input_text or "", str(run.user_id)
-        )
+        try:
+            result = await asyncio.to_thread(
+                _execute_with_api_key, api_key, run.skill_name, run.input_text or "", str(run.user_id)
+            )
+            anthropic_breaker.record_success()
+        except Exception as exec_err:
+            # Check if this is an Anthropic API error for circuit breaker tracking
+            try:
+                import anthropic as anthropic_mod
+                if isinstance(exec_err, anthropic_mod.APIError):
+                    anthropic_breaker.record_failure()
+            except ImportError:
+                pass
+            raise
 
         duration_ms = int((time.time() - start_time) * 1000)
         cost = calculate_cost(result.token_usage)

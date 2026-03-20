@@ -1,5 +1,6 @@
 """FastAPI application factory."""
 
+import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -9,6 +10,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
 from flywheel.api.auth import router as auth_router
+from flywheel.api.chat import router as chat_router
 from flywheel.api.context import router as context_router
 from flywheel.api.files import router as files_router
 from flywheel.api.errors import register_error_handlers
@@ -26,6 +28,9 @@ from flywheel.middleware.rate_limit import limiter
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
+    queue_task = None
+    cleaner_task = None
+
     # Startup
     if settings.flywheel_backend == "postgres":
         from flywheel.db.engine import get_engine
@@ -36,8 +41,25 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             await conn.execute(
                 __import__("sqlalchemy").text("SELECT 1")
             )
+
+        # Start background workers
+        from flywheel.services.job_queue import job_queue_loop
+        from flywheel.services.stale_job_cleaner import cleanup_stale_jobs
+
+        queue_task = asyncio.create_task(job_queue_loop())
+        cleaner_task = asyncio.create_task(cleanup_stale_jobs())
+
     yield
+
     # Shutdown
+    for task in (queue_task, cleaner_task):
+        if task is not None:
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
+
     if settings.flywheel_backend == "postgres":
         from flywheel.db.engine import dispose_engine
 
@@ -91,6 +113,7 @@ def create_app() -> FastAPI:
     app.include_router(work_items_router, prefix="/api/v1")
     app.include_router(integrations_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
+    app.include_router(chat_router, prefix="/api/v1")
     app.include_router(files_router, prefix="/api/v1")
 
     return app
