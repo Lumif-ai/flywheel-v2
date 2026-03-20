@@ -140,10 +140,16 @@ async def execute_run(run: SkillRun) -> None:
             )
             await session.commit()
 
-        # Emit "done" event
+        # Emit "done" event with cost data (rendered_html omitted to avoid bloating events_log)
         await _append_event_atomic(factory, run.id, {
             "event": "done",
-            "data": {"status": "completed", "duration_ms": duration_ms},
+            "data": {
+                "status": "completed",
+                "duration_ms": duration_ms,
+                "run_id": str(run.id),
+                "tokens_used": total_tokens,
+                "cost_estimate": float(cost) if cost else None,
+            },
         })
 
         logger.info(

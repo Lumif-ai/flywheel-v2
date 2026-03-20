@@ -1,4 +1,4 @@
-export type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'clarify' | 'error' | 'done'
+export type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'stage' | 'result' | 'clarify' | 'error' | 'done'
 
 export interface SSEEvent {
   type: SSEEventType
@@ -27,7 +27,22 @@ export interface ErrorEvent {
   message: string
 }
 
+export interface StageEvent {
+  stage: string
+  message?: string
+}
+
+export interface ResultEvent {
+  rendered_html: string
+  tokens_used?: number
+  cost_estimate?: number
+}
+
 export interface DoneEvent {
   run_id: string
-  output_html?: string
+  status: string
+  rendered_html?: string
+  tokens_used?: number
+  cost_estimate?: number
+  duration_ms?: number
 }

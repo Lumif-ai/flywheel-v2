@@ -3,6 +3,7 @@ import { AlertCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useSSE } from '@/lib/sse'
+import { api } from '@/lib/api'
 import { useChatStore } from '../store'
 import type { SSEEvent } from '@/types/events'
 
@@ -41,9 +42,18 @@ export function ChatStream({ runId }: ChatStreamProps) {
           // Result event carries rendered_html from completed run
           setStreamOutput((event.data.rendered_html as string) ?? '')
           break
-        case 'done':
-          setStreamOutput((event.data.output_html as string) ?? '')
+        case 'done': {
+          const html = event.data.rendered_html as string | undefined
+          if (html) {
+            setStreamOutput(html)
+          } else {
+            // Fallback: fetch run detail if rendered_html not in SSE event
+            api.get<{ rendered_html?: string }>(`/skills/runs/${runId}`)
+              .then((res) => setStreamOutput(res.rendered_html ?? ''))
+              .catch(() => setStreamOutput(''))
+          }
           break
+        }
         case 'error':
           setStreamError((event.data.message as string) ?? 'Unknown error')
           break

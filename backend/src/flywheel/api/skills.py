@@ -231,9 +231,16 @@ async def stream_run(
                 yield {"event": evt.get("event", "message"), "data": json.dumps(evt.get("data", evt))}
                 seen_events += 1
 
-            # If already done, send done event and return
+            # If already done, send done event with output data and return
             if run.status in ("completed", "failed"):
-                yield {"event": "done", "data": json.dumps({"status": run.status})}
+                done_data: dict[str, Any] = {
+                    "status": run.status,
+                    "run_id": str(run_id),
+                    "tokens_used": run.tokens_used,
+                    "cost_estimate": float(run.cost_estimate) if run.cost_estimate else None,
+                    "rendered_html": run.rendered_html or "",
+                }
+                yield {"event": "done", "data": json.dumps(done_data)}
                 return
 
             current_status = run.status
@@ -262,7 +269,22 @@ async def stream_run(
             finally:
                 await session.close()
 
-        yield {"event": "done", "data": json.dumps({"status": current_status})}
+        # Fetch final run state for output data
+        session = await get_tenant_session(factory, str(user.tenant_id), str(user.sub))
+        try:
+            result = await session.execute(select(SkillRun).where(SkillRun.id == run_id))
+            final_run = result.scalar_one_or_none()
+            done_payload: dict[str, Any] = {
+                "status": current_status,
+                "run_id": str(run_id),
+            }
+            if final_run:
+                done_payload["tokens_used"] = final_run.tokens_used
+                done_payload["cost_estimate"] = float(final_run.cost_estimate) if final_run.cost_estimate else None
+                done_payload["rendered_html"] = final_run.rendered_html or ""
+        finally:
+            await session.close()
+        yield {"event": "done", "data": json.dumps(done_payload)}
 
     return EventSourceResponse(event_generator())
 
