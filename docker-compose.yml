@@ -1,0 +1,47 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: flywheel
+      POSTGRES_PASSWORD: flywheel
+      POSTGRES_DB: flywheel
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U flywheel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      FLYWHEEL_BACKEND: flatfile
+      DATABASE_URL: postgresql+asyncpg://flywheel:flywheel@postgres:5432/flywheel
+      DEBUG: "true"
+      CORS_ORIGINS: '["http://localhost:5173"]'
+    volumes:
+      - ./backend/src:/app/src
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: uv run uvicorn flywheel.main:app --host 0.0.0.0 --port 8000 --reload
+
+  frontend:
+    profiles: ["full"]
+    build:
+      context: ./frontend
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  pgdata:
