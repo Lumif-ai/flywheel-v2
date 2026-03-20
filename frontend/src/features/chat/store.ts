@@ -145,13 +145,19 @@ export const useChatStore = create<ChatState>((set, get) => ({
         addMessage(noneMsg)
       }
     } catch (err) {
-      // Add error assistant message
+      const message = err instanceof Error ? err.message : 'Failed to process message'
+      const isConcurrentLimit =
+        message.includes('concurrent') ||
+        message.includes('ConcurrentRunLimitExceeded')
+
       const errorMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: err instanceof Error ? err.message : 'Failed to process message',
+        content: isConcurrentLimit
+          ? 'You have 3 skills running right now. Please wait for one to finish before starting another.'
+          : message,
         timestamp: new Date(),
-        status: 'error',
+        status: isConcurrentLimit ? 'complete' : 'error',
       }
       addMessage(errorMsg)
     }
