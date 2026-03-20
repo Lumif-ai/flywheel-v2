@@ -75,6 +75,7 @@ class InviteResponse(BaseModel):
     invite_id: str
     email: str
     expires_at: str | None
+    invite_token: str | None = None
 
 
 class AcceptInviteResponse(BaseModel):
@@ -309,6 +310,7 @@ async def invite_member(
                 invite_id="direct-add",
                 email=body.email,
                 expires_at=None,
+                invite_token=None,
             )
 
     # Generate token, store hash
@@ -326,13 +328,14 @@ async def invite_member(
     await db.commit()
     await db.refresh(invite)
 
-    # TODO: Phase 25 -- send invite email via Resend
+    # Email delivery deferred to Phase 25 (Resend). Token returned in response for shareable link.
     logger.info("invite_created tenant=%s email=%s", user.tenant_id, body.email)
 
     return InviteResponse(
         invite_id=str(invite.id),
         email=body.email,
         expires_at=invite.expires_at.isoformat() if invite.expires_at else None,
+        invite_token=token,
     )
 
 

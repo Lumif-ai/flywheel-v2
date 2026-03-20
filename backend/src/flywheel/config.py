@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     supabase_service_key: str = ""
     supabase_jwt_secret: str = ""
 
-    # BYOK encryption (Fernet-compatible base64 key)
+    # BYOK encryption (base64-encoded 32-byte AES-256 key)
     encryption_key: str = ""
 
     # Subsidized API key for anonymous onboarding (~$0.50/trial)
