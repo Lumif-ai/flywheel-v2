@@ -3,8 +3,10 @@
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from slowapi.errors import RateLimitExceeded
 
 from flywheel.api.auth import router as auth_router
 from flywheel.api.context import router as context_router
@@ -17,6 +19,7 @@ from flywheel.api.tenant import router as tenant_router
 from flywheel.api.user import router as user_router
 from flywheel.api.work_items import router as work_items_router
 from flywheel.config import settings
+from flywheel.middleware.rate_limit import limiter
 
 
 @asynccontextmanager
@@ -57,6 +60,22 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Rate limiter (slowapi requires app.state.limiter)
+    app.state.limiter = limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        retry_after = getattr(exc, "retry_after", 60)
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "RateLimitExceeded",
+                "message": str(exc.detail),
+                "code": 429,
+            },
+            headers={"Retry-After": str(retry_after)},
+        )
 
     # Error handlers (after CORS so error responses include CORS headers)
     register_error_handlers(app)

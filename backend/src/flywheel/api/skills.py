@@ -28,6 +28,7 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import SkillRun, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
+from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit
 
 logger = logging.getLogger(__name__)
 
@@ -146,6 +147,10 @@ async def start_run(
 
     NOTE: Actual execution is Phase 20. This just creates the pending record.
     """
+    # Rate limit checks
+    await check_anonymous_run_limit(user.sub, user.is_anonymous, db)
+    await check_concurrent_run_limit(user.sub, db)
+
     # Validate skill exists
     available = [s["name"] for s in _get_available_skills()]
     if body.skill_name not in available:

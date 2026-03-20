@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import SkillRun, WorkItem
+from flywheel.middleware.rate_limit import check_concurrent_run_limit
 
 router = APIRouter(prefix="/work-items", tags=["work-items"])
 
@@ -234,6 +235,9 @@ async def run_skill_for_item(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Start a skill run for a work item. Actual execution is Phase 20."""
+    # Rate limit check
+    await check_concurrent_run_limit(user.sub, db)
+
     item = (
         await db.execute(select(WorkItem).where(WorkItem.id == item_id))
     ).scalar_one_or_none()

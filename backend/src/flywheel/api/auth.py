@@ -16,7 +16,7 @@ import logging
 import re
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -26,6 +26,7 @@ from flywheel.auth.encryption import encrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.auth.supabase_client import get_supabase_admin
 from flywheel.db.models import Tenant, User, UserTenant
+from flywheel.middleware.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +63,8 @@ class UserProfile(BaseModel):
 
 
 @router.post("/magic-link")
-async def magic_link(body: MagicLinkRequest):
+@limiter.limit("3/hour")
+async def magic_link(request: Request, body: MagicLinkRequest):
     """Send a magic link email. Never reveals whether email exists."""
     if not _EMAIL_RE.match(body.email):
         raise HTTPException(
@@ -70,7 +72,6 @@ async def magic_link(body: MagicLinkRequest):
             detail="Invalid email format",
         )
 
-    # TODO: Rate limit to 3/hr/email (Phase 18 AUTH-09)
     logger.info("magic_link_requested email=%s", body.email)
 
     try:

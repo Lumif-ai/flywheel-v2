@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     # BYOK encryption (base64-encoded 32-byte AES-256 key)
     encryption_key: str = ""
 
+    # Rate limiting
+    rate_limit_magic_link: str = "3/hour"
+    rate_limit_default: str = "60/minute"
+
     # Subsidized API key for anonymous onboarding (~$0.50/trial)
     flywheel_subsidy_api_key: str = ""
 
