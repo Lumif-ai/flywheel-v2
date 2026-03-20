@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
+import base64
 import datetime
+import os
 import time
 from unittest.mock import patch
 from uuid import UUID, uuid4
 
 import jwt as pyjwt
 import pytest
-from cryptography.fernet import Fernet
 from fastapi import HTTPException
 
 from flywheel.auth.jwt import TokenPayload, decode_jwt
@@ -20,7 +21,7 @@ from flywheel.db.models import Invite
 # ---------------------------------------------------------------------------
 
 TEST_JWT_SECRET = "test-jwt-secret-for-unit-tests-only"
-TEST_ENCRYPTION_KEY = Fernet.generate_key().decode()
+TEST_ENCRYPTION_KEY = base64.b64encode(os.urandom(32)).decode()
 
 
 # ---------------------------------------------------------------------------
@@ -126,7 +127,7 @@ class TestEncryption:
         import flywheel.auth.encryption as enc_mod
 
         mock_settings.encryption_key = TEST_ENCRYPTION_KEY
-        enc_mod._fernet = None  # Reset singleton
+        enc_mod._aesgcm = None  # Reset singleton
 
         from flywheel.auth.encryption import decrypt_api_key, encrypt_api_key
 
@@ -140,24 +141,39 @@ class TestEncryption:
         import flywheel.auth.encryption as enc_mod
 
         mock_settings.encryption_key = TEST_ENCRYPTION_KEY
-        enc_mod._fernet = None
+        enc_mod._aesgcm = None
 
         from flywheel.auth.encryption import decrypt_api_key
 
         with pytest.raises(ValueError, match="Failed to decrypt"):
-            decrypt_api_key(b"garbage-data-not-fernet")
+            decrypt_api_key(b"garbage-data-not-valid-aesgcm")
 
     @patch("flywheel.auth.encryption.settings")
     def test_encrypted_output_is_bytes(self, mock_settings):
         import flywheel.auth.encryption as enc_mod
 
         mock_settings.encryption_key = TEST_ENCRYPTION_KEY
-        enc_mod._fernet = None
+        enc_mod._aesgcm = None
 
         from flywheel.auth.encryption import encrypt_api_key
 
         result = encrypt_api_key("test-key")
         assert isinstance(result, bytes)
+
+    @patch("flywheel.auth.encryption.settings")
+    def test_different_encryptions_produce_different_output(self, mock_settings):
+        """Encrypt the same key twice -- ciphertexts must differ (random nonce)."""
+        import flywheel.auth.encryption as enc_mod
+
+        mock_settings.encryption_key = TEST_ENCRYPTION_KEY
+        enc_mod._aesgcm = None
+
+        from flywheel.auth.encryption import encrypt_api_key
+
+        plaintext = "sk-same-key-for-both"
+        encrypted_1 = encrypt_api_key(plaintext)
+        encrypted_2 = encrypt_api_key(plaintext)
+        assert encrypted_1 != encrypted_2, "AES-GCM with random nonce should produce different ciphertexts"
 
 
 # ---------------------------------------------------------------------------
