@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # BYOK encryption (Fernet-compatible base64 key)
     encryption_key: str = ""
 
+    # Subsidized API key for anonymous onboarding (~$0.50/trial)
+    flywheel_subsidy_api_key: str = ""
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 

@@ -6,7 +6,9 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from flywheel.api.auth import router as auth_router
 from flywheel.api.health import router as health_router
+from flywheel.api.onboarding import router as onboarding_router
 from flywheel.config import settings
 
 
@@ -51,6 +53,8 @@ def create_app() -> FastAPI:
 
     # Routes
     app.include_router(health_router, prefix="/api/v1")
+    app.include_router(auth_router, prefix="/api/v1")
+    app.include_router(onboarding_router, prefix="/api/v1")
 
     return app
 
