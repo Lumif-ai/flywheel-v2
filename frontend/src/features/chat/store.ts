@@ -100,27 +100,56 @@ export const useChatStore = create<ChatState>((set, get) => ({
     addMessage(userMsg)
 
     try {
-      const res = await api.post<{ run_id: string }>('/skills/runs', {
-        input_text: content,
-      })
-      setActiveRunId(res.run_id)
+      const res = await api.post<{
+        action: string
+        run_id?: string
+        stream_url?: string
+        skill_name?: string
+        message?: string
+        candidates?: string[]
+      }>('/chat', { message: content })
 
-      // Add placeholder assistant message
-      const assistantMsg: ChatMessage = {
-        id: crypto.randomUUID(),
-        role: 'assistant',
-        content: '',
-        timestamp: new Date(),
-        runId: res.run_id,
-        status: 'streaming',
+      if (res.action === 'execute') {
+        setActiveRunId(res.run_id!)
+
+        // Add placeholder assistant message for streaming
+        const assistantMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: '',
+          timestamp: new Date(),
+          runId: res.run_id,
+          skillName: res.skill_name ?? undefined,
+          status: 'streaming',
+        }
+        addMessage(assistantMsg)
+      } else if (res.action === 'clarify') {
+        // Clarification -- no streaming, just display message
+        const clarifyMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: res.message ?? 'Could you be more specific?',
+          timestamp: new Date(),
+          status: 'complete',
+        }
+        addMessage(clarifyMsg)
+      } else {
+        // action === "none" or unknown
+        const noneMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: res.message ?? 'I can help with skills like research, analysis, and more.',
+          timestamp: new Date(),
+          status: 'complete',
+        }
+        addMessage(noneMsg)
       }
-      addMessage(assistantMsg)
     } catch (err) {
       // Add error assistant message
       const errorMsg: ChatMessage = {
         id: crypto.randomUUID(),
         role: 'assistant',
-        content: err instanceof Error ? err.message : 'Failed to start skill run',
+        content: err instanceof Error ? err.message : 'Failed to process message',
         timestamp: new Date(),
         status: 'error',
       }

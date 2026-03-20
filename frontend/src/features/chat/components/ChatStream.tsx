@@ -29,6 +29,18 @@ export function ChatStream({ runId }: ChatStreamProps) {
         case 'skill_start':
           setStreamStatus('running')
           break
+        case 'stage': {
+          // Stage events from skill_executor: started, executing, rendering
+          const stage = event.data.stage as string
+          if (stage === 'started' || stage === 'executing' || stage === 'rendering') {
+            setStreamStatus('running')
+          }
+          break
+        }
+        case 'result':
+          // Result event carries rendered_html from completed run
+          setStreamOutput((event.data.rendered_html as string) ?? '')
+          break
         case 'done':
           setStreamOutput((event.data.output_html as string) ?? '')
           break

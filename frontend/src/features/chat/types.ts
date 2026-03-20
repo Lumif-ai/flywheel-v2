@@ -5,6 +5,7 @@ export interface ChatMessage {
   timestamp: Date
   runId?: string
   outputHtml?: string
+  skillName?: string
   status: 'pending' | 'streaming' | 'complete' | 'error'
 }
 
