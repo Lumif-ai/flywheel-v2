@@ -1,0 +1,325 @@
+"""Skill endpoints: listing, run management, SSE streaming, execution history.
+
+Endpoints:
+- GET  /skills                    -- list available skills
+- POST /skills/runs               -- start a skill run
+- GET  /skills/runs               -- paginated execution history
+- GET  /skills/runs/{run_id}      -- single run detail
+- GET  /skills/runs/{run_id}/stream -- SSE event stream with late-connect replay
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from pathlib import Path
+from typing import Any
+from uuid import UUID
+
+import yaml
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from pydantic import BaseModel
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sse_starlette.sse import EventSourceResponse
+
+from flywheel.api.deps import get_tenant_db, require_tenant
+from flywheel.auth.jwt import TokenPayload
+from flywheel.db.models import SkillRun, WorkItem
+from flywheel.db.session import get_session_factory, get_tenant_session
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/skills", tags=["skills"])
+
+# Directory where skill definitions live (relative to project root)
+SKILLS_DIR = Path(__file__).resolve().parents[4] / "skills"
+
+
+# ---------------------------------------------------------------------------
+# Request / Response models
+# ---------------------------------------------------------------------------
+
+
+class StartRunRequest(BaseModel):
+    skill_name: str
+    input_text: str | None = None
+    work_item_id: UUID | None = None
+
+
+class StartRunResponse(BaseModel):
+    run_id: str
+    status: str
+    stream_url: str
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_skill_frontmatter(skill_dir: Path) -> dict[str, Any] | None:
+    """Parse SKILL.md YAML frontmatter from a skill directory."""
+    skill_md = skill_dir / "SKILL.md"
+    if not skill_md.exists():
+        return None
+    try:
+        text = skill_md.read_text(encoding="utf-8")
+        if not text.startswith("---"):
+            return None
+        end = text.index("---", 3)
+        fm = yaml.safe_load(text[3:end])
+        if not isinstance(fm, dict):
+            return None
+        return {
+            "name": fm.get("name", skill_dir.name),
+            "description": fm.get("description", ""),
+            "version": fm.get("version", "0.0.0"),
+            "tags": fm.get("tags", []),
+        }
+    except Exception:
+        logger.debug("Failed to parse SKILL.md in %s", skill_dir)
+        return None
+
+
+def _get_available_skills() -> list[dict[str, Any]]:
+    """Scan the skills directory and return parsed metadata."""
+    if not SKILLS_DIR.is_dir():
+        return []
+    skills = []
+    for child in sorted(SKILLS_DIR.iterdir()):
+        if child.is_dir():
+            meta = _parse_skill_frontmatter(child)
+            if meta is not None:
+                skills.append(meta)
+    return skills
+
+
+def _run_to_dict(run: SkillRun, *, detail: bool = False) -> dict[str, Any]:
+    """Serialize a SkillRun to a response dict."""
+    d: dict[str, Any] = {
+        "id": str(run.id),
+        "skill_name": run.skill_name,
+        "status": run.status,
+        "input_text": (run.input_text[:200] if run.input_text and len(run.input_text) > 200 else run.input_text),
+        "tokens_used": run.tokens_used,
+        "cost_estimate": float(run.cost_estimate) if run.cost_estimate is not None else None,
+        "duration_ms": run.duration_ms,
+        "created_at": run.created_at.isoformat() if run.created_at else None,
+        "error": run.error,
+    }
+    if detail:
+        d["input_text"] = run.input_text  # full text
+        d["output"] = run.output
+        d["rendered_html"] = run.rendered_html
+        d["attribution"] = run.attribution
+        d["events_log"] = run.events_log
+    return d
+
+
+# ---------------------------------------------------------------------------
+# GET /skills -- List available skills
+# ---------------------------------------------------------------------------
+
+
+@router.get("/")
+async def list_skills(
+    user: TokenPayload = Depends(require_tenant),
+) -> dict[str, Any]:
+    """Return available skills with metadata parsed from SKILL.md files."""
+    return {"items": _get_available_skills()}
+
+
+# ---------------------------------------------------------------------------
+# POST /skills/runs -- Start a skill run
+# ---------------------------------------------------------------------------
+
+
+@router.post("/runs", status_code=status.HTTP_201_CREATED)
+async def start_run(
+    body: StartRunRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> StartRunResponse:
+    """Create a SkillRun record and return a run_id.
+
+    NOTE: Actual execution is Phase 20. This just creates the pending record.
+    """
+    # Validate skill exists
+    available = [s["name"] for s in _get_available_skills()]
+    if body.skill_name not in available:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{body.skill_name}' not found",
+        )
+
+    input_text = body.input_text or ""
+
+    # If work_item_id provided, verify it exists and include its data
+    if body.work_item_id:
+        result = await db.execute(
+            select(WorkItem).where(WorkItem.id == body.work_item_id)
+        )
+        work_item = result.scalar_one_or_none()
+        if work_item is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Work item not found",
+            )
+        # Prepend work item context to input
+        wi_context = json.dumps({"work_item": {"title": work_item.title, "type": work_item.type, "data": work_item.data}})
+        input_text = f"{wi_context}\n{input_text}" if input_text else wi_context
+
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name=body.skill_name,
+        input_text=input_text or None,
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    await db.commit()
+
+    return StartRunResponse(
+        run_id=str(run.id),
+        status="pending",
+        stream_url=f"/api/v1/skills/runs/{run.id}/stream",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/runs/{run_id}/stream -- SSE event stream
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}/stream")
+async def stream_run(
+    run_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+) -> EventSourceResponse:
+    """SSE event stream with late-connect replay.
+
+    CRITICAL: Does NOT use get_tenant_db -- SSE streams are long-lived
+    and would hold a DB connection. Instead creates short-lived sessions
+    per poll iteration.
+    """
+
+    async def event_generator():
+        factory = get_session_factory()
+        seen_events = 0
+
+        # Initial load -- replay stored events
+        session = await get_tenant_session(factory, str(user.tenant_id), str(user.sub))
+        try:
+            result = await session.execute(select(SkillRun).where(SkillRun.id == run_id))
+            run = result.scalar_one_or_none()
+            if run is None:
+                yield {"event": "error", "data": json.dumps({"message": "Run not found"})}
+                return
+
+            # Replay all stored events (late-connect support)
+            events_log = run.events_log or []
+            for evt in events_log:
+                yield {"event": evt.get("event", "message"), "data": json.dumps(evt.get("data", evt))}
+                seen_events += 1
+
+            # If already done, send done event and return
+            if run.status in ("completed", "failed"):
+                yield {"event": "done", "data": json.dumps({"status": run.status})}
+                return
+
+            current_status = run.status
+        finally:
+            await session.close()
+
+        # Poll loop for in-progress runs
+        while current_status not in ("completed", "failed"):
+            await asyncio.sleep(1)
+
+            session = await get_tenant_session(factory, str(user.tenant_id), str(user.sub))
+            try:
+                result = await session.execute(select(SkillRun).where(SkillRun.id == run_id))
+                run = result.scalar_one_or_none()
+                if run is None:
+                    yield {"event": "error", "data": json.dumps({"message": "Run disappeared"})}
+                    return
+
+                # Yield any new events
+                events_log = run.events_log or []
+                for evt in events_log[seen_events:]:
+                    yield {"event": evt.get("event", "message"), "data": json.dumps(evt.get("data", evt))}
+                    seen_events += 1
+
+                current_status = run.status
+            finally:
+                await session.close()
+
+        yield {"event": "done", "data": json.dumps({"status": current_status})}
+
+    return EventSourceResponse(event_generator())
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/runs -- Paginated execution history
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs")
+async def list_runs(
+    offset: int = Query(0, ge=0),
+    limit: int = Query(20, ge=1, le=100),
+    skill_name: str | None = None,
+    run_status: str | None = Query(None, alias="status"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Paginated execution history with optional filters."""
+    base = select(SkillRun)
+    count_q = select(func.count(SkillRun.id))
+
+    if skill_name:
+        base = base.where(SkillRun.skill_name == skill_name)
+        count_q = count_q.where(SkillRun.skill_name == skill_name)
+    if run_status:
+        base = base.where(SkillRun.status == run_status)
+        count_q = count_q.where(SkillRun.status == run_status)
+
+    total = (await db.execute(count_q)).scalar() or 0
+    runs = (
+        await db.execute(
+            base.order_by(SkillRun.created_at.desc()).offset(offset).limit(limit)
+        )
+    ).scalars().all()
+
+    return {
+        "items": [_run_to_dict(r) for r in runs],
+        "total": total,
+        "offset": offset,
+        "limit": limit,
+        "has_more": offset + limit < total,
+    }
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/runs/{run_id} -- Single run detail
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}")
+async def get_run(
+    run_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Return full run object including output and events_log."""
+    result = await db.execute(select(SkillRun).where(SkillRun.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+    return _run_to_dict(run, detail=True)
