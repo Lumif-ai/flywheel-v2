@@ -33,7 +33,15 @@ from flywheel.api.deps import (
     require_tenant,
 )
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Invite, Tenant, User, UserTenant
+from flywheel.db.models import (
+    ContextEntry,
+    Invite,
+    SkillRun,
+    Tenant,
+    User,
+    UserTenant,
+    WorkItem,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -499,3 +507,75 @@ async def remove_member(
         )
     )
     await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# GET /tenants/export (admin only)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/export")
+async def export_tenant_data(
+    user: TokenPayload = Depends(require_admin),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Export all tenant data: context entries, work items, skill runs.
+
+    Admin only. Synchronous export (Phase 25 adds async for large exports).
+    """
+    # Context entries
+    entries_result = await db.execute(select(ContextEntry))
+    entries = entries_result.scalars().all()
+
+    # Work items
+    items_result = await db.execute(select(WorkItem))
+    work_items = items_result.scalars().all()
+
+    # Skill runs
+    runs_result = await db.execute(select(SkillRun))
+    skill_runs = runs_result.scalars().all()
+
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    return {
+        "context_entries": [
+            {
+                "id": str(e.id),
+                "file_name": e.file_name,
+                "date": e.date.isoformat() if e.date else None,
+                "source": e.source,
+                "detail": e.detail,
+                "confidence": e.confidence,
+                "evidence_count": e.evidence_count,
+                "content": e.content,
+                "created_at": e.created_at.isoformat() if e.created_at else None,
+            }
+            for e in entries
+        ],
+        "work_items": [
+            {
+                "id": str(w.id),
+                "type": w.type,
+                "title": w.title,
+                "status": w.status,
+                "data": w.data,
+                "scheduled_at": w.scheduled_at.isoformat() if w.scheduled_at else None,
+                "created_at": w.created_at.isoformat() if w.created_at else None,
+            }
+            for w in work_items
+        ],
+        "skill_runs": [
+            {
+                "id": str(r.id),
+                "skill_name": r.skill_name,
+                "status": r.status,
+                "input_text": r.input_text,
+                "output": r.output,
+                "tokens_used": r.tokens_used,
+                "duration_ms": r.duration_ms,
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+            }
+            for r in skill_runs
+        ],
+        "exported_at": now.isoformat(),
+    }

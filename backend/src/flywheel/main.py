@@ -7,11 +7,14 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from flywheel.api.auth import router as auth_router
+from flywheel.api.context import router as context_router
 from flywheel.api.errors import register_error_handlers
 from flywheel.api.health import router as health_router
+from flywheel.api.integrations import router as integrations_router
 from flywheel.api.onboarding import router as onboarding_router
 from flywheel.api.tenant import router as tenant_router
 from flywheel.api.user import router as user_router
+from flywheel.api.work_items import router as work_items_router
 from flywheel.config import settings
 
 
@@ -63,6 +66,9 @@ def create_app() -> FastAPI:
     app.include_router(onboarding_router, prefix="/api/v1")
     app.include_router(tenant_router, prefix="/api/v1")
     app.include_router(user_router, prefix="/api/v1")
+    app.include_router(context_router, prefix="/api/v1")
+    app.include_router(work_items_router, prefix="/api/v1")
+    app.include_router(integrations_router, prefix="/api/v1")
 
     return app
 
