@@ -50,3 +50,6 @@ ignore_errors = true
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
 asyncio_mode = "auto"
+markers = [
+    "postgres: tests requiring Docker Postgres on port 5434",
+]

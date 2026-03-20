@@ -51,8 +51,8 @@ async def get_tenant_session(
     Then downgrades to app_user role so RLS policies are enforced.
     """
     session = session_factory()
-    await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
-    await session.execute(text("SELECT set_config('app.user_id', :uid, true)"), {"uid": user_id})
+    await session.execute(text("SELECT set_config('app.tenant_id', :tid, false)"), {"tid": tenant_id})
+    await session.execute(text("SELECT set_config('app.user_id', :uid, false)"), {"uid": user_id})
     await session.execute(text("SET ROLE app_user"))
     return session
 
