@@ -263,6 +263,7 @@ class TestRunSkill:
         user = _make_user()
         item = MockWorkItem(id=TEST_ITEM_ID, data={"description": "Prepare for meeting"})
         mock_db = _mock_db([
+            MockResult(scalar_val=0),  # check_concurrent_run_limit count
             MockResult(value=item),
         ])
 
@@ -287,6 +288,7 @@ class TestRunSkill:
         """POST /work-items/{id}/run returns 404 if item missing."""
         user = _make_user()
         mock_db = _mock_db([
+            MockResult(scalar_val=0),  # check_concurrent_run_limit count
             MockResult(value=None),
         ])
 
