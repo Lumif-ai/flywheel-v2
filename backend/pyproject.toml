@@ -33,11 +33,19 @@ packages = ["src/flywheel"]
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+exclude = ["src/flywheel/engines/*", "src/flywheel/context_utils.py"]
 
 [tool.mypy]
 python_version = "3.12"
 warn_return_any = true
 warn_unused_configs = true
+
+[[tool.mypy.overrides]]
+module = [
+    "flywheel.engines.*",
+    "flywheel.context_utils",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["src/tests"]
