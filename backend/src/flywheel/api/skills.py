@@ -55,6 +55,21 @@ class StartRunResponse(BaseModel):
     stream_url: str
 
 
+class AttributionEntry(BaseModel):
+    id: str
+    file: str
+    source: str | None = None
+
+
+class AttributionResponse(BaseModel):
+    entry_count: int = 0
+    files_consulted: list[str] = []
+    sources: list[str] = []
+    entries_read: list[dict] = []
+    status: str = "available"
+    reason: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -350,3 +365,50 @@ async def get_run(
             detail="Run not found",
         )
     return _run_to_dict(run, detail=True)
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/runs/{run_id}/attribution -- Attribution detail for a run
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}/attribution", response_model=AttributionResponse)
+async def get_run_attribution(
+    run_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> AttributionResponse:
+    """Return attribution data showing which context entries informed a skill run."""
+    result = await db.execute(select(SkillRun).where(SkillRun.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    # If run is still in progress, attribution hasn't been computed yet
+    if run.status in ("pending", "running", "waiting_for_api"):
+        return AttributionResponse(
+            status="pending",
+            reason="Attribution is computed after run completion",
+        )
+
+    # If run completed but has no attribution data
+    attribution = run.attribution
+    if not attribution or not attribution.get("entry_count"):
+        return AttributionResponse(
+            status="unavailable",
+            reason=(
+                "Run completed before attribution tracking was enabled "
+                "or attribution data was not collected"
+            ),
+        )
+
+    return AttributionResponse(
+        entry_count=attribution.get("entry_count", 0),
+        files_consulted=attribution.get("files_consulted", []),
+        sources=attribution.get("sources", []),
+        entries_read=attribution.get("entries_read", []),
+        status="available",
+    )
