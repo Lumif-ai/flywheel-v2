@@ -325,6 +325,33 @@ class UploadedFile(Base):
     )
 
 
+class Integration(Base):
+    __tablename__ = "integrations"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default="connected")
+    credentials_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
+    settings: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    last_synced_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class WorkItem(Base):
     __tablename__ = "work_items"
     __table_args__ = (

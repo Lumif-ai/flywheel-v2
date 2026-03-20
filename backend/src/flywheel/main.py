@@ -7,6 +7,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from flywheel.api.auth import router as auth_router
+from flywheel.api.errors import register_error_handlers
 from flywheel.api.health import router as health_router
 from flywheel.api.onboarding import router as onboarding_router
 from flywheel.api.tenant import router as tenant_router
@@ -52,6 +53,9 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Error handlers (after CORS so error responses include CORS headers)
+    register_error_handlers(app)
 
     # Routes
     app.include_router(health_router, prefix="/api/v1")
