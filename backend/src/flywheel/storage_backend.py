@@ -12,9 +12,11 @@ import os
 _backend = os.environ.get("FLYWHEEL_BACKEND", "flatfile").lower()
 
 if _backend == "postgres":
-    raise NotImplementedError(
-        "Postgres backend not yet implemented -- coming in Phase 16. "
-        "Set FLYWHEEL_BACKEND=flatfile or unset it to use the flat-file backend."
+    from flywheel.storage import (  # noqa: F401
+        append_entry,
+        batch_context,
+        query_context,
+        read_context,
     )
 elif _backend == "flatfile":
     from flywheel.context_utils import (  # noqa: F401

@@ -48,21 +48,22 @@ class TestStorageBackendFlatfile(unittest.TestCase):
 
 
 class TestStorageBackendPostgres(unittest.TestCase):
-    """Test that postgres backend raises NotImplementedError."""
+    """Test that postgres backend imports storage.py functions."""
 
-    def test_postgres_not_implemented(self):
-        """Setting FLYWHEEL_BACKEND=postgres raises NotImplementedError on import."""
-        # Save original env and module state
+    def test_postgres_imports_storage(self):
+        """Setting FLYWHEEL_BACKEND=postgres imports from flywheel.storage."""
         original_backend = os.environ.get("FLYWHEEL_BACKEND")
         original_module = sys.modules.pop("flywheel.storage_backend", None)
 
         try:
             os.environ["FLYWHEEL_BACKEND"] = "postgres"
-            with self.assertRaises(NotImplementedError) as ctx:
-                importlib.import_module("flywheel.storage_backend")
-            self.assertIn("Phase 16", str(ctx.exception))
+            mod = importlib.import_module("flywheel.storage_backend")
+            # Should have the 4 API functions from storage.py
+            self.assertTrue(callable(mod.read_context))
+            self.assertTrue(callable(mod.append_entry))
+            self.assertTrue(callable(mod.query_context))
+            self.assertTrue(callable(mod.batch_context))
         finally:
-            # Restore original state
             if original_backend is not None:
                 os.environ["FLYWHEEL_BACKEND"] = original_backend
             else:
