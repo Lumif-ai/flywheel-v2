@@ -10,6 +10,7 @@ from slowapi.errors import RateLimitExceeded
 
 from flywheel.api.auth import router as auth_router
 from flywheel.api.context import router as context_router
+from flywheel.api.files import router as files_router
 from flywheel.api.errors import register_error_handlers
 from flywheel.api.health import router as health_router
 from flywheel.api.integrations import router as integrations_router
@@ -90,6 +91,7 @@ def create_app() -> FastAPI:
     app.include_router(work_items_router, prefix="/api/v1")
     app.include_router(integrations_router, prefix="/api/v1")
     app.include_router(skills_router, prefix="/api/v1")
+    app.include_router(files_router, prefix="/api/v1")
 
     return app
 
