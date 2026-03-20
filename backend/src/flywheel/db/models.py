@@ -123,6 +123,33 @@ class OnboardingSession(Base):
     )
 
 
+class Invite(Base):
+    __tablename__ = "invites"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    invited_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    email: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, server_default="member")
+    token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    accepted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    expires_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=text("now() + interval '7 days'"),
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class ContextEntry(Base):
     __tablename__ = "context_entries"
     __table_args__ = (
