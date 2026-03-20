@@ -25,7 +25,7 @@ from sqlalchemy import (
     text,
 )
 from sqlalchemy.dialects.postgresql import ARRAY, JSONB, TSVECTOR, TIMESTAMP
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 class Base(DeclarativeBase):
@@ -182,6 +182,13 @@ class ContextEntry(Base):
     evidence_count: Mapped[int] = mapped_column(Integer, server_default=text("1"))
     content: Mapped[str] = mapped_column(Text, nullable=False)
     flagged: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    flag_reason: Mapped[str | None] = mapped_column(Text)
+    flag_related_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("context_entries.id")
+    )
+    flag_related: Mapped["ContextEntry | None"] = relationship(
+        "ContextEntry", remote_side="ContextEntry.id", foreign_keys=[flag_related_id]
+    )
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )
@@ -381,4 +388,36 @@ class WorkItem(Base):
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class SuggestionDismissal(Base):
+    __tablename__ = "suggestion_dismissals"
+    __table_args__ = (
+        Index(
+            "idx_suggestion_dismissals_lookup",
+            "tenant_id",
+            "user_id",
+            "suggestion_type",
+            "suggestion_key",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    suggestion_type: Mapped[str] = mapped_column(Text, nullable=False)
+    suggestion_key: Mapped[str] = mapped_column(Text, nullable=False)
+    dismissed_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    expires_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True),
+        server_default=text("now() + interval '7 days'"),
     )
