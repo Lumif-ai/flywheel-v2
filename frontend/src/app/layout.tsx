@@ -6,6 +6,7 @@ import { TooltipProvider } from '@/components/ui/tooltip'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { AppSidebar } from '@/features/navigation/components/AppSidebar'
 import { MobileNav } from '@/features/navigation/components/MobileNav'
+import { CommandPalette } from '@/features/navigation/components/CommandPalette'
 import { AppRoutes } from '@/app/routes'
 
 const queryClient = new QueryClient({
@@ -51,6 +52,7 @@ export function AppLayout() {
       <BrowserRouter>
         <TooltipProvider>
           <AppShell />
+          <CommandPalette />
         </TooltipProvider>
       </BrowserRouter>
       <ReactQueryDevtools initialIsOpen={false} />

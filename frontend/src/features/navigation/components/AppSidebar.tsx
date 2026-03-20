@@ -12,6 +12,7 @@ import {
   SidebarFooter,
 } from '@/components/ui/sidebar'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { TenantSwitcher } from './TenantSwitcher'
 
 const navItems = [
   { label: 'HQ', icon: Home, path: '/' },
@@ -29,13 +30,8 @@ export function AppSidebar() {
 
   return (
     <Sidebar>
-      <SidebarHeader className="p-4">
-        <div className="flex items-center gap-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary text-primary-foreground font-bold text-sm">
-            F
-          </div>
-          <span className="font-semibold text-foreground">Flywheel</span>
-        </div>
+      <SidebarHeader className="p-3">
+        <TenantSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
@@ -66,11 +62,16 @@ export function AppSidebar() {
       </SidebarContent>
 
       <SidebarFooter className="p-4">
-        <div className="flex items-center gap-2">
-          <Avatar className="h-7 w-7">
-            <AvatarFallback className="text-xs bg-muted">U</AvatarFallback>
-          </Avatar>
-          <span className="text-sm text-muted-foreground">User</span>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Avatar className="h-7 w-7">
+              <AvatarFallback className="text-xs bg-muted">U</AvatarFallback>
+            </Avatar>
+            <span className="text-sm text-muted-foreground">User</span>
+          </div>
+          <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
+            <span className="text-xs">&#8984;</span>K
+          </kbd>
         </div>
       </SidebarFooter>
     </Sidebar>
