@@ -1,0 +1,231 @@
+---
+name: investor-update
+version: "2.0"
+description: >
+  Investor update skill that reads compounded knowledge from the context store
+  to auto-populate meeting intelligence, competitive landscape, positioning,
+  and product signals into monthly updates without manual file reconciliation.
+context:
+  reads:
+    - "*"
+  writes: []
+triggers:
+  - manual
+dependencies:
+  skills: []
+  files:
+    - "~/.claude/context/_catalog.md"
+output:
+  - investor-update-draft
+  - context-store-intelligence-report
+---
+
+# investor-update
+
+You are generating a monthly investor update using the **flywheel-powered** context store intelligence pipeline. Your job is to read compounded knowledge from the context store, synthesize it into structured investor update sections, and combine it with user input to produce a high-quality monthly update.
+
+**Trigger phrases:** "investor update", "monthly update", "draft update", "investor report", "write the update", "prepare investor email", "update for investors", "board update", "shareholder update", "time for the monthly update", "let's do the update", or any reference to creating an investor update.
+
+---
+
+## Step 0: Load Context Store Intelligence
+
+Run the context store intelligence gathering to see what data is available:
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/Projects/flywheel/src"))
+from investor_update import (
+    pre_read_context, generate_intelligence_report,
+    synthesize_update_sections
+)
+
+# Snapshot the entire context store
+existing_context = pre_read_context("investor-update")
+print(f"Loaded {len(existing_context)} context files")
+for f, content in existing_context.items():
+    entry_count = content.count("[20")  # rough entry count
+    print(f"  {f}: ~{entry_count} entries")
+```
+
+Then run the intelligence report for the default period (last 30 days):
+
+```python
+from datetime import datetime, timedelta
+
+since_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+meeting_intel, positioning, product_signals, report = generate_intelligence_report(
+    existing_context, since_date
+)
+print(report)
+
+# Also generate synthesized sections
+sections = synthesize_update_sections(meeting_intel, positioning, product_signals)
+for section_name, lines in sections.items():
+    print(f"\n### {section_name}")
+    for line in lines:
+        print(f"  {line}")
+```
+
+Show the user what was auto-populated from the context store: file count, entry count, key findings by category. **This is the key value demonstration** -- the user immediately sees what the context store provides without any manual file gathering.
+
+## Step 1: Load Previous Updates
+
+Read from `~/lumifai/investor-updates/` for previous updates and `_update-context.md` for cumulative context:
+
+1. **Previous updates directory:** List files, read the most recent 2-3 updates to understand voice, structure, and what was previously communicated to investors.
+These are NOT in the context store -- they are skill-specific files. If `~/lumifai/investor-updates/` doesn't exist, this is the first update.
+
+## Step 2: Gather User Input
+
+Ask the user for information that the context store cannot provide:
+
+1. **Reporting period** -- Default: last 30 days. Confirm or adjust.
+2. **Financial highlights** -- Revenue, burn rate, runway, MRR, key financial metrics.
+3. **Team updates** -- New hires, departures, organizational changes.
+4. **Specific wins/challenges** -- Anything the user wants to highlight beyond what the context store captured.
+5. **Asks/goals for next period** -- What the founder wants from investors (intros, advice, resources).
+
+The context store data supplements but does NOT replace user input. Financial data, team changes, and strategic asks must come from the user.
+
+## Step 3: Draft Update
+
+Combine context store intelligence with user input to draft the update. Structure:
+
+### Executive Summary
+Brief overview of the month. Synthesize the key themes from the context store with user-provided highlights.
+
+### What We Do
+[Auto-populated from context store -- positioning.md]
+Current positioning statement and value proposition. Use the latest entry from positioning.md.
+
+### Traction & Key Meetings
+[Auto-populated from context store -- insights.md, contacts.md, action-items.md]
+Meeting activity, new contacts, pipeline movement. Use the traction_signals from synthesize_update_sections().
+
+### Market Intelligence
+[Auto-populated from context store -- competitive-intel.md]
+Competitive landscape updates, market movements. Use the market_intelligence section.
+
+### Product Evolution
+[Auto-populated from context store -- product-feedback.md, pain-points.md]
+Feature development, feedback themes, pain point validation. Use the product_evolution section.
+
+### ICP Validation
+[Auto-populated from context store -- icp-profiles.md]
+Ideal customer profile refinement based on meeting data. Use icp_summary from positioning snapshot.
+
+### Financials
+[From user input]
+Revenue, burn, runway, key metrics.
+
+### Team & Operations
+[From user input]
+Team changes, operational updates.
+
+### Key Asks
+[From user input]
+What the founder needs from investors.
+
+Mark auto-populated sections with: `[Auto-populated from context store -- N entries from M files]`
+
+## Step 4: Promise Ledger
+
+Check previous update commitments against current data:
+
+1. Read `_update-context.md` for previously stated commitments/promises.
+2. Cross-reference against current meeting intel and product signals.
+3. Categorize each promise as: **Completed**, **In Progress**, or **Stale** (no activity).
+4. Include a brief "Previous Commitments" section in the update showing status.
+5. Update `_update-context.md` with new commitments from this update.
+
+Flag any stale promises (no evidence of progress) for the user to address directly.
+
+## Step 5: Review & Polish
+
+Present the draft to the user for review:
+
+1. Show the complete draft with section labels indicating data source (context store vs user input).
+2. Allow section-by-section editing -- user can modify, expand, or remove any section.
+3. Ensure the voice matches previous updates (if available from Step 1).
+4. Check for consistency between sections (e.g., financials align with traction narrative).
+
+Ask: "Would you like to adjust any sections? I can expand, trim, or rework any part."
+
+## Step 6: Generate Output
+
+Produce the final update:
+
+1. **Generate the DOCX** using python-docx:
+
+```python
+from docx import Document
+from datetime import datetime
+
+doc = Document()
+# Save to ~/lumifai/investor-updates/
+output_dir = os.path.expanduser("~/lumifai/investor-updates")
+os.makedirs(output_dir, exist_ok=True)
+filename = f"investor-update-{datetime.now().strftime('%Y-%m')}.docx"
+output_path = os.path.join(output_dir, filename)
+doc.save(output_path)
+print(f"Saved: {output_path}")
+```
+
+2. Save to `~/lumifai/investor-updates/` alongside previous updates.
+3. Update `_update-context.md` with this month's commitments for next month's promise ledger.
+
+## Step 7: Intelligence Report
+
+Show what the context store contributed to this update:
+
+```python
+from investor_update import format_context_intelligence_section
+
+intel_report = format_context_intelligence_section(
+    meeting_intel, positioning, product_signals, len(existing_context)
+)
+print(intel_report)
+```
+
+Display:
+- How many sections were auto-populated vs manually entered
+- How many entries from the context store were used
+- Which files provided data
+- Comparison: "Without the context store, you would have needed to manually review N files"
+
+This proves the flywheel value and motivates continued use of context-aware skills.
+
+---
+
+## Memory & Learned Preferences
+
+Check for auto-memory file at `~/.claude/auto-memory/investor-update.md`. If it exists, load:
+- Preferred update voice/tone (formal vs conversational)
+- Section ordering preferences
+- Investor-specific notes (what particular investors care about)
+- Financial metric presentation preferences
+- Any user corrections to previous auto-populated content
+
+After generating, save any new learned preferences to the auto-memory file.
+
+## Error Handling
+
+- **Context file read failure:** Skip the file, continue with remaining data. Note which files failed.
+- **No previous updates:** This is the first update -- skip promise ledger, skip voice matching.
+- **_update-context.md missing:** Create it after this update with initial commitments.
+- **python-docx not available:** Fall back to markdown output, inform user.
+- **Intelligence report shows zero entries:** Still generate the report showing zeros -- this is useful feedback that the context store needs seeding.
+
+## Context Store
+
+This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/context-protocol.md` for pre-read, post-write, and knowledge overflow handling.
+
+**Engine note:** This skill's Python engine handles context store I/O programmatically via `context_utils.py` with hardwired file paths. This is correct — the engine's deterministic code should NOT use catalog-driven discovery. The protocol above applies to any additional LLM reasoning performed beyond the engine's scope.
+
+## Important Notes
+
+- Both can be used -- the user chooses which workflow
+- The `_update-context.md` cumulative context file is shared between both skills
+- Over time, as the context store accumulates more data, this skill produces richer auto-populated content
+- The key differentiator: this skill replaces manual reconciliation of 10+ files with a single `pre_read_context()` call

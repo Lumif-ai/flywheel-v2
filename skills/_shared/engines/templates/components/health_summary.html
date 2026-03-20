@@ -1,0 +1,10 @@
+{% from "components/health_card.html" import health_card %}
+
+{{ health_card("Total Entries", health.total_entries, color="brand") }}
+{{ health_card("Context Files", health.file_count, color="info") }}
+{% if health.staleness_percentage > 20 %}
+{{ health_card("Staleness", "%.1f%%"|format(health.staleness_percentage), color="warning") }}
+{% else %}
+{{ health_card("Staleness", "%.1f%%"|format(health.staleness_percentage), color="success") }}
+{% endif %}
+{{ health_card("Last Backup", health.last_backup_time[:10] if health.last_backup_time else "None", color="neutral") }}

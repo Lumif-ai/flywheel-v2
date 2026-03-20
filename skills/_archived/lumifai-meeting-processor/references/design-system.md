@@ -1,0 +1,3 @@
+# Lumif.ai Design System
+
+All HTML outputs must follow this system. Colors: primary #E94F37, secondary #15B392, background #F6F7EB, foreground #111111, surface #FFFFFF, border #E5E7EB. Only 3 states: positive (#15B392), negative (#E94F37), neutral (#9CA3AF). Font: Inter Regular+Bold only. Sizes: 32/20/16/12px. Spacing: 8px rhythm (4/8/16/32/64). Cards: white, 1px border, shadow 0 1px 2px rgba(0,0,0,0.05). Buttons: primary=solid orange-red, ghost=transparent+black border. Product tags: P1=primary tint, P2=secondary tint, P3=neutral tint. Max width 1200px. Generous whitespace. No italics. No medium weight. No rainbow statuses.

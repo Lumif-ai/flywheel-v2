@@ -1,0 +1,13 @@
+<div class="attribution-section mt-2">
+  <h4 class="attribution-title">Data Written to Context Store</h4>
+  <div class="attribution-cards">
+    {% for attr in attribution %}
+    <div class="attribution-card">
+      <span class="attribution-icon">&#128203;</span>
+      <span class="attribution-file">{{ attr.file }}</span>
+      <span class="attribution-status badge {% if attr.status == 'error' %}badge-error{% elif attr.status == 'duplicate (skipped)' %}badge-info{% else %}badge-success{% endif %}">{{ attr.status }}</span>
+      <span class="attribution-time text-secondary">{{ attr.timestamp }}</span>
+    </div>
+    {% endfor %}
+  </div>
+</div>

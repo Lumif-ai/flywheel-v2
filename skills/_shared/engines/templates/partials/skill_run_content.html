@@ -1,0 +1,839 @@
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap');
+
+  /* ── Skill Run Page — Premium Design ── */
+
+  .sr-page {
+    max-width: 720px;
+    margin: 0 auto;
+    padding: 2rem 0 4rem;
+  }
+
+  .sr-back {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    text-decoration: none;
+    margin-bottom: 2rem;
+    transition: color 200ms ease;
+  }
+  .sr-back:hover { color: var(--text-secondary); text-decoration: none; }
+  .sr-back svg { width: 14px; height: 14px; }
+
+  .sr-title {
+    font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: clamp(1.75rem, 3vw, 2.25rem);
+    font-weight: 700;
+    letter-spacing: -0.025em;
+    line-height: 1.1;
+    color: var(--text-primary);
+    margin: 0 0 0.5rem;
+  }
+
+  .sr-subtitle {
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    line-height: 1.6;
+    margin: 0 0 2rem;
+    max-width: 540px;
+  }
+
+  /* ── Form Card ── */
+  .sr-form-card {
+    background: var(--surface-primary);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 16px;
+    padding: 2rem;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.02),
+      0 2px 4px rgba(0, 0, 0, 0.02),
+      0 8px 24px rgba(0, 0, 0, 0.04);
+    transition: box-shadow 300ms ease, border-color 300ms ease;
+  }
+  /* ── AI Input Wrap (textarea + inline button) ── */
+  .sr-input-wrap {
+    display: flex;
+    align-items: flex-end;
+    background: var(--surface-primary);
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    border-radius: 16px;
+    overflow: hidden;
+    transition: all 250ms cubic-bezier(0.16, 1, 0.3, 1);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04), 0 4px 12px rgba(0, 0, 0, 0.03);
+  }
+  .sr-input-wrap:focus-within {
+    border-color: rgba(233, 77, 53, 0.3);
+    box-shadow: 0 0 0 4px rgba(233, 77, 53, 0.06), 0 1px 3px rgba(0, 0, 0, 0.04), 0 8px 24px rgba(0, 0, 0, 0.06);
+  }
+
+  .sr-textarea-ai {
+    flex: 1;
+    border: none;
+    padding: 1rem 1.25rem;
+    font-family: var(--font);
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: var(--text-primary);
+    outline: none;
+    background: transparent;
+    resize: none;
+    line-height: 1.5;
+    min-width: 0;
+  }
+  .sr-textarea-ai::placeholder {
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+
+  .sr-submit-inline {
+    display: flex;
+    align-items: center;
+    gap: 0.375rem;
+    border: none;
+    background: #121212;
+    color: #FFFFFF;
+    font-family: var(--font);
+    font-size: 0.8125rem;
+    font-weight: 600;
+    padding: 0.625rem 1rem;
+    margin: 0.375rem;
+    border-radius: 12px;
+    cursor: pointer;
+    white-space: nowrap;
+    flex-shrink: 0;
+    transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .sr-submit-inline:hover { background: #2D2D2D; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15); }
+  .sr-submit-inline:active { transform: translateY(0) scale(0.98); }
+  .sr-submit-inline:disabled { background: #9CA3AF; cursor: not-allowed; transform: none; }
+  .sr-submit-inline svg { transition: transform 200ms ease; }
+  .sr-submit-inline:hover svg { transform: translateX(2px); }
+
+  /* ── Prompt Text ── */
+  .sr-prompt {
+    font-size: 0.9375rem;
+    color: var(--text-secondary);
+    margin: 0 0 1.25rem;
+    line-height: 1.5;
+  }
+
+  /* ── Suggestion Chips ── */
+  .sr-suggestions {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.5rem;
+    margin-top: 1rem;
+  }
+  .sr-suggestions-label {
+    font-size: 0.6875rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--text-muted);
+  }
+  .sr-chip {
+    display: inline-block;
+    background: rgba(0, 0, 0, 0.03);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 100px;
+    padding: 0.375rem 0.875rem;
+    font-family: var(--font);
+    font-size: 0.75rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 200ms ease;
+    text-align: left;
+  }
+  .sr-chip:hover { background: rgba(233, 77, 53, 0.04); border-color: rgba(233, 77, 53, 0.15); color: var(--text-primary); }
+
+  .sr-form-card:focus-within {
+    border-color: rgba(233, 77, 53, 0.15);
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.02),
+      0 4px 8px rgba(0, 0, 0, 0.03),
+      0 16px 48px rgba(0, 0, 0, 0.06);
+  }
+
+  .sr-form-label {
+    display: block;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 0.625rem;
+    letter-spacing: -0.01em;
+  }
+
+  .sr-textarea {
+    width: 100%;
+    padding: 1rem 1.125rem;
+    font-size: 0.9375rem;
+    font-family: var(--font);
+    color: var(--text-primary);
+    background: var(--surface-secondary);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 12px;
+    resize: vertical;
+    min-height: 120px;
+    line-height: 1.6;
+    transition: all 200ms ease;
+    outline: none;
+  }
+  .sr-textarea::placeholder {
+    color: var(--text-muted);
+    font-weight: 400;
+  }
+  .sr-textarea:focus {
+    border-color: rgba(233, 77, 53, 0.3);
+    background: var(--surface-primary);
+    box-shadow: 0 0 0 4px rgba(233, 77, 53, 0.06);
+  }
+
+  .sr-submit-wrap {
+    margin-top: 1.25rem;
+  }
+
+  .sr-submit {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.625rem;
+    width: 100%;
+    padding: 0.875rem 1.5rem;
+    font-size: 0.9375rem;
+    font-weight: 600;
+    font-family: var(--font);
+    color: #FFFFFF;
+    background: #121212;
+    border: none;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 200ms cubic-bezier(0.16, 1, 0.3, 1);
+    letter-spacing: -0.01em;
+  }
+  .sr-submit:hover:not(:disabled) {
+    background: #2D2D2D;
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  .sr-submit:active:not(:disabled) {
+    transform: translateY(0) scale(0.98);
+  }
+  .sr-submit:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+  }
+  .sr-submit svg {
+    transition: transform 200ms ease;
+  }
+  .sr-submit:hover:not(:disabled) svg {
+    transform: translateX(2px);
+  }
+
+  .sr-submit-spinner {
+    display: none;
+    width: 16px;
+    height: 16px;
+    border: 2px solid rgba(255, 255, 255, 0.25);
+    border-top-color: #FFFFFF;
+    border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+  }
+
+  /* ── Stage Timeline ── */
+  .sr-timeline {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    padding: 1.5rem 0 0.5rem;
+    transition: max-height 300ms var(--ease-out), opacity 200ms ease;
+    overflow: hidden;
+  }
+  .sr-timeline.collapsing {
+    transition: max-height 300ms var(--ease-out);
+    overflow: hidden;
+  }
+  .sr-timeline.collapsed {
+    max-height: 0;
+    opacity: 0;
+    padding: 0;
+  }
+
+  .sr-stage {
+    display: flex;
+    align-items: center;
+    gap: 0.875rem;
+    padding: 0.625rem 0;
+    position: relative;
+  }
+  .sr-stage:not(:last-child)::after {
+    content: '';
+    position: absolute;
+    left: 11px;
+    top: calc(0.625rem + 24px);
+    width: 1.5px;
+    height: calc(100% - 24px + 0.625rem);
+    background: rgba(0, 0, 0, 0.06);
+    border-radius: 1px;
+  }
+
+  .sr-stage-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    border-radius: 50%;
+    position: relative;
+    z-index: 1;
+  }
+  .sr-stage-icon svg { width: 14px; height: 14px; }
+
+  .sr-stage-label {
+    font-size: 0.875rem;
+    font-weight: 450;
+    color: var(--text-secondary);
+    line-height: 1.4;
+  }
+
+  /* Stage states */
+  .sr-stage-completed .sr-stage-icon {
+    color: var(--status-success);
+    background: rgba(34, 197, 94, 0.08);
+  }
+  .sr-stage-completed .sr-stage-label {
+    color: var(--text-secondary);
+  }
+
+  .sr-stage-active .sr-stage-icon {
+    color: var(--accent-primary);
+    background: rgba(233, 77, 53, 0.08);
+  }
+  .sr-stage-active .sr-stage-label {
+    color: var(--text-primary);
+    font-weight: 500;
+  }
+
+  .sr-stage-failed .sr-stage-icon {
+    color: var(--status-danger);
+    background: rgba(239, 68, 68, 0.08);
+  }
+  .sr-stage-failed .sr-stage-label {
+    color: var(--status-danger);
+  }
+
+  .sr-stage-pending {
+    opacity: 0.35;
+  }
+  .sr-stage-pending .sr-stage-icon {
+    color: var(--text-muted);
+    background: rgba(0, 0, 0, 0.03);
+  }
+
+  /* Stage spinner */
+  .sr-stage-spinner {
+    display: inline-block;
+    width: 14px;
+    height: 14px;
+    border: 2px solid rgba(233, 77, 53, 0.15);
+    border-top-color: var(--accent-primary);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+
+  /* ── Stage Summary (collapsed pill) ── */
+  .sr-summary {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    padding: 0.375rem 0.875rem;
+    background: rgba(34, 197, 94, 0.06);
+    border-radius: 9999px;
+    width: fit-content;
+    margin: 0.5rem 0;
+  }
+  .sr-summary-icon {
+    width: 16px;
+    height: 16px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--status-success);
+  }
+  .sr-summary-icon svg { width: 14px; height: 14px; }
+  .sr-summary-icon.failed {
+    color: var(--status-danger);
+  }
+  .sr-summary.failed {
+    background: rgba(239, 68, 68, 0.06);
+  }
+
+  /* ── Result Area ── */
+  .sr-result {
+    opacity: 0;
+    transform: translateY(12px);
+    transition: all 400ms cubic-bezier(0.16, 1, 0.3, 1);
+    margin-top: 1rem;
+  }
+  .sr-result.visible {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .sr-result-card {
+    background: var(--surface-primary);
+    border: 1px solid rgba(0, 0, 0, 0.06);
+    border-radius: 16px;
+    padding: 2rem;
+    box-shadow:
+      0 0 0 1px rgba(0, 0, 0, 0.02),
+      0 4px 8px rgba(0, 0, 0, 0.03),
+      0 16px 48px rgba(0, 0, 0, 0.06);
+  }
+
+  .sr-result-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.625rem;
+    margin-bottom: 1rem;
+  }
+
+  .sr-result-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 0.1875rem 0.625rem;
+    border-radius: 9999px;
+    font-size: 0.6875rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+    background: var(--accent-light);
+    color: var(--accent-primary);
+  }
+
+  .sr-result-duration {
+    font-size: 0.8125rem;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+
+  .sr-result-content {
+    font-size: 0.9375rem;
+    line-height: 1.7;
+    color: var(--text-secondary);
+  }
+
+  /* ── Error Area ── */
+  .sr-error {
+    margin-top: 1rem;
+    animation: fadeUp 300ms ease forwards;
+  }
+
+  .sr-error-card {
+    background: rgba(239, 68, 68, 0.03);
+    border: 1px solid rgba(239, 68, 68, 0.12);
+    border-radius: 14px;
+    padding: 1.25rem 1.5rem;
+  }
+
+  .sr-error-msg {
+    font-size: 0.9375rem;
+    font-weight: 500;
+    color: #DC2626;
+    margin: 0;
+    line-height: 1.5;
+  }
+
+  .sr-error-toggle {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    cursor: pointer;
+    text-decoration: underline;
+    margin-top: 0.5rem;
+    display: inline-block;
+    background: none;
+    border: none;
+    padding: 0;
+    font-family: var(--font);
+    transition: color 150ms ease;
+  }
+  .sr-error-toggle:hover { color: var(--text-secondary); }
+
+  .sr-error-detail {
+    margin-top: 0.625rem;
+    padding: 0.75rem 1rem;
+    background: rgba(239, 68, 68, 0.04);
+    border-radius: 8px;
+    font-size: 0.8125rem;
+    font-family: var(--font-mono);
+    color: var(--text-secondary);
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  .sr-error-actions {
+    display: flex;
+    gap: 0.75rem;
+    margin-top: 1.25rem;
+  }
+
+  .sr-btn-dark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 600;
+    font-family: var(--font);
+    color: #FFFFFF;
+    background: #121212;
+    border: none;
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 200ms ease;
+    text-decoration: none;
+  }
+  .sr-btn-dark:hover { background: #2D2D2D; transform: translateY(-1px); color: #FFFFFF; text-decoration: none; }
+
+  .sr-btn-ghost {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1.25rem;
+    font-size: 0.875rem;
+    font-weight: 500;
+    font-family: var(--font);
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid var(--border-default);
+    border-radius: 10px;
+    cursor: pointer;
+    transition: all 200ms ease;
+    text-decoration: none;
+  }
+  .sr-btn-ghost:hover { background: var(--surface-secondary); color: var(--text-primary); text-decoration: none; }
+</style>
+
+<div class="sr-page">
+
+  <!-- Back link -->
+  <a href="/skills" class="sr-back" hx-get="/skills" hx-target="#content-area" hx-push-url="true">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+    Skills
+  </a>
+
+  <!-- Header -->
+  <h1 class="sr-title">{{ skill.display_name }}</h1>
+  <p class="sr-subtitle">{{ skill.description }}</p>
+
+  <!-- Form card -->
+  <div class="sr-form-card" id="skill-form-card">
+    <p class="sr-prompt">What would you like {{ skill.display_name }} to do?</p>
+    <form id="skill-form" onsubmit="return startSkillRun(event)">
+      <div class="sr-input-wrap" id="sr-input-wrap">
+        <textarea
+          id="input_text"
+          name="input_text"
+          class="sr-textarea-ai"
+          rows="2"
+          placeholder="Describe what you need..."
+        ></textarea>
+        <button type="submit" id="run-btn" class="sr-submit-inline">
+          <span id="run-btn-text">Go</span>
+          <span class="sr-submit-spinner" id="run-btn-spinner"></span>
+          <svg id="run-btn-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+        </button>
+      </div>
+    </form>
+    <div class="sr-suggestions">
+      <span class="sr-suggestions-label">Try:</span>
+      <button class="sr-chip" onclick="document.getElementById('input_text').value=this.textContent.trim();document.getElementById('input_text').focus();">Prep for my meeting with the CEO at Acme tomorrow</button>
+      <button class="sr-chip" onclick="document.getElementById('input_text').value=this.textContent.trim();document.getElementById('input_text').focus();">Analyze our top 3 competitors in the market</button>
+    </div>
+  </div>
+
+  <!-- Stage timeline -->
+  <div class="sr-timeline" id="stage-timeline" style="display: none;"></div>
+
+  <!-- Stage summary (shown after collapse) -->
+  <div class="sr-summary" id="stage-summary" style="display: none;">
+    <span class="sr-summary-icon" id="stage-summary-icon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+    </span>
+    <span id="stage-summary-text"></span>
+  </div>
+
+  <!-- Result area -->
+  <div class="sr-result" id="result-area">
+    <div class="sr-result-card">
+      <div class="sr-result-meta" id="result-meta">
+        <span class="sr-result-badge" id="result-mode" style="display: none;"></span>
+        <span class="sr-result-duration" id="result-duration"></span>
+      </div>
+      <div class="sr-result-content" id="result-content"></div>
+    </div>
+  </div>
+
+  <!-- Error area -->
+  <div id="error-area" style="display: none;">
+    <div class="sr-error">
+      <div class="sr-error-card">
+        <p class="sr-error-msg" id="error-text"></p>
+        <button class="sr-error-toggle" id="error-detail-toggle" onclick="toggleErrorDetail()" style="display: none;">Show details</button>
+        <div class="sr-error-detail" id="error-detail" style="display: none;"></div>
+      </div>
+      <div class="sr-error-actions">
+        <button class="sr-btn-dark" onclick="resetSkillForm()">Try again</button>
+        <a href="/agenda" class="sr-btn-ghost" hx-get="/agenda" hx-target="#content-area" hx-push-url="true">Back to agenda</a>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+(function() {
+  var STAGE_ICONS = {
+    completed: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
+    active: '<span class="sr-stage-spinner"></span>',
+    failed: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>',
+    pending: '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4" fill="none"/></svg>'
+  };
+
+  function updateStageItem(name, status, label) {
+    var el = document.querySelector('.sr-stage[data-stage="' + name + '"]');
+    if (!el) return;
+    // Remove all status classes
+    el.classList.remove('sr-stage-completed', 'sr-stage-active', 'sr-stage-failed', 'sr-stage-pending');
+    el.classList.add('sr-stage-' + status);
+    // Update icon
+    var iconEl = el.querySelector('.sr-stage-icon');
+    if (iconEl) iconEl.innerHTML = STAGE_ICONS[status] || STAGE_ICONS.pending;
+    // Update label
+    var labelEl = el.querySelector('.sr-stage-label');
+    if (labelEl && label) labelEl.textContent = label;
+  }
+
+  window.startSkillRun = function(e) {
+    e.preventDefault();
+
+    var inputText = document.getElementById('input_text').value;
+    var runBtn = document.getElementById('run-btn');
+    var runBtnText = document.getElementById('run-btn-text');
+    var runBtnSpinner = document.getElementById('run-btn-spinner');
+    var runBtnArrow = document.getElementById('run-btn-arrow');
+    var timeline = document.getElementById('stage-timeline');
+    var summary = document.getElementById('stage-summary');
+    var resultArea = document.getElementById('result-area');
+    var resultContent = document.getElementById('result-content');
+    var resultMode = document.getElementById('result-mode');
+    var resultDuration = document.getElementById('result-duration');
+    var errorArea = document.getElementById('error-area');
+
+    // Reset UI
+    timeline.innerHTML = '';
+    timeline.style.display = 'none';
+    timeline.classList.remove('collapsing', 'collapsed');
+    summary.style.display = 'none';
+    summary.classList.remove('failed');
+    resultArea.classList.remove('visible');
+    resultContent.innerHTML = '';
+    resultMode.style.display = 'none';
+    resultDuration.textContent = '';
+    errorArea.style.display = 'none';
+    runBtn.disabled = true;
+    runBtnText.textContent = 'Running...';
+    runBtnSpinner.style.display = 'inline-block';
+    runBtnArrow.style.display = 'none';
+
+    // Build SSE URL
+    var params = new URLSearchParams();
+    params.set('input_text', inputText);
+    var url = '/api/skills/{{ skill.name }}/stream?' + params.toString();
+
+    // Create EventSource
+    var source = new EventSource(url);
+
+    // Register for cleanup on navigation
+    if (!window._activeEventSources) window._activeEventSources = [];
+    window._activeEventSources.push(source);
+
+    // Handle initial stages (full pipeline)
+    source.addEventListener('stages', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        timeline.style.display = 'flex';
+        timeline.innerHTML = '';
+        data.stages.forEach(function(stage) {
+          var item = document.createElement('div');
+          item.className = 'sr-stage sr-stage-' + stage.status;
+          item.dataset.stage = stage.name;
+          item.innerHTML =
+            '<span class="sr-stage-icon">' + STAGE_ICONS[stage.status] + '</span>' +
+            '<span class="sr-stage-label">' + stage.label + '</span>';
+          timeline.appendChild(item);
+        });
+      } catch(err) { console.error('Error parsing stages:', err); }
+    });
+
+    // Handle individual stage updates
+    source.addEventListener('stage', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        updateStageItem(data.name, data.status, data.label);
+      } catch(err) { console.error('Error parsing stage:', err); }
+    });
+
+    // Handle status (backward compatible)
+    source.addEventListener('status', function(e) {
+      // No-op for UI, stages handle display now
+    });
+
+    // Handle result
+    source.addEventListener('result', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+
+        // Collapse timeline
+        var timelineHeight = timeline.scrollHeight;
+        timeline.style.maxHeight = timelineHeight + 'px';
+        timeline.classList.add('collapsing');
+
+        setTimeout(function() {
+          timeline.classList.add('collapsed');
+
+          // Show summary
+          var durationSec = data.duration_ms ? (data.duration_ms / 1000).toFixed(1) : '?';
+          document.getElementById('stage-summary-text').textContent = 'Completed in ' + durationSec + 's';
+          document.getElementById('stage-summary-icon').classList.remove('failed');
+          summary.classList.remove('failed');
+          summary.style.display = 'flex';
+
+          // Show result area with animation
+          if (data.rendered_html) {
+            resultContent.innerHTML = data.rendered_html;
+          } else if (data.output) {
+            resultContent.textContent = data.output;
+          }
+
+          if (data.mode) {
+            resultMode.textContent = data.mode;
+            resultMode.style.display = 'inline-flex';
+          }
+          if (data.duration_ms) {
+            resultDuration.textContent = durationSec + 's';
+          }
+
+          // Trigger reveal animation
+          requestAnimationFrame(function() {
+            resultArea.classList.add('visible');
+          });
+        }, 300);
+      } catch(err) { console.error('Error parsing result:', err); }
+    });
+
+    // Handle error
+    source.addEventListener('error', function(e) {
+      try {
+        var data = JSON.parse(e.data);
+        var errorText = document.getElementById('error-text');
+        var errorDetail = document.getElementById('error-detail');
+        var errorToggle = document.getElementById('error-detail-toggle');
+
+        // Show error area
+        errorArea.style.display = 'block';
+
+        // Plain language error message
+        var plainMessage = simplifyError(data.error || 'Unknown error occurred');
+        errorText.textContent = plainMessage;
+
+        // Show details toggle if error has technical info
+        if (data.error && data.error !== plainMessage) {
+          errorToggle.style.display = 'inline-block';
+          errorDetail.textContent = data.error;
+        }
+
+        // Show summary with failed state
+        document.getElementById('stage-summary-text').textContent = 'Failed';
+        document.getElementById('stage-summary-icon').classList.add('failed');
+        summary.classList.add('failed');
+        document.getElementById('stage-summary-icon').innerHTML =
+          '<svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>';
+        summary.style.display = 'flex';
+      } catch(err) {
+        // SSE connection error (not a skill error event)
+        if (source.readyState === EventSource.CLOSED) return;
+        errorArea.style.display = 'block';
+        document.getElementById('error-text').textContent = 'Connection error. Please try again.';
+      }
+    });
+
+    // Handle done
+    source.addEventListener('done', function(e) {
+      source.close();
+      // Remove from active sources
+      var idx = window._activeEventSources.indexOf(source);
+      if (idx > -1) window._activeEventSources.splice(idx, 1);
+      // Re-enable button
+      runBtn.disabled = false;
+      runBtnText.textContent = 'Run {{ skill.display_name }}';
+      runBtnSpinner.style.display = 'none';
+      runBtnArrow.style.display = '';
+    });
+
+    return false;
+  };
+
+  window.toggleErrorDetail = function() {
+    var detail = document.getElementById('error-detail');
+    var toggle = document.getElementById('error-detail-toggle');
+    if (detail.style.display === 'none') {
+      detail.style.display = 'block';
+      toggle.textContent = 'Hide details';
+    } else {
+      detail.style.display = 'none';
+      toggle.textContent = 'Show details';
+    }
+  };
+
+  window.resetSkillForm = function() {
+    document.getElementById('stage-timeline').style.display = 'none';
+    document.getElementById('stage-timeline').classList.remove('collapsing', 'collapsed');
+    document.getElementById('stage-summary').style.display = 'none';
+    document.getElementById('result-area').classList.remove('visible');
+    document.getElementById('error-area').style.display = 'none';
+    var runBtn = document.getElementById('run-btn');
+    runBtn.disabled = false;
+    document.getElementById('run-btn-text').textContent = 'Run {{ skill.display_name }}';
+    document.getElementById('run-btn-spinner').style.display = 'none';
+    document.getElementById('run-btn-arrow').style.display = '';
+    document.getElementById('input_text').focus();
+  };
+
+  function simplifyError(error) {
+    if (error.includes('Connection') || error.includes('ECONNREFUSED'))
+      return "We couldn't connect to the service. Please try again.";
+    if (error.includes('timeout') || error.includes('Timeout'))
+      return 'The request took too long. Please try again.';
+    if (error.includes('not found') || error.includes('404'))
+      return 'The requested resource was not found.';
+    if (error.includes('Unauthorized') || error.includes('401'))
+      return 'Authentication required. Please sign in again.';
+    if (error.length > 200)
+      return 'Something went wrong during execution.';
+    return error;
+  }
+})();
+</script>

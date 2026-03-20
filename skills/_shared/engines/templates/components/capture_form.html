@@ -1,0 +1,91 @@
+<!-- capture_form.html - Post-action capture form (HTMX partial, no base.html) -->
+<!-- Loaded via GET /api/work-items/{item_id}/capture -->
+
+<div id="capture-form-{{ item_id }}" class="capture-form">
+  {% if captured %}
+  <!-- Success state -->
+  <div class="capture-success" style="padding: 1rem; background: rgba(34, 197, 94, 0.08); border-radius: 12px; border: 1px solid rgba(34, 197, 94, 0.2);">
+    <p style="margin: 0; color: #22C55E; font-weight: 600;">
+      Captured! {{ entries_created }} entries enriched across {{ files_updated | length }} file{{ 's' if files_updated | length != 1 else '' }}
+    </p>
+    {% if files_updated %}
+    <ul style="margin: 0.5rem 0 0; padding-left: 1.2rem; color: #6B7280; font-size: 0.875rem;">
+      {% for f in files_updated %}
+      <li>{{ f }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+
+  {% elif item_type == "meeting" %}
+  <!-- Meeting capture form -->
+  <form hx-post="/api/work-items/{{ item_id }}/capture"
+        hx-target="#capture-form-{{ item_id }}"
+        hx-swap="outerHTML"
+        style="display: flex; flex-direction: column; gap: 0.75rem;">
+    <label style="font-weight: 600; color: #121212;">What happened in the meeting?</label>
+    <textarea name="notes" class="form-control"
+              rows="5"
+              placeholder="Key takeaways, decisions made, action items, notable quotes..."
+              style="resize: vertical; border-radius: 12px; padding: 0.75rem; border: 1px solid #e5e7eb; font-family: Inter, Arial, sans-serif;"></textarea>
+
+    <label style="font-weight: 600; color: #121212;">Outcome</label>
+    <select name="outcome" class="form-control"
+            style="border-radius: 12px; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb;">
+      <option value="productive">Productive - clear next steps</option>
+      <option value="follow-up-needed">Follow-up needed</option>
+      <option value="no-action">No action required</option>
+    </select>
+
+    <button type="submit" class="btn"
+            style="background: #E94D35; color: white; border: none; border-radius: 12px; padding: 0.625rem 1.25rem; font-weight: 600; cursor: pointer; align-self: flex-start;">
+      Capture &amp; Enrich
+    </button>
+  </form>
+
+  {% elif item_type == "outreach" %}
+  <!-- Outreach capture form -->
+  <form hx-post="/api/work-items/{{ item_id }}/capture"
+        hx-target="#capture-form-{{ item_id }}"
+        hx-swap="outerHTML"
+        style="display: flex; flex-direction: column; gap: 0.75rem;">
+    <label style="font-weight: 600; color: #121212;">How did they respond?</label>
+    <select name="outcome" class="form-control"
+            style="border-radius: 12px; padding: 0.5rem 0.75rem; border: 1px solid #e5e7eb;">
+      <option value="replied">Replied</option>
+      <option value="no-reply">No reply</option>
+      <option value="meeting-booked">Meeting booked</option>
+      <option value="declined">Declined</option>
+    </select>
+
+    <label style="font-weight: 600; color: #121212;">Notes</label>
+    <textarea name="notes" class="form-control"
+              rows="3"
+              placeholder="Any details about the response..."
+              style="resize: vertical; border-radius: 12px; padding: 0.75rem; border: 1px solid #e5e7eb; font-family: Inter, Arial, sans-serif;"></textarea>
+
+    <button type="submit" class="btn"
+            style="background: #E94D35; color: white; border: none; border-radius: 12px; padding: 0.625rem 1.25rem; font-weight: 600; cursor: pointer; align-self: flex-start;">
+      Log Outcome
+    </button>
+  </form>
+
+  {% else %}
+  <!-- Generic capture form -->
+  <form hx-post="/api/work-items/{{ item_id }}/capture"
+        hx-target="#capture-form-{{ item_id }}"
+        hx-swap="outerHTML"
+        style="display: flex; flex-direction: column; gap: 0.75rem;">
+    <label style="font-weight: 600; color: #121212;">Notes</label>
+    <textarea name="notes" class="form-control"
+              rows="4"
+              placeholder="What happened? Any outcomes or follow-ups..."
+              style="resize: vertical; border-radius: 12px; padding: 0.75rem; border: 1px solid #e5e7eb; font-family: Inter, Arial, sans-serif;"></textarea>
+
+    <button type="submit" class="btn"
+            style="background: #E94D35; color: white; border: none; border-radius: 12px; padding: 0.625rem 1.25rem; font-weight: 600; cursor: pointer; align-self: flex-start;">
+      Save
+    </button>
+  </form>
+  {% endif %}
+</div>

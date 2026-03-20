@@ -1,0 +1,134 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Flywheel Animations — Centralized keyframes and animation utilities
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ---------------------------------------------------------------------------
+   Keyframes
+   --------------------------------------------------------------------------- */
+
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(-8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInUp {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInDown {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ---------------------------------------------------------------------------
+   Animation Utility Classes
+   --------------------------------------------------------------------------- */
+
+.animate-fadeUp {
+  animation: fadeUp var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-fadeIn {
+  animation: fadeIn var(--duration-enter) ease forwards;
+}
+
+.animate-slideIn {
+  animation: slideIn var(--duration-slow) var(--ease-out) forwards;
+}
+
+/* Legacy aliases (backward compatibility with existing templates) */
+.animate-in {
+  animation: fadeUp var(--duration-slow) var(--ease-out) forwards;
+}
+
+.animate-fade {
+  animation: fadeIn var(--duration-enter) ease forwards;
+}
+
+.animate-slide-up {
+  animation: slideInUp var(--duration-slow) var(--ease-out) forwards;
+}
+
+/* ---------------------------------------------------------------------------
+   Stagger Children — sequential animation delays for list items
+   --------------------------------------------------------------------------- */
+
+.stagger-children > * {
+  opacity: 0;
+  animation: fadeUp var(--duration-slow) var(--ease-out) forwards;
+}
+
+.stagger-children > *:nth-child(1) { animation-delay: 0ms; }
+.stagger-children > *:nth-child(2) { animation-delay: 50ms; }
+.stagger-children > *:nth-child(3) { animation-delay: 100ms; }
+.stagger-children > *:nth-child(4) { animation-delay: 150ms; }
+.stagger-children > *:nth-child(5) { animation-delay: 200ms; }
+.stagger-children > *:nth-child(6) { animation-delay: 250ms; }
+.stagger-children > *:nth-child(7) { animation-delay: 300ms; }
+.stagger-children > *:nth-child(8) { animation-delay: 350ms; }
+.stagger-children > *:nth-child(9) { animation-delay: 400ms; }
+.stagger-children > *:nth-child(10) { animation-delay: 450ms; }
+
+/* ---------------------------------------------------------------------------
+   Page Content Animation
+   --------------------------------------------------------------------------- */
+
+main.container,
+main.content-area {
+  animation: fadeUp var(--duration-slow) var(--ease-out);
+}
+
+/* Content area crossfade for HTMX swaps */
+.content-area.htmx-swapping {
+  opacity: 0;
+  transition: opacity 100ms ease;
+}

@@ -1,0 +1,71 @@
+<!-- Hero section -->
+<section class="export-hero" style="background: var(--brand-glow); padding: 3rem 2rem; border-radius: 12px; text-align: center; margin-bottom: 2rem;">
+  <h1 style="font-size: 2rem; margin-bottom: 1rem; color: var(--text);">Export Your Data</h1>
+  <p style="font-size: 1.1rem; max-width: 640px; margin: 0 auto; color: var(--text-secondary); line-height: 1.7;">
+    Your data lives on your machine. Every entry, every insight, every connection -- it is all yours.
+    Export everything, anytime, in standard formats. No lock-in, no data hostage.
+  </p>
+</section>
+
+<!-- Export options (two cards side by side) -->
+<section class="grid-2" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; margin-bottom: 2rem;">
+
+  <!-- Markdown ZIP card -->
+  <div class="card" style="padding: 2rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg);">
+    <div style="font-size: 2rem; margin-bottom: 0.75rem;">&#128196;</div>
+    <h2 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text);">Markdown Files</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.6;">
+      Original context store files in markdown format. Human-readable, version-control friendly.
+    </p>
+    <div style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;">
+      <span>{{ file_count }} file{{ 's' if file_count != 1 else '' }}</span>
+      <span style="margin: 0 0.5rem;">&middot;</span>
+      <span>{{ estimated_size }}</span>
+    </div>
+    <a href="/export/markdown" class="btn-brand" style="display: inline-block; padding: 0.75rem 1.5rem; background: var(--brand-gradient); color: white; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 0.95rem;">
+      Download ZIP
+    </a>
+  </div>
+
+  <!-- JSON card -->
+  <div class="card" style="padding: 2rem; border-radius: 12px; border: 1px solid var(--border); background: var(--bg);">
+    <div style="font-size: 2rem; margin-bottom: 0.75rem;">&#128203;</div>
+    <h2 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text);">Structured JSON</h2>
+    <p style="color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.6;">
+      Machine-readable export with parsed entries, metadata, and timestamps. Import into any tool.
+    </p>
+    <div style="color: var(--text-muted); font-size: 0.875rem; margin-bottom: 1.25rem;">
+      <span>{{ total_entries }} entr{{ 'ies' if total_entries != 1 else 'y' }}</span>
+      <span style="margin: 0 0.5rem;">&middot;</span>
+      <span>{{ file_count }} file{{ 's' if file_count != 1 else '' }}</span>
+    </div>
+    <a href="/export/json" class="btn-outline" style="display: inline-block; padding: 0.75rem 1.5rem; background: transparent; color: var(--brand); border: 2px solid var(--brand); border-radius: 12px; text-decoration: none; font-weight: 600; font-size: 0.95rem;">
+      Download JSON
+    </a>
+  </div>
+
+</section>
+
+<!-- What's included section -->
+<section class="card" style="padding: 2rem; border-radius: 12px; border: 1px solid var(--border); margin-bottom: 2rem;">
+  <h2 style="font-size: 1.1rem; margin-bottom: 1rem; color: var(--text);">What's Included</h2>
+  <ul style="color: var(--text-secondary); line-height: 1.8; padding-left: 1.25rem;">
+    <li><strong>{{ file_count }}</strong> context file{{ 's' if file_count != 1 else '' }} with <strong>{{ total_entries }}</strong> total entr{{ 'ies' if total_entries != 1 else 'y' }}</li>
+    <li>All entries with their dates, sources, confidence scores, and evidence counts</li>
+    <li>JSON export includes parsed entry structure and export metadata</li>
+  </ul>
+  <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 1rem;">
+    System files (_manifest.md, _catalog.md, event logs) are excluded -- these are internal bookkeeping.
+  </p>
+  <p style="color: var(--text-muted); font-size: 0.875rem; margin-top: 0.5rem;">
+    Exported data includes all entries with their dates, sources, confidence scores, and evidence counts.
+  </p>
+</section>
+
+<!-- Data ownership footer -->
+<section style="background: var(--bg-warm); padding: 2rem; border-radius: 12px; text-align: center; margin-bottom: 2rem;">
+  <p style="color: var(--text-secondary); line-height: 1.7; max-width: 640px; margin: 0 auto;">
+    Flywheel believes in data sovereignty. Your knowledge graph is stored as plain text files on your machine.
+    No cloud dependency, no API required to access your own data.
+  </p>
+</section>

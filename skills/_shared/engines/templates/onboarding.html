@@ -1,0 +1,495 @@
+{% extends "base_fullscreen.html" %}
+{% block title %}Flywheel{% endblock %}
+
+{% block head %}
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="ob" id="ob-root">
+
+  <!-- ═══════════════ ACT 1: THE INVITATION ═══════════════ -->
+  <div class="ob-hero" id="ob-hero">
+
+    <!-- Ambient environment -->
+    <div class="ob-ambient">
+      <div class="ob-glow ob-glow--warm"></div>
+      <div class="ob-glow ob-glow--cool"></div>
+    </div>
+
+    <!-- Content -->
+    <div class="ob-hero-content" id="ob-hero-content">
+      <p class="ob-eyebrow">Flywheel</p>
+      <h1 class="ob-title">Know everything<br>about any company</h1>
+      <p class="ob-subtitle">Paste a URL. We'll build a complete intelligence profile in seconds — competitors, leadership, funding, market position, and more.</p>
+
+      {% if error %}
+      <div class="ob-error-banner">{{ error }}</div>
+      {% endif %}
+
+      <form class="ob-form" id="ob-form" method="post" action="/onboarding/url">
+        <div class="ob-input-wrap" id="ob-input-wrap">
+          <input
+            type="text"
+            name="company_url"
+            class="ob-input"
+            id="ob-input"
+            placeholder="company.com"
+            required
+            autocomplete="off"
+            autofocus
+            spellcheck="false"
+          >
+          <button type="submit" class="ob-submit" id="ob-submit">
+            <span class="ob-submit-text">Analyze</span>
+            <span class="ob-submit-loading" style="display:none">
+              <span class="ob-spinner"></span>
+            </span>
+            <svg class="ob-submit-arrow" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>
+        </div>
+      </form>
+
+      <div class="ob-alt">
+        <form action="/onboarding/upload" method="post" enctype="multipart/form-data" style="display:inline">
+          <label class="ob-alt-link">
+            <input type="file" name="file" accept=".pdf,.docx,.txt,.md" style="display:none" onchange="this.form.submit()">
+            Upload a document
+          </label>
+        </form>
+        <span class="ob-alt-dot"></span>
+        <a href="/onboarding/guided" class="ob-alt-link">Answer questions</a>
+      </div>
+    </div>
+
+    <!-- What you'll get -->
+    <div class="ob-capabilities" id="ob-capabilities">
+      <div class="ob-cap">
+        <div class="ob-cap-num">01</div>
+        <div class="ob-cap-text">
+          <strong>Company Profile</strong>
+          <span>Industry, products, team size, tech stack</span>
+        </div>
+      </div>
+      <div class="ob-cap">
+        <div class="ob-cap-num">02</div>
+        <div class="ob-cap-text">
+          <strong>Market Intelligence</strong>
+          <span>Competitors, positioning, differentiation</span>
+        </div>
+      </div>
+      <div class="ob-cap">
+        <div class="ob-cap-num">03</div>
+        <div class="ob-cap-text">
+          <strong>Deep Research</strong>
+          <span>Funding, leadership, recent news</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══════════════ ACT 2: THE THEATER ═══════════════ -->
+  <div class="ob-theater" id="ob-theater" style="display:none">
+    <div class="crawl-container">
+      <div class="crawl-url-bar" id="crawl-url-bar">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>
+        <span id="crawl-url-text"></span>
+      </div>
+      <div class="crawl-stage" id="crawl-stage">
+        <span class="crawl-stage-dots"><span></span><span></span><span></span></span>
+        <span id="crawl-stage-label">Connecting...</span>
+      </div>
+      <div class="crawl-pages-detail" id="crawl-pages" style="display:none"></div>
+      <div class="crawl-facts" id="crawl-facts"></div>
+      <div class="crawl-timeout" id="crawl-timeout" style="display:none"></div>
+      <div class="crawl-thin-results" id="crawl-thin" style="display:none">
+        We found limited info. <a href="/onboarding/upload">Upload a document</a> or
+        <a href="/onboarding/guided">answer questions</a> to fill gaps.
+      </div>
+      <div class="crawl-error" id="crawl-error" style="display:none">
+        <p class="crawl-error-message" id="crawl-error-msg"></p>
+        <button class="crawl-error-toggle" onclick="document.getElementById('crawl-error-detail').classList.toggle('visible')">Show details</button>
+        <div class="crawl-error-detail" id="crawl-error-detail"></div>
+        <div class="crawl-error-actions">
+          <button class="btn btn-secondary" onclick="resetCrawl()">Try again</button>
+        </div>
+      </div>
+      <div id="crawl-profile" style="display:none"></div>
+      <div class="crawl-continue" id="crawl-continue">
+        <a id="crawl-continue-btn" href="#" class="btn btn-brand">Continue</a>
+      </div>
+    </div>
+  </div>
+</div>
+
+<style>
+/* ── Foundation ── */
+.ob {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  font-family: 'Plus Jakarta Sans', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  color: #121212;
+  background: #FAFAFA;
+  overflow-x: hidden;
+}
+
+/* ── Act 1: The Invitation ── */
+.ob-hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 8rem 2rem 4rem;
+  position: relative;
+  min-height: 100vh;
+  transition: all 700ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+.ob-hero.exiting {
+  opacity: 0;
+  transform: scale(0.98) translateY(-20px);
+  pointer-events: none;
+}
+
+/* Ambient glows */
+.ob-ambient { position: fixed; inset: 0; pointer-events: none; z-index: 0; overflow: hidden; }
+.ob-glow { position: absolute; border-radius: 50%; filter: blur(120px); }
+.ob-glow--warm {
+  width: 600px; height: 600px; top: -15%; left: 50%; transform: translateX(-50%);
+  background: radial-gradient(circle, rgba(233,77,53,0.06) 0%, transparent 70%);
+  animation: glowFloat 12s ease-in-out infinite;
+}
+.ob-glow--cool {
+  width: 400px; height: 400px; bottom: -10%; right: -5%;
+  background: radial-gradient(circle, rgba(59,130,246,0.03) 0%, transparent 70%);
+  animation: glowFloat 15s ease-in-out infinite reverse;
+}
+@keyframes glowFloat {
+  0%, 100% { transform: translateX(-50%) translateY(0); }
+  50% { transform: translateX(-50%) translateY(-20px); }
+}
+
+/* Hero content */
+.ob-hero-content { position: relative; z-index: 1; text-align: center; max-width: 560px; width: 100%; }
+
+.ob-eyebrow {
+  font-size: 0.6875rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.14em;
+  color: #E94D35; margin: 0 0 1.5rem;
+  opacity: 0; animation: fadeUp 600ms 100ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.ob-title {
+  font-size: clamp(2.25rem, 5vw, 3.25rem); font-weight: 800; line-height: 1.05;
+  letter-spacing: -0.035em; color: #121212; margin: 0 0 1.25rem;
+  opacity: 0; animation: fadeUp 600ms 200ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.ob-subtitle {
+  font-size: 1.0625rem; line-height: 1.65; color: #6B7280; margin: 0 auto 2.5rem;
+  max-width: 460px; font-weight: 400;
+  opacity: 0; animation: fadeUp 600ms 300ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+@keyframes fadeUp { from { opacity:0; transform:translateY(12px); } to { opacity:1; transform:translateY(0); } }
+
+/* ── The Input ── */
+.ob-form {
+  width: 100%; max-width: 460px; margin: 0 auto 1.5rem;
+  opacity: 0; animation: fadeUp 600ms 400ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.ob-input-wrap {
+  display: flex; align-items: center; background: #FFFFFF;
+  border: 1px solid rgba(0,0,0,0.08); border-radius: 16px; overflow: hidden;
+  transition: all 250ms cubic-bezier(0.16,1,0.3,1);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.03);
+}
+.ob-input-wrap:focus-within {
+  border-color: rgba(233,77,53,0.3);
+  box-shadow: 0 0 0 4px rgba(233,77,53,0.06), 0 1px 3px rgba(0,0,0,0.04), 0 8px 24px rgba(0,0,0,0.06);
+}
+.ob-input {
+  flex: 1; border: none; padding: 1rem 0 1rem 1.25rem; font-size: 1rem;
+  font-family: inherit; font-weight: 500; color: #121212; outline: none;
+  background: transparent; min-width: 0; letter-spacing: -0.01em;
+}
+.ob-input::placeholder { color: #C4C9D4; font-weight: 400; }
+.ob-submit {
+  display: flex; align-items: center; gap: 0.5rem; border: none;
+  background: #121212; color: #FFFFFF; font-family: inherit;
+  font-size: 0.875rem; font-weight: 600; padding: 0.75rem 1.25rem;
+  margin: 0.375rem; border-radius: 12px; cursor: pointer; white-space: nowrap;
+  transition: all 200ms cubic-bezier(0.16,1,0.3,1); letter-spacing: -0.01em;
+}
+.ob-submit:hover { background: #2D2D2D; transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.ob-submit:active { transform: translateY(0) scale(0.98); }
+.ob-submit-arrow { transition: transform 200ms ease; }
+.ob-submit:hover .ob-submit-arrow { transform: translateX(2px); }
+.ob-spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.25); border-top-color: #fff;
+  border-radius: 50%; animation: spin 0.6s linear infinite;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.ob-error-banner {
+  background: rgba(239,68,68,0.05); border: 1px solid rgba(239,68,68,0.12);
+  border-radius: 12px; padding: 0.75rem 1.25rem; margin-bottom: 1.5rem;
+  color: #DC2626; font-size: 0.875rem; font-weight: 500;
+}
+
+/* ── Alternatives ── */
+.ob-alt {
+  display: flex; align-items: center; justify-content: center; gap: 1rem; font-size: 0.8125rem;
+  opacity: 0; animation: fadeUp 600ms 500ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.ob-alt-link { color: #9CA3AF; text-decoration: none; font-weight: 500; cursor: pointer; transition: color 200ms ease; }
+.ob-alt-link:hover { color: #6B7280; }
+.ob-alt-dot { width: 3px; height: 3px; border-radius: 50%; background: #D1D5DB; }
+
+/* ── Capabilities ── */
+.ob-capabilities {
+  position: relative; z-index: 1; display: flex; gap: 1.5rem; margin-top: 4rem;
+  opacity: 0; animation: fadeUp 600ms 600ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+.ob-cap { display: flex; align-items: flex-start; gap: 0.75rem; flex: 1; max-width: 200px; }
+.ob-cap-num { font-size: 0.625rem; font-weight: 700; color: #E94D35; opacity: 0.6; padding-top: 0.125rem; font-variant-numeric: tabular-nums; }
+.ob-cap-text { display: flex; flex-direction: column; gap: 0.125rem; }
+.ob-cap-text strong { font-size: 0.8125rem; font-weight: 600; color: #121212; }
+.ob-cap-text span { font-size: 0.6875rem; color: #9CA3AF; line-height: 1.4; }
+
+/* ── Act 2: The Theater ── */
+.ob-theater {
+  min-height: 100vh; display: flex; flex-direction: column; align-items: center;
+  justify-content: flex-start; padding: 6rem 2rem 4rem; background: #FAFAFA;
+  position: relative; opacity: 0;
+  animation: theaterEnter 600ms cubic-bezier(0.16,1,0.3,1) forwards;
+}
+@keyframes theaterEnter { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+
+/* ── Responsive ── */
+@media (max-width: 640px) {
+  .ob-hero { padding: 5rem 1.25rem 3rem; }
+  .ob-title { font-size: 2rem; }
+  .ob-subtitle { font-size: 0.9375rem; }
+  .ob-capabilities { flex-direction: column; gap: 1rem; align-items: center; }
+  .ob-cap { max-width: 280px; }
+  .ob-input-wrap { flex-direction: column; border-radius: 12px; }
+  .ob-submit { width: 100%; justify-content: center; margin: 0.25rem; border-radius: 0 0 10px 10px; }
+  .ob-theater { padding: 4rem 1.25rem 3rem; }
+}
+</style>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function() {
+  var ICO = {
+    Building2: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/></svg>',
+    Briefcase: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="7" rx="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>',
+    Users: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+    Package: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m7.5 4.27 9 5.15"/><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>',
+    Swords: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="14.5 17.5 3 6 3 3 6 3 17.5 14.5"/><line x1="13" x2="19" y1="19" y2="13"/><line x1="16" x2="20" y1="16" y2="20"/><line x1="19" x2="21" y1="21" y2="19"/></svg>',
+    CreditCard: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="5" rx="2"/><line x1="2" x2="22" y1="10" y2="10"/></svg>',
+    Sparkles: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3L12 3Z"/></svg>',
+    Quote: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 21c3 0 7-1 7-8V5c0-1.25-.756-2.017-2-2H4c-1.25 0-2 .75-2 1.972V11c0 1.25.75 2 2 2 1 0 1 0 1 1v1c0 1-1 2-2 2s-1 .008-1 1.031V21c0 1 0 1 1 1z"/></svg>',
+    FileText: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"/><polyline points="14 2 14 8 20 8"/><line x1="16" x2="8" y1="13" y2="13"/><line x1="16" x2="8" y1="17" y2="17"/></svg>',
+    UsersRound: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 21a8 8 0 0 0-16 0"/><circle cx="10" cy="8" r="5"/><path d="M22 20c0-3.37-2-6.5-4-8a5 5 0 0 0-.45-8.3"/></svg>',
+    MapPin: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>',
+    UserCheck: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>',
+    TrendingUp: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 7 13.5 15.5 8.5 10.5 2 17"/><polyline points="16 7 22 7 22 13"/></svg>',
+    Newspaper: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 22h16a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2H8a2 2 0 0 0-2 2v16a2 2 0 0 1-2 2Zm0 0a2 2 0 0 1-2-2v-9c0-1.1.9-2 2-2h2"/><path d="M18 14h-8"/><path d="M15 18h-5"/><path d="M10 6h8v4h-8V6Z"/></svg>',
+    Code: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>',
+    Share2: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" x2="15.42" y1="13.51" y2="17.49"/><line x1="15.41" x2="8.59" y1="6.51" y2="10.49"/></svg>',
+    Info: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>'
+  };
+
+  var hero = document.getElementById('ob-hero');
+  var theater = document.getElementById('ob-theater');
+  var form = document.getElementById('ob-form');
+  var input = document.getElementById('ob-input');
+  var submitBtn = document.getElementById('ob-submit');
+  var urlText = document.getElementById('crawl-url-text');
+  var stage = document.getElementById('crawl-stage');
+  var stageLabel = document.getElementById('crawl-stage-label');
+  var pages = document.getElementById('crawl-pages');
+  var facts = document.getElementById('crawl-facts');
+  var timeout = document.getElementById('crawl-timeout');
+  var thin = document.getElementById('crawl-thin');
+  var error = document.getElementById('crawl-error');
+  var errorMsg = document.getElementById('crawl-error-msg');
+  var errorDetail = document.getElementById('crawl-error-detail');
+  var profile = document.getElementById('crawl-profile');
+  var cont = document.getElementById('crawl-continue');
+  var contBtn = document.getElementById('crawl-continue-btn');
+
+  var factCount = 0, eventSource = null, sessionId = '', lastPhase = 'site';
+
+  function arr(v) { return Array.isArray(v) ? v.join(', ') : String(v || ''); }
+  function esc(s) { return s ? String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;') : ''; }
+
+  function buildCard(d) {
+    var name = d.company_name || 'Company', init = name.charAt(0).toUpperCase();
+    var sections = [];
+    var ov = [];
+    if (d.what_they_do) ov.push({l:'About',v:d.what_they_do});
+    if (d.industries) ov.push({l:'Industry',v:arr(d.industries)});
+    if (d.headquarters) ov.push({l:'HQ',v:String(d.headquarters)});
+    if (d.employees) ov.push({l:'Team',v:String(d.employees)});
+    if (ov.length) sections.push({t:'Overview',f:ov});
+    var pr = [];
+    if (d.products) pr.push({l:'Products',v:arr(d.products)});
+    if (d.pricing_model) pr.push({l:'Pricing',v:String(d.pricing_model)});
+    if (d.key_differentiators) pr.push({l:'Edge',v:arr(d.key_differentiators)});
+    if (pr.length) sections.push({t:'Products',f:pr});
+    var mk = [];
+    if (d.target_customers) mk.push({l:'Customers',v:arr(d.target_customers)});
+    if (d.competitors) mk.push({l:'Competitors',v:arr(d.competitors)});
+    if (mk.length) sections.push({t:'Market',f:mk});
+    var pf = [];
+    if (d.key_people) pf.push({l:'Leadership',v:'__people__'});
+    if (d.funding) pf.push({l:'Funding',v:String(d.funding)});
+    if (d.recent_news) {
+      var newsItems = [];
+      for (var ni=0;ni<d.recent_news.length;ni++) {
+        var n = d.recent_news[ni];
+        newsItems.push(typeof n === 'object' ? (n.title||'') + (n.date ? ' ('+n.date+')' : '') : String(n));
+      }
+      if (newsItems.length) pf.push({l:'News',v:newsItems.join('; ')});
+    }
+    if (d.recent_press) {
+      var pressItems = [];
+      for (var rp=0;rp<d.recent_press.length;rp++) {
+        var pi = d.recent_press[rp];
+        pressItems.push(typeof pi === 'object' ? (pi.title||'') + (pi.date ? ' ('+pi.date+')' : '') : String(pi));
+      }
+      if (pressItems.length) pf.push({l:'Press',v:pressItems.join('; ')});
+    }
+    if (d.social_accounts) {
+      var sa = d.social_accounts, saParts = [];
+      for (var sk in sa) { if (sa[sk]) saParts.push(sk + ': ' + sa[sk]); }
+      if (saParts.length) pf.push({l:'Social',v:saParts.join(', ')});
+    }
+    if (d.blog_topics) pf.push({l:'Blog',v:arr(d.blog_topics)});
+    if (pf.length) sections.push({t:'Intelligence',f:pf});
+
+    var h = '<div class="profile-card"><div class="profile-card-header">';
+    h += '<div class="profile-card-avatar">' + esc(init) + '</div><div>';
+    h += '<h2 class="profile-card-name">' + esc(name) + '</h2>';
+    if (d.tagline) h += '<p class="profile-card-url">' + esc(d.tagline) + '</p>';
+    h += '</div></div><div class="profile-card-sections">';
+    for (var i=0;i<sections.length;i++) {
+      h += '<div class="profile-section"><h3 class="profile-section-title">' + esc(sections[i].t) + '</h3>';
+      for (var j=0;j<sections[i].f.length;j++) {
+        if (sections[i].f[j].v === '__people__' && d.key_people) {
+          var people = d.key_people;
+          for (var p=0;p<people.length;p++) {
+            var person = people[p];
+            if (typeof person === 'object') {
+              h += '<div class="profile-person">';
+              h += '<span class="profile-person-name">' + esc(person.name||'') + '</span>';
+              h += '<span class="profile-person-title">' + esc(person.title||'') + '</span>';
+              if (person.linkedin) h += '<a href="' + esc(person.linkedin) + '" target="_blank" class="profile-person-link">LinkedIn</a>';
+              h += '</div>';
+            } else {
+              h += '<div class="profile-field"><span class="profile-field-label">Leader</span><span class="profile-field-value">' + esc(String(person)) + '</span></div>';
+            }
+          }
+        } else {
+          h += '<div class="profile-field"><span class="profile-field-label">' + esc(sections[i].f[j].l) + '</span><span class="profile-field-value">' + esc(sections[i].f[j].v) + '</span></div>';
+        }
+      }
+      h += '</div>';
+    }
+    var tech = d.tech_stack || [];
+    if (typeof tech === 'string') tech = tech.split(',').map(function(t){return t.trim()});
+    if (tech.length) {
+      h += '<div class="profile-section"><h3 class="profile-section-title">Technology</h3><div class="profile-tags">';
+      for (var k=0;k<tech.length;k++) h += '<span class="profile-tag">' + esc(tech[k]) + '</span>';
+      h += '</div></div>';
+    }
+    h += '</div>';
+    var href = sessionId ? '/onboarding/work-picker?session='+sessionId : '#';
+    h += '<div class="profile-card-actions">';
+    h += '<a href="'+href+'" class="profile-action-primary">Continue</a>';
+    h += '<a href="'+href+'" class="profile-action-secondary">Skip for now</a>';
+    h += '</div></div>';
+    return h;
+  }
+
+  function addFact(data) {
+    factCount++;
+    if (data.source==='research' && lastPhase==='site') {
+      var div = document.createElement('div');
+      div.className = 'crawl-phase-divider';
+      div.innerHTML = '<span class="crawl-phase-label">Web research</span>';
+      div.style.opacity = '0'; div.style.animation = 'fadeIn 300ms ease forwards';
+      facts.appendChild(div); lastPhase = 'research';
+    }
+    var row = document.createElement('div');
+    row.className = 'crawl-fact' + (data.source==='research'?' crawl-fact-research':'');
+    row.style.animationDelay = (factCount * 60) + 'ms';
+    var src = data.source==='research' ? '<span class="crawl-fact-source">researched</span>' : '';
+    row.innerHTML = '<div class="crawl-fact-icon">'+(ICO[data.icon]||ICO.Info)+'</div><div class="crawl-fact-content"><div class="crawl-fact-label">'+esc(data.label)+src+'</div><div class="crawl-fact-value">'+esc(data.value)+'</div></div>';
+    facts.appendChild(row);
+  }
+
+  function coalesce(profileData) {
+    facts.classList.add('crawl-facts-collapsing');
+    var rows = facts.querySelectorAll('.crawl-fact,.crawl-phase-divider');
+    for (var i=0;i<rows.length;i++) rows[i].style.transitionDelay = (i*20)+'ms';
+    setTimeout(function() {
+      facts.style.display = 'none'; stage.style.display = 'none';
+      var pulse = document.createElement('div');
+      pulse.className = 'crawl-gather-pulse';
+      facts.parentNode.insertBefore(pulse, profile);
+      setTimeout(function() { pulse.remove(); profile.innerHTML=buildCard(profileData); profile.style.display='block'; }, 500);
+    }, (rows.length*20)+250);
+  }
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+    var url = input.value.trim(); if (!url) return;
+    factCount=0; lastPhase='site';
+    facts.innerHTML=''; facts.style.display=''; facts.classList.remove('crawl-facts-collapsing');
+    pages.innerHTML=''; pages.style.display='none';
+    timeout.style.display='none'; thin.style.display='none'; error.style.display='none';
+    profile.style.display='none'; profile.innerHTML=''; cont.classList.remove('visible');
+    submitBtn.querySelector('.ob-submit-text').style.display='none';
+    submitBtn.querySelector('.ob-submit-arrow').style.display='none';
+    submitBtn.querySelector('.ob-submit-loading').style.display='inline-flex';
+    submitBtn.disabled=true;
+
+    hero.classList.add('exiting');
+    urlText.textContent=url;
+    setTimeout(function(){ hero.style.display='none'; theater.style.display='flex'; },500);
+    stage.style.display='flex'; stageLabel.textContent='Connecting...';
+
+    eventSource = new EventSource('/api/onboarding/crawl/stream?url='+encodeURIComponent(url));
+    eventSource.addEventListener('stage', function(e){ try{stageLabel.textContent=JSON.parse(e.data).label||'Working...';}catch(x){} });
+    eventSource.addEventListener('page', function(e){ try{var d=JSON.parse(e.data);pages.style.display='block';var p=document.createElement('span');p.textContent=(d.title||d.url)+'  ';pages.appendChild(p);}catch(x){} });
+    eventSource.addEventListener('fact', function(e){ try{addFact(JSON.parse(e.data));}catch(x){} });
+    eventSource.addEventListener('timeout', function(e){ try{timeout.textContent=JSON.parse(e.data).message;timeout.style.display='block';}catch(x){} });
+    eventSource.addEventListener('profile', function(e){ try{coalesce(JSON.parse(e.data));}catch(x){} });
+    eventSource.addEventListener('error', function(e){
+      try{var d=JSON.parse(e.data);errorMsg.textContent=d.message||'Something went wrong.';errorDetail.textContent=d.detail||'';error.style.display='block';stage.style.display='none';}
+      catch(x){if(eventSource&&eventSource.readyState===EventSource.CLOSED)return;errorMsg.textContent='Connection lost.';error.style.display='block';stage.style.display='none';}
+      finish();
+    });
+    eventSource.addEventListener('done', function(e){
+      try{
+        var d=JSON.parse(e.data); sessionId=d.session_id||'';
+        stage.style.display='none'; timeout.style.display='none';
+        if(factCount<3) thin.style.display='block';
+        var link=profile.querySelector('.profile-action-primary');
+        if(link&&sessionId) link.href='/onboarding/work-picker?session='+sessionId;
+        if(sessionId&&profile.style.display==='none'){contBtn.href='/onboarding/work-picker?session='+sessionId;cont.classList.add('visible');}
+        try{if(localStorage.getItem('flywheel_chime_disabled')!=='true') new Audio('/static/sounds/chime.mp3').play();}catch(x){}
+      }catch(x){} finish();
+    });
+
+    var timer=setTimeout(function(){if(timeout.style.display==='none'){timeout.textContent='Still working\u2026 some sites take longer.';timeout.style.display='block';}},30000);
+    function finish(){if(eventSource){eventSource.close();eventSource=null;}clearTimeout(timer);submitBtn.querySelector('.ob-submit-text').style.display='';submitBtn.querySelector('.ob-submit-arrow').style.display='';submitBtn.querySelector('.ob-submit-loading').style.display='none';submitBtn.disabled=false;}
+  });
+
+  window.resetCrawl = function(){ theater.style.display='none'; hero.style.display=''; hero.classList.remove('exiting'); input.value=''; input.focus(); };
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,48 @@
+{# Legal Review output template - risk badges and severity-colored sections #}
+<div class="output-document output-legal-review">
+  <div class="output-header">
+    <h2 class="output-title">Legal Review</h2>
+    {% for fact in key_facts %}
+      {% if fact.label | lower in ['risk level', 'risk', 'overall risk'] %}
+        {% set risk = fact.value | lower %}
+        <span class="severity-badge severity-{{ 'red' if 'high' in risk or 'critical' in risk else ('amber' if 'medium' in risk or 'moderate' in risk else 'green') }}">
+          {{ fact.value }}
+        </span>
+      {% endif %}
+    {% endfor %}
+  </div>
+
+  {# Key findings summary at top #}
+  {% for section in sections %}
+    {% if section.title | lower in ['key findings', 'summary', 'executive summary', 'overview'] %}
+    <div class="output-card output-card-highlight">
+      <h3 class="output-card-title">{{ section.title }}</h3>
+      {% if section.bullet_items %}
+      <ul class="output-list">
+        {% for item in section.bullet_items %}
+        <li>{{ item }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="output-content">{{ section.content | md }}</div>
+      {% endif %}
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  {# Remaining sections with severity-colored borders #}
+  {% for section in sections %}
+    {% if section.title | lower not in ['key findings', 'summary', 'executive summary', 'overview'] %}
+    <div class="output-card output-severity-card
+      {% if 'critical' in section.title | lower or 'risk' in section.title | lower or 'issue' in section.title | lower %}output-severity-red
+      {% elif 'warning' in section.title | lower or 'concern' in section.title | lower or 'caution' in section.title | lower %}output-severity-amber
+      {% elif 'recommendation' in section.title | lower or 'negotiation' in section.title | lower %}output-severity-highlight
+      {% else %}output-severity-green{% endif %}">
+      <h3 class="output-card-title">{{ section.title }}</h3>
+      <div class="output-content">{{ section.content | md }}</div>
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  {% include "components/attribution_footer.html" %}
+</div>

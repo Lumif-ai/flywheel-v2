@@ -1,0 +1,666 @@
+/* ═══════════════════════════════════════════════════════════════════════════
+   Output Document Styles — Premium document feel, print-ready
+   Uses flywheel.css semantic design tokens (--surface-*, --text-*, --accent-*, etc.)
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ---------------------------------------------------------------------------
+   Output Document Container
+   --------------------------------------------------------------------------- */
+
+.output-standalone {
+  min-height: 100vh;
+  background: var(--surface-secondary);
+  padding: 2rem;
+}
+
+.output-container {
+  max-width: 960px;
+  margin: 0 auto;
+}
+
+.output-document {
+  font-family: var(--font);
+  color: var(--text-secondary);
+  line-height: 1.65;
+}
+
+/* ---------------------------------------------------------------------------
+   Header
+   --------------------------------------------------------------------------- */
+
+.output-header {
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border-default);
+}
+
+.output-header-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.output-title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+  letter-spacing: -0.02em;
+}
+
+/* ---------------------------------------------------------------------------
+   Section Cards
+   --------------------------------------------------------------------------- */
+
+.output-card {
+  background: var(--surface-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius);
+  padding: 1.5rem;
+  margin-bottom: 0.875rem;
+  transition: all var(--duration-normal) ease;
+}
+
+.output-card:hover {
+  border-color: rgba(233, 77, 53, 0.1);
+}
+
+.output-card-title {
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.75rem;
+  letter-spacing: -0.01em;
+}
+
+.output-card-highlight {
+  background: linear-gradient(135deg, rgba(233, 77, 53, 0.03), transparent);
+  border-color: rgba(233, 77, 53, 0.12);
+}
+
+/* ---------------------------------------------------------------------------
+   Content & Lists
+   --------------------------------------------------------------------------- */
+
+.output-content {
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.7;
+}
+
+.output-content-intro {
+  margin-bottom: 0.75rem;
+}
+
+.output-list {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+
+.output-list li {
+  position: relative;
+  padding-left: 1.125rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.9375rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+.output-list li::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.625rem;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+  opacity: 0.6;
+}
+
+.output-list-compact li {
+  margin-bottom: 0.25rem;
+  font-size: 0.8125rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Two-Column Layout (Sidebar)
+   --------------------------------------------------------------------------- */
+
+.output-layout-with-sidebar {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.output-sidebar {
+  position: sticky;
+  top: 5rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Key Facts Card
+   --------------------------------------------------------------------------- */
+
+.output-facts-card {
+  background: var(--surface-warm);
+  border-color: rgba(233, 77, 53, 0.08);
+}
+
+.output-facts-title {
+  font-size: 0.6875rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-primary);
+  margin: 0 0 1rem;
+}
+
+.output-facts {
+  margin: 0;
+}
+
+.output-fact {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0;
+  border-bottom: 1px solid rgba(233, 77, 53, 0.06);
+}
+
+.output-fact:last-child {
+  border-bottom: none;
+}
+
+.output-fact dt {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.output-fact dd {
+  font-size: 0.9375rem;
+  font-weight: 500;
+  color: var(--text-primary);
+  margin: 0.125rem 0 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Meeting Brief — Section Icons
+   --------------------------------------------------------------------------- */
+
+.output-meeting-brief .output-icon-title {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.output-section-icon {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent-primary);
+  opacity: 0.7;
+  flex-shrink: 0;
+}
+
+.output-section-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* ---------------------------------------------------------------------------
+   Contact Cards Grid — Key People section
+   --------------------------------------------------------------------------- */
+
+.output-contacts-section {
+  background: linear-gradient(135deg, rgba(233, 77, 53, 0.02), transparent);
+  border-color: rgba(233, 77, 53, 0.1);
+}
+
+.output-contacts-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.75rem;
+}
+
+.output-contact-card {
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+  padding: 1rem;
+}
+
+.output-contact-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.125rem;
+}
+
+.output-contact-title {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  margin-bottom: 0.5rem;
+}
+
+.output-contact-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.75rem;
+  color: var(--accent-primary);
+  text-decoration: none;
+  font-weight: 500;
+  margin-right: 0.75rem;
+}
+
+.output-contact-link:hover {
+  text-decoration: underline;
+}
+
+.output-contact-link svg {
+  flex-shrink: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Checklist-style bullets — Talking Points & Preparation Checklist
+   --------------------------------------------------------------------------- */
+
+.output-list-checklist li {
+  padding-left: 1.5rem;
+}
+
+.output-list-checklist li::before {
+  content: "";
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--border-default);
+  border-radius: 4px;
+  background: var(--surface-primary);
+  top: 0.375rem;
+  left: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Severity Badges (Legal Review)
+   --------------------------------------------------------------------------- */
+
+.severity-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.1875rem 0.75rem;
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+}
+
+.severity-red {
+  background: rgba(239, 68, 68, 0.08);
+  color: #DC2626;
+}
+
+.severity-amber {
+  background: rgba(249, 115, 22, 0.08);
+  color: #EA580C;
+}
+
+.severity-green {
+  background: rgba(34, 197, 94, 0.08);
+  color: #16A34A;
+}
+
+.output-severity-card {
+  border-left: 3px solid var(--border-default);
+}
+
+.output-severity-red { border-left: 3px solid #EF4444; }
+.output-severity-amber { border-left: 3px solid #F97316; }
+.output-severity-green { border-left: 3px solid #22C55E; }
+
+.output-severity-highlight {
+  border-left: 3px solid var(--accent-primary);
+  background: linear-gradient(135deg, rgba(233, 77, 53, 0.02), transparent);
+}
+
+/* ---------------------------------------------------------------------------
+   Outreach Batch — Card Grid
+   --------------------------------------------------------------------------- */
+
+.output-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 0.875rem;
+}
+
+.output-recipient-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.output-recipient-header {
+  margin-bottom: 0.5rem;
+}
+
+.output-personalization {
+  margin-bottom: 0.75rem;
+}
+
+.output-personalization-label {
+  display: block;
+  font-size: 0.625rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--accent-primary);
+  margin-bottom: 0.375rem;
+}
+
+.output-draft-preview {
+  border-top: 1px solid var(--border-subtle);
+  padding-top: 0.75rem;
+}
+
+.output-content-preview {
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+
+/* ---------------------------------------------------------------------------
+   Investor Update — Hero Card & Metrics
+   --------------------------------------------------------------------------- */
+
+.output-hero-card {
+  background: var(--accent-gradient);
+  color: white;
+  border: none;
+}
+
+.output-hero-card .output-card-title {
+  color: white;
+}
+
+.output-hero-content {
+  color: rgba(255, 255, 255, 0.9);
+}
+
+.output-metrics-row {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.875rem;
+  margin-bottom: 1.5rem;
+}
+
+.output-metric-card {
+  background: var(--surface-primary);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  text-align: center;
+  transition: all var(--duration-normal) ease;
+}
+
+.output-metric-card:hover {
+  border-color: rgba(233, 77, 53, 0.15);
+}
+
+.output-metric-value {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: var(--accent-primary);
+  line-height: 1;
+}
+
+.output-metric-label {
+  font-size: 0.6875rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-top: 0.375rem;
+}
+
+/* Timeline */
+.output-timeline-list {
+  border-left: 2px solid var(--accent-primary);
+  padding-left: 1.5rem;
+}
+
+.output-timeline-list li {
+  padding-left: 0;
+}
+
+.output-timeline-list li::before {
+  content: "";
+  position: absolute;
+  left: -1.75rem;
+  top: 0.5rem;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent-primary);
+}
+
+.output-highlight-card {
+  background: var(--surface-warm);
+  border-color: rgba(233, 77, 53, 0.1);
+}
+
+/* ---------------------------------------------------------------------------
+   Competitive Analysis — Comparison Grid
+   --------------------------------------------------------------------------- */
+
+.output-comparison-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.output-comparison-col {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+/* ---------------------------------------------------------------------------
+   Attribution Footer
+   --------------------------------------------------------------------------- */
+
+.attribution-footer {
+  margin-top: 2rem;
+}
+
+.attribution-footer-separator {
+  height: 1px;
+  background: var(--border-subtle);
+  margin-bottom: 1rem;
+}
+
+.attribution-footer-content {
+  padding: 0;
+}
+
+.attribution-footer-summary {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 0 0 0.75rem;
+}
+
+.attribution-footer-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.375rem;
+}
+
+.attribution-footer-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.1875rem 0.625rem;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-pill);
+  font-size: 0.6875rem;
+  transition: all var(--duration-normal) ease;
+}
+
+.attribution-footer-pill:hover {
+  border-color: var(--border-default);
+}
+
+.attribution-footer-filename {
+  color: var(--text-secondary);
+  font-weight: 500;
+}
+
+.attribution-footer-count {
+  color: var(--text-muted);
+  font-size: 0.625rem;
+}
+
+.attribution-footer-count::before {
+  content: "\00b7 ";
+}
+
+/* ---------------------------------------------------------------------------
+   Empty & Raw States
+   --------------------------------------------------------------------------- */
+
+.output-empty {
+  text-align: center;
+  padding: 3rem;
+}
+
+.output-raw {
+  white-space: pre-wrap;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.7;
+}
+
+/* ---------------------------------------------------------------------------
+   Print Styles
+   --------------------------------------------------------------------------- */
+
+@media print {
+  .nav, .footer, .nav-inner, .btn, button {
+    display: none !important;
+  }
+
+  body {
+    background: white;
+    color: #121212;
+  }
+
+  .output-standalone {
+    background: white;
+    padding: 0;
+  }
+
+  .output-container {
+    max-width: 100%;
+  }
+
+  .output-document {
+    font-size: 11pt;
+  }
+
+  .output-card {
+    border: none;
+    box-shadow: none;
+    padding: 0.75rem 0;
+    margin-bottom: 0.5rem;
+    border-bottom: 1px solid #E5E7EB;
+    page-break-inside: avoid;
+    border-radius: 0;
+  }
+
+  .output-card-highlight,
+  .output-hero-card {
+    background: #F9FAFB;
+    padding: 0.75rem;
+    border: 1px solid #E5E7EB;
+  }
+
+  .output-hero-card {
+    background: #F3F4F6;
+    color: #121212;
+  }
+
+  .output-hero-card .output-card-title,
+  .output-hero-content {
+    color: #121212;
+  }
+
+  .output-layout-with-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .output-sidebar {
+    position: static;
+  }
+
+  .output-facts-card {
+    background: #F9FAFB;
+  }
+
+  .output-comparison-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .output-header {
+    page-break-after: avoid;
+  }
+
+  .attribution-footer-pill {
+    border: 1px solid #D1D5DB;
+    background: transparent;
+  }
+
+  .severity-badge,
+  .output-severity-red,
+  .output-severity-amber,
+  .output-severity-green {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}
+
+/* ---------------------------------------------------------------------------
+   Responsive
+   --------------------------------------------------------------------------- */
+
+@media (max-width: 768px) {
+  .output-standalone {
+    padding: 1rem;
+  }
+
+  .output-layout-with-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .output-sidebar {
+    position: static;
+  }
+
+  .output-comparison-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .output-card-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .output-metrics-row {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .output-title {
+    font-size: 1.25rem;
+  }
+}

@@ -1,0 +1,40 @@
+{# Outreach Batch output template - per-recipient card grid #}
+<div class="output-document output-outreach-batch">
+  <div class="output-header">
+    <h2 class="output-title">Outreach Batch</h2>
+    <span class="badge badge-brand">{{ section_count }} recipient{{ 's' if section_count != 1 else '' }}</span>
+  </div>
+
+  <div class="output-card-grid">
+    {% for section in sections %}
+    <div class="output-card output-recipient-card">
+      <div class="output-recipient-header">
+        <h3 class="output-card-title">{{ section.title }}</h3>
+      </div>
+      {% if section.bullet_items %}
+      <div class="output-personalization">
+        <span class="output-personalization-label">Personalization</span>
+        <ul class="output-list output-list-compact">
+          {% for item in section.bullet_items[:3] %}
+          <li>{{ item }}</li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+      {% if section.content %}
+      <div class="output-draft-preview">
+        <div class="output-content output-content-preview">{{ section.content | md }}</div>
+      </div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if not sections %}
+  <div class="output-card">
+    <div class="output-content">{{ raw | md }}</div>
+  </div>
+  {% endif %}
+
+  {% include "components/attribution_footer.html" %}
+</div>

@@ -1,0 +1,129 @@
+{% from "components/health_card.html" import health_card %}
+
+{% if is_context_empty %}
+<!-- Guided setup empty state -->
+<div class="empty-state">
+  <div class="empty-state-icon">
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+      <ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5V19A9 3 0 0 0 21 19V5"/><path d="M3 12A9 3 0 0 0 21 12"/>
+    </svg>
+  </div>
+  <h2 class="empty-state-title">Your knowledge base is empty</h2>
+  <p class="empty-state-desc">Start by adding a company. The context health dashboard shows how your intelligence grows over time.</p>
+  <a href="/onboarding" class="btn btn-brand">Add a Company</a>
+</div>
+
+{% else %}
+<h1>Context Store Dashboard</h1>
+<p class="mt-1 text-secondary">Monitor the health and activity of your knowledge base.</p>
+
+<!-- Health summary row (auto-refreshes every 30s via HTMX) -->
+<div class="grid-4 mt-3" hx-get="/api/health/summary" hx-trigger="every 30s" hx-swap="innerHTML">
+  {{ health_card("Total Entries", health.total_entries, color="brand") }}
+  {{ health_card("Context Files", health.file_count, color="info") }}
+  {% if health.staleness_percentage > 20 %}
+  {{ health_card("Staleness", "%.1f%%"|format(health.staleness_percentage), color="warning") }}
+  {% else %}
+  {{ health_card("Staleness", "%.1f%%"|format(health.staleness_percentage), color="success") }}
+  {% endif %}
+  {{ health_card("Last Backup", health.last_backup_time[:10] if health.last_backup_time else "None", color="neutral") }}
+</div>
+
+<!-- Growth section: 7-day activity chart -->
+<div class="mt-3">
+  <h2>Activity This Week</h2>
+  {% if growth and growth|selectattr("count")|list %}
+  <div class="growth-chart mt-2">
+    {% set max_count = growth|map(attribute='count')|max %}
+    {% for day in growth %}
+    <div class="growth-bar-wrapper">
+      <div class="growth-bar" style="height: {{ (day.count / max_count * 100) if max_count > 0 else 0 }}%"></div>
+      <span class="growth-bar-count">{{ day.count }}</span>
+      <span class="growth-bar-label">{{ day.day_name }}</span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted mt-1">No entries added this week.</p>
+  {% endif %}
+</div>
+
+<!-- Attribution section: top knowledge sources -->
+<div class="mt-3">
+  <h2>Knowledge Sources</h2>
+  {% if attribution_summary %}
+  <div class="attribution-table mt-2">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Source</th>
+          <th>Entries</th>
+          <th>Last Active</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for src in attribution_summary %}
+        <tr{% if loop.first %} class="bg-warm"{% endif %}>
+          <td class="font-medium">{{ src.source }}</td>
+          <td><span class="badge badge-brand">{{ src.count }}</span></td>
+          <td class="text-secondary">{{ src.last_seen }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <p class="text-muted mt-1">No attribution data yet. Run some skills to populate.</p>
+  {% endif %}
+</div>
+
+<!-- Context files section: expandable cards with HTMX lazy-load -->
+<div class="mt-3">
+  <h2>Your Context Store</h2>
+  {% if file_stats %}
+  <div class="context-file-list mt-2">
+    {% for file in file_stats %}
+    <div class="context-file-card card mb-1">
+      <div class="flex items-center justify-between context-file-header"
+           hx-get="/api/context/{{ file.name }}"
+           hx-target="#entries-{{ loop.index }}"
+           hx-swap="innerHTML"
+           style="cursor: pointer;">
+        <div>
+          <span class="font-medium">{{ file.display_name }}</span>
+          <span class="badge badge-info" style="margin-left: 0.5rem;">{{ file.entry_count }} entries</span>
+        </div>
+        <span class="text-muted text-sm">{{ file.last_modified }}</span>
+      </div>
+      <div id="entries-{{ loop.index }}" class="context-entries-detail"></div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-muted mt-1">No context files found.</p>
+  {% endif %}
+</div>
+
+<!-- Suggestions and What's Changed -->
+<div class="grid-2 mt-3">
+  <div class="card bg-warm">
+    <h3>Suggested Next Step</h3>
+    {% if suggestion %}
+    <p class="mt-1">{{ suggestion }}</p>
+    {% else %}
+    <p class="mt-1 text-muted">Everything looks great. Keep running skills to grow your context store.</p>
+    {% endif %}
+  </div>
+  <div class="card bg-warm">
+    <h3>What's Changed</h3>
+    {% if whats_changed %}
+    <p class="mt-1">{{ whats_changed }}</p>
+    {% else %}
+    <p class="mt-1 text-muted">No recent changes to report.</p>
+    {% endif %}
+  </div>
+</div>
+
+<!-- Data ownership footer -->
+<p class="text-muted text-center mt-3">All {{ health.total_entries }} entries stored locally on this machine.</p>
+{% endif %}

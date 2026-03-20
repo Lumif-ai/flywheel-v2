@@ -1,0 +1,11 @@
+{% macro health_card(label, value, color="info", trend=None) %}
+<div class="health-card health-card-{{ color }}">
+  <div class="health-card-value">{{ value }}</div>
+  <div class="health-card-label">{{ label }}</div>
+  {% if trend %}
+  <div class="health-card-trend health-card-trend-{{ trend }}">
+    {% if trend == "up" %}&#9650;{% elif trend == "down" %}&#9660;{% else %}&#9679;{% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endmacro %}

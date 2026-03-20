@@ -1,0 +1,479 @@
+---
+name: lumifai-meeting-processor
+description: >
+  Lumif.ai's meeting intelligence processor. Extracts structured insights from Granola
+  meeting notes (or pasted/uploaded notes) and maintains the master insights tracker,
+  transcript archive, context graph, and learnings synthesis. Trigger this skill whenever
+  the user mentions: "process meetings", "pull from Granola", "update insights tracker",
+  "process my calls", "add meeting notes", "update the expert tracker", "what did we learn
+  from calls", "sync meeting notes", "process latest notes", or any reference to extracting
+  insights from expert/customer calls. Also trigger when the user uploads meeting notes or
+  transcripts, or asks to update the Lumif.ai insights files. Even if the user just says
+  "process my notes" or "update the tracker" without mentioning Granola — trigger this skill.
+---
+
+# Lumif.ai Meeting Processor
+
+You are processing meeting notes for **Lumif.ai**, an AI startup building insurance
+technology products. The founding team and chief of staff conduct calls across insurance,
+construction, real estate, energy, infrastructure, and advisory sectors — plus advisor
+sessions, administrative/operational calls, and internal meetings. Your job is to classify
+each meeting by type and extract the right intelligence for each type.
+
+## Lumif.ai's Products
+
+1. **P1: Workers Comp Premium Audit** — AI-assisted premium audit automation
+2. **P2: Construction Risk Compliance (GC-facing)** — Subcontractor insurance compliance for GCs/owners
+3. **P3: Construction Risk Compliance (Broker-facing)** — Same compliance engine, sold to insurance brokers
+
+## File Locations
+
+| File | Path |
+|------|------|
+| Insights tracker | `lumifai/insights/expert-insights-tracker.xlsx` |
+| Command Center | `lumifai/insights/command-center.html` |
+| Learnings synthesis | `lumifai/insights/learnings-synthesis.md` |
+| Context graph data | `lumifai/insights/context-graph.json` |
+| Context graph visual | `lumifai/insights/context-graph.html` |
+| Transcripts | `lumifai/transcripts/` (one file per interview) |
+| Transcript index | `lumifai/transcripts/_interview-index.md` |
+| Product files | `lumifai/products/` |
+
+---
+
+## Step 0: Environment
+
+All data is stored locally:
+- Excel tracker at `lumifai/insights/expert-insights-tracker.xlsx`
+- Markdown files for transcripts, synthesis, and product docs
+- Command Center dashboard at `lumifai/insights/command-center.html`
+- Context graph at `lumifai/insights/context-graph.html`
+
+The Command Center is a local HTML dashboard with tabs for all data views, search,
+filtering, and CSV export. It gets regenerated after every processing run.
+
+The user can export data to Google Sheets (via CSV), Google Docs, or PDF at any time
+from the dashboard. Source of truth is always the local files.
+
+**Always append, never replace.** The tracker only grows.
+
+---
+
+## Step 1: Get Meeting Notes
+
+Try sources in this order:
+
+1. **Granola MCP** — Check for tools like `granola_get_documents`, `granola_search`. Pull latest notes.
+2. **User provides notes** — If Granola isn't connected, ask them to paste or upload.
+3. **Uploaded files** — Check `/mnt/user-data/uploads/` for meeting note files.
+
+---
+
+## Step 1.5: Classify Meeting Types
+
+**Before extracting insights, classify every meeting into one of four types.** This
+determines which extraction pipeline applies and where data is stored.
+
+### Meeting Types
+
+| Type | Code | Description | Examples |
+|------|------|-------------|----------|
+| **Expert / Customer Call** | `expert` | External calls with industry professionals, potential customers, or market participants being interviewed for product/market insights | Insurance carriers, brokers, GCs, construction risk managers, potential pilot customers |
+| **Advisor Call** | `advisor` | Calls with formal or informal advisors who provide strategic guidance, introductions, domain expertise, or mentorship to the Lumif.ai team | Deepika (Ubeya), Carl, Curtis Kochman (when in advisor capacity), industry mentors, investor advisors |
+| **Administrative / Operational** | `admin` | Calls related to running the business — legal, accounting, finance, compliance, vendor setup, tooling, partnerships for ops (not product) | George (SG & Associates — financial accounting), lawyers, accountants, HR, ops vendors, outreach tool demos |
+| **Internal** | `internal` | Team meetings — standups, sprint planning, prep calls, learning sessions, strategy sessions with only Lumif team members | Daily standups, team connects, call prep sessions, learning sessions, internal strategy |
+
+### Classification Rules
+
+1. **Check participants.** If ALL participants are `@lumif.ai` emails → `internal`
+2. **Check title and context.** Look for signals:
+   - "Prep", "Stand Up", "Team Connect", "Learning Session", "Internal" → `internal`
+   - Known advisors (maintain a running list below) → `advisor`
+   - Known admin contacts (accountants, lawyers, ops vendors) → `admin`
+   - "<Name> <> Lumif.ai", "Meeting with lumif.ai (<Name>)", "<Name> and Anoothi Kumar" → likely `expert` (default for external calls)
+   - Tool demos, platform walkthroughs for internal use → `admin`
+3. **When ambiguous**, check the meeting content/transcript. If still unclear, default to `expert` and flag for user review.
+4. **Same person, different capacity.** A person can appear as `advisor` in one call and `expert` in another. Curtis Kochman might be an advisor in one call and an expert interviewee in another. Classify per-call, not per-person.
+
+### Known Advisor Contacts (update as new advisors are identified)
+
+- Deepika Rayala (Ubeya) — advisor
+- Carl — advisor
+- Curtis Kochman (Champlain Insurance Group) — advisor (also expert in some calls)
+- Jeff (jacouden@mit.edu) — advisor (fortnightly calls)
+- _Add new advisors as they are identified in calls_
+
+### Known Admin/Ops Contacts (update as new contacts are identified)
+
+- George (SG & Associates) — financial accounting prep
+- Merdan Durdyyev (Sales Shortcut AI) — outreach tooling
+- Caroline Mzobe (Satguru Travel) — MICE/events partnership ops
+- _Add new admin contacts as identified_
+
+### What Gets Processed Per Type
+
+| Type | Tracker Row | Deep Insights (Step 3) | Transcript Archive | Context Graph | Learnings Synthesis |
+|------|:-----------:|:---------------------:|:-----------------:|:-------------:|:------------------:|
+| `expert` | Yes — full extraction | Yes — all 9 analyses | Yes | Yes — full | Yes |
+| `advisor` | Yes — adapted extraction (see below) | Partial — focus on strategic advice, introductions, action items | Yes | Yes — advisor edges | Yes — advisor section |
+| `admin` | No (separate log) | No | Optional (if substantive) | Minimal — company node only | No |
+| `internal` | No | No | No | No | No |
+
+### Advisor Call Extraction (differs from expert calls)
+
+For `advisor` calls, extract these fields instead of the standard expert fields:
+
+- **Date, Person Name, Title/Role, Email, Company** — same as expert
+- **Meeting Type:** `Advisor`
+- **Advisory Focus:** What domain/topic they advise on (e.g., "Insurance distribution", "Construction risk", "GTM strategy")
+- **Strategic Advice Given:** Key recommendations, strategic direction discussed
+- **Introductions / Referrals Made:** Who they connected the team with, warm intros offered
+- **Market Intelligence Shared:** Industry knowledge, competitive intel, pricing benchmarks
+- **Action Items:** What the team committed to doing based on advisor input
+- **Product Feedback:** Any reactions to product demos, positioning, or strategy
+- **Follow-up Cadence:** How often the team meets with this advisor
+- **Advisor Engagement Level:** Active (regular calls, making intros) / Occasional / One-time
+
+Do NOT extract Hair on Fire, Vitamin/Painkiller, Problem Severity, ICP Signals,
+Willingness to Pay, or Warm Lead for advisor calls — these fields don't apply.
+
+### Admin/Ops Call Logging
+
+For `admin` calls, create a lightweight log entry (not in the main tracker):
+- **Date, Contact Name, Company, Purpose, Key Outcomes, Action Items, Next Steps**
+- Store in a separate "Admin Log" sheet in the tracker (Sheet 8)
+- No deep insight extraction needed
+
+### Internal Call Handling
+
+For `internal` calls: **skip entirely.** Do not process, log, or archive.
+If the user explicitly asks to process an internal call, ask what they want extracted.
+
+---
+
+## Step 1.75: Parallel Agent Processing (for large batches)
+
+When processing **8 or more meetings**, use parallel agents to maximize throughput.
+The orchestrator (main conversation) handles classification, dedup, and final assembly.
+Agents handle the heavy extraction work.
+
+### Decision Logic
+
+| Meetings to Process | Strategy |
+|---------------------|----------|
+| 1–7 | Process sequentially in main conversation |
+| 8–15 | Spawn **2 parallel agents** — split expert/advisor calls evenly between them |
+| 16–30 | Spawn **3 parallel agents** — split by meeting type or date range |
+| 31+ | Spawn **4 parallel agents** — split into roughly equal batches by date |
+
+### How to Split Work
+
+1. **Classify all meetings first** (Step 1.5) — this is fast and done in main conversation
+2. **Filter out** `internal` meetings (skip) and `admin` meetings (lightweight, process in main)
+3. **Split remaining `expert` + `advisor` calls** across agents
+4. Each agent receives:
+   - A list of meeting IDs + titles + types to process
+   - Instructions to fetch each meeting via Granola MCP, extract structured data, and return
+     a JSON array of extracted records
+   - The extraction schema (fields per meeting type)
+5. **Main conversation** collects agent results, deduplicates, and writes to tracker/files
+
+### Agent Prompt Template
+
+Each parallel agent should be a `general-purpose` agent with this prompt structure:
+
+```
+You are processing Lumif.ai meeting notes. For each meeting ID below, use the Granola
+MCP tools to fetch the meeting content, then extract structured data per the schema.
+
+Meeting type determines extraction depth:
+- "expert": Full extraction (all 32 fields + deep insights)
+- "advisor": Advisor extraction (strategic advice, intros, market intel, action items)
+
+Return results as a structured summary per meeting — do NOT update any files.
+Just extract and return the data. The main conversation will handle file updates.
+
+Meetings to process:
+[list of {id, title, type}]
+
+Extraction schema:
+[include relevant field lists from Step 2]
+```
+
+### Assembly (main conversation)
+
+After all agents complete:
+1. Collect all extracted records
+2. Deduplicate against existing tracker
+3. Write to tracker (Step 4), transcripts (Step 5), graph (Step 6), synthesis (Step 7)
+4. Regenerate dashboard (Step 10)
+
+This ensures file writes are serialized (no conflicts) while extraction is parallelized.
+
+---
+
+## Step 2: Extract Structured Data
+
+**Applies to `expert` type meetings.** For `advisor` meetings, see Step 1.5 advisor
+extraction fields. For `admin` meetings, see Step 1.5 admin logging. Skip `internal`.
+
+For EACH expert meeting/call, extract these fields. If unavailable, mark "—" (never fabricate).
+
+**Core fields:** Date, Person Name, Title/Role, Email, Phone, Company, Company URL,
+LinkedIn, Category, Sub-category, **Meeting Type** (`expert`/`advisor`/`admin`)
+
+**Discovery fields:** Company Size, Decision Maker Type (Buyer/Influencer/End User/Expert),
+Meeting Source (Warm Intro/Cold Outreach/Conference/LinkedIn/Referral/Advisor Network)
+
+**Insight fields:** Meeting Summary, Key Insights, Hair on Fire Problem,
+Vitamin vs Painkiller, Problem Severity (1-5), ICP Signals, New ICP Identified,
+Willingness to Pay, Current Spend/Tools, Competitors Mentioned
+
+**Action fields:** Action Items, Research Needed, Product Relevance, Sentiment, Warm Lead,
+Follow-up Date, Referrals
+
+**Meta fields:** Confidence Score (High/Medium/Low), Notes
+
+**Category list:** Insurance (Carrier, Broker/Agent, MGA/MGU, Adjuster/Auditor, Wholesaler),
+Construction (GC, Subcontractor, Owner/Developer, Safety/Risk Manager),
+Real Estate (Developer, Property Manager, Investor), Energy, Infrastructure,
+Advisor/Consultant, Technology/SaaS, Investor/VC, Other
+
+**Group calls:** If multiple participants, create one row per person. Tag each with
+"Group call with [other names]" in Notes. Link them with "co_interviewed" edges in the graph.
+
+---
+
+## Step 3: Extract Deep Insights
+
+For each call, analyze:
+
+1. **Hair on Fire Analysis** — The single most painful problem described. Capture their words.
+   - Classify: Painkiller (actively suffering, seeking solutions, has budget) / Vitamin (acknowledged but not urgent) / Unclear
+   - Rate severity 1-5: 5 = "need this yesterday, budget allocated" down to 1 = "I guess that could be improved"
+
+2. **ICP Discovery** — Does this confirm an existing ICP or reveal a new segment?
+   If new: "NEW ICP: [segment] — [why they'd be a customer] — [estimated prevalence]"
+
+3. **Workflow Details** — How they currently do things. Tool names, step counts, time spent,
+   team sizes, current costs. Gold for product design.
+
+4. **Buying Signals & Willingness to Pay** — Interest in a solution? Pricing discussion?
+   Pilot offer? Current spend on alternatives? Budget/procurement signals?
+
+5. **Competitor Intelligence** — Tools, vendors, or alternatives mentioned. What they said
+   about them. Feeds the Competitors sheet.
+
+6. **Objections / Concerns** — Pushback, regulatory worries, "we already have X", AI skepticism.
+   As valuable as positive signals.
+
+7. **Quotable Moments** — Specific phrases useful for pitch decks and investor conversations.
+
+8. **Cross-Call Patterns** — Confirm or contradict previous experts? Note: "This is the
+   Nth person who mentioned [pattern]"
+
+9. **Follow-up Linking** — If spoken to this person before, note what changed since last time.
+
+---
+
+## Step 4: Update the Tracker
+
+**Before updating, read `references/tracker-schema.md` for full column definitions, all 7
+sheet specifications, formatting rules, data validation requirements, and dedup logic.**
+
+Key rules:
+- 8 sheets: Expert Calls (33 cols), Action Items, Research Queue, ICP Tracker, Competitors,
+  Feedback & Changelog, Dashboard (formulas), Admin Log
+- Append-only. Never overwrite existing rows.
+- **Deduplication:** Check existing (Person Name + Company + Date).
+  Exact match = skip. Same person different date = add. Same name different company = add.
+- Competitors sheet: increment count if already exists, don't duplicate.
+- After adding formulas, run the xlsx skill's `scripts/recalc.py` to calculate values.
+
+---
+
+## Step 5: Archive Full Transcript
+
+**Read `references/transcript-template.md` for the document template and naming conventions.**
+
+Key rules:
+- One file per interview: `YYYY-MM-DD-firstname-lastname-company.md`
+- Stores raw unedited transcript + metadata header + key highlights + quotable moments
+- Structured analysis lives in the tracker, not duplicated here
+- Update `_interview-index.md` with new entries (sorted newest-first)
+- Skip if file already exists (dedup)
+
+---
+
+## Step 6: Update Context Graph
+
+**Read `references/context-graph-spec.md` for node types, edge types, JSON schema,
+and D3 visualization instructions.**
+
+Key rules:
+- Update `context-graph.json` — add new nodes/edges, deduplicate by label
+- For repeat problems: increment `frequency`, recalculate `severity` as running average
+- Regenerate `context-graph.html` (D3.js interactive force-directed graph)
+- Node types: People, Companies, Problems, ICPs, Products, Research, Competitors
+- Edge types: works_at, described, relevant_to, referred, co_interviewed, follow_up,
+  experienced_by, target_for, investigates, competes_with
+
+---
+
+## Step 7: Update Learnings Synthesis
+
+Read `lumifai/insights/learnings-synthesis.md` and update:
+1. **Last 5 Calls table** — most recent calls
+2. **Theme sections** — WC insights to Theme 1, Construction to Theme 2, Cross-cutting to Theme 3
+3. **ICP Discovery section** — update validation counts and new segments
+4. **Pain Analysis section** — update severity rankings
+5. **Product Improvement Ideas** — add any that emerged
+6. **Research Queue** — mirror from tracker
+
+Preserve all existing content. Add new content with date stamps:
+`**[2026-03-03, from call with John Smith @ ABC Insurance]:** Key finding here...`
+
+---
+
+## Step 8: Flag Product File Updates
+
+Check if insights warrant product file changes. If so, tell the user what to update
+and why — but only update with explicit approval (these are strategic documents).
+
+---
+
+## Step 9: Present Processing Summary
+
+```
+## Processing Complete
+
+**Meetings classified:**
+- Expert/Customer: X | Advisor: X | Admin: X | Internal: X (skipped)
+
+**Calls processed:** X new (Y skipped — already in tracker)
+**Extraction confidence:** X high / X medium / X low
+**Processing mode:** Sequential / Parallel (N agents)
+
+### Pain Analysis (expert calls only)
+- Painkillers: X | Vitamins: X | Avg severity: X/5
+
+### Top Hair on Fire Problems
+1. [Problem] — Severity: X/5 — [Person @ Company]
+
+### Advisor Highlights
+- [Advisor Name]: [Key strategic advice / intros made]
+
+### ICP Updates
+- Validated: [which, count] | NEW: [any new segments]
+
+### Competitor Intel
+- [Competitor] — mentioned X times — [sentiment]
+
+### Action Items / Research Flagged
+- [items with owners and due dates]
+
+### Admin Log Entries
+- [X admin calls logged]
+
+### Files Updated
+- Tracker / Transcripts / Graph / Synthesis / Competitors / Admin Log
+```
+
+---
+
+## Step 10: Regenerate Command Center Dashboard
+
+After all data updates are complete, regenerate `lumifai/insights/command-center.html`:
+
+1. Read the Excel tracker (all sheets) using openpyxl
+2. Convert all data to JSON format matching the `DATA` object structure in the HTML template
+3. Embed the JSON into the dashboard HTML template
+4. Save to `lumifai/insights/command-center.html`
+
+**Read `references/design-system.md` before generating any HTML.** All HTML outputs must
+follow the Lumif.ai design system (warm cream background, Inter font, 3-state badges only,
+8px spacing rhythm, minimal shadows).
+
+The dashboard has tabs for: Overview, Expert Calls (searchable/filterable table),
+Action Items, Research Queue, ICPs (card view), Competitors, Context Graph (embedded),
+and Products. It includes CSV export and print-to-PDF buttons.
+
+**Use the existing HTML template as the base** — only update the `DATA` object with
+current tracker contents. Do not rebuild the HTML/CSS/JS from scratch each time.
+
+---
+
+## Step 11: Collect Feedback
+
+**Read `references/feedback-loop.md` for the full feedback collection and self-improvement
+mechanism.**
+
+Always end with:
+> "Quick feedback on this run? Extraction errors, missing data points, process suggestions?
+> Even 'looks good' helps — your feedback trains the system."
+
+Log to "Feedback & Changelog" sheet. Before each future run, read that sheet and adjust
+extraction behavior based on recurring corrections.
+
+---
+
+## Memory & Learned Preferences
+
+This skill learns contact classifications and processing preferences over time.
+
+**Memory file:** Check the auto-memory directory for `lumifai-meeting-processor.md`:
+```bash
+cat "$(find ~/.claude/projects -name 'lumifai-meeting-processor.md' -path '*/memory/*' 2>/dev/null | head -1)" 2>/dev/null || echo "NOT_FOUND"
+```
+
+### Loading preferences (at processing start)
+
+Before Step 1.5 (classification), check for saved preferences. If found, load:
+
+```
+Learned preferences loaded:
+├─ Known advisors: [list — supplements the hardcoded list in SKILL.md]
+├─ Known admin contacts: [list]
+├─ Classification corrections: [e.g. "Jeff is advisor, not expert"]
+├─ Extraction preferences: [e.g. "always extract competitor mentions"]
+└─ Processing stats: [e.g. "47 meetings processed across 12 sessions"]
+```
+
+Merge saved advisor/admin lists with the hardcoded lists in Step 1.5.
+
+### What to save after each run
+
+- **New advisor contacts identified** — append to known advisors list
+- **New admin/ops contacts identified** — append to known admin list
+- **Classification corrections** — if user corrected a meeting type, save the rule
+- **Extraction feedback** — if user flagged missed insights or over-extraction
+- **Processing stats** — cumulative count of meetings processed, by type
+- **Common patterns** — recurring themes or insights the user highlighted as important
+
+Use the Edit tool to update existing entries — never duplicate. Save to `~/.claude/projects/-Users-sharan-Projects/memory/lumifai-meeting-processor.md`.
+
+### What NOT to save
+
+- Meeting content or transcripts
+- Specific insights (those live in the tracker)
+- Temporary processing overrides
+
+---
+
+## Error Handling
+
+- Granola empty: tell user, suggest alternatives
+- Sparse notes: extract what you can, mark confidence "Low"
+- Uncertain category: "Other — [best guess]", flag for review
+- Corrupted tracker: create new, warn user
+- Group call ambiguity: ask user to clarify participants
+
+---
+
+## Core Principles
+
+1. **Never fabricate.** If it's not in the notes, mark "—".
+2. **Capture too much.** A minor insight now may become a pattern after 10 more calls.
+3. **Connect the dots.** "3rd person who mentioned X" > any single insight.
+4. **Respect the founder's time.** Lead with what matters. Don't bury the lead.
+5. **Tracker is source of truth.** Everything else derives from it.

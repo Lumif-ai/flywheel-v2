@@ -1,0 +1,85 @@
+<div class="page-header">
+  <h1>Integrations</h1>
+  <p class="subtitle">Connect services and manage proactive intelligence.</p>
+</div>
+
+<!-- Cost Dashboard -->
+{% if cost_summary %}
+<div class="card cost-dashboard" style="margin-bottom:2rem;border-left:4px solid var(--accent-primary);padding:1.5rem;">
+  <h2 style="margin-top:0;">Cost Dashboard</h2>
+  <div style="display:flex;gap:2rem;flex-wrap:wrap;">
+    <div>
+      <strong>Today's Triggers:</strong>
+      {{ cost_summary.get('today_triggers', 0) }} / {{ cost_summary.get('daily_cap', 20) }}
+    </div>
+    <div>
+      <strong>Estimated Cost:</strong>
+      ${{ "%.4f"|format(cost_summary.get('today_cost_estimate', 0)) }}
+    </div>
+    <div>
+      <strong>Remaining:</strong>
+      {{ cost_summary.get('remaining_triggers', 0) }} triggers
+    </div>
+  </div>
+  {% if cost_summary.get('by_integration') %}
+  <div style="margin-top:1rem;">
+    <strong>Per-Integration Breakdown:</strong>
+    <ul style="margin:0.5rem 0 0 1.5rem;">
+      {% for integ, count in cost_summary.get('by_integration', {}).items() %}
+      <li>{{ integ }}: {{ count }} trigger{{ 's' if count != 1 else '' }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
+<!-- Integration Cards -->
+<div class="integration-grid" style="display:grid;gap:1.5rem;">
+  {% for key, info in settings.items() %}
+  <div class="card" style="padding:1.5rem;border-radius:12px;border:1px solid var(--border-default);">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div>
+        <h3 style="margin:0 0 0.5rem 0;">{{ info.get('name', key) }}</h3>
+        <p style="margin:0 0 0.5rem 0;color:var(--text-secondary);">{{ info.get('description', '') }}</p>
+        <div style="font-size:0.875rem;color:var(--text-muted);">
+          Scope: {{ info.get('scope', 'N/A') }} &middot; Est. cost: {{ info.get('est_cost', 'N/A') }}
+        </div>
+      </div>
+      <div style="text-align:center;">
+        {% if info.get('enabled') %}
+        <span class="badge badge-success">Enabled</span>
+        {% else %}
+        <span class="badge badge-neutral">Disabled</span>
+        {% endif %}
+        <div style="margin-top:0.75rem;">
+          <button
+            hx-post="/api/integrations/{{ key }}/toggle"
+            hx-swap="none"
+            onclick="setTimeout(function(){location.reload()},300)"
+            class="btn btn-sm {% if info.get('enabled') %}btn-outline{% else %}btn-secondary{% endif %}">
+            {{ 'Disable' if info.get('enabled') else 'Enable' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Watcher status if available -->
+    {% set ws_key = 'watcher-' + key + '-' + (current_user.user_id if current_user else '') %}
+    {% if watcher_status.get(ws_key) %}
+    {% set ws = watcher_status[ws_key] %}
+    <div style="margin-top:1rem;padding-top:0.75rem;border-top:1px solid var(--border-subtle);font-size:0.875rem;color:var(--text-secondary);">
+      Last run: {{ ws.get('last_processed', 'Never') }} &middot;
+      Errors: {{ ws.get('error_count', 0) }} &middot;
+      Processed: {{ ws.get('processed_count', 0) }}
+    </div>
+    {% endif %}
+  </div>
+  {% endfor %}
+
+  {% if not settings %}
+  <div class="card" style="padding:2rem;text-align:center;color:var(--text-muted);">
+    <p>Integration framework not available. Start the server with the integration modules installed.</p>
+  </div>
+  {% endif %}
+</div>

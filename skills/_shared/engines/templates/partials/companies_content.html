@@ -1,0 +1,127 @@
+<div class="page-container">
+  <div class="page-header">
+    <div>
+      <h1 class="page-title">Companies</h1>
+      <p class="page-subtitle">Companies you've added to your knowledge base</p>
+    </div>
+    <a href="/onboarding" class="btn btn-brand">Add Company</a>
+  </div>
+
+  {% if companies %}
+  <div class="companies-grid">
+    {% for company in companies %}
+    <div class="card company-card">
+      <div class="company-card-header">
+        <div class="company-card-avatar">{{ company.name[0]|upper }}</div>
+        <div class="company-card-info">
+          <h3 class="company-card-name">{{ company.name }}</h3>
+          {% if company.date %}
+          <span class="company-card-date">Added {{ company.date }}</span>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div class="empty-state-icon">
+      <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="color: var(--text-muted);">
+        <path d="M6 22V4a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v18Z"/><path d="M6 12H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h2"/><path d="M18 9h2a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-2"/><path d="M10 6h4"/><path d="M10 10h4"/><path d="M10 14h4"/><path d="M10 18h4"/>
+      </svg>
+    </div>
+    <h2 class="empty-state-title">No companies yet</h2>
+    <p class="empty-state-message">Add a company to start building your intelligence layer. We'll crawl their website and extract key facts automatically.</p>
+    <a href="/onboarding" class="btn btn-brand">Add Your First Company</a>
+  </div>
+  {% endif %}
+</div>
+
+<style>
+.companies-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 1rem;
+  margin-top: 1.5rem;
+}
+
+.company-card {
+  padding: 1.25rem;
+  cursor: default;
+  transition: border-color var(--duration-normal, 200ms) ease, box-shadow var(--duration-normal, 200ms) ease;
+}
+
+.company-card:hover {
+  border-color: rgba(233, 77, 53, 0.15);
+  box-shadow: var(--shadow-sm);
+}
+
+.company-card-header {
+  display: flex;
+  align-items: center;
+  gap: 0.875rem;
+}
+
+.company-card-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--accent-light, rgba(233, 77, 53, 0.08));
+  color: var(--accent-primary, #E94D35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+
+.company-card-info {
+  min-width: 0;
+}
+
+.company-card-name {
+  font-size: 0.9375rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.company-card-date {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 2rem;
+  max-width: 420px;
+  margin: 2rem auto;
+}
+
+.empty-state-icon {
+  margin-bottom: 1.5rem;
+  opacity: 0.5;
+}
+
+.empty-state-title {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0 0 0.5rem 0;
+}
+
+.empty-state-message {
+  font-size: 0.875rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin: 0 0 1.5rem 0;
+}
+</style>

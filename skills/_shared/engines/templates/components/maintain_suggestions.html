@@ -1,0 +1,32 @@
+<div class="maintain-list">
+  {% for suggestion in maintain_suggestions %}
+  <div class="maintain-card" id="suggestion-{{ loop.index }}">
+    <div class="maintain-card-inner">
+      <div class="maintain-icon">
+        {% if suggestion.type == 'stale_context' %}
+          &#x1f4c5;
+        {% elif suggestion.type == 'uncaptured_notes' %}
+          &#x1f4dd;
+        {% elif suggestion.type == 'idle_leads' %}
+          &#x1f4e9;
+        {% elif suggestion.type == 'empty_context' %}
+          &#x2728;
+        {% else %}
+          &#x1f4a1;
+        {% endif %}
+      </div>
+      <div class="maintain-content">
+        <h4 class="maintain-title">{{ suggestion.title }}</h4>
+        <p class="maintain-desc">{{ suggestion.description }}</p>
+      </div>
+      <div class="maintain-actions">
+        <a href="{{ suggestion.action_url }}" class="btn btn-sm btn-ghost">Go</a>
+        <button class="btn btn-sm btn-ghost dismiss-btn"
+                onclick="this.closest('.maintain-card').style.display='none'">
+          Dismiss
+        </button>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>

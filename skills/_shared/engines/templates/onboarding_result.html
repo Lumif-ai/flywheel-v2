@@ -1,0 +1,175 @@
+{% extends "base_fullscreen.html" %}
+{% block title %}Results - Flywheel{% endblock %}
+{% block content %}
+
+<div class="onboarding-result-page animate-in">
+{% if error %}
+<div class="card error-card" style="animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);">
+  <h3>Something went wrong</h3>
+  <p class="mt-1">{{ error }}</p>
+  <p class="mt-1 text-secondary">Try a different method or check your input.</p>
+</div>
+
+{% else %}
+<div class="result-banner">
+  <div class="result-banner-content">
+    <h3>Intelligence Captured</h3>
+    <p class="result-banner-meta">{{ source }}{% if pages_crawled %} &middot; {{ pages_crawled }} pages scanned{% endif %}</p>
+  </div>
+</div>
+
+<div class="intelligence-grid mt-2 stagger-children">
+  {% if intelligence.company_name %}
+  <div class="card intel-card">
+    <h4>Company</h4>
+    <p class="intel-value">{{ intelligence.company_name }}</p>
+    {% if intelligence.tagline %}
+    <p class="text-secondary mt-1" style="font-size: 0.875rem;">{{ intelligence.tagline }}</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if intelligence.what_they_do %}
+  <div class="card intel-card">
+    <h4>What They Do</h4>
+    <p class="intel-value">{{ intelligence.what_they_do }}</p>
+  </div>
+  {% endif %}
+
+  {% if intelligence.products %}
+  <div class="card intel-card">
+    <h4>Products / Services</h4>
+    <ul>
+      {% for product in intelligence.products %}
+      <li>{{ product }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if intelligence.target_customers %}
+  <div class="card intel-card">
+    <h4>Target Customers</h4>
+    <ul>
+      {% for customer in intelligence.target_customers %}
+      <li>{{ customer }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if intelligence.industries %}
+  <div class="card intel-card">
+    <h4>Industries</h4>
+    <ul>
+      {% for industry in intelligence.industries %}
+      <li>{{ industry }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if intelligence.competitors %}
+  <div class="card intel-card">
+    <h4>Competitors</h4>
+    <ul>
+      {% for competitor in intelligence.competitors %}
+      <li>{{ competitor }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if intelligence.key_differentiators %}
+  <div class="card intel-card">
+    <h4>Key Differentiators</h4>
+    <ul>
+      {% for diff in intelligence.key_differentiators %}
+      <li>{{ diff }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if intelligence.raw_text and not intelligence.structured %}
+  <div class="card intel-card">
+    <h4>Raw Text (LLM structuring unavailable)</h4>
+    <p class="text-secondary">{{ intelligence.raw_text[:500] }}{% if intelligence.raw_text|length > 500 %}...{% endif %}</p>
+  </div>
+  {% endif %}
+</div>
+
+{% if attribution %}
+{% include "components/attribution.html" %}
+{% endif %}
+
+<div class="result-cta-row mt-3">
+  <a href="/auth/login?next=/agenda" class="btn btn-gradient btn-lg result-cta-primary">
+    Save &amp; Create Your Workspace
+  </a>
+  {% if session_id %}
+  <a href="/onboarding/work-picker?session={{ session_id }}" class="btn btn-secondary">
+    Try Another Work Type
+  </a>
+  {% else %}
+  <a href="/onboarding" class="btn btn-secondary">
+    Add More Data
+  </a>
+  {% endif %}
+</div>
+{% endif %}
+</div>
+
+<style>
+.onboarding-result-page {
+  max-width: 680px;
+  margin: 0 auto;
+  padding: 2rem 1.5rem;
+}
+
+.result-banner {
+  background: var(--accent-gradient, var(--brand-gradient));
+  color: white;
+  padding: 1.25rem 1.5rem;
+  border-radius: var(--radius, 12px);
+  animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.result-banner h3 {
+  color: white;
+  margin: 0 0 0.25rem;
+  font-size: 1.125rem;
+}
+
+.result-banner-meta {
+  color: rgba(255, 255, 255, 0.8);
+  font-size: 0.8125rem;
+  margin: 0;
+}
+
+.intel-card {
+  transition: all var(--duration-normal) ease;
+}
+
+.intel-value {
+  font-size: 0.9375rem;
+  color: var(--text-primary, var(--text));
+  font-weight: 500;
+  margin: 0;
+}
+
+.result-cta-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  animation: fadeUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.2s both;
+}
+
+.result-cta-primary {
+  flex: 1;
+  text-align: center;
+  min-width: 200px;
+}
+</style>
+
+{% endblock %}

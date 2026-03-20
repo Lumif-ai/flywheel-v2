@@ -1,0 +1,44 @@
+{# Investor Update output template - executive summary hero, metrics, milestones #}
+<div class="output-document output-investor-update">
+  <div class="output-header">
+    <h2 class="output-title">Investor Update</h2>
+  </div>
+
+  {# Executive summary hero card #}
+  {% for section in sections %}
+    {% if section.title | lower in ['executive summary', 'summary', 'overview', 'tldr', 'tl;dr'] %}
+    <div class="output-card output-hero-card">
+      <h3 class="output-card-title">{{ section.title }}</h3>
+      <div class="output-content output-hero-content">
+        {{ section.content | md }}
+      </div>
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  {# Key metrics display #}
+  {% if key_facts %}
+  <div class="output-metrics-row">
+    {% for fact in key_facts[:6] %}
+    <div class="output-metric-card">
+      <div class="output-metric-value">{{ fact.value }}</div>
+      <div class="output-metric-label">{{ fact.label }}</div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Remaining sections #}
+  {% for section in sections %}
+    {% if section.title | lower not in ['executive summary', 'summary', 'overview', 'tldr', 'tl;dr'] %}
+    <div class="output-card
+      {% if 'milestone' in section.title | lower or 'timeline' in section.title | lower %}output-timeline-card{% endif %}
+      {% if 'ask' in section.title | lower or 'pipeline' in section.title | lower %}output-highlight-card{% endif %}">
+      <h3 class="output-card-title">{{ section.title }}</h3>
+      <div class="output-content">{{ section.content | md }}</div>
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  {% include "components/attribution_footer.html" %}
+</div>

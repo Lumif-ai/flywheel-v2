@@ -1,0 +1,120 @@
+{# Company Profile Card — read-only card rendered client-side from SSE profile event data.
+   This template serves as the HTML reference for the JS buildProfileCard() function
+   in onboarding.html. The JS generates equivalent HTML from profile JSON data. #}
+
+<div class="profile-card animate-fadeIn">
+  <div class="profile-card-header">
+    <div class="profile-card-avatar">
+      {{ company_name[0]|upper if company_name else '?' }}
+    </div>
+    <div>
+      <h2 class="profile-card-name">{{ company_name }}</h2>
+      <p class="profile-card-url">{{ url }}</p>
+    </div>
+  </div>
+
+  <div class="profile-card-sections">
+    {# Section: Overview #}
+    {% if industry or founded or location %}
+    <div class="profile-section" data-section="overview">
+      <h3 class="profile-section-title">Overview</h3>
+      {% if industry %}
+      <div class="profile-field">
+        <span class="profile-field-label">Industry</span>
+        <span class="profile-field-value">{{ industry }}</span>
+      </div>
+      {% endif %}
+      {% if founded %}
+      <div class="profile-field">
+        <span class="profile-field-label">Founded</span>
+        <span class="profile-field-value">{{ founded }}</span>
+      </div>
+      {% endif %}
+      {% if location %}
+      <div class="profile-field">
+        <span class="profile-field-label">Location</span>
+        <span class="profile-field-value">{{ location }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Section: Products & Services #}
+    {% if products or what_they_do %}
+    <div class="profile-section" data-section="products">
+      <h3 class="profile-section-title">Products & Services</h3>
+      {% if what_they_do %}
+      <div class="profile-field">
+        <span class="profile-field-label">Description</span>
+        <span class="profile-field-value">{{ what_they_do }}</span>
+      </div>
+      {% endif %}
+      {% if products %}
+      <div class="profile-field">
+        <span class="profile-field-label">Products</span>
+        <span class="profile-field-value">{{ products if products is string else products|join(', ') }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Section: Team #}
+    {% if employees or key_people %}
+    <div class="profile-section" data-section="team">
+      <h3 class="profile-section-title">Team</h3>
+      {% if employees %}
+      <div class="profile-field">
+        <span class="profile-field-label">Employees</span>
+        <span class="profile-field-value">{{ employees }}</span>
+      </div>
+      {% endif %}
+      {% if key_people %}
+      <div class="profile-field">
+        <span class="profile-field-label">Key People</span>
+        <span class="profile-field-value">{{ key_people if key_people is string else key_people|join(', ') }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    {# Section: Technology #}
+    {% if tech_stack %}
+    <div class="profile-section" data-section="tech">
+      <h3 class="profile-section-title">Technology</h3>
+      <div class="profile-tags">
+        {% for tech in tech_stack %}
+        <span class="profile-tag">{{ tech }}</span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {# Section: Market #}
+    {% if competitors or target_customers %}
+    <div class="profile-section" data-section="market">
+      <h3 class="profile-section-title">Market</h3>
+      {% if target_customers %}
+      <div class="profile-field">
+        <span class="profile-field-label">Customers</span>
+        <span class="profile-field-value">{{ target_customers if target_customers is string else target_customers|join(', ') }}</span>
+      </div>
+      {% endif %}
+      {% if competitors %}
+      <div class="profile-field">
+        <span class="profile-field-label">Competitors</span>
+        <span class="profile-field-value">{{ competitors if competitors is string else competitors|join(', ') }}</span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="profile-card-actions">
+    <a href="/onboarding/work-picker?session={{ session_id }}" class="profile-action-primary">
+      Continue
+    </a>
+    <a href="/onboarding/work-picker?session={{ session_id }}" class="profile-action-secondary">
+      Skip for now
+    </a>
+  </div>
+</div>

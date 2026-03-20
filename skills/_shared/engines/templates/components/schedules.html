@@ -1,0 +1,196 @@
+{# Schedule management component for agenda page #}
+<section class="agenda-section" id="automations-section">
+  <div class="section-header">
+    <h2>Automate <span class="badge badge-info">{{ schedules|length }}</span></h2>
+    <p class="section-desc">Recurring intelligence that runs on autopilot.</p>
+  </div>
+
+  {% if schedules %}
+  <div class="schedule-list">
+    {% for sched in schedules %}
+    <div class="schedule-card" id="schedule-{{ sched.id }}">
+      <div class="schedule-info">
+        <div class="schedule-name">{{ sched.skill_name|replace("-", " ")|title }}</div>
+        <div class="schedule-meta text-muted">
+          {{ sched.frequency|title }}
+          {% if sched.day_of_week is not none %}
+            &middot; {{ ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][sched.day_of_week] }}
+          {% endif %}
+          &middot; {{ sched.time }}
+          {% if sched.next_run %}
+            &middot; Next: {{ sched.next_run[:16]|replace("T", " ") }}
+          {% endif %}
+        </div>
+        {% if sched.description %}
+        <div class="schedule-desc text-muted" style="font-size: 0.85rem;">{{ sched.description }}</div>
+        {% endif %}
+      </div>
+      <div class="schedule-actions">
+        <label class="toggle-switch" title="{{ 'Disable' if sched.enabled else 'Enable' }}">
+          <input type="checkbox"
+                 {{ "checked" if sched.enabled else "" }}
+                 hx-patch="/api/schedules/{{ sched.id }}"
+                 hx-vals='{"enabled": {{ "false" if sched.enabled else "true" }}}'
+                 hx-target="#automations-section"
+                 hx-swap="outerHTML"
+                 hx-headers='{"Content-Type": "application/json"}'>
+          <span class="toggle-slider"></span>
+        </label>
+        <button class="btn btn-sm btn-text text-muted"
+                hx-delete="/api/schedules/{{ sched.id }}"
+                hx-target="#schedule-{{ sched.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Remove this automation?"
+                style="font-size: 0.8rem;">
+          Remove
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-section">
+    <p class="text-muted">No automations yet. Set up recurring intelligence to keep your flywheel spinning.</p>
+  </div>
+  {% endif %}
+
+  {# Suggested automations (show when user has fewer than 3 schedules) #}
+  {% if suggested_schedules and schedules|length < 3 %}
+  <div class="suggested-schedules" style="margin-top: 1.5rem;">
+    <h3 style="font-size: 1rem; color: var(--text-secondary, #6B7280); margin-bottom: 0.75rem;">Suggested Automations</h3>
+    <div class="suggestion-cards">
+      {% for suggestion in suggested_schedules %}
+      <div class="suggestion-card">
+        <div class="suggestion-info">
+          <div style="font-weight: 600;">{{ suggestion.skill_name|replace("-", " ")|title }}</div>
+          <div class="text-muted" style="font-size: 0.85rem;">{{ suggestion.description }}</div>
+          <div class="text-muted" style="font-size: 0.8rem;">
+            {{ suggestion.frequency|title }}
+            {% if suggestion.day_of_week is defined and suggestion.day_of_week is not none %}
+              &middot; {{ ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][suggestion.day_of_week] }}
+            {% endif %}
+            &middot; {{ suggestion.time }}
+          </div>
+        </div>
+        <button class="btn btn-sm btn-secondary"
+                hx-post="/api/schedules"
+                hx-vals='{{ suggestion|tojson }}'
+                hx-target="#automations-section"
+                hx-swap="outerHTML"
+                hx-headers='{"Content-Type": "application/json"}'>
+          Enable
+        </button>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Add schedule form (expandable) #}
+  <details class="add-schedule-form" style="margin-top: 1rem;">
+    <summary class="btn btn-sm btn-secondary" style="cursor: pointer;">+ New Automation</summary>
+    <form style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: flex-end;"
+          hx-post="/api/schedules"
+          hx-target="#automations-section"
+          hx-swap="outerHTML"
+          hx-headers='{"Content-Type": "application/json"}'
+          hx-vals="js:{skill_name: this.querySelector('[name=skill_name]').value, frequency: this.querySelector('[name=frequency]').value, day_of_week: this.querySelector('[name=day_of_week]').value || null, time: this.querySelector('[name=time]').value}">
+      <div>
+        <label style="display: block; font-size: 0.8rem; color: var(--text-secondary, #6B7280); margin-bottom: 0.25rem;">Skill</label>
+        <select name="skill_name" required style="padding: 0.4rem 0.6rem; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem;">
+          {% for skill in available_skills %}
+          <option value="{{ skill }}">{{ skill|replace("-", " ")|title }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label style="display: block; font-size: 0.8rem; color: var(--text-secondary, #6B7280); margin-bottom: 0.25rem;">Frequency</label>
+        <select name="frequency" required style="padding: 0.4rem 0.6rem; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem;"
+                onchange="this.closest('form').querySelector('.dow-field').style.display = (this.value==='weekly'||this.value==='biweekly') ? 'block' : 'none'">
+          <option value="daily">Daily</option>
+          <option value="weekly">Weekly</option>
+          <option value="biweekly">Biweekly</option>
+          <option value="monthly">Monthly</option>
+        </select>
+      </div>
+      <div class="dow-field" style="display: none;">
+        <label style="display: block; font-size: 0.8rem; color: var(--text-secondary, #6B7280); margin-bottom: 0.25rem;">Day</label>
+        <select name="day_of_week" style="padding: 0.4rem 0.6rem; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem;">
+          <option value="0">Monday</option>
+          <option value="1">Tuesday</option>
+          <option value="2">Wednesday</option>
+          <option value="3">Thursday</option>
+          <option value="4">Friday</option>
+          <option value="5">Saturday</option>
+          <option value="6">Sunday</option>
+        </select>
+      </div>
+      <div>
+        <label style="display: block; font-size: 0.8rem; color: var(--text-secondary, #6B7280); margin-bottom: 0.25rem;">Time</label>
+        <input type="time" name="time" value="06:00" required style="padding: 0.4rem 0.6rem; border: 1px solid #ddd; border-radius: 8px; font-size: 0.9rem;">
+      </div>
+      <button type="submit" class="btn btn-sm btn-brand">Create Automation</button>
+    </form>
+  </details>
+</section>
+
+<style>
+.schedule-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1rem;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  margin-bottom: 0.5rem;
+  background: white;
+}
+.schedule-card:hover {
+  border-color: #d1d5db;
+}
+.schedule-name {
+  font-weight: 600;
+  font-size: 0.95rem;
+}
+.schedule-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.toggle-switch {
+  position: relative;
+  display: inline-block;
+  width: 36px;
+  height: 20px;
+}
+.toggle-switch input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc; border-radius: 20px;
+  transition: .3s;
+}
+.toggle-slider:before {
+  position: absolute; content: "";
+  height: 14px; width: 14px;
+  left: 3px; bottom: 3px;
+  background-color: white; border-radius: 50%;
+  transition: .3s;
+}
+.toggle-switch input:checked + .toggle-slider {
+  background-color: #22C55E;
+}
+.toggle-switch input:checked + .toggle-slider:before {
+  transform: translateX(16px);
+}
+.suggestion-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.6rem 0.8rem;
+  border: 1px dashed #d1d5db;
+  border-radius: 10px;
+  margin-bottom: 0.4rem;
+  background: rgba(233,77,53,0.02);
+}
+</style>

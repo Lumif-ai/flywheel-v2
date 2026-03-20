@@ -1,0 +1,186 @@
+<div class="agenda-page animate-in">
+  <div class="agenda-header">
+    <div class="agenda-greeting">
+      <h1>Your Agenda</h1>
+      <p class="agenda-date">{{ today }}</p>
+    </div>
+  </div>
+
+  {% if empty_state_type %}
+  <!-- Context-dependent empty state -->
+  {% if empty_state_type == "new_user" %}
+  <div class="empty-state">
+    <div class="empty-state-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/>
+      </svg>
+    </div>
+    <h2 class="empty-state-title">No meetings yet</h2>
+    <p class="empty-state-desc">Add a company to get your first brief. Flywheel builds intelligence from your meetings, outreach, and analysis.</p>
+    <a href="/onboarding" class="btn btn-brand">Add Your First Company</a>
+  </div>
+
+  {% elif empty_state_type == "no_calendar" %}
+  <div class="empty-state">
+    <div class="empty-state-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/><line x1="4" y1="4" x2="20" y2="20"/>
+      </svg>
+    </div>
+    <h2 class="empty-state-title">Calendar not connected</h2>
+    <p class="empty-state-desc">Connect your calendar to automatically see upcoming meetings with prepared briefs.</p>
+    <a href="/integrations" class="btn btn-brand">Connect Calendar</a>
+    <p class="empty-state-hint">Or <a href="/skills">run a skill manually</a> to get started.</p>
+  </div>
+
+  {% elif empty_state_type == "clear_day" %}
+  <div class="empty-state">
+    <div class="empty-state-icon">
+      <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/>
+      </svg>
+    </div>
+    <h2 class="empty-state-title">Your agenda is clear</h2>
+    <p class="empty-state-desc">Enjoy the quiet. When meetings come up, you'll find prepared briefs here.</p>
+  </div>
+  {% endif %}
+
+  {% else %}
+  <!-- Normal agenda with sections -->
+
+  <!-- PREPARE Section -->
+  <section class="agenda-section">
+    <div class="section-header">
+      <div class="section-label">
+        <div class="section-indicator section-indicator-info"></div>
+        <h2>Prepare</h2>
+        <span class="badge badge-info">{{ prepare_items|length }}</span>
+      </div>
+      <p class="section-desc">Upcoming meetings and demos that need preparation.</p>
+    </div>
+    {% if prepare_items %}
+    <div class="agenda-items stagger-children">
+      {% for item in prepare_items %}
+        {% include "components/work_item_card.html" %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-section">
+      <p class="empty-section-text">Nothing to prepare right now</p>
+      <p class="empty-section-hint">Add a meeting to get started.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- ACT Section -->
+  <section class="agenda-section">
+    <div class="section-header">
+      <div class="section-label">
+        <div class="section-indicator section-indicator-brand"></div>
+        <h2>Act</h2>
+        <span class="badge badge-brand">{{ act_items|length }}</span>
+      </div>
+      <p class="section-desc">Ready outputs waiting for your attention.</p>
+    </div>
+    {% if act_items %}
+    <div class="agenda-items stagger-children">
+      {% for item in act_items %}
+        {% include "components/work_item_card.html" %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-section">
+      <p class="empty-section-text">No items need action right now</p>
+      <p class="empty-section-hint">Outputs will appear here when ready.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- REVIEW Section -->
+  <section class="agenda-section">
+    <div class="section-header">
+      <div class="section-label">
+        <div class="section-indicator section-indicator-success"></div>
+        <h2>Review</h2>
+        <span class="badge badge-success">{{ review_items|length }}</span>
+      </div>
+      <p class="section-desc">Items needing review or recently completed work.</p>
+    </div>
+    {% if review_items %}
+    <div class="agenda-items stagger-children">
+      {% for item in review_items %}
+        {% include "components/work_item_card.html" %}
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-section">
+      <p class="empty-section-text">Nothing to review</p>
+      <p class="empty-section-hint">Great work keeping up!</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- MAINTAIN Section -->
+  <section class="agenda-section">
+    <div class="section-header">
+      <div class="section-label">
+        <div class="section-indicator section-indicator-warning"></div>
+        <h2>Maintain</h2>
+        <span class="badge badge-warning">{{ maintain_suggestions|length }}</span>
+      </div>
+      <p class="section-desc">Suggestions to keep your knowledge base healthy.</p>
+    </div>
+    {% if maintain_suggestions %}
+      {% include "components/maintain_suggestions.html" %}
+    {% else %}
+    <div class="empty-section">
+      <p class="empty-section-text">Everything looks healthy</p>
+      <p class="empty-section-hint">No maintenance needed.</p>
+    </div>
+    {% endif %}
+  </section>
+
+  <!-- AUTOMATE Section (Schedules) -->
+  {% include "components/schedules.html" %}
+
+  <!-- Quick Add Bar -->
+  <div class="quick-add-bar">
+    <span class="quick-add-label">Quick add:</span>
+    <button class="btn btn-sm btn-secondary quick-add-btn"
+            hx-post="/api/work-items"
+            hx-vals='{"type": "meeting", "title": "New Meeting", "skill_name": "meeting-prep"}'
+            hx-target=".agenda-section:first-of-type .agenda-items"
+            hx-swap="beforeend">
+      + Meeting
+    </button>
+    <button class="btn btn-sm btn-secondary quick-add-btn"
+            hx-post="/api/work-items"
+            hx-vals='{"type": "custom", "title": "New Document", "skill_name": ""}'
+            hx-target=".agenda-section:first-of-type .agenda-items"
+            hx-swap="beforeend">
+      + Document
+    </button>
+    <button class="btn btn-sm btn-secondary quick-add-btn"
+            hx-post="/api/work-items"
+            hx-vals='{"type": "custom", "title": "New Task", "skill_name": ""}'
+            hx-target=".agenda-section:first-of-type .agenda-items"
+            hx-swap="beforeend">
+      + Task
+    </button>
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function toggleOutput(btn, outputId) {
+  if (!outputId) return;
+  var container = document.getElementById('output-' + outputId);
+  if (!container) return;
+  if (container.style.display === 'none') {
+    container.style.display = 'block';
+    htmx.process(container);
+  } else {
+    container.style.display = 'none';
+  }
+}
+</script>

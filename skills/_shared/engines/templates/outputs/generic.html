@@ -1,0 +1,55 @@
+{# Generic output template - fallback for all unknown skill types #}
+<div class="output-document output-generic">
+  <div class="output-header">
+    <div class="output-header-content">
+      <h2 class="output-title">{{ skill_name | replace('ctx-', '') | replace('-', ' ') | title }}</h2>
+      <span class="badge badge-brand">{{ section_count }} section{{ 's' if section_count != 1 else '' }}</span>
+    </div>
+  </div>
+
+  {% if key_facts %}
+  <div class="output-layout-with-sidebar">
+    <div class="output-main">
+  {% endif %}
+
+  {% if sections %}
+    {% for section in sections %}
+    <div class="output-card" style="animation: fadeUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) {{ loop.index0 * 60 }}ms both;">
+      <h3 class="output-card-title">{{ section.title }}</h3>
+      <div class="output-content">
+        {{ section.content | md }}
+      </div>
+    </div>
+    {% endfor %}
+  {% elif raw %}
+    <div class="output-card">
+      <div class="output-content output-raw">
+        {{ raw | md }}
+      </div>
+    </div>
+  {% else %}
+    <div class="output-card output-empty">
+      <p class="text-muted">No output content available.</p>
+    </div>
+  {% endif %}
+
+  {% if key_facts %}
+    </div>
+    <aside class="output-sidebar">
+      <div class="output-card output-facts-card">
+        <h4 class="output-facts-title">Key Facts</h4>
+        <dl class="output-facts">
+          {% for fact in key_facts %}
+          <div class="output-fact">
+            <dt>{{ fact.label }}</dt>
+            <dd>{{ fact.value }}</dd>
+          </div>
+          {% endfor %}
+        </dl>
+      </div>
+    </aside>
+  </div>
+  {% endif %}
+
+  {% include "components/attribution_footer.html" %}
+</div>

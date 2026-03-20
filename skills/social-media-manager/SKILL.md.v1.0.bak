@@ -1,0 +1,380 @@
+---
+name: social-media-manager
+description: >
+  Content pipeline for founders and operators to draft, manage, and publish social media posts
+  on LinkedIn and X/Twitter. Mines context store and git history for "postable moments," drafts
+  platform-native posts through role-based lenses (CEO, CTO, CPO, combined), enforces PII/reputation
+  safety, manages a content backlog and calendar, and learns the user's voice over time. Trigger on:
+  "draft a post", "write a LinkedIn post", "tweet about", "social media", "content calendar",
+  "post about", "add to backlog", "content ideas", "what should I post", "schedule a post",
+  "show my calendar", "draft a thread", "post ideas from this week", "write a tweet",
+  "help me post about [topic]", "series on [topic]", "quick post about [topic]".
+  Also triggers on: "I want to post about my learnings", "draft something about [event]",
+  "what's in my content backlog", "show content stats", "review my posting cadence".
+---
+
+> **Version:** 1.0 | **Last Updated:** 2026-03-14
+> **Changelog:** See [Changelog](#changelog) at end of file.
+
+# Social Media Manager
+
+A content pipeline for founders — not a polishing tool. Draft posts that sound like you typed
+them on your phone between meetings. Mine your real work for stories worth telling.
+
+**Core principle:** Human always reviews and publishes. No auto-posting. No AI disclosure. Posts
+should feel authentically founder-written.
+
+## Workflow Overview
+
+```
+IDEA → BACKLOG → DRAFT → PII/REPUTATION SCAN → USER REVIEW → CALENDAR → REMIND → POST-MORTEM
+```
+
+**Modes:**
+- **Draft a post** — user provides topic, raw notes, or says "pick something for me"
+- **Add to backlog** — quick capture an idea for later
+- **Show calendar** — view scheduled/upcoming posts
+- **Content mining** — scan context store for postable moments (v2)
+- **Series** — create a multi-post narrative arc (v2)
+- **Visual assets** — generate quote cards, carousels (v3)
+
+---
+
+## Step 0: Setup & Checks
+
+### 0a. Dependency Check
+- Verify `python3` is available
+- Verify scripts exist: `scripts/pii_guard.py`, `scripts/calendar_manager.py`, `scripts/backlog_manager.py`
+- Verify data directory exists: `~/.claude/skills/social-media-manager/data/`
+  - If missing, create it and initialize `blocklist.md` template
+
+### 0b. Context Store Pre-Read
+This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/context-protocol.md`.
+
+Read `~/.claude/context/_catalog.md` and match tags: `content`, `voice`, `positioning`, `product`, `market`, `people`, `competitors`.
+Load recent entries from matched files to inform content mining and topic suggestions.
+
+### 0c. Memory Load
+Check for saved preferences at the memory file path (see Memory section below).
+Auto-apply: role, tone dials, preferred registers, platform preferences, posting cadence,
+hook preference, AI tells to avoid. Show what was loaded.
+
+### 0d. Voice Profile Check
+If no voice profile exists in memory, run the **First-Time Setup** (see below).
+
+---
+
+## First-Time Setup (one-time, saved to memory)
+
+Ask these questions (skip any already saved):
+
+1. **Role:** "What's your primary role?" (CEO, CTO, CPO, COO, VP Eng)
+   - "Any secondary hats?" (multi-hat founders)
+   - "What stage?" (pre-seed, seed, Series A, growth)
+
+2. **Voice Calibration:** "Share 2-3 posts you've written that you liked, or describe your style."
+   - Analyze for: register preference, polish level, hook style, vocabulary patterns
+   - If no samples: "Pick the register that feels most like you:"
+     - Workshop Dispatch (texting a cofounder)
+     - Bar Conversation (telling a story to a friend)
+     - Honest Retrospective (journaling out loud)
+     - Excited Builder (showing someone what you made)
+
+3. **Platforms:** "LinkedIn, X, or both?" + posting frequency target
+
+4. **Blocklist:** "Any customer names, companies, or metrics that should never appear in posts?"
+   - Save to `data/blocklist.md`
+
+Save all answers to memory. Never ask again unless user wants to recalibrate.
+
+---
+
+## Drafting a Post
+
+### Step 1: Understand the Input
+
+Accept ANY input format — the user's raw material is the priority:
+- **Specific topic:** "Post about our compliance automation approach"
+- **Raw notes/rant:** Pasted text, bullet points, stream of consciousness
+- **Event reaction:** "React to [news/event/announcement]"
+- **"Pick for me":** Use context store + backlog to suggest 3 ideas
+- **Series episode:** "Next episode of [series name]"
+
+### Step 2: Choose Lens & Platform
+
+Based on the topic and user's role profile:
+- Select primary lens (CEO, CTO, CPO, or combination)
+- Select platform (LinkedIn or X) if not specified
+- If the topic spans multiple lenses, note: "This touches both [X] and [Y]. Want to combine
+  or split into two posts?"
+
+Reference `references/voice_system.md` for lens definitions and combination patterns.
+
+### Step 3: Draft the Post
+
+**Write a ROUGH draft — intentionally imperfect.** Reference `references/voice_system.md` for style rules.
+
+Key rules:
+- Short sentences. Fragments. Line breaks.
+- Start mid-story, not with preamble
+- Use the user's preferred register
+- Include specific details (numbers, names of tools, real situations — anonymized)
+- End abruptly or with a genuine question. Never motivational closer.
+- NO em dashes, semicolons, "here's the thing", parallel lists, buzzwords
+
+**For LinkedIn:** Follow `references/linkedin_guide.md` — hook-first, line breaks, 1200-1800 chars
+**For X:** Follow `references/x_guide.md` — 280 chars or thread (5-8 tweets), punchy
+
+Generate **3-5 hook variants** — the first line is 80% of the post. Present all hooks and
+let the user pick.
+
+### Step 4: PII & Reputation Scan
+
+Run the PII guard on the draft:
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/pii_guard.py --draft "DRAFT TEXT"
+```
+
+Check results:
+- **HIGH severity:** Block the draft. Show issues. Require fixes before presenting.
+- **MEDIUM severity:** Show warnings inline with the draft. Suggest alternatives.
+- **LOW severity:** Note at bottom. User can ignore.
+- **Bad Day Safeguard triggered:** Present the cooling period options.
+
+Also check `references/pii_reputation.md` for:
+- Regulatory claims language (insurance/compliance especially)
+- Competitor mentions — flag intent
+- Forward-looking statements — flag commitment
+
+### Step 5: Present Draft
+
+Show:
+1. The draft with chosen hook (and alternative hooks below)
+2. PII/reputation scan results (if any)
+3. Metadata: platform, lens, category, estimated character count
+4. "Edit, approve, or kill?"
+
+### Step 6: Calendar & Backlog
+
+On **approve:**
+- Add to calendar via `scripts/calendar_manager.py`
+- Tag with: date, platform, lens, category, intent, series (if applicable)
+- Save draft text to `data/drafts/POST-XXX.md`
+
+On **edit:**
+- Apply user's changes
+- Track edit patterns in memory (what they changed = voice calibration data)
+- Re-run PII scan on edited version
+
+On **kill:**
+- Discard. Optionally save core idea to backlog.
+
+---
+
+## Backlog Management
+
+### Adding Ideas
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/backlog_manager.py add \
+  --idea "IDEA TEXT" --lens CEO --tier evergreen --tags "compliance,product"
+```
+
+Tier assignment:
+- **now** — time-sensitive, post within 6 hours
+- **this_week** — timely but not urgent
+- **evergreen** — can be scheduled anytime
+
+### Listing Ideas
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/backlog_manager.py list [--tier now]
+```
+
+### Promoting to Calendar
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/backlog_manager.py promote \
+  --id IDEA-001 --date 2026-03-15 --platform linkedin
+```
+
+---
+
+## Calendar Operations
+
+### View Calendar
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/calendar_manager.py list [--week] [--month]
+```
+
+### Calendar Stats
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/calendar_manager.py stats
+```
+
+Shows: status breakdown, platform mix, category balance, lens distribution, upcoming posts, overdue items.
+
+### Reschedule
+```bash
+python3 ~/.claude/skills/social-media-manager/scripts/calendar_manager.py reschedule \
+  --id POST-001 --new-date 2026-03-17
+```
+
+### Calendar Intelligence (applied by Claude, not scripted)
+
+When reviewing calendar, check and advise on:
+- **Topic diversity:** Alert if >3 consecutive posts in same category
+- **Lens balance:** Alert if >3 consecutive posts with same lens
+- **Platform rotation:** Alert if neglecting one platform for >1 week
+- **Posting cadence:** Compare actual vs. target frequency from memory
+- **Overdue posts:** Suggest graceful reset: "You have N overdue posts. Clear backlog or reschedule?"
+
+---
+
+## Content Mining (v2 — placeholder)
+
+When context store has relevant data, scan for postable moments:
+- Meeting decisions under pressure
+- Customer quotes (anonymized)
+- Industry signals worth reacting to
+- Git history milestones (significant commits, architecture changes)
+
+Surface as: "I found 3-5 post ideas from this week's activity. Want to see them?"
+
+---
+
+## Series Management (v2 — placeholder)
+
+Named series with episode tracking:
+- Create: define name, arc (3-7 episodes), narrative progression
+- Each episode: standalone + callbacks to previous
+- Health checks: engagement trending per episode
+- Cross-platform: LinkedIn version + X thread for each episode
+
+---
+
+## Post-Publish Tracking (v4 — placeholder)
+
+After publishing, user provides engagement data:
+- Impressions, likes, comments, reposts
+- DMs generated
+- Track performance by: lens, category, platform, time, intent
+- Feed back into voice calibration and content strategy
+
+---
+
+## Context Store
+
+This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/context-protocol.md`.
+
+**Pre-read tags:** `content`, `voice`, `positioning`, `product`, `market`, `competitors`
+
+**Post-write:** After creating content plans or publishing posts, write relevant insights to:
+- Content-related context files (if they exist in catalog)
+- `_inbox.md` for new content strategy patterns worth sharing across skills
+
+---
+
+## Memory & Learned Preferences
+
+**Memory file:** `~/.claude/projects/{current-project}/memory/social-media-manager.md`
+
+### Loading (at start)
+Check for saved preferences. Auto-apply: role, voice profile, posting cadence,
+blocklist updates, hook preferences. Show what was loaded.
+
+### Saving (after each run)
+Update memory with new preferences. Edit existing entries, never duplicate.
+
+### What to Save
+- Role (primary, secondary, stage)
+- Voice profile: registers, polish level, tone dials, AI tells banned
+- Hook preference (question, statement, mid-story, statistic)
+- Platform preferences and posting frequency targets
+- Posting days/times that work
+- Edit patterns (what the user consistently changes = calibration signal)
+- Category/lens balance preferences
+- Blocklist additions
+
+### What NOT to Save
+- Draft content, post text, specific ideas
+- Engagement numbers (those go in calendar/post-mortem tracking)
+- Confidential details from context store
+
+---
+
+## Dependency Check (Step 0a)
+
+```bash
+# Verify scripts exist
+ls ~/.claude/skills/social-media-manager/scripts/pii_guard.py
+ls ~/.claude/skills/social-media-manager/scripts/calendar_manager.py
+ls ~/.claude/skills/social-media-manager/scripts/backlog_manager.py
+
+# Verify data directory
+mkdir -p ~/.claude/skills/social-media-manager/data/drafts
+```
+
+No external Python packages required — all scripts use stdlib only.
+
+---
+
+## Input Validation
+
+Before drafting:
+- If user provides a topic, confirm platform if not specified
+- If "pick for me" mode, verify backlog or context store has content to mine
+- If series mode, verify series exists or offer to create one
+
+Before calendar operations:
+- Verify date format (YYYY-MM-DD)
+- Verify platform is valid (linkedin, x, both)
+
+---
+
+## Error Handling
+
+- If PII guard script fails, warn user and present draft with manual review note
+- If calendar/backlog CSV is corrupted, attempt to read what's valid, report corruption
+- If context store is empty, skip content mining gracefully — don't block drafting
+
+---
+
+## Deliverables
+
+Every run that produces a draft or updates the calendar must end with:
+
+```
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+YOUR FILES
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  Draft:     ~/.claude/skills/social-media-manager/data/drafts/POST-XXX.md
+  Calendar:  ~/.claude/skills/social-media-manager/data/calendar.csv
+  Backlog:   ~/.claude/skills/social-media-manager/data/backlog.csv
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+---
+
+## Reference Files
+
+Load these as needed during drafting:
+- **Voice system:** `references/voice_system.md` — role lenses, registers, style rules, voice profile structure
+- **LinkedIn guide:** `references/linkedin_guide.md` — platform formatting, algorithm, content types
+- **X guide:** `references/x_guide.md` — thread mechanics, character limits, platform differences
+- **PII & reputation:** `references/pii_reputation.md` — entity scrubbing, claims checker, sentiment detection
+- **Content patterns:** `references/content_patterns.md` — anti-patterns, AI smell detector, category balance, timeliness tiers
+
+---
+
+## Version Roadmap
+
+- **v1 (current):** Voice setup, drafting, PII guard, reputation layer, backlog, calendar, bad day safeguard, AI-smell detector
+- **v2:** Context mining, timeliness engine, series management, semantic dedup, fact-checking
+- **v3:** Visual assets (quote cards, carousels), Slack reminders, approval workflow, polls
+- **v4:** Performance tracking, intent-based measurement, memory-driven feedback loop, anti-abandonment features
+
+---
+
+## Changelog
+
+| Version | Date | Changes |
+|---------|------|---------|
+| 1.0 | 2026-03-14 | Initial version: voice setup, drafting engine, PII guard, reputation layer, backlog manager, calendar manager, role-based lenses, AI-smell detector, bad day safeguard |

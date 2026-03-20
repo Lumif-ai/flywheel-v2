@@ -1,0 +1,193 @@
+---
+name: gtm-my-company
+version: "2.0"
+description: >
+  Company profile enricher that writes positioning, ICP, competitive intel,
+  and objection handling data to the context store. Also maintains the legacy
+  sender-profile.md for backward compatibility with existing GTM pipeline skills.
+context:
+  reads:
+    - "*"
+  writes:
+    - "positioning.md"
+    - "icp-profiles.md"
+    - "competitive-intel.md"
+    - "objections.md"
+triggers:
+  - manual
+dependencies:
+  skills: []
+  files:
+    - "~/.claude/context/_catalog.md"
+output:
+  - context-store-writes
+  - sender-profile-compat
+---
+
+# gtm-my-company
+
+**Trigger phrases:** "update company profile", "build sender profile", "update positioning", "my company", "who are we", "update ICP", "update competitive intel", "update objections", or any reference to updating the company's positioning, profile, or go-to-market data.
+
+---
+
+## Step 0: Load Existing Context
+
+Run the pre-read to snapshot existing context store data and detect what already exists:
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/Projects/flywheel/src"))
+from gtm_company import (
+    pre_read_context, format_context_entry, write_to_context_store,
+    write_profile, log_profile_event, WRITE_TARGETS
+)
+
+existing_context = pre_read_context("gtm-my-company")
+print(f"Loaded {len(existing_context)} context files")
+
+# Check which profile-related files already have data
+for target in WRITE_TARGETS:
+    if target in existing_context and existing_context[target]:
+        entry_count = existing_context[target].count("[20")
+        print(f"  {target}: ~{entry_count} existing entries")
+    else:
+        print(f"  {target}: empty (no existing data)")
+```
+
+Show the user what positioning data already exists. If data exists in any of the 4 target files, ask: **"Do you want to update the existing profile or start fresh?"**
+
+## Step 1: Gather Company Information
+
+Three modes based on existing data:
+
+### Build from Scratch (no existing data)
+1. Ask for: company name, website URL, elevator pitch
+2. Crawl the company website for: product/service info, team page, pricing, customer logos
+3. Research competitors via web search
+4. Ask clarifying questions about: target market, key differentiators, common objections heard
+
+### Update Existing (data exists, user wants to update)
+1. Show current positioning data from context store
+2. Ask: "What has changed? New product features? New competitors? Updated ICP?"
+3. Only gather information for sections that need updating
+
+### Quick Edit (user wants to change specific fields)
+1. Show current profile organized by section
+2. Let user specify which sections to edit
+3. Accept edits inline
+
+## Step 2: Structure Profile Data
+
+Organize all gathered information into the `profile_data` dict structure. This is LLM work -- you structure the data, the Python engine handles I/O.
+
+**Required sections:**
+
+| Key | Context File | What to Include |
+|-----|-------------|-----------------|
+| `positioning` | positioning.md | Value propositions, key differentiators, elevator pitch, what we offer, how we're different |
+| `icp` | icp-profiles.md | Ideal customer profiles, company characteristics (size, industry, tech stack), buyer personas, decision-maker titles |
+| `competitors` | competitive-intel.md | Competitive landscape, feature comparisons, positioning against each competitor, win/loss patterns |
+| `objections` | objections.md | Common objections heard in sales, evidence-based responses, counter-arguments, proof points |
+
+| Key | What to Include |
+|-----|-----------------|
+| `sender` | Sender name, role, email |
+| `company` | Company overview, founding, mission |
+| `value_props` | Detailed value propositions |
+| `differentiators` | What makes us different |
+| `competitive_landscape` | Full competitive analysis |
+| `icps` | Detailed ICP descriptions |
+| `buyer_personas` | Persona cards |
+| `fit_scoring` | Scoring criteria for lead qualification |
+
+Each value should be a list of content line strings:
+
+```python
+profile_data = {
+    "positioning": [
+        "Flywheel is a knowledge compounding engine for AI-native teams",
+        "Replaces fragmented per-skill data silos with shared context store",
+        "Every interaction makes every future interaction smarter",
+        "Key differentiator: compounded intelligence vs point solutions",
+    ],
+    "icp": [
+        "AI-native startups using Claude/GPT for daily operations",
+        "Teams with 5+ AI-powered workflows/skills",
+        "Company size: 10-200 employees",
+        "Decision maker: CTO, VP Engineering, Head of AI",
+    ],
+    "competitors": [
+        "Competitor: Notion AI -- general-purpose, no skill integration",
+        "Competitor: Mem.ai -- personal knowledge, no team compounding",
+        "Advantage: Flywheel compounds across skills, not just documents",
+    ],
+    "objections": [
+        "Objection: 'We already use Notion for knowledge management'",
+        "Response: Notion stores documents; Flywheel compounds intelligence across AI skills",
+        "Objection: 'How is this different from RAG?'",
+        "Response: RAG retrieves static docs; Flywheel actively enriches with every interaction",
+    ],
+}
+```
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/Projects/flywheel/src"))
+from gtm_company import write_profile, pre_read_context, log_profile_event
+
+# profile_data structured by the LLM in Step 2
+results = write_profile(profile_data, "gtm-my-company")
+print(f"Context store: {results['context_store_results']}")
+# Log event
+files_written = list(results['context_store_results'].keys())
+log_profile_event(files_written, len(files_written))
+```
+
+## Step 4: Verification
+
+Read back from context store to confirm writes landed correctly:
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/Projects/flywheel/src"))
+# Verify context store writes
+updated_context = pre_read_context("gtm-my-company")
+for target in WRITE_TARGETS:
+    if target in updated_context and updated_context[target]:
+        print(f"  {target}: confirmed written")
+    else:
+        print(f"  {target}: WARNING - no data found")
+
+    print(f"  sender-profile.md: confirmed ({size} bytes)")
+else:
+    print(f"  sender-profile.md: WARNING - not found")
+```
+
+---
+
+## Memory & Learned Preferences
+
+Check for auto-memory file at `~/.claude/auto-memory/gtm-my-company.md`. If it exists, load:
+- Company name and core identity
+- Preferred positioning language/tone
+- Known competitors and how to position against them
+- ICP refinements from sales feedback
+- Objection patterns that work best
+
+After processing, save any new learned preferences to the auto-memory file.
+
+## Error Handling
+
+- **Partial profile data:** Write whatever sections are provided, skip empty sections
+- **Website crawl failure:** Fall back to manual input from user
+- **Empty profile data:** Warn user, do not write empty entries
+
+## Context Store
+
+This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/context-protocol.md` for pre-read, post-write, and knowledge overflow handling.
+
+**Engine note:** This skill's Python engine handles context store I/O programmatically via `context_utils.py` with hardwired file paths. This is correct — the engine's deterministic code should NOT use catalog-driven discovery. The protocol above applies to any additional LLM reasoning performed beyond the engine's scope.
+
+## Important Notes
+
+- All context store writes go through `context_utils.append_entry()` (never direct file writes for context files)

@@ -1,0 +1,69 @@
+{# Competitive Analysis output template - comparison grid layout #}
+<div class="output-document output-competitive-analysis">
+  <div class="output-header">
+    <h2 class="output-title">Competitive Analysis</h2>
+    <span class="badge badge-brand">{{ section_count }} section{{ 's' if section_count != 1 else '' }}</span>
+  </div>
+
+  {# Positioning summary at top #}
+  {% for section in sections %}
+    {% if section.title | lower in ['positioning', 'summary', 'overview', 'positioning summary', 'market position'] %}
+    <div class="output-card output-card-highlight">
+      <h3 class="output-card-title">{{ section.title }}</h3>
+      <div class="output-content">{{ section.content | md }}</div>
+    </div>
+    {% endif %}
+  {% endfor %}
+
+  {# Strengths/Weaknesses in comparison grid #}
+  {% set strength_sections = [] %}
+  {% set weakness_sections = [] %}
+  {% set other_sections = [] %}
+  {% for section in sections %}
+    {% if section.title | lower in ['positioning', 'summary', 'overview', 'positioning summary', 'market position'] %}
+      {# already rendered above #}
+    {% elif 'strength' in section.title | lower or 'advantage' in section.title | lower or 'pro' in section.title | lower %}
+      {% if strength_sections.append(section) %}{% endif %}
+    {% elif 'weakness' in section.title | lower or 'disadvantage' in section.title | lower or 'con' in section.title | lower or 'gap' in section.title | lower %}
+      {% if weakness_sections.append(section) %}{% endif %}
+    {% else %}
+      {% if other_sections.append(section) %}{% endif %}
+    {% endif %}
+  {% endfor %}
+
+  {% if strength_sections or weakness_sections %}
+  <div class="output-comparison-grid">
+    {% if strength_sections %}
+    <div class="output-comparison-col output-col-strengths">
+      {% for section in strength_sections %}
+      <div class="output-card output-severity-green">
+        <h3 class="output-card-title">{{ section.title }}</h3>
+        <div class="output-content">{{ section.content | md }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% if weakness_sections %}
+    <div class="output-comparison-col output-col-weaknesses">
+      {% for section in weakness_sections %}
+      <div class="output-card output-severity-red">
+        <h3 class="output-card-title">{{ section.title }}</h3>
+        <div class="output-content">{{ section.content | md }}</div>
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# Other sections #}
+  {% for section in other_sections %}
+  <div class="output-card">
+    <h3 class="output-card-title">{{ section.title }}</h3>
+    <div class="output-content">{{ section.content | md }}</div>
+  </div>
+  {% endfor %}
+
+  {% include "components/attribution_footer.html" %}
+</div>

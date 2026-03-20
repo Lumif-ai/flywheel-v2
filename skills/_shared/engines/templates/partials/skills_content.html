@@ -1,0 +1,28 @@
+<h1>Available Skills</h1>
+<p class="mt-1 text-secondary">Skills read from and write to your shared context store. Every run makes future runs smarter.</p>
+
+{% if skills %}
+<div class="skill-grid mt-3">
+  {% for skill in skills %}
+  <div class="card skill-card">
+    <h3>{{ skill.display_name }}</h3>
+    <div class="skill-meta">
+      <span class="badge badge-brand">{{ skill.engine_type }}</span>
+      <span class="text-muted" style="font-size: 0.75rem;">{{ skill.module_name }}.py</span>
+    </div>
+    <p class="skill-desc">{{ skill.description }}</p>
+  </div>
+  {% endfor %}
+</div>
+{% else %}
+<div class="empty-state mt-3">
+  <p>No skills configured yet.</p>
+  <p class="mt-1">Skills will appear here once they are registered in the engine registry.</p>
+</div>
+{% endif %}
+
+<div class="mt-3" style="padding: 1rem; background: var(--bg-warm); border-radius: var(--radius);">
+  <p class="text-secondary" style="font-size: 0.8125rem;">
+    All skills operate on your local context store. Your data never leaves your machine unless you explicitly export it.
+  </p>
+</div>

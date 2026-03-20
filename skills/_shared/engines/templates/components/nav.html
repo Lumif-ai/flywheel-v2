@@ -1,0 +1,49 @@
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/agenda" class="nav-brand">flywheel</a>
+    <ul class="nav-links">
+      <li><a href="/agenda" {% if request.url.path == '/agenda' %}class="active"{% endif %}>Agenda</a></li>
+      <li><a href="/dashboard" {% if request.url.path == '/dashboard' %}class="active"{% endif %}>Dashboard</a></li>
+      <li><a href="/skills" {% if request.url.path == '/skills' %}class="active"{% endif %}>Skills</a></li>
+      <li><a href="/onboarding" {% if request.url.path == '/onboarding' %}class="active"{% endif %}>Onboarding</a></li>
+      <li><a href="/export" {% if request.url.path == '/export' %}class="active"{% endif %}>Export</a></li>
+    </ul>
+    <div class="nav-right">
+      <button class="btn btn-ghost btn-sm cb-trigger-hint" onclick="commandBar.open()" title="Search (Cmd+K)">
+        <kbd class="nav-kbd">&#8984;K</kbd>
+      </button>
+      {% if current_user %}
+        <span class="nav-user">{{ current_user.user_id }}</span>
+        <form action="/auth/logout" method="post" style="display:inline;">
+          <button type="submit" class="btn btn-ghost btn-sm">Sign Out</button>
+        </form>
+      {% else %}
+        <a href="/auth/login" class="btn btn-sm btn-secondary">Sign In</a>
+      {% endif %}
+    </div>
+  </div>
+</nav>
+
+<style>
+  .nav-kbd {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 0.6875rem;
+    font-family: var(--font);
+    font-weight: 500;
+    background: var(--border-light);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-muted);
+    line-height: 1.4;
+    letter-spacing: 0.02em;
+  }
+  .cb-trigger-hint {
+    display: none !important;
+  }
+  @media (min-width: 768px) {
+    .cb-trigger-hint {
+      display: inline-flex !important;
+    }
+  }
+</style>

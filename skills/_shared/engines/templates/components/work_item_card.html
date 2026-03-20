@@ -1,0 +1,62 @@
+<div class="work-item-card card" id="work-item-{{ item.id }}">
+  <div class="work-item-header">
+    <div class="work-item-info">
+      <span class="type-badge type-badge-{{ item.type }}">{{ item.type|replace("_", " ")|title }}</span>
+      <span class="status-indicator status-{{ item.status }}"></span>
+      <h3 class="work-item-title">{{ item.title }}</h3>
+    </div>
+    {% if item.due_date %}
+    <span class="work-item-due">{{ item.due_date }}</span>
+    {% endif %}
+  </div>
+
+  {% if item.description %}
+  <p class="work-item-desc">{{ item.description }}</p>
+  {% endif %}
+
+  <div class="work-item-actions">
+    {% if item.status == 'upcoming' %}
+    <button class="btn btn-sm"
+            hx-post="/api/work-items/{{ item.id }}/run"
+            hx-target="#work-item-{{ item.id }}"
+            hx-swap="outerHTML">
+      Prepare Now
+    </button>
+    {% elif item.status == 'preparing' %}
+    <button class="btn btn-sm btn-secondary" disabled>
+      <span class="preparing-pulse"></span> Preparing...
+    </button>
+    {% elif item.status == 'ready' %}
+    <button class="btn btn-sm output-toggle"
+            onclick="toggleOutput(this, '{{ item.skill_output_id }}')">
+      View Output
+    </button>
+    {% elif item.status == 'needs_review' %}
+    <button class="btn btn-sm btn-secondary output-toggle"
+            onclick="toggleOutput(this, '{{ item.skill_output_id }}')">
+      Review
+    </button>
+    {% elif item.status == 'done' %}
+    <button class="btn btn-sm btn-ghost output-toggle"
+            onclick="toggleOutput(this, '{{ item.skill_output_id }}')">
+      View
+    </button>
+    {% if item.type == 'meeting' %}
+    <button class="btn btn-sm btn-ghost"
+            hx-patch="/api/work-items/{{ item.id }}"
+            hx-vals='{"skill_params": {"notes_captured": true}}'
+            hx-target="#work-item-{{ item.id }}"
+            hx-swap="outerHTML">
+      Capture Notes
+    </button>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <!-- Inline output viewer (initially hidden) -->
+  {% if item.skill_output_id %}
+  <div class="output-viewer-container" id="output-{{ item.skill_output_id }}" style="display:none;">
+    {% include "components/output_viewer.html" %}
+  </div>
+  {% endif %}
+</div>

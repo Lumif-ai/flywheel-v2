@@ -1,0 +1,36 @@
+{# Attribution footer component - shows context sources used to build output #}
+{% if total_files > 0 %}
+<div class="attribution-footer">
+  <div class="attribution-footer-separator"></div>
+  <div class="attribution-footer-content">
+    <p class="attribution-footer-summary">
+      Built from {{ total_entries }} entr{{ 'ies' if total_entries != 1 else 'y' }} across {{ total_files }} context file{{ 's' if total_files != 1 else '' }}
+      {% if source_skills %}
+        &mdash; sourced from {{ source_skills|join(', ') }}
+      {% endif %}
+      {% if compound_depth is defined and compound_depth >= 2 %}
+        <span class="attribution-footer-depth" title="This output compounds intelligence from {{ compound_depth }} skill layers">
+          &bull; Compound depth: {{ compound_depth }}
+        </span>
+      {% endif %}
+    </p>
+    <div class="attribution-footer-files">
+      {% if file_pills is defined %}
+        {% for file in file_pills %}
+        <span class="attribution-footer-pill">
+          <span class="attribution-footer-filename">{{ file.name }}</span>
+          <span class="attribution-footer-count">{{ file.entry_count }}</span>
+        </span>
+        {% endfor %}
+      {% elif attribution is mapping %}
+        {% for filename, count in attribution.items() %}
+        <span class="attribution-footer-pill">
+          <span class="attribution-footer-filename">{{ filename }}</span>
+          <span class="attribution-footer-count">{{ count }}</span>
+        </span>
+        {% endfor %}
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endif %}

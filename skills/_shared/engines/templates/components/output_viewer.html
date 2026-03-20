@@ -1,0 +1,11 @@
+<div class="output-viewer"
+     hx-get="/api/outputs/{{ item.skill_output_id }}/rendered"
+     hx-trigger="intersect once"
+     hx-swap="innerHTML">
+  <!-- Loading skeleton -->
+  <div class="output-skeleton">
+    <div class="skeleton-line skeleton-line-long"></div>
+    <div class="skeleton-line skeleton-line-medium"></div>
+    <div class="skeleton-line skeleton-line-short"></div>
+  </div>
+</div>
