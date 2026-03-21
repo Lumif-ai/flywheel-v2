@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     # Subsidized API key for anonymous onboarding (~$0.50/trial)
     flywheel_subsidy_api_key: str = ""
 
+    # Email (Resend)
+    resend_api_key: str = ""  # empty = email disabled, log instead
+    email_domain: str = "flywheel.app"  # verified domain in Resend
+
+    # Frontend URL (for email links)
+    frontend_url: str = "http://localhost:5173"
+
     # Google Calendar OAuth
     google_client_id: str = ""
     google_client_secret: str = ""

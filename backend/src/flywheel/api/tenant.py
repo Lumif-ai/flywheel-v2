@@ -14,6 +14,7 @@ Authenticated endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import hashlib
 import logging
@@ -336,14 +337,20 @@ async def invite_member(
     await db.commit()
     await db.refresh(invite)
 
-    # Email delivery deferred to Phase 25 (Resend). Token returned in response for shareable link.
     logger.info("invite_created tenant=%s email=%s", user.tenant_id, body.email)
+
+    # Fire-and-forget invite email (fails gracefully, never blocks response)
+    from flywheel.config import settings
+    from flywheel.services.email import send_invite_email
+
+    invite_url = f"{settings.frontend_url}/invite?token={token}"
+    asyncio.create_task(send_invite_email(body.email, invite_url, tenant.name))
 
     return InviteResponse(
         invite_id=str(invite.id),
         email=body.email,
         expires_at=invite.expires_at.isoformat() if invite.expires_at else None,
-        invite_token=token,
+        invite_token=token,  # Still returned as fallback (shareable link)
     )
 
 
