@@ -1,9 +1,10 @@
-"""CLI entry point with login, status, and logout commands."""
+"""CLI entry point with login, status, focus, and logout commands."""
 
 from __future__ import annotations
 
 import base64
 import hashlib
+import json
 import secrets
 import socket
 import webbrowser
@@ -14,6 +15,7 @@ import click
 import httpx
 from rich.console import Console
 from rich.panel import Panel
+from rich.table import Table
 
 from flywheel_cli.auth import (
     clear_credentials,
@@ -24,12 +26,92 @@ from flywheel_cli.auth import (
 )
 from flywheel_cli.config import (
     CALLBACK_PORT,
+    FLYWHEEL_DIR,
     SUPABASE_ANON_KEY,
     SUPABASE_URL,
     get_api_url,
 )
 
 console = Console()
+
+ACTIVE_FOCUS_FILE = FLYWHEEL_DIR / "active_focus.json"
+
+# ---------------------------------------------------------------------------
+# API helpers
+# ---------------------------------------------------------------------------
+
+
+def _api_headers() -> dict[str, str]:
+    """Return Authorization headers using the stored token."""
+    return {"Authorization": f"Bearer {get_token()}"}
+
+
+def _api_request(method: str, path: str, **kwargs) -> httpx.Response:
+    """Make an authenticated API request with standard error handling.
+
+    Args:
+        method: HTTP method (GET, POST, PATCH, etc.)
+        path: API path starting with / (e.g., /api/v1/focuses)
+        **kwargs: Passed through to httpx.request (json, params, etc.)
+
+    Returns:
+        httpx.Response on success.
+
+    Raises:
+        click.ClickException on HTTP or connection errors.
+    """
+    url = f"{get_api_url()}{path}"
+    kwargs.setdefault("headers", _api_headers())
+    kwargs.setdefault("timeout", 10.0)
+    try:
+        resp = httpx.request(method, url, **kwargs)
+        resp.raise_for_status()
+        return resp
+    except httpx.HTTPStatusError as exc:
+        detail = ""
+        try:
+            detail = exc.response.json().get("detail", "")
+        except Exception:
+            pass
+        msg = f"API error ({exc.response.status_code})"
+        if detail:
+            msg += f": {detail}"
+        raise click.ClickException(msg) from exc
+    except httpx.RequestError as exc:
+        raise click.ClickException(
+            f"Cannot reach API at {get_api_url()}: {exc}"
+        ) from exc
+
+
+# ---------------------------------------------------------------------------
+# Active focus local state
+# ---------------------------------------------------------------------------
+
+
+def _load_active_focus() -> dict | None:
+    """Load the locally persisted active focus ({id, name}). Returns None if unset."""
+    if not ACTIVE_FOCUS_FILE.exists():
+        return None
+    try:
+        data = json.loads(ACTIVE_FOCUS_FILE.read_text())
+        if "id" in data and "name" in data:
+            return data
+        return None
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
+def _save_active_focus(focus_id: str, focus_name: str) -> None:
+    """Persist the active focus locally."""
+    FLYWHEEL_DIR.mkdir(parents=True, exist_ok=True)
+    ACTIVE_FOCUS_FILE.write_text(json.dumps({"id": focus_id, "name": focus_name}, indent=2))
+
+
+def _clear_active_focus() -> None:
+    """Remove the local active focus file."""
+    if ACTIVE_FOCUS_FILE.exists():
+        ACTIVE_FOCUS_FILE.unlink()
+
 
 # ---------------------------------------------------------------------------
 # Click group
@@ -276,16 +358,148 @@ def status() -> None:
     tenant_name = tenant.get("name", "none") if tenant else "none"
     role = tenant.get("role", "unknown") if tenant else "n/a"
 
+    # Active focus info
+    active_focus = _load_active_focus()
+    focus_line = (
+        f"[bold]Focus:[/bold]  {active_focus['name']}"
+        if active_focus
+        else "[bold]Focus:[/bold]  global (no focus)"
+    )
+
     console.print(
         Panel(
             f"[bold]Email:[/bold]  {email}\n"
             f"[bold]Tenant:[/bold] {tenant_name}\n"
             f"[bold]Role:[/bold]   {role}\n"
-            f"[bold]Expiry:[/bold] {expiry_str}",
+            f"[bold]Expiry:[/bold] {expiry_str}\n"
+            f"{focus_line}",
             title="Flywheel Status",
             border_style="green",
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Focus management
+# ---------------------------------------------------------------------------
+
+
+@cli.group()
+def focus() -> None:
+    """Manage focuses (departments, teams, projects)."""
+
+
+@focus.command("list")
+def focus_list() -> None:
+    """List all focuses for the current tenant."""
+    resp = _api_request("GET", "/api/v1/focuses")
+    items = resp.json().get("items", [])
+
+    if not items:
+        console.print(
+            "[yellow]No focuses yet. Create one: flywheel focus create <name>[/yellow]"
+        )
+        return
+
+    active = _load_active_focus()
+    active_id = active["id"] if active else None
+
+    table = Table(title="Focuses")
+    table.add_column("", width=2)  # active marker
+    table.add_column("Name", style="bold")
+    table.add_column("ID", style="dim")
+    table.add_column("Members", justify="right")
+    table.add_column("Created", style="dim")
+
+    for item in items:
+        marker = "*" if item["id"] == active_id else ""
+        created = item.get("created_at", "")
+        if created and len(created) >= 10:
+            created = created[:10]  # date only
+        table.add_row(
+            marker,
+            item["name"],
+            item["id"][:8],
+            str(item.get("member_count", 0)),
+            created,
+        )
+
+    console.print(table)
+    if active:
+        console.print(f"\n[dim]* = active focus ({active['name']})[/dim]")
+
+
+@focus.command("create")
+@click.argument("name")
+@click.option("--description", "-d", default=None, help="Focus description.")
+def focus_create(name: str, description: str | None) -> None:
+    """Create a new focus."""
+    body: dict = {"name": name}
+    if description:
+        body["description"] = description
+
+    resp = _api_request("POST", "/api/v1/focuses", json=body)
+    data = resp.json().get("focus", {})
+    focus_id = data.get("id", "unknown")
+    focus_name = data.get("name", name)
+
+    console.print(f"[green]Created focus: {focus_name} ({focus_id[:8]})[/green]")
+
+    if click.confirm("Switch to this focus now?", default=True):
+        _api_request("POST", f"/api/v1/focuses/{focus_id}/switch")
+        _save_active_focus(focus_id, focus_name)
+        console.print(f"[green]Switched to focus: {focus_name}[/green]")
+
+
+@focus.command("switch")
+@click.argument("name_or_id")
+def focus_switch(name_or_id: str) -> None:
+    """Switch active focus by name (partial match) or ID prefix."""
+    # Fetch all focuses to find a match
+    resp = _api_request("GET", "/api/v1/focuses")
+    items = resp.json().get("items", [])
+
+    if not items:
+        raise click.ClickException(
+            "No focuses found. Create one first: flywheel focus create <name>"
+        )
+
+    # Match by ID prefix or case-insensitive name substring
+    query = name_or_id.lower()
+    matches = [
+        item
+        for item in items
+        if item["id"].lower().startswith(query)
+        or query in item["name"].lower()
+    ]
+
+    if len(matches) == 0:
+        raise click.ClickException(
+            f"No focus matching '{name_or_id}'. "
+            "Run 'flywheel focus list' to see available focuses."
+        )
+    if len(matches) > 1:
+        console.print(f"[yellow]Multiple focuses match '{name_or_id}':[/yellow]")
+        for m in matches:
+            console.print(f"  - {m['name']} ({m['id'][:8]})")
+        raise click.ClickException("Be more specific or use the full ID.")
+
+    target = matches[0]
+    _api_request("POST", f"/api/v1/focuses/{target['id']}/switch")
+    _save_active_focus(target["id"], target["name"])
+    console.print(f"[green]Switched to focus: {target['name']}[/green]")
+
+
+@focus.command("current")
+def focus_current() -> None:
+    """Show the current active focus."""
+    active = _load_active_focus()
+    if active:
+        console.print(
+            f"[bold]Active focus:[/bold] {active['name']} ({active['id'][:8]})"
+        )
+    else:
+        console.print("[dim]No active focus (global view)[/dim]")
 
 
 # ---------------------------------------------------------------------------
