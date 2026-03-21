@@ -91,6 +91,7 @@ async def append_entry(
     file: str,
     entry: dict[str, Any],
     source: str,
+    focus_id: str | None = None,
 ) -> str:
     """Append a context entry, with evidence deduplication.
 
@@ -99,6 +100,7 @@ async def append_entry(
         file: Context file name (e.g., "company-intel")
         entry: Dict with keys: detail, confidence (optional), content (str or list)
         source: Source identifier (e.g., "skill-name")
+        focus_id: Optional focus UUID string. If not provided, reads from session config.
 
     Returns:
         Formatted entry string matching v1 output format.
@@ -119,6 +121,12 @@ async def append_entry(
     tenant_id = tid_result.scalar()
     uid_result = await session.execute(text("SELECT current_setting('app.user_id', true)"))
     user_id = uid_result.scalar()
+
+    # Resolve focus_id: explicit param > session config > None
+    if not focus_id:
+        fid_result = await session.execute(text("SELECT current_setting('app.focus_id', true)"))
+        fid_value = fid_result.scalar()
+        focus_id = fid_value if fid_value else None
 
     # Evidence dedup: check for existing entry with same tenant+file+source+detail
     dedup_stmt = (
@@ -155,6 +163,7 @@ async def append_entry(
             confidence=confidence,
             content=content,
             date=date.today(),
+            focus_id=focus_id,
         )
         session.add(new_entry)
         await session.flush()
@@ -266,6 +275,7 @@ async def query_context(
             "evidence_count": entry.evidence_count,
             "content": entry.content,
             "visibility": entry.visibility,
+            "focus_id": str(entry.focus_id) if entry.focus_id else None,
         }
         for entry in entries
     ]

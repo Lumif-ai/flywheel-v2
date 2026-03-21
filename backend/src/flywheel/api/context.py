@@ -74,6 +74,7 @@ def _entry_to_dict(e: ContextEntry) -> dict:
         "confidence": e.confidence,
         "evidence_count": e.evidence_count,
         "content": e.content,
+        "focus_id": str(e.focus_id) if e.focus_id else None,
         "created_at": e.created_at.isoformat() if e.created_at else None,
         "updated_at": e.updated_at.isoformat() if e.updated_at else None,
     }
@@ -241,7 +242,12 @@ async def append_entry(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Append a new context entry to a file."""
+    """Append a new context entry to a file. Auto-tags with active focus from session."""
+    # Read focus_id from session config (set by X-Focus-Id header via deps.py)
+    fid_result = await db.execute(text("SELECT current_setting('app.focus_id', true)"))
+    fid_value = fid_result.scalar()
+    focus_id = fid_value if fid_value else None
+
     new_entry = ContextEntry(
         tenant_id=user.tenant_id,
         user_id=user.sub,
@@ -251,6 +257,7 @@ async def append_entry(
         confidence=body.confidence,
         content=body.content,
         date=datetime.date.today(),
+        focus_id=focus_id,
     )
     db.add(new_entry)
     await db.flush()
@@ -293,8 +300,13 @@ async def batch_entries(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Append multiple context entries atomically in a single transaction."""
+    """Append multiple context entries atomically. Auto-tags with active focus."""
     today = datetime.date.today()
+
+    # Read focus_id from session config (set by X-Focus-Id header via deps.py)
+    fid_result = await db.execute(text("SELECT current_setting('app.focus_id', true)"))
+    fid_value = fid_result.scalar()
+    focus_id = fid_value if fid_value else None
 
     # Create all entry objects
     new_entries = []
@@ -308,6 +320,7 @@ async def batch_entries(
             confidence=item.confidence,
             content=item.content,
             date=today,
+            focus_id=focus_id,
         )
         new_entries.append(entry)
 
