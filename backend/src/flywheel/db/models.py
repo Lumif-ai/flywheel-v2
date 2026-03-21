@@ -1,8 +1,9 @@
-"""SQLAlchemy 2.0 ORM models for all 14 Flywheel tables.
+"""SQLAlchemy 2.0 ORM models for all 16 Flywheel tables.
 
 Schema matches V2-PRODUCT-SPEC.md. Tables are divided into:
 - System tables (tenants, users) -- NOT tenant-scoped, no RLS
 - Tenant-scoped tables (9 tables) -- all have tenant_id FK, RLS enforced
+- Focus tables (2 tables) -- focus/lens scoping for context
 - Context graph tables (3 tables) -- entity graph layer on top of context_entries
 """
 
@@ -181,6 +182,9 @@ class ContextEntry(Base):
     detail: Mapped[str | None] = mapped_column(Text)
     confidence: Mapped[str] = mapped_column(Text, server_default="medium")
     evidence_count: Mapped[int] = mapped_column(Integer, server_default=text("1"))
+    focus_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("focuses.id"), nullable=True, index=True
+    )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     flagged: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     flag_reason: Mapped[str | None] = mapped_column(Text)
@@ -393,6 +397,72 @@ class WorkItem(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# FOCUS TABLES (focus/lens scoping for context)
+# ---------------------------------------------------------------------------
+
+
+class Focus(Base):
+    __tablename__ = "focuses"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "name", name="uq_focus_tenant_name"),
+        Index("idx_focuses_tenant", "tenant_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    settings: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    archived_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    created_by: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class UserFocus(Base):
+    __tablename__ = "user_focuses"
+    __table_args__ = (
+        Index(
+            "idx_one_active_focus",
+            "user_id",
+            "tenant_id",
+            unique=True,
+            postgresql_where=text("active = true"),
+        ),
+    )
+
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), primary_key=True
+    )
+    focus_id: Mapped[UUID] = mapped_column(
+        ForeignKey("focuses.id"), primary_key=True
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    active: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+    joined_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class SuggestionDismissal(Base):
     __tablename__ = "suggestion_dismissals"
     __table_args__ = (
@@ -493,7 +563,7 @@ class ContextRelationship(Base):
     source_entry_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("context_entries.id")
     )
-    focus_id: Mapped[UUID | None] = mapped_column()
+    focus_id: Mapped[UUID | None] = mapped_column(ForeignKey("focuses.id"))
     directional: Mapped[bool] = mapped_column(
         Boolean, server_default=text("true")
     )
