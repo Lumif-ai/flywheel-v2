@@ -105,6 +105,20 @@ class ReasoningTraceResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+def _get_tier_message(tier: int) -> str | None:
+    """Return human-readable tier gate message for the frontend.
+
+    Tier 1: Full functionality on web -- no message needed.
+    Tier 2: Partial functionality -- inform user of reduced capability.
+    Tier 3: Requires local agent -- block execution on web.
+    """
+    if tier == 3:
+        return "Requires local agent. Install the Flywheel CLI and run 'flywheel agent start' to use this skill."
+    if tier == 2:
+        return "Works on web with reduced capability. Connect your local agent for deeper research."
+    return None  # Tier 1: no message needed, full functionality
+
+
 def _parse_skill_frontmatter(skill_dir: Path) -> dict[str, Any] | None:
     """Parse SKILL.md YAML frontmatter from a skill directory."""
     skill_md = skill_dir / "SKILL.md"
@@ -118,11 +132,14 @@ def _parse_skill_frontmatter(skill_dir: Path) -> dict[str, Any] | None:
         fm = yaml.safe_load(text[3:end])
         if not isinstance(fm, dict):
             return None
+        web_tier = fm.get("web_tier", 1)
         return {
             "name": fm.get("name", skill_dir.name),
             "description": fm.get("description", ""),
             "version": fm.get("version", "0.0.0"),
             "tags": fm.get("tags", []),
+            "web_tier": web_tier,
+            "tier_message": _get_tier_message(web_tier),
         }
     except Exception:
         logger.debug("Failed to parse SKILL.md in %s", skill_dir)
