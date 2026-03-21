@@ -33,7 +33,7 @@ AGENT_ID = "ctx-investor-update"
 # Skill-local state file for cumulative cross-invocation context.
 # This is NOT a context store file -- it stores promise ledger, narrative arc,
 # prior months data, and stale threads that don't fit the append-only entry format.
-_DATA_DIR = os.environ.get("FLYWHEEL_DATA_DIR", str(Path.home() / "lumifai"))
+_DATA_DIR = os.environ.get("FLYWHEEL_DATA_DIR", str(Path.home() / ".flywheel" / "data"))
 UPDATE_CONTEXT_PATH = Path(_DATA_DIR) / "investor-updates" / "_update-context.md"
 
 # Context files read by category

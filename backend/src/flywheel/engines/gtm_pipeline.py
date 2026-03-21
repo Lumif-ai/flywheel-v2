@@ -40,7 +40,7 @@ _TRACKER_DIR = os.environ.get(
 TRACKER_PATH = Path(_TRACKER_DIR)
 
 # Learning directory for effectiveness data
-_DATA_DIR = os.environ.get("FLYWHEEL_DATA_DIR", str(Path.home() / "lumifai"))
+_DATA_DIR = os.environ.get("FLYWHEEL_DATA_DIR", str(Path.home() / ".flywheel" / "data"))
 LEARNING_DIR = Path(_DATA_DIR) / "_learning"
 
 # Cold-start protection threshold

@@ -718,7 +718,7 @@ def _merge_dedup(list_a: list, list_b: list) -> list:
 # 10. Transcript Discovery (Cross-Meeting Synthesis)
 # ---------------------------------------------------------------------------
 
-# Transcript directories: configurable via env var, legacy lumifai path removed
+# Transcript directories: configurable via env var
 _MEETINGS_DIR = os.environ.get(
     "FLYWHEEL_MEETINGS_DIR", str(Path.home() / ".claude" / "meetings" / "raw")
 )
