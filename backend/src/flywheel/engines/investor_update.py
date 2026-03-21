@@ -17,10 +17,8 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# Import context_utils from the same src/ directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-from context_utils import (
-    CONTEXT_ROOT,
+from flywheel.storage_backend import (
+    list_context_files,
     parse_context_file,
     query_context,
     read_context,
@@ -35,7 +33,8 @@ AGENT_ID = "ctx-investor-update"
 # Skill-local state file for cumulative cross-invocation context.
 # This is NOT a context store file -- it stores promise ledger, narrative arc,
 # prior months data, and stale threads that don't fit the append-only entry format.
-UPDATE_CONTEXT_PATH = Path.home() / "lumifai" / "investor-updates" / "_update-context.md"
+_DATA_DIR = os.environ.get("FLYWHEEL_DATA_DIR", str(Path.home() / "lumifai"))
+UPDATE_CONTEXT_PATH = Path(_DATA_DIR) / "investor-updates" / "_update-context.md"
 
 # Context files read by category
 MEETING_INTEL_FILES = [
@@ -101,17 +100,18 @@ def pre_read_context(agent_id: str = AGENT_ID) -> dict:
     """
     context_snapshot = {}
 
-    if not CONTEXT_ROOT.exists():
+    try:
+        files = list_context_files()
+    except Exception:
         return context_snapshot
 
-    for f in CONTEXT_ROOT.iterdir():
-        if f.is_file() and f.suffix == ".md" and not f.name.startswith("_"):
-            try:
-                content = read_context(f.name, agent_id)
-                context_snapshot[f.name] = content
-            except Exception:
-                # Partial read failure is acceptable -- skip file
-                context_snapshot[f.name] = ""
+    for filename in files:
+        try:
+            content = read_context(filename, agent_id)
+            context_snapshot[filename] = content
+        except Exception:
+            # Partial read failure is acceptable -- skip file
+            context_snapshot[filename] = ""
 
     return context_snapshot
 

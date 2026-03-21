@@ -26,7 +26,9 @@ from typing import Optional
 sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
 from skill_converter import ENGINE_REGISTRY, ExecutionSpec, convert_skill
 from skill_governance import handle_empty_context
-import context_utils
+from flywheel.storage_backend import append_entry as _sb_append_entry
+from flywheel.storage_backend import log_event as _sb_log_event
+from flywheel.storage_backend import read_context as _sb_read_context
 
 try:
     import anthropic
@@ -478,7 +480,7 @@ def execute_tool(
     if tool_name == "read_context":
         file_name = tool_input.get("file", "")
         try:
-            content = context_utils.read_context(file_name, agent_id=user_id)
+            content = _sb_read_context(file_name, agent_id=user_id)
             if not content:
                 _, suggestion = handle_empty_context("", file_name)
                 return suggestion if suggestion else f"No entries found in {file_name}"
@@ -509,7 +511,7 @@ def execute_tool(
             "source": user_id,
         }
         try:
-            result = context_utils.append_entry(
+            result = _sb_append_entry(
                 file=file_name,
                 entry=entry,
                 source=user_id,
@@ -601,7 +603,7 @@ def enforce_contract(
 
     # Log violation to events
     try:
-        context_utils.log_event(
+        _sb_log_event(
             "contract_violation",
             {
                 "skill": skill_name,

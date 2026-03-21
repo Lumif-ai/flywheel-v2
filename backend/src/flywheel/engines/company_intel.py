@@ -24,12 +24,7 @@ import html2text
 import httpx
 from bs4 import BeautifulSoup
 
-# Import context_utils from the same src/ directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-from context_utils import (
-    CONTEXT_ROOT,
-    append_entry,
-)
+from flywheel.storage_backend import append_entry
 
 # ---------------------------------------------------------------------------
 # Constants
