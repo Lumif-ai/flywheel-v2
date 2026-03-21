@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:5173/api/v1/integrations/google-calendar/callback"
 
+    # External APIs
+    tavily_api_key: str = ""  # empty = web search disabled
+
     # Production deployment
     environment: str = "development"  # development, staging, production
     sentry_dsn: str = ""  # empty = disabled
