@@ -26,6 +26,11 @@ class Settings(BaseSettings):
     # Subsidized API key for anonymous onboarding (~$0.50/trial)
     flywheel_subsidy_api_key: str = ""
 
+    # Google Calendar OAuth
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:5173/api/v1/integrations/google-calendar/callback"
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
