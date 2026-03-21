@@ -4,6 +4,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
+import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -73,6 +74,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    # Initialize Sentry error tracking (conditional on DSN being set)
+    if settings.sentry_dsn:
+        sentry_sdk.init(
+            dsn=settings.sentry_dsn,
+            environment=settings.environment,
+            traces_sample_rate=0.1,
+            send_default_pii=False,
+        )
+
     app = FastAPI(
         title="Flywheel",
         description="Knowledge compounding engine for AI-native teams",

@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:5173/api/v1/integrations/google-calendar/callback"
 
+    # Production deployment
+    environment: str = "development"  # development, staging, production
+    sentry_dsn: str = ""  # empty = disabled
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
