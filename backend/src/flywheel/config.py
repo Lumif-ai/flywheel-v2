@@ -38,6 +38,14 @@ class Settings(BaseSettings):
     google_client_secret: str = ""
     google_redirect_uri: str = "http://localhost:5173/api/v1/integrations/google-calendar/callback"
 
+    # Google Gmail OAuth (same Google Cloud project, separate scope)
+    google_gmail_redirect_uri: str = "http://localhost:5173/api/v1/integrations/gmail/callback"
+
+    # Microsoft Outlook OAuth (Azure AD app registration)
+    microsoft_client_id: str = ""
+    microsoft_client_secret: str = ""
+    microsoft_redirect_uri: str = "http://localhost:5173/api/v1/integrations/outlook/callback"
+
     # External APIs
     tavily_api_key: str = ""  # empty = web search disabled
 
