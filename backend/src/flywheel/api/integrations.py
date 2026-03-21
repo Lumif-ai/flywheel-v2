@@ -8,6 +8,8 @@ Endpoints:
 - GET  /integrations/gmail/callback            -- Gmail OAuth callback
 - GET  /integrations/outlook/authorize         -- start Outlook OAuth flow
 - GET  /integrations/outlook/callback          -- Outlook OAuth callback
+- GET  /integrations/slack/authorize           -- start Slack OAuth install flow
+- GET  /integrations/slack/callback            -- Slack OAuth callback
 - DELETE /integrations/{id}                    -- disconnect integration
 - POST /integrations/{id}/sync                 -- trigger immediate calendar sync
 - GET  /integrations/suggestions               -- meeting prep suggestions
@@ -46,6 +48,11 @@ from flywheel.services.microsoft_outlook import (
     generate_outlook_auth_url,
     serialize_outlook_credentials,
 )
+from flywheel.services.slack_oauth import (
+    exchange_slack_code,
+    generate_slack_auth_url,
+    serialize_slack_credentials,
+)
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
@@ -59,6 +66,7 @@ _PROVIDER_DISPLAY = {
     "google-calendar": "Google Calendar",
     "gmail": "Gmail",
     "outlook": "Outlook",
+    "slack": "Slack",
 }
 
 
@@ -378,6 +386,104 @@ async def outlook_callback(
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
     integration.settings = {}  # Clear oauth_state
+    await db.commit()
+
+    return {"status": "connected", "id": str(integration.id)}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/slack/authorize
+# ---------------------------------------------------------------------------
+
+
+@router.get("/slack/authorize")
+async def authorize_slack(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Start Slack OAuth install flow.
+
+    Creates a pending Integration row with a cryptographic state parameter
+    for CSRF protection, then returns the Slack authorization URL.
+    """
+    state = secrets.token_urlsafe(32)
+
+    integration = Integration(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        provider="slack",
+        status="pending",
+        settings={"oauth_state": state},
+    )
+    db.add(integration)
+    await db.commit()
+    await db.refresh(integration)
+
+    auth_url = generate_slack_auth_url(state)
+
+    return {"auth_url": auth_url, "state": state}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/slack/callback
+# ---------------------------------------------------------------------------
+
+
+@router.get("/slack/callback")
+async def slack_callback(
+    code: str = Query(..., description="Authorization code from Slack"),
+    state: str = Query(..., description="State parameter for CSRF verification"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Handle Slack OAuth callback.
+
+    Verifies the state parameter, exchanges the authorization code for
+    workspace install data, encrypts the bot token, and updates the
+    Integration row with team metadata.
+    """
+    result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == user.tenant_id,
+            Integration.provider == "slack",
+            Integration.status == "pending",
+        )
+    )
+    pending = result.scalars().all()
+
+    integration = None
+    for p in pending:
+        if p.settings and p.settings.get("oauth_state") == state:
+            integration = p
+            break
+
+    if integration is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OAuth state. Please restart the Slack authorization flow.",
+        )
+
+    try:
+        install_data = await exchange_slack_code(code)
+    except ValueError as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Slack OAuth code exchange failed: {exc}",
+        ) from exc
+
+    encrypted = serialize_slack_credentials(install_data)
+    integration.status = "connected"
+    integration.credentials_encrypted = encrypted
+    integration.settings = {
+        "team_id": install_data["team"]["id"],
+        "team_name": install_data["team"]["name"],
+    }
     await db.commit()
 
     return {"status": "connected", "id": str(integration.id)}
