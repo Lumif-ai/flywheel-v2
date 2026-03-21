@@ -134,6 +134,7 @@ def create_registry() -> ToolRegistry:
         schema=TOOL_SCHEMAS["browser_navigate"],
         handler=handle_browser_navigate,
         requires_budget=None,
+        requires_agent=True,
     ))
     registry.register(ToolDefinition(
         name="browser_click",
@@ -141,6 +142,7 @@ def create_registry() -> ToolRegistry:
         schema=TOOL_SCHEMAS["browser_click"],
         handler=handle_browser_click,
         requires_budget=None,
+        requires_agent=True,
     ))
     registry.register(ToolDefinition(
         name="browser_type",
@@ -148,6 +150,7 @@ def create_registry() -> ToolRegistry:
         schema=TOOL_SCHEMAS["browser_type"],
         handler=handle_browser_type,
         requires_budget=None,
+        requires_agent=True,
     ))
     registry.register(ToolDefinition(
         name="browser_extract",
@@ -155,6 +158,7 @@ def create_registry() -> ToolRegistry:
         schema=TOOL_SCHEMAS["browser_extract"],
         handler=handle_browser_extract,
         requires_budget=None,
+        requires_agent=True,
     ))
     registry.register(ToolDefinition(
         name="browser_screenshot",
@@ -162,6 +166,7 @@ def create_registry() -> ToolRegistry:
         schema=TOOL_SCHEMAS["browser_screenshot"],
         handler=handle_browser_screenshot,
         requires_budget=None,
+        requires_agent=True,
     ))
 
     return registry

@@ -41,6 +41,7 @@ class ToolDefinition:
     schema: dict
     handler: Callable[..., Awaitable[str]]
     requires_budget: str | None = None
+    requires_agent: bool = False
 
 
 class ToolRegistry:
@@ -58,19 +59,33 @@ class ToolRegistry:
         """Register a tool definition."""
         self._tools[tool.name] = tool
 
-    def get_anthropic_tools(self, skill_name: str | None = None) -> list[dict]:
+    def get_browser_tool_names(self) -> set[str]:
+        """Return names of all tools that require the local agent."""
+        return {
+            name for name, tool in self._tools.items()
+            if tool.requires_agent
+        }
+
+    def get_anthropic_tools(
+        self,
+        skill_name: str | None = None,
+        exclude_browser: bool = False,
+    ) -> list[dict]:
         """Return tool definitions in Anthropic API format.
 
         Args:
             skill_name: Optional skill filter (not implemented yet --
                         skill-level filtering is Phase 26.1 Plan 03).
+            exclude_browser: If True, exclude tools that require the local
+                agent (requires_agent=True). Used when agent is not connected.
 
         Returns:
             List of dicts with name, description, and input_schema keys.
         """
-        # For now, return ALL registered tools regardless of skill_name
         tools = []
         for tool in self._tools.values():
+            if exclude_browser and tool.requires_agent:
+                continue
             tools.append({
                 "name": tool.name,
                 "description": tool.schema.get("description", ""),

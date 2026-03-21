@@ -36,6 +36,24 @@ from flywheel.services.cost_tracker import calculate_cost
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Skill Browser Tiers:
+# - Tier 1: Cloud-only skills. No browser tools needed. Always available.
+# - Tier 2: Skills that benefit from browser but work without.
+#   When agent not connected: browser tools excluded from tool list,
+#   skill runs with reduced capability + note in output.
+# - Tier 3: Skills that REQUIRE browser automation to function.
+#   When agent not connected: execution blocked with clear error message.
+#
+# Classification is by skill name in TIER_3_SKILLS set.
+# All other skills with browser tool usage are implicitly Tier 2.
+# Skills that never use browser tools are implicitly Tier 1.
+# ---------------------------------------------------------------------------
+TIER_3_SKILLS: set[str] = {"gtm-web-scraper", "dogfood-tester"}
+
+# Markers in tool results that indicate a browser step was skipped
+AGENT_SKIP_MARKERS = ["AGENT_NOT_CONNECTED", "AGENT_TIMEOUT"]
+
 # Thread lock for env var manipulation during execute_skill calls.
 # The execution_gateway reads ANTHROPIC_API_KEY from os.environ, so we
 # must set it before calling execute_skill and restore it after.
@@ -421,8 +439,20 @@ async def execute_run(run: SkillRun) -> None:
         from flywheel.tools import create_registry
         from flywheel.tools.registry import RunContext
         from flywheel.tools.budget import RunBudget
+        from flywheel.services.agent_manager import agent_manager
 
         registry = create_registry()
+
+        # Check agent connection for browser tool availability
+        agent_connected = agent_manager.is_connected(run.user_id) if run.user_id else False
+
+        # Tier 3 skills require the agent -- fail fast if not connected
+        if run.skill_name in TIER_3_SKILLS and not agent_connected:
+            raise ValueError(
+                "This skill requires the local agent for browser automation. "
+                "Start the agent with: flywheel agent start"
+            )
+
         run_context = RunContext(
             tenant_id=run.tenant_id,
             user_id=run.user_id,
@@ -437,10 +467,11 @@ async def execute_run(run: SkillRun) -> None:
             factory, run.tenant_id, active_focus_id
         )
         logger.info(
-            "Run %s: active_focus=%s, merged_settings_keys=%s",
+            "Run %s: active_focus=%s, merged_settings_keys=%s, agent_connected=%s",
             run.id,
             active_focus_id,
             list(merged_settings.keys()) if merged_settings else [],
+            agent_connected,
         )
 
         try:
@@ -452,6 +483,7 @@ async def execute_run(run: SkillRun) -> None:
                 context=run_context,
                 factory=factory,
                 run_id=run.id,
+                agent_connected=agent_connected,
             )
             anthropic_breaker.record_success()
         except Exception as exec_err:
@@ -466,6 +498,14 @@ async def execute_run(run: SkillRun) -> None:
 
         duration_ms = int((time.time() - start_time) * 1000)
         cost = calculate_cost(token_usage)
+
+        # Add agent status note to output for Tier 2 skills that ran without agent
+        browser_tool_names = registry.get_browser_tool_names()
+        if browser_tool_names and not agent_connected:
+            output += (
+                "\n\nNote: Some browser-based capabilities were unavailable "
+                "(local agent not connected)."
+            )
 
         # Build attribution from tool calls (context_read calls -> file-level attribution)
         tool_attribution = _build_tool_attribution(tool_calls)
@@ -546,6 +586,7 @@ async def execute_run(run: SkillRun) -> None:
             )
             # Include tool snapshot for version safety auditing
             trace["tools_snapshot"] = tool_snapshot
+            trace["agent_connected"] = agent_connected
             async with factory() as session:
                 await session.execute(
                     update(SkillRun)
@@ -592,6 +633,50 @@ async def execute_run(run: SkillRun) -> None:
         logger.error("Run %s failed (skill=%s): %s", run.id, run.skill_name, e)
 
 
+def _append_skipped_steps_note(
+    output_text: str,
+    tool_calls_made: list[dict],
+    agent_connected: bool,
+) -> str:
+    """Deterministically scan tool results for skipped browser steps.
+
+    After the tool loop completes, this function checks all tool call records
+    for AGENT_NOT_CONNECTED or AGENT_TIMEOUT markers and appends a structured
+    note to the output. Also adds a note when browser tools were excluded
+    because the agent was not connected.
+
+    This is NOT optional and does NOT rely on Claude choosing to summarize
+    skipped steps. It guarantees the must-have truth that skipped steps are
+    noted in output by engineered behavior, not LLM judgment.
+    """
+    skipped_steps = []
+    for call in tool_calls_made:
+        tool_name = call.get("tool", "unknown")
+        result_snippet = call.get("result_snippet", "")
+        # Check if the tool result contains AGENT_NOT_CONNECTED or AGENT_TIMEOUT
+        # markers returned by browser_tools handlers when the agent disconnects
+        if any(marker in result_snippet for marker in AGENT_SKIP_MARKERS):
+            skipped_steps.append(tool_name)
+
+    # Also check: if browser tools exist in registry but were excluded
+    # (agent not connected), note the reduced capability
+    if not agent_connected and not skipped_steps:
+        # No skipped steps to report (browser tools were excluded from tool
+        # list entirely, so Claude never tried to call them). Add a note
+        # about reduced capability only if the output doesn't already mention it.
+        return output_text
+
+    if skipped_steps:
+        unique_skipped = list(dict.fromkeys(skipped_steps))  # preserve order, dedupe
+        skip_note = (
+            f"\n\n---\nSkipped browser steps (agent unavailable): "
+            f"{', '.join(unique_skipped)}"
+        )
+        output_text += skip_note
+
+    return output_text
+
+
 async def _execute_with_tools(
     api_key: str,
     skill_name: str,
@@ -601,6 +686,7 @@ async def _execute_with_tools(
     factory: async_sessionmaker,
     run_id: UUID,
     max_iterations: int = 25,
+    agent_connected: bool = False,
 ) -> tuple[str, dict, list]:
     """Execute a skill using AsyncAnthropic with the tool registry.
 
@@ -617,6 +703,7 @@ async def _execute_with_tools(
         factory: Session factory for event logging.
         run_id: SkillRun UUID for event logging.
         max_iterations: Maximum tool_use loop iterations (default 25).
+        agent_connected: Whether the user's local agent is connected.
 
     Returns:
         Tuple of (output_text, token_usage_dict, tool_calls_list).
@@ -637,8 +724,12 @@ async def _execute_with_tools(
     system_prompt = spec.system_prompt
 
     # Snapshot tool definitions for version safety
-    tool_snapshot = registry.snapshot_tools(skill_name)
-    tool_defs = tool_snapshot
+    # When agent is not connected, exclude browser tools so Claude never
+    # sees them and won't attempt to call them (Tier 2 graceful degradation)
+    tool_defs = registry.get_anthropic_tools(
+        skill_name=skill_name,
+        exclude_browser=not agent_connected,
+    )
 
     # Initial message
     messages = [{"role": "user", "content": input_text}]
@@ -667,6 +758,9 @@ async def _execute_with_tools(
                 if hasattr(block, "text"):
                     output_parts.append(block.text)
             output_text = "\n".join(output_parts) if output_parts else ""
+
+            # Post-loop: deterministic skipped-step scanning
+            output_text = _append_skipped_steps_note(output_text, tool_calls_made, agent_connected)
 
             token_usage = {
                 "input_tokens": total_input_tokens,
@@ -699,14 +793,17 @@ async def _execute_with_tools(
                         "content": result,
                     })
 
-                    # Track for reasoning trace
+                    # Track for reasoning trace and skipped-step detection
                     input_summary = str(block.input)
                     if len(input_summary) > 200:
                         input_summary = input_summary[:200] + "..."
+                    # Store result snippet for AGENT_SKIP_MARKERS detection
+                    result_snippet = result[:300] if isinstance(result, str) else str(result)[:300]
                     tool_calls_made.append({
                         "tool": block.name,
                         "input": input_summary,
                         "result_length": len(result),
+                        "result_snippet": result_snippet,
                     })
 
             # Append assistant response + tool results to messages
@@ -719,6 +816,7 @@ async def _execute_with_tools(
                 if hasattr(block, "text"):
                     output_parts.append(block.text)
             output_text = "\n".join(output_parts) if output_parts else ""
+            output_text = _append_skipped_steps_note(output_text, tool_calls_made, agent_connected)
             token_usage = {
                 "input_tokens": total_input_tokens,
                 "output_tokens": total_output_tokens,
@@ -727,12 +825,15 @@ async def _execute_with_tools(
             return output_text, token_usage, tool_calls_made
 
     # Max iterations exceeded
+    output_text = _append_skipped_steps_note(
+        "Skill exceeded maximum iterations", tool_calls_made, agent_connected
+    )
     token_usage = {
         "input_tokens": total_input_tokens,
         "output_tokens": total_output_tokens,
         "model": "claude-sonnet-4-20250514",
     }
-    return "Skill exceeded maximum iterations", token_usage, tool_calls_made
+    return output_text, token_usage, tool_calls_made
 
 
 # Legacy sync path -- used by CLI gateway (execution_gateway.py). Web uses _execute_with_tools().
