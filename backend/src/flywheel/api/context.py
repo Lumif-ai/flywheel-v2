@@ -249,6 +249,16 @@ async def append_entry(
     db.add(new_entry)
     await db.flush()
 
+    # Graph extraction: extract entities from the new entry (non-blocking)
+    try:
+        from flywheel.services.entity_extraction import process_entry_for_graph
+        await process_entry_for_graph(db, new_entry, str(user.tenant_id))
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Graph extraction failed for entry %s", new_entry.id, exc_info=True
+        )
+
     # Upsert catalog status to active
     catalog_stmt = pg_insert(ContextCatalog).values(
         tenant_id=user.tenant_id,
@@ -297,6 +307,17 @@ async def batch_entries(
 
     db.add_all(new_entries)
     await db.flush()
+
+    # Graph extraction: extract entities from each new entry (non-blocking)
+    for entry in new_entries:
+        try:
+            from flywheel.services.entity_extraction import process_entry_for_graph
+            await process_entry_for_graph(db, entry, str(user.tenant_id))
+        except Exception:
+            import logging
+            logging.getLogger(__name__).warning(
+                "Graph extraction failed for entry %s", entry.id, exc_info=True
+            )
 
     # Upsert catalog status for each unique file_name
     unique_files = {item.file_name for item in body.entries}

@@ -185,6 +185,16 @@ async def append_entry(
     session.add(event)
     await session.flush()
 
+    # Graph extraction: extract entities from the new/updated entry (non-blocking)
+    try:
+        from flywheel.services.entity_extraction import process_entry_for_graph
+        await process_entry_for_graph(session, result_entry, tenant_id)
+    except Exception:
+        import logging
+        logging.getLogger(__name__).warning(
+            "Graph extraction failed for entry %s", result_entry.id, exc_info=True
+        )
+
     return _format_entry(result_entry)
 
 
@@ -409,3 +419,47 @@ async def log_event(
     )
     session.add(event)
     await session.flush()
+
+
+async def backfill_graph_for_entries(
+    session: AsyncSession,
+    tenant_id: str,
+    batch_size: int = 100,
+) -> dict:
+    """Backfill graph data for all existing context entries in a tenant.
+
+    Processes entries in batches. Returns stats dict with counts.
+
+    Args:
+        session: Tenant-scoped AsyncSession.
+        tenant_id: Tenant UUID string.
+        batch_size: Not currently used for chunking but reserved for future use.
+
+    Returns:
+        Dict with processed, errors, and total counts.
+    """
+    import logging
+
+    from flywheel.services.entity_extraction import process_entry_for_graph
+
+    stmt = (
+        select(ContextEntry)
+        .where(ContextEntry.deleted_at.is_(None))
+        .order_by(ContextEntry.created_at.asc())
+    )
+    result = await session.execute(stmt)
+    entries = result.scalars().all()
+
+    processed = 0
+    errors = 0
+    for entry in entries:
+        try:
+            await process_entry_for_graph(session, entry, tenant_id)
+            processed += 1
+        except Exception:
+            errors += 1
+            logging.getLogger(__name__).warning(
+                "Backfill failed for entry %s", entry.id, exc_info=True
+            )
+
+    return {"processed": processed, "errors": errors, "total": len(entries)}
