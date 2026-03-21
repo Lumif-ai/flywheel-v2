@@ -3,7 +3,8 @@
 Handles:
 - HMAC-SHA256 signing secret verification per Slack docs
 - Event deduplication with bounded in-memory OrderedDict
-- Placeholder processors for events and slash commands (wired in Plan 03)
+- Event routing: messages -> channel monitor, commands -> slash command handler
+- Bot message filtering (prevents self-loops)
 """
 
 from __future__ import annotations
@@ -107,36 +108,62 @@ def is_duplicate_event(event_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Event and command processors (placeholders for Plan 03)
+# Event and command processors (wired to handlers in Plan 03)
 # ---------------------------------------------------------------------------
 
 
 async def process_slack_event(payload: dict, db: AsyncSession) -> None:
     """Process an incoming Slack event in the background.
 
-    This is a placeholder that will be wired to command routing and
-    channel monitoring in Plan 03. For now, logs the event type and team.
+    Routes events by type:
+    - message (non-bot): -> channel monitor for keyword intelligence
+    - app_mention: logged (future: respond to mentions)
+    - other: logged at debug level
+
+    Bot messages are filtered to prevent self-loops.
     """
     event = payload.get("event", {})
     event_type = event.get("type", "unknown")
     team_id = payload.get("team_id", "unknown")
+
     logger.info("Slack event received: type=%s team=%s", event_type, team_id)
+
+    if event_type == "message":
+        # Filter bot messages to prevent self-loops
+        if event.get("bot_id") is not None:
+            logger.debug("Ignoring bot message from bot_id=%s", event.get("bot_id"))
+            return
+
+        # Also filter message subtypes that aren't real user messages
+        subtype = event.get("subtype")
+        if subtype is not None:
+            logger.debug("Ignoring message subtype=%s", subtype)
+            return
+
+        # Route to channel monitor -- inject team_id into event for tenant resolution
+        event_with_team = {**event, "team_id": team_id}
+
+        from flywheel.services.slack_channel_monitor import process_channel_message
+
+        await process_channel_message(event_with_team, db)
+
+    elif event_type == "app_mention":
+        logger.info("App mention from user=%s in channel=%s", event.get("user"), event.get("channel"))
+        # Future: respond to @mentions
+
+    else:
+        logger.debug("Unhandled Slack event type: %s", event_type)
 
 
 async def process_slack_command(payload: dict, db: AsyncSession) -> dict:
     """Process an incoming Slack slash command.
 
-    This is a placeholder that will be wired to skill execution in Plan 03.
-    For now, returns an acknowledgment message.
+    Delegates to the slash command handler which routes subcommands
+    to skills, help, or skills listing.
 
     Returns:
         Slack-compatible response dict.
     """
-    command = payload.get("command", "unknown")
-    team_id = payload.get("team_id", "unknown")
-    logger.info("Slack command received: command=%s team=%s", command, team_id)
+    from flywheel.services.slack_commands import handle_slash_command
 
-    return {
-        "response_type": "ephemeral",
-        "text": "Flywheel is connected! Command handlers coming soon.",
-    }
+    return await handle_slash_command(payload, db)
