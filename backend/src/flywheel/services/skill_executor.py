@@ -18,6 +18,7 @@ import os
 import sys
 import threading
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 from uuid import UUID
 
@@ -100,6 +101,104 @@ async def _build_attribution(
             "sources": [],
             "entries_read": [],
         }
+
+
+async def _build_reasoning_trace(
+    tenant_id: UUID,
+    user_id: UUID,
+    skill_name: str,
+    gateway_attribution: dict,
+    events_log: list,
+    execution_mode: str,
+) -> dict:
+    """Build a reasoning trace capturing context consumed and routing decision.
+
+    Assembles entry-level detail from ContextEntry rows for each file the
+    gateway reported reading, plus the orchestrator's routing decision from
+    the run's events_log.
+
+    This function must NEVER raise -- reasoning trace is informational and
+    must not block skill execution results.
+
+    Args:
+        tenant_id: Tenant UUID for RLS scoping.
+        user_id: User UUID (unused currently, reserved for user-scoped traces).
+        skill_name: Name of the skill that was executed.
+        gateway_attribution: File-level attribution dict from execution gateway
+            (e.g. {filename: {entry_count, chars_read}}).
+        events_log: Current events_log list from the SkillRun record.
+        execution_mode: Execution mode string (e.g. "llm", "template").
+
+    Returns:
+        Structured trace dict with version, routing, context_consumed,
+        files_read, and captured_at. On failure returns minimal error dict.
+    """
+    try:
+        # Extract routing decision from events_log
+        routing_data: dict = {}
+        for event in (events_log or []):
+            if isinstance(event, dict) and event.get("event") == "routing":
+                routing_data = event.get("data", {})
+                break
+
+        routing = {
+            "intent_action": routing_data.get("action", "direct"),
+            "intent_confidence": routing_data.get("confidence"),
+            "skill_name": skill_name,
+            "execution_mode": execution_mode,
+        }
+
+        # Query entry-level detail for files the gateway actually read
+        context_consumed: list[dict] = []
+        files_with_entries = [
+            fname for fname, info in (gateway_attribution or {}).items()
+            if isinstance(info, dict) and info.get("entry_count", 0) > 0
+        ]
+
+        if files_with_entries:
+            factory = get_session_factory()
+            async with factory() as session:
+                # Set tenant RLS context
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+
+                result = await session.execute(
+                    select(ContextEntry)
+                    .where(
+                        ContextEntry.tenant_id == tenant_id,
+                        ContextEntry.file_name.in_(files_with_entries),
+                        ContextEntry.deleted_at.is_(None),
+                    )
+                    .order_by(ContextEntry.date.desc())
+                    .limit(50)
+                )
+                rows = result.scalars().all()
+
+                context_consumed = [
+                    {
+                        "entry_id": str(entry.id),
+                        "file_name": entry.file_name,
+                        "source": entry.source,
+                        "detail": entry.detail,
+                        "confidence": entry.confidence,
+                        "evidence_count": entry.evidence_count,
+                        "date": entry.date.isoformat() if entry.date else None,
+                    }
+                    for entry in rows
+                ]
+
+        return {
+            "version": 1,
+            "routing": routing,
+            "context_consumed": context_consumed,
+            "files_read": gateway_attribution or {},
+            "captured_at": datetime.now(timezone.utc).isoformat(),
+        }
+    except Exception as exc:
+        logger.warning("Reasoning trace building failed: %s", exc)
+        return {"version": 1, "error": str(exc)}
 
 
 async def execute_run(run: SkillRun) -> None:
@@ -221,6 +320,33 @@ async def execute_run(run: SkillRun) -> None:
             logger.warning(
                 "Attribution enrichment failed for run %s: %s", run.id, attr_err
             )
+
+        # Build reasoning trace (post-completion, entry-level detail)
+        try:
+            # Read current events_log for routing decision
+            async with factory() as session:
+                events_result = await session.execute(
+                    select(SkillRun.events_log).where(SkillRun.id == run.id)
+                )
+                current_events = events_result.scalar_one_or_none() or []
+
+            trace = await _build_reasoning_trace(
+                run.tenant_id,
+                run.user_id,
+                run.skill_name,
+                result.context_attribution or {},
+                current_events,
+                result.mode,
+            )
+            async with factory() as session:
+                await session.execute(
+                    update(SkillRun)
+                    .where(SkillRun.id == run.id)
+                    .values(reasoning_trace=trace)
+                )
+                await session.commit()
+        except Exception as trace_err:
+            logger.warning("Reasoning trace failed for run %s: %s", run.id, trace_err)
 
         # Emit "done" event with cost data (rendered_html omitted to avoid bloating events_log)
         await _append_event_atomic(factory, run.id, {

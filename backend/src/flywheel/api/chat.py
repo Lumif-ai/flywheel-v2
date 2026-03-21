@@ -8,11 +8,13 @@ POST /chat accepts a user message, classifies intent using Haiku, and either:
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
@@ -95,6 +97,31 @@ async def chat(
         await db.flush()
         await db.refresh(run)
         await db.commit()
+
+        # Store routing decision in events_log for reasoning trace builder.
+        # Uses atomic JSONB append (|| operator) per decision [20-01].
+        try:
+            routing_event = {
+                "event": "routing",
+                "data": {
+                    "action": intent.get("action"),
+                    "confidence": intent.get("confidence"),
+                    "skill_name": intent.get("skill_name"),
+                },
+            }
+            await db.execute(
+                sa_text("""
+                    UPDATE skill_runs
+                    SET events_log = events_log || :event::jsonb
+                    WHERE id = :run_id
+                """),
+                {"run_id": str(run.id), "event": json.dumps([routing_event])},
+            )
+            await db.commit()
+        except Exception as routing_err:
+            logger.warning(
+                "Failed to store routing event for run %s: %s", run.id, routing_err
+            )
 
         return ChatResponse(
             action="execute",
