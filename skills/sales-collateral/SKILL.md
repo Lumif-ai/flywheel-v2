@@ -1,6 +1,7 @@
 ---
 name: sales-collateral
 version: 1.1.0
+web_tier: 1
 description: Create professional B2B sales documents including value proposition one-pagers, partnership pitches, case studies (1-page and 2-page), and vertical-specific marketing collateral. Use when anyone asks to create a value prop doc, sales one-pager, partnership pitch, case study, marketing doc, customer-facing collateral, leave-behind, pitch doc, or any sales document. Also triggers on "create a one-pager", "make a value prop", "build a case study", "partnership one-pager", "sales collateral", "marketing one-pager", or any request to produce a professional sales document. ALWAYS use this skill when creating sales or marketing documents. Produces documents that are defensible, honest, and designed to survive scrutiny from senior buyers.
 ---
 
@@ -422,6 +423,19 @@ Every run MUST end with a clear deliverables block:
 ```
 
 ---
+
+## Tool Access (Web Platform)
+
+When running on the web platform, you have access to these tools via tool_use:
+
+- **context_read**: Read context files. Call with `{"file": "company-intel"}` to read a context file.
+- **context_write**: Write to context files. Call with `{"file": "company-intel", "content": ["line1", "line2"], "detail": "description", "confidence": "high"}`.
+- **context_query**: Search across context. Call with `{"search": "search terms"}`.
+- **web_search**: Search the web. Call with `{"query": "search query"}`. Limited to 20 searches per run.
+- **web_fetch**: Fetch and extract text from a URL. Call with `{"url": "https://..."}`.
+- **file_write**: Save generated output. Call with `{"filename": "output.html", "content": "<html>...", "mimetype": "text/html"}`.
+
+When running in Claude Code (CLI), use direct Python calls to context_utils instead.
 
 ## Reference Files
 

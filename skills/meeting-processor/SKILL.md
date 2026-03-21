@@ -18,6 +18,7 @@ dependencies:
 output:
   - context-store-writes
   - standalone-enriched-report
+web_tier: 1
 ---
 
 # meeting-processor
@@ -713,6 +714,19 @@ After processing, save any new learned preferences to the auto-memory file:
 - Entry detail format: "meeting-{date}-{company-slug}" or "contact: {firstname-lastname}"
 - Group calls: create one contacts.md entry per person, tag each with "Group call with [other names]"
 - Same person, different capacity: classify per-call, not per-person. An advisor in one call may be a customer contact in another.
+
+## Tool Access (Web Platform)
+
+When running on the web platform, you have access to these tools via tool_use:
+
+- **context_read**: Read context files. Call with `{"file": "company-intel"}` to read a context file.
+- **context_write**: Write to context files. Call with `{"file": "company-intel", "content": ["line1", "line2"], "detail": "description", "confidence": "high"}`.
+- **context_query**: Search across context. Call with `{"search": "search terms"}`.
+- **web_search**: Search the web. Call with `{"query": "search query"}`. Limited to 20 searches per run.
+- **web_fetch**: Fetch and extract text from a URL. Call with `{"url": "https://..."}`.
+- **file_write**: Save generated output. Call with `{"filename": "output.html", "content": "<html>...", "mimetype": "text/html"}`.
+
+When running in Claude Code (CLI), use direct Python calls to context_utils instead.
 
 ## Changelog
 

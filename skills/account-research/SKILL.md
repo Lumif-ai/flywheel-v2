@@ -18,6 +18,7 @@ dependencies:
 output:
   - account-research-profile
   - context-store-cross-references
+web_tier: 2
 ---
 
 # account-research

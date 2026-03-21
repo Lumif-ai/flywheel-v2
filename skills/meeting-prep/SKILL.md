@@ -23,6 +23,7 @@ output:
   - meeting-prep-briefing-html
   - context-store-cross-references
   - research-intelligence-writes
+web_tier: 1
 ---
 
 # meeting-prep
@@ -813,6 +814,19 @@ This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/co
 - **Anonymize past insights.** Say "teams in this segment report..." not specific names.
 - **Flag novel segments.** If first conversation in a segment, note it explicitly.
 - **Reference real companies.** Use actual company names from their background.
+
+## Tool Access (Web Platform)
+
+When running on the web platform, you have access to these tools via tool_use:
+
+- **context_read**: Read context files. Call with `{"file": "company-intel"}` to read a context file.
+- **context_write**: Write to context files. Call with `{"file": "company-intel", "content": ["line1", "line2"], "detail": "description", "confidence": "high"}`.
+- **context_query**: Search across context. Call with `{"search": "search terms"}`.
+- **web_search**: Search the web. Call with `{"query": "search query"}`. Limited to 20 searches per run.
+- **web_fetch**: Fetch and extract text from a URL. Call with `{"url": "https://..."}`.
+- **file_write**: Save generated output. Call with `{"filename": "output.html", "content": "<html>...", "mimetype": "text/html"}`.
+
+When running in Claude Code (CLI), use direct Python calls to context_utils instead.
 
 ## Changelog
 

@@ -14,6 +14,7 @@ compatibility: "Requires Playwright MCP server to be connected and active in Cla
 version: "1.2"
 context-aware: true
 recipe-aware: true
+web_tier: 3
 ---
 
 # Web Scraper / Data Extractor Skill

@@ -13,6 +13,7 @@ description: >
 compatibility: "Requires Playwright MCP server connected and active."
 version: "1.0"
 context-aware: true
+web_tier: 2
 ---
 
 # Company Fit Analyzer Skill
