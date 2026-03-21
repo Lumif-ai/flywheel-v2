@@ -801,7 +801,7 @@ def read_update_context() -> dict:
 def write_update_context(context: dict) -> str:
     """Write updated cumulative context back to skill-local state file.
 
-    Creates ~/lumifai/investor-updates/ directory if needed.
+    Creates investor-updates/ directory under FLYWHEEL_DATA_DIR if needed.
 
     Args:
         context: Dict with keys matching read_update_context() output.

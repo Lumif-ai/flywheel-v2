@@ -13,17 +13,14 @@ import csv
 import json
 import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 from statistics import mean
 from typing import Dict, List, Optional
 
-# Import context_utils from the same src/ directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-from context_utils import (
-    CONTEXT_ROOT,
+from flywheel.storage_backend import (
     append_entry,
+    list_context_files,
     log_event,
     parse_context_file,
     read_context,
@@ -36,10 +33,15 @@ from context_utils import (
 AGENT_ID = "ctx-gtm-pipeline"
 
 # Outreach tracker (read-only source for effectiveness signals)
-TRACKER_PATH = Path.home() / ".claude" / "gtm-stack" / "outreach-tracker.csv"
+_TRACKER_DIR = os.environ.get(
+    "FLYWHEEL_GTM_TRACKER",
+    str(Path.home() / ".claude" / "gtm-stack" / "outreach-tracker.csv"),
+)
+TRACKER_PATH = Path(_TRACKER_DIR)
 
 # Learning directory for effectiveness data
-LEARNING_DIR = CONTEXT_ROOT / "_learning"
+_DATA_DIR = os.environ.get("FLYWHEEL_DATA_DIR", str(Path.home() / "lumifai"))
+LEARNING_DIR = Path(_DATA_DIR) / "_learning"
 
 # Cold-start protection threshold
 MINIMUM_SAMPLE_SIZE = 5
@@ -89,17 +91,13 @@ def pre_read_context(agent_id: str = AGENT_ID) -> Dict[str, str]:
     """
     context_snapshot = {}
 
-    if not CONTEXT_ROOT.exists():
-        return context_snapshot
-
-    for f in CONTEXT_ROOT.iterdir():
-        if f.is_file() and f.suffix == ".md" and not f.name.startswith("_"):
-            try:
-                content = read_context(f.name, agent_id)
-                context_snapshot[f.name] = content
-            except Exception:
-                # Partial read failure is acceptable -- skip file
-                context_snapshot[f.name] = ""
+    for f in list_context_files():
+        try:
+            content = read_context(f, agent_id)
+            context_snapshot[f] = content
+        except Exception:
+            # Partial read failure is acceptable -- skip file
+            context_snapshot[f] = ""
 
     return context_snapshot
 
