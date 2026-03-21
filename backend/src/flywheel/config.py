@@ -46,6 +46,12 @@ class Settings(BaseSettings):
     microsoft_client_secret: str = ""
     microsoft_redirect_uri: str = "http://localhost:5173/api/v1/integrations/outlook/callback"
 
+    # Slack OAuth (workspace install via Events API)
+    slack_client_id: str = ""
+    slack_client_secret: str = ""
+    slack_signing_secret: str = ""
+    slack_redirect_uri: str = "http://localhost:5173/api/v1/integrations/slack/callback"
+
     # External APIs
     tavily_api_key: str = ""  # empty = web search disabled
 
