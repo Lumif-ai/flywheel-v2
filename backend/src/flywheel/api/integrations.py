@@ -4,6 +4,10 @@ Endpoints:
 - GET  /integrations/                          -- list integrations for tenant
 - GET  /integrations/google-calendar/authorize -- start OAuth flow
 - GET  /integrations/google-calendar/callback  -- OAuth callback (exchange code)
+- GET  /integrations/gmail/authorize           -- start Gmail OAuth flow
+- GET  /integrations/gmail/callback            -- Gmail OAuth callback
+- GET  /integrations/outlook/authorize         -- start Outlook OAuth flow
+- GET  /integrations/outlook/callback          -- Outlook OAuth callback
 - DELETE /integrations/{id}                    -- disconnect integration
 - POST /integrations/{id}/sync                 -- trigger immediate calendar sync
 - GET  /integrations/suggestions               -- meeting prep suggestions
@@ -25,11 +29,22 @@ from flywheel.services.calendar_sync import (
     get_meeting_prep_suggestions,
     sync_calendar,
 )
+from flywheel.config import settings
 from flywheel.services.google_calendar import (
     TokenRevokedException,
     exchange_code,
     generate_auth_url,
     serialize_credentials,
+)
+from flywheel.services.google_gmail import (
+    exchange_gmail_code,
+    generate_gmail_auth_url,
+    serialize_credentials as serialize_gmail_credentials,
+)
+from flywheel.services.microsoft_outlook import (
+    exchange_outlook_code,
+    generate_outlook_auth_url,
+    serialize_outlook_credentials,
 )
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
@@ -40,11 +55,19 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 # ---------------------------------------------------------------------------
 
 
+_PROVIDER_DISPLAY = {
+    "google-calendar": "Google Calendar",
+    "gmail": "Gmail",
+    "outlook": "Outlook",
+}
+
+
 def _integration_to_dict(i: Integration) -> dict:
     """Serialize an Integration ORM object to a JSON-friendly dict."""
     return {
         "id": str(i.id),
         "provider": i.provider,
+        "provider_display": _PROVIDER_DISPLAY.get(i.provider, i.provider),
         "status": i.status,
         "settings": i.settings,
         "last_synced_at": i.last_synced_at.isoformat() if i.last_synced_at else None,
@@ -166,6 +189,195 @@ async def google_calendar_callback(
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
     integration.settings = {"sync_token": None}  # Clear oauth_state, init sync_token
+    await db.commit()
+
+    return {"status": "connected", "id": str(integration.id)}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/gmail/authorize
+# ---------------------------------------------------------------------------
+
+
+@router.get("/gmail/authorize")
+async def authorize_gmail(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Start Gmail OAuth flow.
+
+    Creates a pending Integration row with a cryptographic state parameter
+    for CSRF protection, then returns the Google authorization URL with
+    gmail.send scope.
+    """
+    state = secrets.token_urlsafe(32)
+
+    integration = Integration(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        provider="gmail",
+        status="pending",
+        settings={"oauth_state": state},
+    )
+    db.add(integration)
+    await db.commit()
+    await db.refresh(integration)
+
+    auth_url = generate_gmail_auth_url(state)
+
+    return {"auth_url": auth_url, "state": state}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/gmail/callback
+# ---------------------------------------------------------------------------
+
+
+@router.get("/gmail/callback")
+async def gmail_callback(
+    code: str = Query(..., description="Authorization code from Google"),
+    state: str = Query(..., description="State parameter for CSRF verification"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Handle Gmail OAuth callback.
+
+    Verifies the state parameter, exchanges the authorization code for
+    credentials, encrypts them, and updates the Integration row.
+    """
+    result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == user.tenant_id,
+            Integration.provider == "gmail",
+            Integration.status == "pending",
+        )
+    )
+    pending = result.scalars().all()
+
+    integration = None
+    for p in pending:
+        if p.settings and p.settings.get("oauth_state") == state:
+            integration = p
+            break
+
+    if integration is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OAuth state. Please restart the Gmail authorization flow.",
+        )
+
+    try:
+        creds = exchange_gmail_code(code)
+    except ValueError as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Gmail OAuth code exchange failed: {exc}",
+        ) from exc
+
+    encrypted = serialize_gmail_credentials(creds)
+    integration.status = "connected"
+    integration.credentials_encrypted = encrypted
+    integration.settings = {}  # Clear oauth_state
+    await db.commit()
+
+    return {"status": "connected", "id": str(integration.id)}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/outlook/authorize
+# ---------------------------------------------------------------------------
+
+
+@router.get("/outlook/authorize")
+async def authorize_outlook(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Start Outlook OAuth flow.
+
+    Creates a pending Integration row with a cryptographic state parameter
+    for CSRF protection, then returns the Microsoft authorization URL.
+    """
+    state = secrets.token_urlsafe(32)
+
+    integration = Integration(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        provider="outlook",
+        status="pending",
+        settings={"oauth_state": state},
+    )
+    db.add(integration)
+    await db.commit()
+    await db.refresh(integration)
+
+    auth_url = generate_outlook_auth_url(state, settings.microsoft_redirect_uri)
+
+    return {"auth_url": auth_url, "state": state}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/outlook/callback
+# ---------------------------------------------------------------------------
+
+
+@router.get("/outlook/callback")
+async def outlook_callback(
+    code: str = Query(..., description="Authorization code from Microsoft"),
+    state: str = Query(..., description="State parameter for CSRF verification"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Handle Outlook OAuth callback.
+
+    Verifies the state parameter, exchanges the authorization code for
+    tokens via MSAL, encrypts them, and updates the Integration row.
+    """
+    result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == user.tenant_id,
+            Integration.provider == "outlook",
+            Integration.status == "pending",
+        )
+    )
+    pending = result.scalars().all()
+
+    integration = None
+    for p in pending:
+        if p.settings and p.settings.get("oauth_state") == state:
+            integration = p
+            break
+
+    if integration is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OAuth state. Please restart the Outlook authorization flow.",
+        )
+
+    try:
+        token_result = exchange_outlook_code(code, settings.microsoft_redirect_uri)
+    except ValueError as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Outlook OAuth code exchange failed: {exc}",
+        ) from exc
+
+    encrypted = serialize_outlook_credentials(token_result)
+    integration.status = "connected"
+    integration.credentials_encrypted = encrypted
+    integration.settings = {}  # Clear oauth_state
     await db.commit()
 
     return {"status": "connected", "id": str(integration.id)}
