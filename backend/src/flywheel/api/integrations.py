@@ -5,7 +5,8 @@ Endpoints:
 - GET  /integrations/google-calendar/authorize -- start OAuth flow
 - GET  /integrations/google-calendar/callback  -- OAuth callback (exchange code)
 - DELETE /integrations/{id}                    -- disconnect integration
-- POST /integrations/{id}/sync                 -- stub: returns 501 (Phase 23 Plan 02)
+- POST /integrations/{id}/sync                 -- trigger immediate calendar sync
+- GET  /integrations/suggestions               -- meeting prep suggestions
 """
 
 from __future__ import annotations
@@ -14,14 +15,18 @@ import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Integration
+from flywheel.services.calendar_sync import (
+    get_meeting_prep_suggestions,
+    sync_calendar,
+)
 from flywheel.services.google_calendar import (
+    TokenRevokedException,
     exchange_code,
     generate_auth_url,
     serialize_credentials,
@@ -203,13 +208,53 @@ async def disconnect_integration(
 async def sync_integration(
     integration_id: UUID,
     user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Stub: Calendar sync available after first background sync (Plan 02)."""
-    return JSONResponse(
-        status_code=501,
-        content={
-            "error": "NotImplemented",
-            "message": "Calendar sync available after first background sync",
-            "code": 501,
-        },
+    """Trigger an immediate calendar sync for a specific integration."""
+    integration = (
+        await db.execute(
+            select(Integration).where(Integration.id == integration_id)
+        )
+    ).scalar_one_or_none()
+
+    if integration is None:
+        raise HTTPException(status_code=404, detail="Integration not found")
+
+    if integration.status != "connected":
+        raise HTTPException(
+            status_code=400, detail="Integration not connected"
+        )
+
+    try:
+        count = await sync_calendar(db, integration)
+    except TokenRevokedException:
+        integration.status = "disconnected"
+        integration.credentials_encrypted = None
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail="Google Calendar access has been revoked. Please reconnect.",
+        )
+
+    return {"synced": True, "events_processed": count}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/suggestions
+# ---------------------------------------------------------------------------
+
+
+@router.get("/suggestions")
+async def list_suggestions(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Get proactive meeting prep suggestions.
+
+    Returns meetings with external attendees within the next 48 hours
+    that haven't been dismissed by the user.
+    """
+    suggestions = await get_meeting_prep_suggestions(
+        db, user.tenant_id, user.sub
     )
+    return {"suggestions": suggestions}

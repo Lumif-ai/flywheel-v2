@@ -31,6 +31,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: startup and shutdown hooks."""
     queue_task = None
     cleaner_task = None
+    calendar_sync_task = None
 
     # Startup
     if settings.flywheel_backend == "postgres":
@@ -47,13 +48,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from flywheel.services.job_queue import job_queue_loop
         from flywheel.services.stale_job_cleaner import cleanup_stale_jobs
 
+        from flywheel.services.calendar_sync import calendar_sync_loop
+
         queue_task = asyncio.create_task(job_queue_loop())
         cleaner_task = asyncio.create_task(cleanup_stale_jobs())
+        calendar_sync_task = asyncio.create_task(calendar_sync_loop())
 
     yield
 
     # Shutdown
-    for task in (queue_task, cleaner_task):
+    for task in (queue_task, cleaner_task, calendar_sync_task):
         if task is not None:
             task.cancel()
             try:
