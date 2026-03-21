@@ -16,6 +16,7 @@ from flywheel.api.auth import router as auth_router
 from flywheel.api.chat import router as chat_router
 from flywheel.api.context import router as context_router
 from flywheel.api.files import router as files_router
+from flywheel.api.focus import router as focus_router
 from flywheel.api.learning import router as learning_router
 from flywheel.api.errors import register_error_handlers
 from flywheel.api.health import router as health_router
@@ -138,6 +139,7 @@ def create_app() -> FastAPI:
     app.include_router(learning_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
+    app.include_router(focus_router, prefix="/api/v1")
 
     return app
 
