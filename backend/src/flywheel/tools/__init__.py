@@ -119,4 +119,49 @@ def create_registry() -> ToolRegistry:
         requires_budget=None,
     ))
 
+    # Browser tools (require local agent connection, no budget)
+    from flywheel.tools.browser_tools import (
+        handle_browser_navigate,
+        handle_browser_click,
+        handle_browser_type,
+        handle_browser_extract,
+        handle_browser_screenshot,
+    )
+
+    registry.register(ToolDefinition(
+        name="browser_navigate",
+        version=1,
+        schema=TOOL_SCHEMAS["browser_navigate"],
+        handler=handle_browser_navigate,
+        requires_budget=None,
+    ))
+    registry.register(ToolDefinition(
+        name="browser_click",
+        version=1,
+        schema=TOOL_SCHEMAS["browser_click"],
+        handler=handle_browser_click,
+        requires_budget=None,
+    ))
+    registry.register(ToolDefinition(
+        name="browser_type",
+        version=1,
+        schema=TOOL_SCHEMAS["browser_type"],
+        handler=handle_browser_type,
+        requires_budget=None,
+    ))
+    registry.register(ToolDefinition(
+        name="browser_extract",
+        version=1,
+        schema=TOOL_SCHEMAS["browser_extract"],
+        handler=handle_browser_extract,
+        requires_budget=None,
+    ))
+    registry.register(ToolDefinition(
+        name="browser_screenshot",
+        version=1,
+        schema=TOOL_SCHEMAS["browser_screenshot"],
+        handler=handle_browser_screenshot,
+        requires_budget=None,
+    ))
+
     return registry

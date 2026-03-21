@@ -164,4 +164,82 @@ TOOL_SCHEMAS: dict[str, dict] = {
             "required": ["code"],
         },
     },
+    # Browser tools (require local agent connection)
+    "browser_navigate": {
+        "description": (
+            "Navigate to a URL using the local browser agent. Returns page "
+            "text content (truncated to 50KB). Requires the user's local "
+            "agent to be connected."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "url": {
+                    "type": "string",
+                    "description": "The URL to navigate to.",
+                },
+            },
+            "required": ["url"],
+        },
+    },
+    "browser_click": {
+        "description": (
+            "Click an element by CSS selector in the local browser."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector of the element to click.",
+                },
+            },
+            "required": ["selector"],
+        },
+    },
+    "browser_type": {
+        "description": (
+            "Type text into a form field by CSS selector in the local browser."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector of the input field.",
+                },
+                "text": {
+                    "type": "string",
+                    "description": "The text to type into the field.",
+                },
+            },
+            "required": ["selector", "text"],
+        },
+    },
+    "browser_extract": {
+        "description": (
+            "Extract text content from a specific element by CSS selector "
+            "in the local browser."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "selector": {
+                    "type": "string",
+                    "description": "CSS selector of the element to extract text from.",
+                },
+            },
+            "required": ["selector"],
+        },
+    },
+    "browser_screenshot": {
+        "description": (
+            "Take a screenshot of the current page in the local browser. "
+            "Returns base64-encoded JPEG."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {},
+        },
+    },
 }
