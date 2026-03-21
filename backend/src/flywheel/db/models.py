@@ -1,8 +1,9 @@
-"""SQLAlchemy 2.0 ORM models for all 11 Flywheel tables.
+"""SQLAlchemy 2.0 ORM models for all 14 Flywheel tables.
 
 Schema matches V2-PRODUCT-SPEC.md. Tables are divided into:
 - System tables (tenants, users) -- NOT tenant-scoped, no RLS
 - Tenant-scoped tables (9 tables) -- all have tenant_id FK, RLS enforced
+- Context graph tables (3 tables) -- entity graph layer on top of context_entries
 """
 
 from __future__ import annotations
@@ -421,4 +422,104 @@ class SuggestionDismissal(Base):
     expires_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True),
         server_default=text("now() + interval '7 days'"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# CONTEXT GRAPH TABLES (entity graph layer on top of context_entries)
+# ---------------------------------------------------------------------------
+
+
+class ContextEntity(Base):
+    __tablename__ = "context_entities"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "name", "entity_type",
+            name="uq_entity_tenant_name_type",
+        ),
+        Index("idx_entities_aliases", "aliases", postgresql_using="gin"),
+        Index("idx_entities_tenant_type", "tenant_id", "entity_type"),
+        Index("idx_entities_tenant_name", "tenant_id", "name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    entity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    aliases: Mapped[list[str] | None] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    mention_count: Mapped[int] = mapped_column(
+        Integer, server_default=text("1")
+    )
+    first_seen_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    last_seen_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class ContextRelationship(Base):
+    __tablename__ = "context_relationships"
+    __table_args__ = (
+        Index("idx_relationships_tenant_a", "tenant_id", "entity_a_id"),
+        Index("idx_relationships_tenant_b", "tenant_id", "entity_b_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    entity_a_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    entity_b_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_entities.id", ondelete="CASCADE"), nullable=False
+    )
+    relationship: Mapped[str] = mapped_column(Text, nullable=False)
+    source_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("context_entries.id")
+    )
+    focus_id: Mapped[UUID | None] = mapped_column()
+    directional: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("true")
+    )
+    confidence: Mapped[str] = mapped_column(Text, server_default="medium")
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class ContextEntityEntry(Base):
+    __tablename__ = "context_entity_entries"
+
+    entity_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_entities.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    entry_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_entries.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    mention_type: Mapped[str] = mapped_column(
+        Text, server_default="explicit"
     )
