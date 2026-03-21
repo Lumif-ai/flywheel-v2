@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
 from flywheel.api.admin import router as admin_router
+from flywheel.api.graph import router as graph_router
 from flywheel.api.auth import router as auth_router
 from flywheel.api.chat import router as chat_router
 from flywheel.api.context import router as context_router
@@ -136,6 +137,7 @@ def create_app() -> FastAPI:
     app.include_router(files_router, prefix="/api/v1")
     app.include_router(learning_router, prefix="/api/v1")
     app.include_router(admin_router, prefix="/api/v1")
+    app.include_router(graph_router, prefix="/api/v1")
 
     return app
 

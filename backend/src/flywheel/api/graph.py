@@ -241,3 +241,57 @@ async def list_entities(
     ]
 
     return _paginated_response(items, total, offset, limit)
+
+
+# ---------------------------------------------------------------------------
+# PUT /context/graph/aliases -- tenant alias map management
+# ---------------------------------------------------------------------------
+
+
+class AliasMapRequest(BaseModel):
+    entity_aliases: dict[str, str]  # alias -> canonical name
+
+
+@router.put("/aliases")
+async def update_aliases(
+    body: AliasMapRequest,
+    user: TokenPayload = Depends(require_admin),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Update the tenant's entity alias map. Admin only."""
+    import json as _json
+
+    aliases_json = _json.dumps(body.entity_aliases)
+
+    await db.execute(
+        text(
+            "UPDATE tenants SET settings = jsonb_set("
+            "COALESCE(settings, '{}'::jsonb), "
+            "'{entity_aliases}', :aliases_json::jsonb"
+            ") WHERE id = :tid"
+        ),
+        {"aliases_json": aliases_json, "tid": str(user.tenant_id)},
+    )
+    await db.commit()
+
+    return {
+        "status": "updated",
+        "entity_aliases": body.entity_aliases,
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /context/graph/backfill -- admin backfill trigger
+# ---------------------------------------------------------------------------
+
+
+@router.post("/backfill")
+async def backfill_graph(
+    user: TokenPayload = Depends(require_admin),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Backfill graph data for all existing context entries. Admin only."""
+    from flywheel.storage import backfill_graph_for_entries
+
+    stats = await backfill_graph_for_entries(db, str(user.tenant_id))
+    return stats
