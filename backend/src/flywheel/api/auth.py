@@ -1,8 +1,9 @@
-"""Auth endpoints: magic link, anonymous sign-in, user profile, BYOK API key.
+"""Auth endpoints: magic link, anonymous sign-in, token refresh, user profile, BYOK API key.
 
 Public endpoints (no auth):
 - POST /auth/magic-link  -- send magic link email via Supabase
 - POST /auth/anonymous   -- create anonymous session
+- POST /auth/refresh     -- exchange refresh_token for new tokens
 
 Authenticated endpoints:
 - GET  /auth/me           -- user profile with has_api_key flag
@@ -25,6 +26,7 @@ from flywheel.api.deps import get_current_user, get_db_unscoped, require_tenant
 from flywheel.auth.encryption import encrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.auth.supabase_client import get_supabase_admin
+from flywheel.config import settings
 from flywheel.db.models import Tenant, User, UserTenant
 from flywheel.middleware.rate_limit import limiter
 
@@ -42,6 +44,10 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 class MagicLinkRequest(BaseModel):
     email: str
     redirect_to: str | None = None
+
+
+class RefreshTokenRequest(BaseModel):
+    refresh_token: str
 
 
 class APIKeyRequest(BaseModel):
@@ -111,6 +117,46 @@ async def anonymous():
             "id": str(user.id),
             "is_anonymous": user.is_anonymous,
         },
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /auth/refresh (public -- refresh_token IS the credential)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/refresh")
+@limiter.limit(settings.rate_limit_default)
+async def refresh_token(request: Request, body: RefreshTokenRequest):
+    """Exchange a valid refresh_token for new access + refresh tokens."""
+    url = f"{settings.supabase_url}/auth/v1/token?grant_type=refresh_token"
+    headers = {
+        "apikey": settings.supabase_service_key,
+        "content-type": "application/json",
+    }
+    payload = {"refresh_token": body.refresh_token}
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.post(url, headers=headers, json=payload, timeout=10.0)
+        except httpx.HTTPError:
+            logger.exception("refresh_token_error")
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail="Could not reach auth provider",
+            )
+
+    if resp.status_code != 200:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or expired refresh token",
+        )
+
+    data = resp.json()
+    return {
+        "access_token": data["access_token"],
+        "refresh_token": data["refresh_token"],
+        "expires_at": data["expires_at"],
     }
 
 
