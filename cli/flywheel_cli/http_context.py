@@ -283,7 +283,7 @@ class _BatchOperation:
     def append_entry(self, file: str, entry: dict) -> None:
         """Stage an entry for batch submission."""
         self._entries.append({
-            "file": file,
+            "file_name": file,
             "content": entry["content"],
             "source": self.source,
             "detail": entry.get("detail"),
