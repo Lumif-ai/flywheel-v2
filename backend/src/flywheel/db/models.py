@@ -271,6 +271,7 @@ class SkillRun(Base):
     attribution: Mapped[dict] = mapped_column(
         JSONB, server_default=text("'{}'::jsonb")
     )
+    reasoning_trace: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     tokens_used: Mapped[int | None] = mapped_column(Integer)
     cost_estimate: Mapped[float | None] = mapped_column(Numeric(10, 4))
     duration_ms: Mapped[int | None] = mapped_column(Integer)
