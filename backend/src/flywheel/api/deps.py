@@ -14,7 +14,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncGenerator
 
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -62,14 +62,20 @@ async def require_admin(
 
 
 async def get_tenant_db(
+    request: Request,
     user: TokenPayload = Depends(require_tenant),
 ) -> AsyncGenerator[AsyncSession, None]:
-    """Yield a tenant-scoped AsyncSession with RLS context set."""
+    """Yield a tenant-scoped AsyncSession with RLS context set.
+
+    Reads X-Focus-Id header to propagate active focus into session config.
+    """
+    focus_id = request.headers.get("x-focus-id")
     factory = get_session_factory()
     session = await get_tenant_session(
         factory,
         tenant_id=str(user.tenant_id),
         user_id=str(user.sub),
+        focus_id=focus_id,
     )
     try:
         yield session
