@@ -129,6 +129,7 @@ async def read_entries(
     search: str | None = Query(None),
     source: str | None = Query(None),
     min_confidence: str | None = Query(None),
+    focus_id: str | None = Query(None),
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
@@ -139,6 +140,11 @@ async def read_entries(
         ContextEntry.file_name == file_name,
         ContextEntry.deleted_at.is_(None),
     )
+
+    # Explicit focus filter (user requests entries from one focus only)
+    if focus_id is not None:
+        from uuid import UUID as _UUID
+        base = base.where(ContextEntry.focus_id == _UUID(focus_id))
 
     if source is not None:
         base = base.where(ContextEntry.source.ilike(f"%{source}%"))
@@ -424,7 +430,12 @@ async def search_entries(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Cross-file full-text search across all context entries in the tenant."""
+    """Cross-file full-text search across all context entries in the tenant.
+
+    When the user has an active focus, results are re-sorted within each page
+    using focus_weight as a secondary factor (ts_rank remains primary).
+    V1 limitation: reranking is per-page, not global.
+    """
     limit = min(limit, 100)
     ts_query = func.plainto_tsquery("english", q)
 
@@ -444,6 +455,33 @@ async def search_entries(
     )
     result = await db.execute(data_stmt)
     entries = result.scalars().all()
+
+    # Focus-aware secondary re-sort within the current page
+    active_focus_id_str = None
+    try:
+        focus_result = await db.execute(
+            text("SELECT current_setting('app.focus_id', true)")
+        )
+        active_focus_id_str = focus_result.scalar()
+    except Exception:
+        pass
+
+    if active_focus_id_str:
+        from uuid import UUID as _UUID
+        try:
+            active_fid = _UUID(active_focus_id_str)
+
+            def _focus_weight(entry: ContextEntry) -> float:
+                if entry.focus_id == active_fid:
+                    return 1.0
+                if entry.focus_id is None:
+                    return 0.8
+                return 0.5
+
+            # Stable sort by focus_weight descending preserves ts_rank within groups
+            entries = sorted(entries, key=_focus_weight, reverse=True)
+        except (ValueError, AttributeError):
+            pass  # Invalid UUID in setting, skip reranking
 
     return _paginated_response(
         [_entry_to_dict(e) for e in entries], total, offset, limit

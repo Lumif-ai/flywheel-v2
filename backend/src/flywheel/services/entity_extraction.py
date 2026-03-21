@@ -256,6 +256,20 @@ async def process_entry_for_graph(
 
         # 5. Persist relationships (check for duplicates via SELECT before INSERT)
         tid = UUID(tenant_id) if isinstance(tenant_id, str) else tenant_id
+
+        # Read focus_id from session config (set by RLS middleware when active)
+        focus_id_value = None
+        try:
+            from sqlalchemy import text as _sa_text
+            focus_result = await session.execute(
+                _sa_text("SELECT current_setting('app.focus_id', true)")
+            )
+            focus_id_str = focus_result.scalar()
+            if focus_id_str:
+                focus_id_value = UUID(focus_id_str)
+        except Exception:
+            pass  # No focus_id in session, relationships remain unscoped
+
         for rel in rels:
             a_key = (rel.entity_a_name.strip().lower(), rel.entity_a_type)
             b_key = (rel.entity_b_name.strip().lower(), rel.entity_b_type)
@@ -281,6 +295,7 @@ async def process_entry_for_graph(
                 entity_b_id=db_b.id,
                 relationship=rel.relationship,
                 source_entry_id=entry_id,
+                focus_id=focus_id_value,
             )
             session.add(new_rel)
 
