@@ -168,8 +168,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "browser_navigate": {
         "description": (
             "Navigate to a URL using the local browser agent. Returns page "
-            "text content (truncated to 50KB). Requires the user's local "
-            "agent to be connected."
+            "text content (truncated to 50KB). (Requires local agent)"
         ),
         "input_schema": {
             "type": "object",
@@ -184,7 +183,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
     },
     "browser_click": {
         "description": (
-            "Click an element by CSS selector in the local browser."
+            "Click an element by CSS selector in the local browser. "
+            "(Requires local agent)"
         ),
         "input_schema": {
             "type": "object",
@@ -199,7 +199,8 @@ TOOL_SCHEMAS: dict[str, dict] = {
     },
     "browser_type": {
         "description": (
-            "Type text into a form field by CSS selector in the local browser."
+            "Type text into a form field by CSS selector in the local browser. "
+            "(Requires local agent)"
         ),
         "input_schema": {
             "type": "object",
@@ -219,7 +220,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "browser_extract": {
         "description": (
             "Extract text content from a specific element by CSS selector "
-            "in the local browser."
+            "in the local browser. (Requires local agent)"
         ),
         "input_schema": {
             "type": "object",
@@ -235,7 +236,7 @@ TOOL_SCHEMAS: dict[str, dict] = {
     "browser_screenshot": {
         "description": (
             "Take a screenshot of the current page in the local browser. "
-            "Returns base64-encoded JPEG."
+            "Returns base64-encoded JPEG. (Requires local agent)"
         ),
         "input_schema": {
             "type": "object",
