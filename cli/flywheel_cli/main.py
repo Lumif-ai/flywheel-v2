@@ -17,6 +17,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.table import Table
 
+from flywheel_cli.agent.commands import agent
 from flywheel_cli.auth import (
     clear_credentials,
     get_token,
@@ -512,3 +513,10 @@ def logout() -> None:
     """Remove stored credentials."""
     clear_credentials()
     console.print("[green]Logged out successfully.[/green]")
+
+
+# ---------------------------------------------------------------------------
+# Agent (local browser agent)
+# ---------------------------------------------------------------------------
+
+cli.add_command(agent)
