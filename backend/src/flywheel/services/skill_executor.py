@@ -27,7 +27,7 @@ from uuid import UUID
 from sqlalchemy import text as sa_text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from flywheel.db.models import ContextEntry, SkillRun, User
+from flywheel.db.models import ContextEntry, Focus, SkillRun, Tenant, User, UserFocus
 from flywheel.db.session import get_session_factory
 from sqlalchemy import select
 
@@ -43,6 +43,130 @@ _env_lock = threading.Lock()
 
 # Path to the engines directory (v1 execution gateway location)
 _ENGINES_DIR = Path(__file__).resolve().parents[3] / "engines"
+
+
+def merge_settings(tenant_settings: dict | None, focus_settings: dict | None) -> dict:
+    """Shallow merge: focus settings override tenant defaults key-by-key.
+
+    Always merge at read time, never persist merged results.
+    """
+    if not focus_settings:
+        return dict(tenant_settings) if tenant_settings else {}
+    return {**(tenant_settings or {}), **focus_settings}
+
+
+async def get_merged_settings(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_id: UUID,
+    focus_id: UUID | None,
+) -> dict:
+    """Query tenant and focus settings, return shallow-merged result.
+
+    If focus_id is None, returns tenant settings only.
+    """
+    async with factory() as session:
+        tenant_result = await session.execute(
+            select(Tenant.settings).where(Tenant.id == tenant_id)
+        )
+        tenant_settings = tenant_result.scalar_one_or_none() or {}
+
+        focus_settings = None
+        if focus_id is not None:
+            focus_result = await session.execute(
+                select(Focus.settings).where(Focus.id == focus_id)
+            )
+            focus_settings = focus_result.scalar_one_or_none()
+
+    return merge_settings(tenant_settings, focus_settings)
+
+
+async def resolve_weighted_context(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_id: UUID,
+    active_focus_id: UUID | None,
+    file_names: list[str],
+) -> list[tuple[ContextEntry, float]]:
+    """Query context entries for given files with focus-based weighting.
+
+    Weighting rules:
+    - active_focus_id is None -> all entries weight 1.0
+    - entry.focus_id == active_focus_id -> weight 1.0
+    - entry.focus_id is None -> weight 0.8 (global/unscoped)
+    - entry.focus_id != active_focus_id -> weight 0.5
+    - If focus is archived, entries from it get weight 0.5 regardless
+
+    Returns entries sorted by (composite_score * focus_weight) descending.
+    CRITICAL: Never filters out entries -- only sort order changes.
+    """
+    async with factory() as session:
+        await session.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+
+        result = await session.execute(
+            select(ContextEntry)
+            .where(
+                ContextEntry.tenant_id == tenant_id,
+                ContextEntry.file_name.in_(file_names),
+                ContextEntry.deleted_at.is_(None),
+            )
+        )
+        rows = result.scalars().all()
+
+        if not rows:
+            return []
+
+        # Look up archived focuses to apply weight penalty
+        archived_focus_ids: set[UUID] = set()
+        if active_focus_id is not None:
+            focus_ids_in_rows = {r.focus_id for r in rows if r.focus_id is not None}
+            if focus_ids_in_rows:
+                archived_result = await session.execute(
+                    select(Focus.id).where(
+                        Focus.id.in_(focus_ids_in_rows),
+                        Focus.archived_at.is_not(None),
+                    )
+                )
+                archived_focus_ids = set(archived_result.scalars().all())
+
+    # Apply weighting
+    weighted: list[tuple[ContextEntry, float]] = []
+    for entry in rows:
+        if active_focus_id is None:
+            weight = 1.0
+        elif entry.focus_id is not None and entry.focus_id in archived_focus_ids:
+            weight = 0.5
+        elif entry.focus_id == active_focus_id:
+            weight = 1.0
+        elif entry.focus_id is None:
+            weight = 0.8
+        else:
+            weight = 0.5
+
+        composite_score = getattr(entry, "composite_score", None) or 0.5
+        weighted.append((entry, composite_score * weight))
+
+    # Sort by weighted score descending
+    weighted.sort(key=lambda x: x[1], reverse=True)
+    return weighted
+
+
+async def _get_user_active_focus(
+    factory: async_sessionmaker[AsyncSession],
+    user_id: UUID,
+    tenant_id: UUID,
+) -> UUID | None:
+    """Get the user's active focus_id for the given tenant, or None."""
+    async with factory() as session:
+        result = await session.execute(
+            select(UserFocus.focus_id).where(
+                UserFocus.user_id == user_id,
+                UserFocus.tenant_id == tenant_id,
+                UserFocus.active.is_(True),
+            )
+        )
+        return result.scalar_one_or_none()
 
 
 async def _build_attribution(
@@ -91,7 +215,12 @@ async def _build_attribution(
                 "files_consulted": list(set(r.file_name for r in rows)),
                 "sources": list(set(r.source for r in rows if r.source)),
                 "entries_read": [
-                    {"id": str(r.id), "file": r.file_name, "source": r.source}
+                    {
+                        "id": str(r.id),
+                        "file": r.file_name,
+                        "source": r.source,
+                        "focus_id": str(r.focus_id) if r.focus_id else None,
+                    }
                     for r in rows[:20]  # Cap detail at 20
                 ],
             }
@@ -283,6 +412,11 @@ async def execute_run(run: SkillRun) -> None:
                 "No API key configured. Please add your Anthropic API key in Settings."
             )
 
+        # Look up user's active focus before creating RunContext
+        active_focus_id = await _get_user_active_focus(
+            factory, run.user_id, run.tenant_id
+        )
+
         # Create tool registry and run context for web execution path
         from flywheel.tools import create_registry
         from flywheel.tools.registry import RunContext
@@ -295,6 +429,18 @@ async def execute_run(run: SkillRun) -> None:
             run_id=run.id,
             budget=RunBudget(),
             session_factory=factory,
+            focus_id=active_focus_id,
+        )
+
+        # Merge tenant + focus settings (available for system prompt context)
+        merged_settings = await get_merged_settings(
+            factory, run.tenant_id, active_focus_id
+        )
+        logger.info(
+            "Run %s: active_focus=%s, merged_settings_keys=%s",
+            run.id,
+            active_focus_id,
+            list(merged_settings.keys()) if merged_settings else [],
         )
 
         try:

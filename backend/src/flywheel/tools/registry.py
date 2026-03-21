@@ -29,6 +29,7 @@ class RunContext:
     run_id: UUID
     budget: RunBudget
     session_factory: async_sessionmaker[AsyncSession]
+    focus_id: UUID | None = None
 
 
 @dataclass
