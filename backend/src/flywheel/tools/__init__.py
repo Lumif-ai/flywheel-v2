@@ -63,17 +63,25 @@ def create_registry() -> ToolRegistry:
         requires_budget=None,
     ))
 
-    # Web tools (budget-tracked)
-    from flywheel.tools.web_search import handle_web_search
+    # Web tools (budget-tracked, tavily dependency is optional)
+    try:
+        from flywheel.tools.web_search import handle_web_search
+
+        registry.register(ToolDefinition(
+            name="web_search",
+            version=1,
+            schema=TOOL_SCHEMAS["web_search"],
+            handler=handle_web_search,
+            requires_budget="web_search",
+        ))
+    except ImportError:
+        import logging
+        logging.getLogger(__name__).warning(
+            "tavily-python not installed -- web_search tool unavailable"
+        )
+
     from flywheel.tools.web_fetch import handle_web_fetch
 
-    registry.register(ToolDefinition(
-        name="web_search",
-        version=1,
-        schema=TOOL_SCHEMAS["web_search"],
-        handler=handle_web_search,
-        requires_budget="web_search",
-    ))
     registry.register(ToolDefinition(
         name="web_fetch",
         version=1,
@@ -82,7 +90,33 @@ def create_registry() -> ToolRegistry:
         requires_budget="web_fetch",
     ))
 
-    # File tools and python_execute are registered in Plan 02
-    # (handlers not yet implemented)
+    # File I/O tools (no budget)
+    from flywheel.tools.file_tools import handle_file_read, handle_file_write
+
+    registry.register(ToolDefinition(
+        name="file_read",
+        version=1,
+        schema=TOOL_SCHEMAS["file_read"],
+        handler=handle_file_read,
+        requires_budget=None,
+    ))
+    registry.register(ToolDefinition(
+        name="file_write",
+        version=1,
+        schema=TOOL_SCHEMAS["file_write"],
+        handler=handle_file_write,
+        requires_budget=None,
+    ))
+
+    # Python sandbox (no budget)
+    from flywheel.tools.python_execute import handle_python_execute
+
+    registry.register(ToolDefinition(
+        name="python_execute",
+        version=1,
+        schema=TOOL_SCHEMAS["python_execute"],
+        handler=handle_python_execute,
+        requires_budget=None,
+    ))
 
     return registry
