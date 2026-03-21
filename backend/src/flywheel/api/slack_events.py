@@ -75,10 +75,10 @@ async def slack_events_webhook(
 
     # Queue for background processing and ACK immediately (3-second requirement)
     # We need a DB session for background processing -- get it lazily
-    from flywheel.db.engine import async_session_factory
+    from flywheel.db.session import get_session_factory
 
     async def _process_event():
-        async with async_session_factory() as db:
+        async with get_session_factory()() as db:
             await process_slack_event(payload, db)
 
     background_tasks.add_task(_process_event)
@@ -126,10 +126,10 @@ async def slack_commands_webhook(
         "channel_id": form.get("channel_id"),
     }
 
-    # Process command (placeholder returns acknowledgment in Plan 03)
-    from flywheel.db.engine import async_session_factory
+    # Process command
+    from flywheel.db.session import get_session_factory
 
-    async with async_session_factory() as db:
+    async with get_session_factory()() as db:
         result = await process_slack_command(command_payload, db)
 
     return result
