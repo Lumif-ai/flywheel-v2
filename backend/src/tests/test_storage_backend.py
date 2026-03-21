@@ -38,13 +38,42 @@ class TestStorageBackendFlatfile(unittest.TestCase):
         self.assertIs(storage_backend.batch_context, context_utils.batch_context)
 
     def test_all_exports(self):
-        """__all__ contains the 4 public API functions."""
+        """__all__ contains the 7 public API functions."""
         from flywheel import storage_backend
 
         self.assertEqual(
             set(storage_backend.__all__),
-            {"read_context", "append_entry", "query_context", "batch_context"},
+            {
+                "read_context",
+                "append_entry",
+                "query_context",
+                "batch_context",
+                "list_context_files",
+                "parse_context_file",
+                "log_event",
+            },
         )
+
+    def test_exports_list_context_files(self):
+        """storage_backend exposes list_context_files from context_utils."""
+        from flywheel import storage_backend
+        from flywheel import context_utils
+
+        self.assertIs(storage_backend.list_context_files, context_utils.list_context_files)
+
+    def test_exports_parse_context_file(self):
+        """storage_backend exposes parse_context_file from context_utils."""
+        from flywheel import storage_backend
+        from flywheel import context_utils
+
+        self.assertIs(storage_backend.parse_context_file, context_utils.parse_context_file)
+
+    def test_exports_log_event(self):
+        """storage_backend exposes log_event from context_utils."""
+        from flywheel import storage_backend
+        from flywheel import context_utils
+
+        self.assertIs(storage_backend.log_event, context_utils.log_event)
 
 
 class TestStorageBackendPostgres(unittest.TestCase):

@@ -359,3 +359,53 @@ async def set_cached_enrichment(
     )
     await session.execute(stmt)
     await session.flush()
+
+
+async def list_context_files(session: AsyncSession) -> list[str]:
+    """List distinct context file names for the current tenant.
+
+    RLS automatically filters by tenant_id.
+
+    Returns:
+        List of file name strings.
+    """
+    stmt = (
+        select(ContextEntry.file_name)
+        .where(ContextEntry.deleted_at.is_(None))
+        .distinct()
+        .order_by(ContextEntry.file_name)
+    )
+    result = await session.execute(stmt)
+    return [row[0] for row in result.all()]
+
+
+async def log_event(
+    session: AsyncSession,
+    event_type: str,
+    file_name: str,
+    agent_id: str,
+    detail: str = "",
+) -> None:
+    """Log an event to the context_events table.
+
+    Args:
+        session: Tenant-scoped AsyncSession.
+        event_type: Type of event (e.g., 'entry_added', 'contract_violation').
+        file_name: Context file associated with the event.
+        agent_id: Agent or user that triggered the event.
+        detail: Optional detail string.
+    """
+    tid_result = await session.execute(text("SELECT current_setting('app.tenant_id', true)"))
+    tenant_id = tid_result.scalar()
+    uid_result = await session.execute(text("SELECT current_setting('app.user_id', true)"))
+    user_id = uid_result.scalar()
+
+    event = ContextEvent(
+        tenant_id=tenant_id,
+        user_id=user_id,
+        event_type=event_type,
+        file_name=file_name,
+        detail=detail,
+    )
+    session.add(event)
+    await session.flush()

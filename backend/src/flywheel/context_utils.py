@@ -1147,6 +1147,24 @@ def format_entry(entry: dict, source: str) -> str:
     return "\n".join(lines)
 
 
+def list_context_files() -> List[str]:
+    """Return list of context file stems (excluding internal files).
+
+    Scans CONTEXT_ROOT for .md files not starting with '_'.
+
+    Returns:
+        List of filename strings (e.g. ['positioning.md', 'contacts.md']).
+        Returns empty list if CONTEXT_ROOT does not exist.
+    """
+    if not CONTEXT_ROOT.exists():
+        return []
+    return [
+        f.name
+        for f in CONTEXT_ROOT.iterdir()
+        if f.is_file() and f.suffix == ".md" and not f.name.startswith("_")
+    ]
+
+
 def read_context(file: str, agent_id: str) -> str:
     """Read a context file and return its raw content.
 

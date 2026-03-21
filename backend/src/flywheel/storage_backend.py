@@ -15,13 +15,22 @@ if _backend == "postgres":
     from flywheel.storage import (  # noqa: F401
         append_entry,
         batch_context,
+        list_context_files,
+        log_event,
         query_context,
         read_context,
     )
+
+    # parse_context_file is backend-independent (parses markdown text)
+    from flywheel.context_utils import parse_context_file  # noqa: F401
+
 elif _backend == "flatfile":
     from flywheel.context_utils import (  # noqa: F401
         append_entry,
         batch_context,
+        list_context_files,
+        log_event,
+        parse_context_file,
         query_context,
         read_context,
     )
@@ -31,4 +40,12 @@ else:
         "Expected 'flatfile' or 'postgres'."
     )
 
-__all__ = ["read_context", "append_entry", "query_context", "batch_context"]
+__all__ = [
+    "read_context",
+    "append_entry",
+    "query_context",
+    "batch_context",
+    "list_context_files",
+    "parse_context_file",
+    "log_event",
+]
