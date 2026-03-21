@@ -1,12 +1,13 @@
-"""Learning engine REST endpoints: scoring, contradictions, suggestions, dedup stats.
+"""Learning engine REST endpoints: scoring, contradictions, suggestions, dedup stats, trace analysis.
 
-6 endpoints:
+7 endpoints:
 - GET /learning/scores/{file_name}                          -- scored entries with confidence rankings
 - GET /learning/contradictions                               -- detected contradictions (optional file filter)
 - POST /learning/contradictions/{entry_id}/resolve           -- resolve a contradiction
 - GET /learning/suggestions                                  -- proactive suggestions
 - POST /learning/suggestions/{suggestion_type}/{suggestion_key}/dismiss -- dismiss a suggestion
 - GET /learning/dedup-stats                                  -- dedup event counts per file
+- GET /learning/trace-analysis                               -- entry effectiveness from reasoning traces
 """
 
 from __future__ import annotations
@@ -24,6 +25,7 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import ContextEvent
 from flywheel.services.learning_engine import (
+    analyze_entry_effectiveness,
     detect_contradictions,
     dismiss_suggestion,
     generate_suggestions,
@@ -111,6 +113,22 @@ class DedupStats(BaseModel):
 class DedupStatsResponse(BaseModel):
     items: list[DedupStats]
     total_deduped: int
+
+
+class EntryEffectiveness(BaseModel):
+    entry_id: str
+    file_name: str
+    detail: str | None = None
+    confidence: str | None = None
+    total_count: int
+    success_count: int
+    fail_count: int
+    success_rate: float
+
+
+class TraceAnalysisResponse(BaseModel):
+    entries: list[EntryEffectiveness]
+    total_entries_analyzed: int
 
 
 # ---------------------------------------------------------------------------
@@ -244,3 +262,23 @@ async def get_dedup_stats(
     total = sum(item.dedup_count for item in items)
 
     return DedupStatsResponse(items=items, total_deduped=total)
+
+
+# ---------------------------------------------------------------------------
+# GET /learning/trace-analysis
+# ---------------------------------------------------------------------------
+
+
+@router.get("/trace-analysis", response_model=TraceAnalysisResponse)
+async def get_trace_analysis(
+    file_name: str | None = Query(None, description="Filter by context file name"),
+    min_runs: int = Query(3, ge=1, le=100, description="Minimum runs for inclusion"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> TraceAnalysisResponse:
+    """Return entry effectiveness rankings based on reasoning trace analysis."""
+    results = await analyze_entry_effectiveness(db, file_name, min_runs)
+    return TraceAnalysisResponse(
+        entries=results,
+        total_entries_analyzed=len(results),
+    )

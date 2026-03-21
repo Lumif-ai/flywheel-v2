@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import difflib
 import datetime
+import logging
 from uuid import UUID
 
-from sqlalchemy import func, select, and_, or_
+from sqlalchemy import func, select, and_, or_, text
 from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 from flywheel.db.models import (
     ContextEntry,
@@ -226,7 +229,82 @@ async def detect_contradictions(
 
 
 # ---------------------------------------------------------------------------
-# 3. Proactive suggestions (LEARN-04)
+# 3. Trace-based entry effectiveness analysis (LEARN-05)
+# ---------------------------------------------------------------------------
+
+
+async def analyze_entry_effectiveness(
+    session: AsyncSession,
+    file_name: str | None = None,
+    min_runs: int = 3,
+) -> list[dict]:
+    """Analyze which context entries consistently appear in successful vs failed runs.
+
+    Uses PostgreSQL JSONB operators to push aggregation to the database (no Python loops).
+    Returns entries sorted by success_rate descending.
+    """
+    try:
+        # Build SQL with conditional file_name filter
+        base_sql = """
+            SELECT
+                entry_elem->>'entry_id' AS entry_id,
+                entry_elem->>'file_name' AS file_name,
+                entry_elem->>'detail' AS detail,
+                entry_elem->>'confidence' AS confidence,
+                COUNT(*) AS total_count,
+                COUNT(*) FILTER (WHERE sr.status = 'completed') AS success_count,
+                COUNT(*) FILTER (WHERE sr.status = 'failed') AS fail_count
+            FROM skill_runs sr,
+                 jsonb_array_elements(sr.reasoning_trace->'context_consumed') AS entry_elem
+            WHERE sr.reasoning_trace IS NOT NULL
+              AND sr.status IN ('completed', 'failed')
+        """
+
+        if file_name is not None:
+            base_sql += "  AND entry_elem->>'file_name' = :file_name\n"
+
+        base_sql += """
+            GROUP BY entry_elem->>'entry_id', entry_elem->>'file_name',
+                     entry_elem->>'detail', entry_elem->>'confidence'
+            HAVING COUNT(*) >= :min_runs
+            ORDER BY COUNT(*) DESC
+            LIMIT 100
+        """
+
+        params: dict = {"min_runs": min_runs}
+        if file_name is not None:
+            params["file_name"] = file_name
+
+        result = await session.execute(text(base_sql), params)
+        rows = result.all()
+
+        entries: list[dict] = []
+        for row in rows:
+            total = row.total_count
+            success = row.success_count
+            success_rate = round(success / total, 4) if total > 0 else 0.0
+            entries.append({
+                "entry_id": row.entry_id,
+                "file_name": row.file_name,
+                "detail": row.detail,
+                "confidence": row.confidence,
+                "total_count": total,
+                "success_count": success,
+                "fail_count": row.fail_count,
+                "success_rate": success_rate,
+            })
+
+        # Sort by success_rate descending
+        entries.sort(key=lambda x: x["success_rate"], reverse=True)
+        return entries
+
+    except Exception:
+        logger.warning("analyze_entry_effectiveness failed, returning empty list", exc_info=True)
+        return []
+
+
+# ---------------------------------------------------------------------------
+# 4. Proactive suggestions (LEARN-04)
 # ---------------------------------------------------------------------------
 
 
