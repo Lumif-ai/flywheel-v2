@@ -11,6 +11,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import datetime
 import json
 import logging
 from pathlib import Path
@@ -26,7 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import SkillRun, WorkItem
+from flywheel.db.models import ContextEntry, SkillRun, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit
 
@@ -66,6 +67,35 @@ class AttributionResponse(BaseModel):
     files_consulted: list[str] = []
     sources: list[str] = []
     entries_read: list[dict] = []
+    status: str = "available"
+    reason: str | None = None
+
+
+class TraceEntry(BaseModel):
+    entry_id: str
+    file_name: str
+    source: str | None = None
+    detail: str | None = None
+    confidence: str | None = None
+    evidence_count: int = 1
+    date: str | None = None
+    still_exists: bool = True
+    updated_since_capture: bool = False
+
+
+class RoutingDecision(BaseModel):
+    intent_action: str = "direct"
+    intent_confidence: float | None = None
+    skill_name: str
+    execution_mode: str
+
+
+class ReasoningTraceResponse(BaseModel):
+    version: int = 1
+    routing: RoutingDecision | None = None
+    context_consumed: list[TraceEntry] = []
+    files_read: dict = {}
+    captured_at: str | None = None
     status: str = "available"
     reason: str | None = None
 
@@ -410,5 +440,129 @@ async def get_run_attribution(
         files_consulted=attribution.get("files_consulted", []),
         sources=attribution.get("sources", []),
         entries_read=attribution.get("entries_read", []),
+        status="available",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/runs/{run_id}/trace -- Reasoning trace ("What informed this?")
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}/trace", response_model=ReasoningTraceResponse)
+async def get_run_trace(
+    run_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> ReasoningTraceResponse:
+    """Return the reasoning trace for a run: routing decision, context consumed, files read."""
+    result = await db.execute(select(SkillRun).where(SkillRun.id == run_id))
+    run = result.scalar_one_or_none()
+    if run is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Run not found",
+        )
+
+    # Pending/running runs don't have traces yet
+    if run.status in ("pending", "running", "waiting_for_api"):
+        return ReasoningTraceResponse(
+            status="pending",
+            reason="Trace is computed after run completion",
+        )
+
+    # Old runs without trace data
+    trace = run.reasoning_trace
+    if not trace:
+        return ReasoningTraceResponse(
+            status="unavailable",
+            reason="Run completed before reasoning trace tracking was enabled",
+        )
+
+    # Build routing decision
+    routing = None
+    if trace.get("routing"):
+        routing_data = trace["routing"]
+        routing = RoutingDecision(
+            intent_action=routing_data.get("intent_action", "direct"),
+            intent_confidence=routing_data.get("intent_confidence"),
+            skill_name=routing_data.get("skill_name", ""),
+            execution_mode=routing_data.get("execution_mode", ""),
+        )
+
+    # Build context consumed entries with liveness check
+    raw_entries = trace.get("context_consumed", [])
+    entry_ids: list[UUID] = []
+    for e in raw_entries:
+        try:
+            entry_ids.append(UUID(e["entry_id"]))
+        except (KeyError, ValueError):
+            pass
+
+    # Batch liveness query: fetch all referenced entries in one query
+    liveness_map: dict[str, tuple[bool, bool]] = {}  # entry_id -> (exists, updated_since)
+    captured_at_str = trace.get("captured_at")
+    try:
+        if entry_ids:
+            liveness_result = await db.execute(
+                select(
+                    ContextEntry.id,
+                    ContextEntry.deleted_at,
+                    ContextEntry.updated_at,
+                ).where(ContextEntry.id.in_(entry_ids))
+            )
+            liveness_rows = liveness_result.all()
+
+            found_ids: set[str] = set()
+            for row_id, deleted_at, updated_at in liveness_rows:
+                eid = str(row_id)
+                found_ids.add(eid)
+                exists = deleted_at is None
+                updated_since = False
+                if captured_at_str and updated_at:
+                    try:
+                        captured_dt = datetime.datetime.fromisoformat(captured_at_str)
+                        if updated_at.tzinfo is None:
+                            updated_at = updated_at.replace(tzinfo=datetime.timezone.utc)
+                        if captured_dt.tzinfo is None:
+                            captured_dt = captured_dt.replace(tzinfo=datetime.timezone.utc)
+                        updated_since = updated_at > captured_dt
+                    except (ValueError, TypeError):
+                        pass
+                liveness_map[eid] = (exists, updated_since)
+
+            # Mark missing entries
+            for eid_uuid in entry_ids:
+                eid_str = str(eid_uuid)
+                if eid_str not in found_ids:
+                    liveness_map[eid_str] = (False, False)
+    except Exception:
+        # Graceful degradation: liveness check failed, use optimistic defaults
+        logger.warning("Liveness check failed for run %s, using defaults", run_id)
+
+    context_consumed: list[TraceEntry] = []
+    for e in raw_entries:
+        eid = e.get("entry_id", "")
+        exists, updated = liveness_map.get(eid, (True, False))
+        context_consumed.append(
+            TraceEntry(
+                entry_id=eid,
+                file_name=e.get("file_name", ""),
+                source=e.get("source"),
+                detail=e.get("detail"),
+                confidence=e.get("confidence"),
+                evidence_count=e.get("evidence_count", 1),
+                date=e.get("date"),
+                still_exists=exists,
+                updated_since_capture=updated,
+            )
+        )
+
+    return ReasoningTraceResponse(
+        version=trace.get("version", 1),
+        routing=routing,
+        context_consumed=context_consumed,
+        files_read=trace.get("files_read", {}),
+        captured_at=captured_at_str,
         status="available",
     )
