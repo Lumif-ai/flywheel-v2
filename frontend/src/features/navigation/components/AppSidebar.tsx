@@ -13,6 +13,7 @@ import {
 } from '@/components/ui/sidebar'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { TenantSwitcher } from './TenantSwitcher'
+import { FocusSwitcher } from './FocusSwitcher'
 
 const navItems = [
   { label: 'HQ', icon: Home, path: '/' },
@@ -32,6 +33,7 @@ export function AppSidebar() {
     <Sidebar>
       <SidebarHeader className="p-3">
         <TenantSwitcher />
+        <FocusSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
