@@ -74,3 +74,15 @@ export interface User {
   email: string | null
   is_anonymous: boolean
 }
+
+export interface Focus {
+  id: string
+  name: string
+  description: string | null
+  settings: Record<string, unknown> | null
+  created_by: string
+  created_at: string
+  updated_at: string
+  archived_at: string | null
+  member_count?: number
+}
