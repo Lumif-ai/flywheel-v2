@@ -1,10 +1,11 @@
-"""Context CRUD endpoints: file listing, entry read/write/update/delete, search.
+"""Context CRUD endpoints: file listing, entry read/write/update/delete, search, batch.
 
-7 endpoints:
+8 endpoints:
 - GET /context/files              -- list context files from catalog
 - GET /context/files/{name}/entries -- paginated entries with search/filter
 - GET /context/files/{name}/stats -- entry count, last updated, unique sources
 - POST /context/files/{name}/entries -- append new entry
+- POST /context/batch             -- batch append multiple entries atomically
 - PATCH /context/entries/{entry_id} -- update entry content/confidence
 - DELETE /context/entries/{entry_id} -- soft-delete entry
 - GET /context/search             -- cross-file full-text search
@@ -16,7 +17,7 @@ import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -38,6 +39,18 @@ class AppendEntryRequest(BaseModel):
     source: str
     detail: str | None = None
     confidence: str = "medium"
+
+
+class BatchEntryItem(BaseModel):
+    file_name: str
+    content: str
+    source: str
+    detail: str | None = None
+    confidence: str = "medium"
+
+
+class BatchEntriesRequest(BaseModel):
+    entries: list[BatchEntryItem] = Field(..., min_length=1, max_length=50)
 
 
 class UpdateEntryRequest(BaseModel):
@@ -251,6 +264,64 @@ async def append_entry(
     await db.refresh(new_entry)
 
     return {"entry": _entry_to_dict(new_entry)}
+
+
+# ---------------------------------------------------------------------------
+# POST /context/batch
+# ---------------------------------------------------------------------------
+
+
+@router.post("/batch", status_code=201)
+async def batch_entries(
+    body: BatchEntriesRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Append multiple context entries atomically in a single transaction."""
+    today = datetime.date.today()
+
+    # Create all entry objects
+    new_entries = []
+    for item in body.entries:
+        entry = ContextEntry(
+            tenant_id=user.tenant_id,
+            user_id=user.sub,
+            file_name=item.file_name,
+            source=item.source,
+            detail=item.detail,
+            confidence=item.confidence,
+            content=item.content,
+            date=today,
+        )
+        new_entries.append(entry)
+
+    db.add_all(new_entries)
+    await db.flush()
+
+    # Upsert catalog status for each unique file_name
+    unique_files = {item.file_name for item in body.entries}
+    for file_name in unique_files:
+        catalog_stmt = pg_insert(ContextCatalog).values(
+            tenant_id=user.tenant_id,
+            file_name=file_name,
+            status="active",
+        )
+        catalog_stmt = catalog_stmt.on_conflict_do_update(
+            index_elements=["tenant_id", "file_name"],
+            set_={"status": "active"},
+        )
+        await db.execute(catalog_stmt)
+
+    await db.commit()
+
+    # Refresh all entries to get DB-generated fields
+    for entry in new_entries:
+        await db.refresh(entry)
+
+    return {
+        "entries": [_entry_to_dict(e) for e in new_entries],
+        "count": len(new_entries),
+    }
 
 
 # ---------------------------------------------------------------------------
