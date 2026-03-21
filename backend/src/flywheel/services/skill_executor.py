@@ -1,11 +1,13 @@
-"""Skill execution bridge -- async job queue to sync execution_gateway.
+"""Skill execution -- async tool_use loop (web) and sync gateway bridge (CLI).
 
-Bridges the async job queue worker to the synchronous execution_gateway.
-Handles BYOK key decryption, env var management (thread-safe), event
-streaming to events_log, cost calculation, and HTML rendering.
+Web execution uses AsyncAnthropic with a tool_use loop through the tool
+registry. CLI/Slack execution still uses the sync execution_gateway via
+_execute_with_api_key(). Both paths share BYOK key decryption, event
+streaming, cost calculation, and HTML rendering.
 
 Public API:
     execute_run(run) -> None
+    _execute_with_tools(...) -> tuple[str, dict, list]
     _append_event_atomic(factory, run_id, event_dict) -> None
 """
 
@@ -110,12 +112,13 @@ async def _build_reasoning_trace(
     gateway_attribution: dict,
     events_log: list,
     execution_mode: str,
+    tool_calls: list | None = None,
 ) -> dict:
     """Build a reasoning trace capturing context consumed and routing decision.
 
     Assembles entry-level detail from ContextEntry rows for each file the
     gateway reported reading, plus the orchestrator's routing decision from
-    the run's events_log.
+    the run's events_log. Optionally includes tool_calls made during the run.
 
     This function must NEVER raise -- reasoning trace is informational and
     must not block skill execution results.
@@ -128,10 +131,11 @@ async def _build_reasoning_trace(
             (e.g. {filename: {entry_count, chars_read}}).
         events_log: Current events_log list from the SkillRun record.
         execution_mode: Execution mode string (e.g. "llm", "template").
+        tool_calls: Optional list of tool call records from _execute_with_tools.
 
     Returns:
         Structured trace dict with version, routing, context_consumed,
-        files_read, and captured_at. On failure returns minimal error dict.
+        files_read, tool_calls, and captured_at. On failure returns minimal error dict.
     """
     try:
         # Extract routing decision from events_log
@@ -194,11 +198,46 @@ async def _build_reasoning_trace(
             "routing": routing,
             "context_consumed": context_consumed,
             "files_read": gateway_attribution or {},
+            "tool_calls": tool_calls or [],
             "captured_at": datetime.now(timezone.utc).isoformat(),
         }
     except Exception as exc:
         logger.warning("Reasoning trace building failed: %s", exc)
         return {"version": 1, "error": str(exc)}
+
+
+def _build_tool_attribution(tool_calls: list) -> dict:
+    """Build file-level attribution dict from tool call records.
+
+    Maps context_read tool calls to a file-level attribution dict compatible
+    with the existing attribution format: {filename: {entry_count, chars_read}}.
+
+    Args:
+        tool_calls: List of tool call records from _execute_with_tools.
+
+    Returns:
+        Attribution dict keyed by context file name.
+    """
+    attribution: dict = {}
+    for call in (tool_calls or []):
+        if call.get("tool") == "context_read":
+            # Parse filename from input summary
+            input_str = call.get("input", "")
+            # input is str repr of dict like "{'file': 'company-intel'}"
+            try:
+                # Try to extract file name from the input string
+                if "'file'" in input_str or '"file"' in input_str:
+                    import re
+                    match = re.search(r"['\"]file['\"]:\s*['\"]([^'\"]+)['\"]", input_str)
+                    if match:
+                        filename = match.group(1)
+                        if filename not in attribution:
+                            attribution[filename] = {"entry_count": 0, "chars_read": 0}
+                        attribution[filename]["entry_count"] += 1
+                        attribution[filename]["chars_read"] += call.get("result_length", 0)
+            except Exception:
+                pass
+    return attribution
 
 
 async def execute_run(run: SkillRun) -> None:
@@ -244,17 +283,29 @@ async def execute_run(run: SkillRun) -> None:
                 "No API key configured. Please add your Anthropic API key in Settings."
             )
 
-        # Ensure engines directory is on sys.path for execution_gateway imports
-        engines_str = str(_ENGINES_DIR)
-        if engines_str not in sys.path:
-            sys.path.insert(0, engines_str)
+        # Create tool registry and run context for web execution path
+        from flywheel.tools import create_registry
+        from flywheel.tools.registry import RunContext
+        from flywheel.tools.budget import RunBudget
 
-        from flywheel.engines.execution_gateway import execute_skill
+        registry = create_registry()
+        run_context = RunContext(
+            tenant_id=run.tenant_id,
+            user_id=run.user_id,
+            run_id=run.id,
+            budget=RunBudget(),
+            session_factory=factory,
+        )
 
-        # Thread-safe env var manipulation: set BYOK key, execute, restore
         try:
-            result = await asyncio.to_thread(
-                _execute_with_api_key, api_key, run.skill_name, run.input_text or "", str(run.user_id)
+            output, token_usage, tool_calls = await _execute_with_tools(
+                api_key=api_key,
+                skill_name=run.skill_name,
+                input_text=run.input_text or "",
+                registry=registry,
+                context=run_context,
+                factory=factory,
+                run_id=run.id,
             )
             anthropic_breaker.record_success()
         except Exception as exec_err:
@@ -268,35 +319,39 @@ async def execute_run(run: SkillRun) -> None:
             raise
 
         duration_ms = int((time.time() - start_time) * 1000)
-        cost = calculate_cost(result.token_usage)
+        cost = calculate_cost(token_usage)
+
+        # Build attribution from tool calls (context_read calls -> file-level attribution)
+        tool_attribution = _build_tool_attribution(tool_calls)
 
         # Render HTML output
         rendered_html = None
         try:
             from flywheel.engines.output_renderer import render_output
             rendered_html = render_output(
-                run.skill_name, result.output, result.context_attribution
+                run.skill_name, output, tool_attribution
             )
         except Exception as e:
             logger.warning("Output rendering failed for %s: %s", run.skill_name, e)
 
         # Update run record with results
         total_tokens = (
-            (result.token_usage or {}).get("input_tokens", 0)
-            + (result.token_usage or {}).get("output_tokens", 0)
+            (token_usage or {}).get("input_tokens", 0)
+            + (token_usage or {}).get("output_tokens", 0)
         )
+        tool_snapshot = registry.snapshot_tools(run.skill_name)
         async with factory() as session:
             await session.execute(
                 update(SkillRun)
                 .where(SkillRun.id == run.id)
                 .values(
                     status="completed",
-                    output=result.output,
+                    output=output,
                     rendered_html=rendered_html,
                     tokens_used=total_tokens,
                     cost_estimate=cost,
                     duration_ms=duration_ms,
-                    attribution=result.context_attribution or {},
+                    attribution=tool_attribution,
                 )
             )
             await session.commit()
@@ -307,8 +362,7 @@ async def execute_run(run: SkillRun) -> None:
                 run.tenant_id, run.user_id, run.skill_name
             )
             if db_attribution.get("entry_count", 0) > 0:
-                # Merge DB attribution with any gateway-provided attribution
-                merged = {**(result.context_attribution or {}), **db_attribution}
+                merged = {**tool_attribution, **db_attribution}
                 async with factory() as session:
                     await session.execute(
                         update(SkillRun)
@@ -321,9 +375,14 @@ async def execute_run(run: SkillRun) -> None:
                 "Attribution enrichment failed for run %s: %s", run.id, attr_err
             )
 
-        # Build reasoning trace (post-completion, entry-level detail)
+        # Log budget summary as event
+        await _append_event_atomic(factory, run.id, {
+            "event": "budget",
+            "data": run_context.budget.summary(),
+        })
+
+        # Build reasoning trace (post-completion, entry-level detail + tool calls)
         try:
-            # Read current events_log for routing decision
             async with factory() as session:
                 events_result = await session.execute(
                     select(SkillRun.events_log).where(SkillRun.id == run.id)
@@ -334,10 +393,13 @@ async def execute_run(run: SkillRun) -> None:
                 run.tenant_id,
                 run.user_id,
                 run.skill_name,
-                result.context_attribution or {},
+                tool_attribution,
                 current_events,
-                result.mode,
+                "llm",
+                tool_calls=tool_calls,
             )
+            # Include tool snapshot for version safety auditing
+            trace["tools_snapshot"] = tool_snapshot
             async with factory() as session:
                 await session.execute(
                     update(SkillRun)
@@ -384,6 +446,150 @@ async def execute_run(run: SkillRun) -> None:
         logger.error("Run %s failed (skill=%s): %s", run.id, run.skill_name, e)
 
 
+async def _execute_with_tools(
+    api_key: str,
+    skill_name: str,
+    input_text: str,
+    registry: "ToolRegistry",
+    context: "RunContext",
+    factory: async_sessionmaker,
+    run_id: UUID,
+    max_iterations: int = 25,
+) -> tuple[str, dict, list]:
+    """Execute a skill using AsyncAnthropic with the tool registry.
+
+    This is the web execution path that bypasses the sync execution_gateway.
+    It directly calls the Anthropic API with tool definitions from the
+    registry and routes tool_use responses back through the registry.
+
+    Args:
+        api_key: Decrypted BYOK API key.
+        skill_name: Name of the skill to execute.
+        input_text: User's input text.
+        registry: Tool registry with all available tools.
+        context: Run context with budget, tenant, session factory.
+        factory: Session factory for event logging.
+        run_id: SkillRun UUID for event logging.
+        max_iterations: Maximum tool_use loop iterations (default 25).
+
+    Returns:
+        Tuple of (output_text, token_usage_dict, tool_calls_list).
+    """
+    import anthropic
+
+    client = anthropic.AsyncAnthropic(api_key=api_key)
+
+    # Build system prompt from SKILL.md
+    _skills_engines_dir = str(
+        Path(__file__).resolve().parents[4] / "skills" / "_shared" / "engines"
+    )
+    if _skills_engines_dir not in sys.path:
+        sys.path.insert(0, _skills_engines_dir)
+    from skill_converter import convert_skill
+
+    spec = convert_skill(skill_name)
+    system_prompt = spec.system_prompt
+
+    # Snapshot tool definitions for version safety
+    tool_snapshot = registry.snapshot_tools(skill_name)
+    tool_defs = tool_snapshot
+
+    # Initial message
+    messages = [{"role": "user", "content": input_text}]
+
+    # Cumulative token tracking
+    total_input_tokens = 0
+    total_output_tokens = 0
+    tool_calls_made: list[dict] = []
+
+    for _iteration in range(max_iterations):
+        response = await client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            tools=tool_defs,
+            messages=messages,
+        )
+
+        total_input_tokens += response.usage.input_tokens
+        total_output_tokens += response.usage.output_tokens
+
+        if response.stop_reason == "end_turn":
+            # Extract text from content blocks
+            output_parts = []
+            for block in response.content:
+                if hasattr(block, "text"):
+                    output_parts.append(block.text)
+            output_text = "\n".join(output_parts) if output_parts else ""
+
+            token_usage = {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "model": "claude-sonnet-4-20250514",
+            }
+            return output_text, token_usage, tool_calls_made
+
+        if response.stop_reason == "tool_use":
+            # Build assistant message content and tool results
+            tool_results = []
+            for block in response.content:
+                if block.type == "tool_use":
+                    # Emit SSE event for real-time progress
+                    await _append_event_atomic(factory, run_id, {
+                        "event": "stage",
+                        "data": {
+                            "stage": "tool_call",
+                            "tool": block.name,
+                            "message": f"Using {block.name}...",
+                        },
+                    })
+
+                    # Execute tool through registry
+                    result = await registry.execute(block.name, block.input, context)
+
+                    tool_results.append({
+                        "type": "tool_result",
+                        "tool_use_id": block.id,
+                        "content": result,
+                    })
+
+                    # Track for reasoning trace
+                    input_summary = str(block.input)
+                    if len(input_summary) > 200:
+                        input_summary = input_summary[:200] + "..."
+                    tool_calls_made.append({
+                        "tool": block.name,
+                        "input": input_summary,
+                        "result_length": len(result),
+                    })
+
+            # Append assistant response + tool results to messages
+            messages.append({"role": "assistant", "content": response.content})
+            messages.append({"role": "user", "content": tool_results})
+        else:
+            # Unexpected stop reason -- return what we have
+            output_parts = []
+            for block in response.content:
+                if hasattr(block, "text"):
+                    output_parts.append(block.text)
+            output_text = "\n".join(output_parts) if output_parts else ""
+            token_usage = {
+                "input_tokens": total_input_tokens,
+                "output_tokens": total_output_tokens,
+                "model": "claude-sonnet-4-20250514",
+            }
+            return output_text, token_usage, tool_calls_made
+
+    # Max iterations exceeded
+    token_usage = {
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_output_tokens,
+        "model": "claude-sonnet-4-20250514",
+    }
+    return "Skill exceeded maximum iterations", token_usage, tool_calls_made
+
+
+# Legacy sync path -- used by CLI gateway (execution_gateway.py). Web uses _execute_with_tools().
 def _execute_with_api_key(
     api_key: str, skill_name: str, input_text: str, user_id: str
 ):
