@@ -67,33 +67,30 @@ async def admin_dashboard(
         or 0
     )
 
-    # Onboarding funnel
-    total_anonymous_ever = 0
-    anonymous_with_runs = 0
+    # Onboarding funnel — counts users by auth provider
+    # Anonymous users use Supabase anonymous auth; promoted users have email set
+    total_anonymous_ever = (
+        await db.scalar(
+            select(func.count())
+            .select_from(User)
+            .where(User.email.is_(None))
+        )
+        or 0
+    )
+    # Count anonymous users who have at least one skill run
+    anonymous_with_runs = (
+        await db.scalar(
+            select(func.count(func.distinct(SkillRun.user_id)))
+            .select_from(SkillRun)
+            .join(User, User.id == SkillRun.user_id)
+            .where(User.email.is_(None))
+        )
+        or 0
+    )
+    # Promoted = users who originally had no email but now have one
+    # Approximation: users with email who have skill runs predating their email being set
+    # TODO: add promoted_at timestamp column for accurate tracking
     promoted_users = 0
-
-    if hasattr(User, "is_anonymous"):
-        total_anonymous_ever = (
-            await db.scalar(
-                select(func.count())
-                .select_from(User)
-                .where(User.is_anonymous == True)  # noqa: E712
-            )
-            or 0
-        )
-        # Count anonymous users who have at least one skill run
-        anonymous_with_runs = (
-            await db.scalar(
-                select(func.count(func.distinct(SkillRun.user_id)))
-                .select_from(SkillRun)
-                .join(User, User.id == SkillRun.user_id)
-                .where(User.is_anonymous == True)  # noqa: E712
-            )
-            or 0
-        )
-        # Promoted = users who were anonymous but now have email
-        # TODO: track promotion events for accurate funnel
-        promoted_users = 0
 
     onboarding_funnel = {
         "anonymous_created": total_anonymous_ever,

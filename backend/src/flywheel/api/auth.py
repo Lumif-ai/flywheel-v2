@@ -93,19 +93,9 @@ async def magic_link(request: Request, body: MagicLinkRequest):
         # Swallow errors to avoid leaking whether the email exists
         logger.exception("magic_link_error email=%s", body.email)
 
-    # TODO: In production, configure Supabase to use Resend SMTP OR send magic
-    # links directly via Resend instead of relying on Supabase's built-in delivery.
-    # For now, fire a Resend email alongside Supabase as backup/alternative.
-    # The magic link URL format depends on Supabase's OTP token -- for direct
-    # Resend delivery, you'd need to generate the link yourself.
-    from flywheel.services.email import send_magic_link
-
-    redirect = body.redirect_to or settings.cors_origins[0] if settings.cors_origins else ""
-    magic_link_url = (
-        f"{settings.supabase_url}/auth/v1/verify"
-        f"?type=magiclink&token_hash=placeholder&redirect_to={redirect}"
-    )
-    asyncio.create_task(send_magic_link(body.email, magic_link_url))
+    # Supabase handles magic link email delivery via its built-in mailer.
+    # To use Resend instead, configure Supabase SMTP settings to point to Resend's
+    # SMTP relay (smtp.resend.com) in the Supabase Dashboard -> Auth -> SMTP Settings.
 
     # Always return success -- do NOT reveal whether email exists
     return {"message": "Magic link sent"}
