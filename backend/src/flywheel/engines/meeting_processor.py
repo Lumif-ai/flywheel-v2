@@ -13,21 +13,17 @@ this module handles deterministic I/O and data manipulation.
 import json
 import os
 import re
-import sys
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-# Import context_utils from the same src/ directory
-sys.path.insert(0, os.path.join(os.path.dirname(__file__)))
-from context_utils import (
-    CONTEXT_ROOT,
+from flywheel.storage_backend import (
     append_entry,
+    list_context_files,
     log_event,
     parse_context_file,
     query_context,
     read_context,
-    safe_read,
 )
 
 # ---------------------------------------------------------------------------
@@ -35,7 +31,10 @@ from context_utils import (
 # ---------------------------------------------------------------------------
 
 AGENT_ID = "ctx-meeting-processor"
-MEETINGS_ROOT = Path.home() / ".claude" / "meetings"
+_MEETINGS_BASE = os.environ.get(
+    "FLYWHEEL_MEETINGS_DIR", str(Path.home() / ".claude" / "meetings")
+)
+MEETINGS_ROOT = Path(_MEETINGS_BASE)
 RAW_NOTES_DIR = MEETINGS_ROOT / "raw"
 MEETING_LOG_PATH = MEETINGS_ROOT / "_meeting-log.md"
 
@@ -100,17 +99,13 @@ def pre_read_context(agent_id: str = AGENT_ID) -> dict:
     """
     context_snapshot = {}
 
-    if not CONTEXT_ROOT.exists():
-        return context_snapshot
-
-    for f in CONTEXT_ROOT.iterdir():
-        if f.is_file() and f.suffix == ".md" and not f.name.startswith("_"):
-            try:
-                content = read_context(f.name, agent_id)
-                context_snapshot[f.name] = content
-            except Exception:
-                # Partial read failure is acceptable -- skip file
-                context_snapshot[f.name] = ""
+    for f in list_context_files():
+        try:
+            content = read_context(f, agent_id)
+            context_snapshot[f] = content
+        except Exception:
+            # Partial read failure is acceptable -- skip file
+            context_snapshot[f] = ""
 
     return context_snapshot
 
