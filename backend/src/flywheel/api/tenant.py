@@ -22,6 +22,7 @@ import secrets
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,6 +43,11 @@ from flywheel.db.models import (
     User,
     UserTenant,
     WorkItem,
+)
+from flywheel.services.data_export import (
+    estimate_export_size,
+    generate_export_zip,
+    SIZE_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -526,63 +532,30 @@ async def export_tenant_data(
     user: TokenPayload = Depends(require_admin),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Export all tenant data: context entries, work items, skill runs.
+    """Export all tenant data as a ZIP of JSON files.
 
-    Admin only. Synchronous export (Phase 25 adds async for large exports).
+    Streams a ZIP download for datasets under 100MB.
+    Returns 413 for larger datasets (async export not yet implemented).
     """
-    # Context entries
-    entries_result = await db.execute(select(ContextEntry))
-    entries = entries_result.scalars().all()
+    estimated_size = await estimate_export_size(user.tenant_id, db)
 
-    # Work items
-    items_result = await db.execute(select(WorkItem))
-    work_items = items_result.scalars().all()
+    if estimated_size >= SIZE_THRESHOLD:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "message": "Dataset too large for sync export. Async export with email notification is not yet available.",
+                "estimated_size_mb": round(estimated_size / 1_000_000, 1),
+                "threshold_mb": SIZE_THRESHOLD / 1_000_000,
+            },
+        )
 
-    # Skill runs
-    runs_result = await db.execute(select(SkillRun))
-    skill_runs = runs_result.scalars().all()
-
-    now = datetime.datetime.now(datetime.timezone.utc)
-
-    return {
-        "context_entries": [
-            {
-                "id": str(e.id),
-                "file_name": e.file_name,
-                "date": e.date.isoformat() if e.date else None,
-                "source": e.source,
-                "detail": e.detail,
-                "confidence": e.confidence,
-                "evidence_count": e.evidence_count,
-                "content": e.content,
-                "created_at": e.created_at.isoformat() if e.created_at else None,
-            }
-            for e in entries
-        ],
-        "work_items": [
-            {
-                "id": str(w.id),
-                "type": w.type,
-                "title": w.title,
-                "status": w.status,
-                "data": w.data,
-                "scheduled_at": w.scheduled_at.isoformat() if w.scheduled_at else None,
-                "created_at": w.created_at.isoformat() if w.created_at else None,
-            }
-            for w in work_items
-        ],
-        "skill_runs": [
-            {
-                "id": str(r.id),
-                "skill_name": r.skill_name,
-                "status": r.status,
-                "input_text": r.input_text,
-                "output": r.output,
-                "tokens_used": r.tokens_used,
-                "duration_ms": r.duration_ms,
-                "created_at": r.created_at.isoformat() if r.created_at else None,
-            }
-            for r in skill_runs
-        ],
-        "exported_at": now.isoformat(),
-    }
+    # Sync path: generate and stream ZIP directly
+    zip_buffer = await generate_export_zip(user.tenant_id, db)
+    filename = f"flywheel-export-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d-%H%M%S')}.zip"
+    return StreamingResponse(
+        zip_buffer,
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+        },
+    )
