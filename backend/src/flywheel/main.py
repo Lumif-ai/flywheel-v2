@@ -10,6 +10,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
+from flywheel.api.agent_ws import router as agent_ws_router
 from flywheel.api.admin import router as admin_router
 from flywheel.api.graph import router as graph_router
 from flywheel.api.auth import router as auth_router
@@ -142,6 +143,7 @@ def create_app() -> FastAPI:
     app.include_router(admin_router, prefix="/api/v1")
     app.include_router(graph_router, prefix="/api/v1")
     app.include_router(focus_router, prefix="/api/v1")
+    app.include_router(agent_ws_router, prefix="/api/v1")
 
     return app
 
