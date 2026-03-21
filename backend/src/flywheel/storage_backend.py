@@ -1,8 +1,9 @@
-"""Strangler Fig selector: routes API calls to flat-file or Postgres backend.
+"""Strangler Fig selector: routes API calls to flat-file, Postgres, or remote backend.
 
 The FLYWHEEL_BACKEND env var controls which backend is active:
   - "flatfile" (default): Uses v1 context_utils.py markdown-based storage
-  - "postgres": Will use SQLAlchemy/asyncpg (Phase 16)
+  - "postgres": Uses SQLAlchemy/asyncpg with Supabase Postgres
+  - "remote": Routes all calls through HTTP to a hosted Flywheel API (requires flywheel-cli package)
 
 All callers import from this module, never directly from context_utils or postgres_backend.
 """
@@ -34,10 +35,20 @@ elif _backend == "flatfile":
         query_context,
         read_context,
     )
+elif _backend == "remote":
+    from flywheel_cli.http_context import (  # noqa: F401
+        append_entry,
+        batch_context,
+        list_context_files,
+        log_event,
+        parse_context_file,
+        query_context,
+        read_context,
+    )
 else:
     raise ValueError(
         f"Unknown FLYWHEEL_BACKEND value: {_backend!r}. "
-        "Expected 'flatfile' or 'postgres'."
+        "Expected 'flatfile', 'postgres', or 'remote'."
     )
 
 __all__ = [
