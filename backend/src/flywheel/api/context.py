@@ -337,15 +337,26 @@ async def batch_entries(
     await db.flush()
 
     # Graph extraction: extract entities from each new entry (non-blocking)
+    all_entity_ids: list = []
     for entry in new_entries:
         try:
             from flywheel.services.entity_extraction import process_entry_for_graph
-            await process_entry_for_graph(db, entry, str(user.tenant_id))
+            eids = await process_entry_for_graph(db, entry, str(user.tenant_id)) or []
+            all_entity_ids.extend(eids)
         except Exception:
             import logging
             logging.getLogger(__name__).warning(
                 "Graph extraction failed for entry %s", entry.id, exc_info=True
             )
+
+    # Recompute density for streams linked to extracted entities
+    if all_entity_ids:
+        try:
+            from flywheel.api.streams import recompute_density_for_entities
+            unique_eids = list(set(all_entity_ids))
+            await recompute_density_for_entities(unique_eids, db)
+        except Exception:
+            pass  # Non-blocking: density will catch up on next entity link
 
     # Upsert catalog status for each unique file_name
     unique_files = {item.file_name for item in body.entries}
