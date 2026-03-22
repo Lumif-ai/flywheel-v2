@@ -56,7 +56,7 @@ export function UrlInput({ onSubmit, disabled }: UrlInputProps) {
           See Flywheel in action
         </h1>
         <p className="text-muted-foreground">
-          No account required -- enter a company URL to get started
+          Enter your company URL to get started -- no signup required
         </p>
       </div>
 
