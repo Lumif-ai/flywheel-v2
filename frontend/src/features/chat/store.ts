@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '@/lib/api'
-import type { ChatMessage, StreamState } from './types'
+import type { ChatMessage, HistoryEntry, StreamState } from './types'
 
 const initialStreamState: StreamState = {
   status: 'idle',
@@ -13,9 +13,11 @@ interface ChatState {
   messages: ChatMessage[]
   streamState: StreamState
   activeRunId: string | null
+  streamId: string | null
 
   addMessage: (msg: ChatMessage) => void
   setActiveRunId: (id: string | null) => void
+  setStreamId: (id: string | null) => void
   setStreamStatus: (status: StreamState['status']) => void
   appendChunk: (content: string) => void
   setStreamOutput: (html: string) => void
@@ -28,11 +30,14 @@ export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
   streamState: { ...initialStreamState },
   activeRunId: null,
+  streamId: null,
 
   addMessage: (msg) =>
     set((s) => ({ messages: [...s.messages, msg] })),
 
   setActiveRunId: (id) => set({ activeRunId: id }),
+
+  setStreamId: (id) => set({ streamId: id }),
 
   setStreamStatus: (status) =>
     set((s) => ({ streamState: { ...s.streamState, status } })),
@@ -100,14 +105,20 @@ export const useChatStore = create<ChatState>((set, get) => ({
     addMessage(userMsg)
 
     try {
+      // Build conversation history from accumulated messages (last 10 = ~5 turns)
+      const history: HistoryEntry[] = get()
+        .messages.slice(-10)
+        .map((m) => ({ role: m.role, content: m.content }))
+
       const res = await api.post<{
         action: string
         run_id?: string
         stream_url?: string
         skill_name?: string
         message?: string
+        response?: string
         candidates?: string[]
-      }>('/chat', { message: content })
+      }>('/chat', { message: content, history, stream_id: get().streamId })
 
       if (res.action === 'execute') {
         setActiveRunId(res.run_id!)
@@ -133,6 +144,16 @@ export const useChatStore = create<ChatState>((set, get) => ({
           status: 'complete',
         }
         addMessage(clarifyMsg)
+      } else if (res.action === 'conversational') {
+        // Direct conversational response from LLM -- no SSE streaming needed
+        const convMsg: ChatMessage = {
+          id: crypto.randomUUID(),
+          role: 'assistant',
+          content: res.response ?? res.message ?? '',
+          timestamp: new Date(),
+          status: 'complete',
+        }
+        addMessage(convMsg)
       } else {
         // action === "none" or unknown
         const noneMsg: ChatMessage = {

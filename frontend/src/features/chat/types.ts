@@ -9,6 +9,11 @@ export interface ChatMessage {
   status: 'pending' | 'streaming' | 'complete' | 'error'
 }
 
+export interface HistoryEntry {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export interface StreamState {
   status: 'idle' | 'thinking' | 'streaming' | 'running' | 'complete' | 'error'
   chunks: string[]
