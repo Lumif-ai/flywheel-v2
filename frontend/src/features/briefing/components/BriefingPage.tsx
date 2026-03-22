@@ -1,13 +1,24 @@
+import { useMemo } from 'react'
 import { useBriefing } from '../hooks/useBriefing'
 import { BriefingCard } from './BriefingCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
+import { SoftSignupCard, isSignupCardDismissed } from '@/features/onboarding/components/SoftSignupCard'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
-import { InboxIcon } from 'lucide-react'
+import { useAuthStore } from '@/stores/auth'
+import { InboxIcon, Calendar, ArrowRight } from 'lucide-react'
 
 export function BriefingPage() {
   const { data, isLoading, error } = useBriefing()
+  const user = useAuthStore(state => state.user)
+
+  const isAnonymous = useMemo(() => {
+    if (!user) return true
+    return (user as Record<string, unknown>).is_anonymous === true
+  }, [user])
+
+  const showSignupCard = isAnonymous && !isSignupCardDismissed()
 
   if (error) {
     return (
@@ -22,6 +33,9 @@ export function BriefingPage() {
   return (
     <div className="flex h-full flex-col">
       <div className="flex-1 space-y-6 overflow-y-auto p-6">
+        {/* Soft signup card for anonymous users */}
+        {showSignupCard && <SoftSignupCard />}
+
         {/* Greeting */}
         {isLoading ? (
           <div className="space-y-2">
@@ -91,6 +105,28 @@ export function BriefingPage() {
           </div>
         )}
       </div>
+
+      {/* Calendar connect suggestion for anonymous users */}
+      {isAnonymous && (
+        <div className="mx-6 mb-4 rounded-lg border border-dashed p-4 flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <Calendar className="w-5 h-5 text-muted-foreground" />
+            <div>
+              <p className="text-sm font-medium">Connect your calendar</p>
+              <p className="text-xs text-muted-foreground">
+                Auto-detect meetings and prep briefings
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/settings"
+            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
+          >
+            Set up
+            <ArrowRight className="w-3 h-3" />
+          </Link>
+        </div>
+      )}
 
       {/* Global Chat Input - pinned at bottom */}
       <div className="border-t bg-background p-4">
