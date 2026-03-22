@@ -576,6 +576,83 @@ class ContextRelationship(Base):
     )
 
 
+# ---------------------------------------------------------------------------
+# WORK STREAM TABLES (work stream organizing principle for v3.0)
+# ---------------------------------------------------------------------------
+
+
+class WorkStream(Base):
+    __tablename__ = "work_streams"
+    __table_args__ = (
+        Index("idx_streams_tenant", "tenant_id"),
+        Index(
+            "idx_streams_tenant_active",
+            "tenant_id",
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+        Index(
+            "uq_stream_tenant_name",
+            "tenant_id",
+            "name",
+            unique=True,
+            postgresql_where=text("archived_at IS NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    settings: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    density_score: Mapped[float] = mapped_column(
+        Numeric(5, 2), server_default=text("0.00")
+    )
+    density_details: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    archived_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class WorkStreamEntity(Base):
+    __tablename__ = "work_stream_entities"
+    __table_args__ = (
+        Index("idx_wse_tenant", "tenant_id"),
+        Index("idx_wse_entity", "entity_id"),
+    )
+
+    stream_id: Mapped[UUID] = mapped_column(
+        ForeignKey("work_streams.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    entity_id: Mapped[UUID] = mapped_column(
+        ForeignKey("context_entities.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    linked_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class ContextEntityEntry(Base):
     __tablename__ = "context_entity_entries"
 
