@@ -190,6 +190,28 @@ async def _recompute_density(
     )
 
 
+async def recompute_density_for_entities(
+    entity_ids: list[UUID],
+    db: AsyncSession,
+) -> None:
+    """Recompute density for all streams linked to the given entities.
+
+    Called after context writes to keep density scores current.
+    """
+    if not entity_ids:
+        return
+    # Find streams linked to any of these entities
+    stmt = (
+        select(WorkStreamEntity.stream_id)
+        .where(WorkStreamEntity.entity_id.in_(entity_ids))
+        .distinct()
+    )
+    result = await db.execute(stmt)
+    stream_ids = [row[0] for row in result.all()]
+    for sid in stream_ids:
+        await _recompute_density(sid, None, db)
+
+
 async def _get_stream_or_404(
     stream_id: UUID, db: AsyncSession
 ) -> WorkStream:

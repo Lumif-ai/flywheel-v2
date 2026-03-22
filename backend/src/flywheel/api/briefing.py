@@ -60,7 +60,7 @@ class BriefingResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-@router.get("/briefing", response_model=BriefingResponse)
+@router.get("", response_model=BriefingResponse)
 async def get_briefing(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),

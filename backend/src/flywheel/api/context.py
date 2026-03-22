@@ -263,14 +263,23 @@ async def append_entry(
     await db.flush()
 
     # Graph extraction: extract entities from the new entry (non-blocking)
+    extracted_entity_ids: list = []
     try:
         from flywheel.services.entity_extraction import process_entry_for_graph
-        await process_entry_for_graph(db, new_entry, str(user.tenant_id))
+        extracted_entity_ids = await process_entry_for_graph(db, new_entry, str(user.tenant_id)) or []
     except Exception:
         import logging
         logging.getLogger(__name__).warning(
             "Graph extraction failed for entry %s", new_entry.id, exc_info=True
         )
+
+    # Recompute density for streams linked to extracted entities
+    if extracted_entity_ids:
+        try:
+            from flywheel.api.streams import recompute_density_for_entities
+            await recompute_density_for_entities(extracted_entity_ids, db)
+        except Exception:
+            pass  # Non-blocking: density will catch up on next entity link
 
     # Upsert catalog status to active
     catalog_stmt = pg_insert(ContextCatalog).values(

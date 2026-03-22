@@ -206,7 +206,7 @@ async def process_entry_for_graph(
     session: AsyncSession,
     entry: object,
     tenant_id: str,
-) -> None:
+) -> list:
     """Extract entities and relationships from an entry and persist to graph tables.
 
     Orchestration:
@@ -224,12 +224,12 @@ async def process_entry_for_graph(
         # 1. Extract entities
         entities = extract_entities_sync(entry)
         if not entities:
-            return
+            return []
 
         entry_id = getattr(entry, "id", None)
         if entry_id is None:
             logger.warning("Entry has no id, skipping graph extraction")
-            return
+            return []
 
         # 2-3. Upsert entities and link to entry
         entity_db_map: dict[tuple[str, str], object] = {}  # (name, type) -> DB entity
@@ -315,9 +315,12 @@ async def process_entry_for_graph(
                 entry_id,
             )
 
+        return [db_e.id for db_e in entity_db_map.values()]
+
     except Exception:
         logger.warning(
             "Graph extraction failed for entry %s",
             getattr(entry, "id", "unknown"),
             exc_info=True,
         )
+        return []
