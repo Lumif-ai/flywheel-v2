@@ -597,6 +597,7 @@ class WorkStream(Base):
             unique=True,
             postgresql_where=text("archived_at IS NULL"),
         ),
+        Index("idx_streams_parent", "parent_id"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -607,6 +608,9 @@ class WorkStream(Base):
     )
     user_id: Mapped[UUID] = mapped_column(
         ForeignKey("users.id"), nullable=False
+    )
+    parent_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("work_streams.id", ondelete="CASCADE")
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)

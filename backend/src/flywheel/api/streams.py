@@ -1,6 +1,6 @@
 """Work stream CRUD endpoints with density scoring and entity linking.
 
-8 endpoints:
+10 endpoints:
 - GET /streams/                           -- list active streams (paginated)
 - POST /streams/                          -- create stream
 - GET /streams/{stream_id}                -- get stream detail with entities
@@ -9,6 +9,8 @@
 - POST /streams/{stream_id}/unarchive     -- unarchive stream
 - POST /streams/{stream_id}/entities      -- link entity to stream
 - DELETE /streams/{stream_id}/entities/{entity_id} -- unlink entity
+- POST /streams/{stream_id}/sub-threads   -- create sub-thread
+- GET /streams/{stream_id}/sub-threads    -- list sub-threads
 """
 
 from __future__ import annotations
@@ -54,6 +56,11 @@ class LinkEntityRequest(BaseModel):
     entity_id: UUID
 
 
+class CreateSubThreadRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: str | None = None
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -63,6 +70,7 @@ def _stream_to_dict(s: WorkStream) -> dict:
     """Serialize a WorkStream ORM object to a JSON-friendly dict."""
     return {
         "id": str(s.id),
+        "parent_id": str(s.parent_id) if s.parent_id else None,
         "name": s.name,
         "description": s.description,
         "settings": s.settings,
@@ -243,6 +251,45 @@ async def _check_name_unique(
         )
 
 
+async def _get_sub_threads(
+    parent_id: UUID, db: AsyncSession
+) -> list[dict]:
+    """Get sub-threads for a parent stream with density and entry counts."""
+    stmt = (
+        select(WorkStream)
+        .where(
+            WorkStream.parent_id == parent_id,
+            WorkStream.archived_at.is_(None),
+        )
+        .order_by(WorkStream.created_at.asc())
+    )
+    result = await db.execute(stmt)
+    children = result.scalars().all()
+
+    sub_threads = []
+    for child in children:
+        # Count entries linked to this sub-thread's entities
+        entry_count_stmt = (
+            select(func.count())
+            .select_from(ContextEntityEntry)
+            .join(WorkStreamEntity, WorkStreamEntity.entity_id == ContextEntityEntry.entity_id)
+            .where(WorkStreamEntity.stream_id == child.id)
+        )
+        entry_result = await db.execute(entry_count_stmt)
+        entry_count = entry_result.scalar() or 0
+
+        sub_threads.append({
+            "id": str(child.id),
+            "name": child.name,
+            "description": child.description,
+            "density_score": float(child.density_score) if child.density_score is not None else 0.0,
+            "entry_count": entry_count,
+            "created_at": child.created_at.isoformat() if child.created_at else None,
+        })
+
+    return sub_threads
+
+
 # ---------------------------------------------------------------------------
 # GET /streams/
 # ---------------------------------------------------------------------------
@@ -352,10 +399,14 @@ async def get_stream(
             for e in entries_result.scalars().all()
         ]
 
+    # Get sub-threads (child streams)
+    sub_threads = await _get_sub_threads(stream_id, db)
+
     result = _stream_to_dict(stream)
     result["entities"] = [_entity_to_dict(e) for e in entities]
     result["density"] = stream.density_details
     result["recent_entries"] = recent_entries
+    result["sub_threads"] = sub_threads
 
     return result
 
@@ -515,3 +566,99 @@ async def unlink_entity(
     await db.commit()
 
     return {"unlinked": True, "stream_id": str(stream_id), "entity_id": str(entity_id)}
+
+
+# ---------------------------------------------------------------------------
+# POST /streams/{stream_id}/sub-threads
+# ---------------------------------------------------------------------------
+
+
+@router.post("/{stream_id}/sub-threads", status_code=201)
+async def create_sub_thread(
+    stream_id: UUID,
+    body: CreateSubThreadRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Create a sub-thread (child work stream) under a parent stream."""
+    parent = await _get_stream_or_404(stream_id, db)
+
+    # Prevent nesting beyond 1 level
+    if parent.parent_id is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot create sub-threads under a sub-thread (max 1 level of nesting)",
+        )
+
+    # Name uniqueness check scoped to siblings (same parent_id)
+    sibling_stmt = select(WorkStream.id).where(
+        WorkStream.parent_id == stream_id,
+        WorkStream.name == body.name,
+        WorkStream.archived_at.is_(None),
+    )
+    existing = (await db.execute(sibling_stmt)).scalar_one_or_none()
+    if existing is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="A sub-thread with this name already exists in this stream",
+        )
+
+    # Create child stream inheriting tenant_id and user_id from parent
+    child = WorkStream(
+        tenant_id=parent.tenant_id,
+        user_id=parent.user_id,
+        parent_id=stream_id,
+        name=body.name,
+        description=body.description,
+    )
+    db.add(child)
+    await db.flush()
+
+    # Create a ContextEntity for this sub-thread and link it to the parent stream
+    sub_entity = ContextEntity(
+        tenant_id=parent.tenant_id,
+        name=body.name,
+        entity_type="sub_thread",
+    )
+    db.add(sub_entity)
+    await db.flush()
+
+    # Link entity to the parent stream
+    link = WorkStreamEntity(
+        stream_id=stream_id,
+        entity_id=sub_entity.id,
+        tenant_id=parent.tenant_id,
+    )
+    db.add(link)
+
+    # Also link entity to the child stream
+    child_link = WorkStreamEntity(
+        stream_id=child.id,
+        entity_id=sub_entity.id,
+        tenant_id=parent.tenant_id,
+    )
+    db.add(child_link)
+
+    # Recompute density for parent
+    await _recompute_density(stream_id, parent.tenant_id, db)
+
+    await db.commit()
+    await db.refresh(child)
+
+    return _stream_to_dict(child)
+
+
+# ---------------------------------------------------------------------------
+# GET /streams/{stream_id}/sub-threads
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{stream_id}/sub-threads")
+async def list_sub_threads(
+    stream_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """List sub-threads for a parent stream with density and entry counts."""
+    await _get_stream_or_404(stream_id, db)
+    return await _get_sub_threads(stream_id, db)
