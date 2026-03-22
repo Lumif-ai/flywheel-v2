@@ -57,6 +57,9 @@ export interface BriefingCard {
   reason: string | null
   source_attribution: SourceAttribution[] | null
   suggestion_key: string | null
+  auto_classified: boolean
+  change_option: boolean
+  classification_confidence: 'high' | 'medium' | 'low' | null
 }
 
 export interface KnowledgeHealth {

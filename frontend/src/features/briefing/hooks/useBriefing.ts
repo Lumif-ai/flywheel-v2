@@ -29,3 +29,18 @@ export function useDismissCard() {
     },
   })
 }
+
+export function useClassifyMeeting() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (params: { work_item_id: string; stream_id: string }) =>
+      api.post<{ classified: boolean; stream_name: string }>(
+        '/briefing/classify-meeting',
+        params,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['briefing'] })
+    },
+  })
+}

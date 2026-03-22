@@ -9,9 +9,12 @@ import {
   ClockIcon,
   LinkIcon,
   ChevronDownIcon,
+  CheckIcon,
 } from 'lucide-react'
 import type { BriefingCard as BriefingCardType } from '@/types/streams'
-import { useDismissCard } from '../hooks/useBriefing'
+import { useDismissCard, useClassifyMeeting } from '../hooks/useBriefing'
+import { useStreams } from '../hooks/useStreams'
+import { MeetingClassificationCard } from './MeetingClassificationCard'
 
 const iconMap = {
   meeting: CalendarIcon,
@@ -52,7 +55,19 @@ interface BriefingCardProps {
 export function BriefingCard({ card }: BriefingCardProps) {
   const [showAttribution, setShowAttribution] = useState(false)
   const [dismissed, setDismissed] = useState(false)
+  const [showChangePicker, setShowChangePicker] = useState(false)
   const dismissMutation = useDismissCard()
+  const classifyMutation = useClassifyMeeting()
+  const { data: streamsData } = useStreams()
+  const streams = streamsData?.items ?? []
+
+  // Medium-confidence meetings render as classification cards
+  if (
+    card.card_type === 'meeting' &&
+    card.classification_confidence === 'medium'
+  ) {
+    return <MeetingClassificationCard card={card} />
+  }
 
   const Icon = iconMap[card.card_type]
   const isStale = card.card_type === 'stale'
@@ -69,6 +84,18 @@ export function BriefingCard({ card }: BriefingCardProps) {
     })
   }
 
+  const handleChangeClassification = (
+    streamId: string,
+    _streamName: string,
+  ) => {
+    const workItemId = card.metadata?.work_item_id
+      ? String(card.metadata.work_item_id)
+      : ''
+    if (!workItemId) return
+    classifyMutation.mutate({ work_item_id: workItemId, stream_id: streamId })
+    setShowChangePicker(false)
+  }
+
   if (dismissed) {
     return (
       <div className="rounded-xl border border-border bg-card p-4 text-center text-sm text-muted-foreground opacity-60 transition-opacity duration-300">
@@ -76,6 +103,12 @@ export function BriefingCard({ card }: BriefingCardProps) {
       </div>
     )
   }
+
+  // Find stream name for auto-classified badge
+  const autoStreamName =
+    card.auto_classified && card.stream_id
+      ? streams.find((s) => s.id === card.stream_id)?.name ?? 'stream'
+      : null
 
   return (
     <div
@@ -106,6 +139,45 @@ export function BriefingCard({ card }: BriefingCardProps) {
             )}
           </div>
           <p className="mt-1 text-sm text-muted-foreground">{card.body}</p>
+
+          {/* Auto-classified badge with Change option */}
+          {card.auto_classified && card.change_option && autoStreamName && (
+            <div className="mt-2">
+              <div className="inline-flex items-center gap-2">
+                <span className="inline-flex items-center gap-1 rounded-md bg-blue-50 px-2 py-0.5 text-xs font-medium text-blue-700">
+                  <CheckIcon className="h-3 w-3" />
+                  Auto-assigned to {autoStreamName}
+                </span>
+                <button
+                  onClick={() => setShowChangePicker(!showChangePicker)}
+                  className="text-xs text-muted-foreground hover:text-primary transition-colors"
+                >
+                  Change
+                </button>
+              </div>
+
+              {/* Inline stream picker for changing classification */}
+              {showChangePicker && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {streams
+                    .filter((s) => s.id !== card.stream_id)
+                    .map((stream) => (
+                      <button
+                        key={stream.id}
+                        onClick={() =>
+                          handleChangeClassification(stream.id, stream.name)
+                        }
+                        disabled={classifyMutation.isPending}
+                        className="rounded-full border border-border bg-background px-3 py-1 text-xs font-medium transition-colors hover:border-primary hover:bg-primary/5 hover:text-primary disabled:opacity-50"
+                      >
+                        {stream.name}
+                      </button>
+                    ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {card.entity_name && (
             <div className="mt-2">
               {card.stream_id ? (
