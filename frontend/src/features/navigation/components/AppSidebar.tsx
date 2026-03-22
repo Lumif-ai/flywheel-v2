@@ -1,5 +1,7 @@
-import { NavLink, useLocation } from 'react-router'
-import { Home, Briefcase, Zap, Brain, History, Settings } from 'lucide-react'
+import { NavLink, useLocation, Link } from 'react-router'
+import { Home, Settings } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '@/lib/api'
 import {
   Sidebar,
   SidebarContent,
@@ -13,58 +15,74 @@ import {
 } from '@/components/ui/sidebar'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { TenantSwitcher } from './TenantSwitcher'
-import { FocusSwitcher } from './FocusSwitcher'
-
-const navItems = [
-  { label: 'HQ', icon: Home, path: '/' },
-  { label: 'Prep', icon: Briefcase, path: '/prep' },
-  { label: 'Act', icon: Zap, path: '/act' },
-  { label: 'Intel', icon: Brain, path: '/intel' },
-  { label: 'History', icon: History, path: '/history' },
-  { label: 'Settings', icon: Settings, path: '/settings' },
-]
-
-export { navItems }
+import { StreamSidebar } from '@/features/streams/components/StreamSidebar'
 
 export function AppSidebar() {
   const location = useLocation()
+
+  const { data: keyStatus } = useQuery({
+    queryKey: ['api-key-status'],
+    queryFn: () => api.get<{ has_api_key: boolean }>('/auth/api-key'),
+  })
+
+  const hasApiKey = keyStatus?.has_api_key ?? true
 
   return (
     <Sidebar>
       <SidebarHeader className="p-3">
         <TenantSwitcher />
-        <FocusSwitcher />
       </SidebarHeader>
 
       <SidebarContent>
+        {!hasApiKey && (
+          <div className="mx-3 mb-2">
+            <Link
+              to="/settings"
+              className="block text-xs text-amber-600 bg-amber-50 rounded-md px-3 py-2 hover:bg-amber-100 transition-colors"
+            >
+              Add your API key to unlock AI features
+            </Link>
+          </div>
+        )}
+
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
-              {navItems.map((item) => {
-                const isActive = item.path === '/'
-                  ? location.pathname === '/'
-                  : location.pathname.startsWith(item.path)
-
-                return (
-                  <SidebarMenuItem key={item.path}>
-                    <SidebarMenuButton
-                      isActive={isActive}
-                      render={<NavLink to={item.path} />}
-                      tooltip={item.label}
-                    >
-                      <item.icon className="size-4" />
-                      <span>{item.label}</span>
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname === '/'}
+                  render={<NavLink to="/" />}
+                  tooltip="Briefing"
+                >
+                  <Home className="size-4" />
+                  <span>Briefing</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
             </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <StreamSidebar />
           </SidebarGroupContent>
         </SidebarGroup>
       </SidebarContent>
 
       <SidebarFooter className="p-4">
-        <div className="flex items-center justify-between">
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              isActive={location.pathname === '/settings'}
+              render={<NavLink to="/settings" />}
+              tooltip="Settings"
+            >
+              <Settings className="size-4" />
+              <span>Settings</span>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+        <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             <Avatar className="h-7 w-7">
               <AvatarFallback className="text-xs bg-muted">U</AvatarFallback>

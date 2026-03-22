@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { Home, Briefcase, Zap, Brain, History, Settings, Search } from 'lucide-react'
+import { Home, MessageSquare, Settings, Search, Zap, Layers } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useUIStore } from '@/stores/ui'
 import {
@@ -15,13 +15,12 @@ import {
   CommandSeparator,
 } from '@/components/ui/command'
 import type { Skill } from '@/types/api'
+import type { PaginatedResponse } from '@/types/api'
+import type { WorkStream } from '@/types/streams'
 
 const navItems = [
-  { label: 'HQ', icon: Home, path: '/' },
-  { label: 'Prep', icon: Briefcase, path: '/prep' },
-  { label: 'Act', icon: Zap, path: '/act' },
-  { label: 'Intel', icon: Brain, path: '/intel' },
-  { label: 'History', icon: History, path: '/history' },
+  { label: 'Briefing', icon: Home, path: '/' },
+  { label: 'Chat', icon: MessageSquare, path: '/chat' },
   { label: 'Settings', icon: Settings, path: '/settings' },
 ]
 
@@ -35,6 +34,17 @@ export function CommandPalette() {
     queryFn: () => api.get<Skill[]>('/skills'),
     enabled: open,
   })
+
+  const { data: streamsData } = useQuery({
+    queryKey: ['streams'],
+    queryFn: () =>
+      api.get<PaginatedResponse<WorkStream>>('/streams/', {
+        params: { limit: 20 },
+      }),
+    enabled: open,
+  })
+
+  const streams = streamsData?.items ?? []
 
   // Global Cmd+K listener
   useEffect(() => {
@@ -74,6 +84,23 @@ export function CommandPalette() {
             ))}
           </CommandGroup>
 
+          {streams.length > 0 && (
+            <>
+              <CommandSeparator />
+              <CommandGroup heading="Work Streams">
+                {streams.map((stream) => (
+                  <CommandItem
+                    key={stream.id}
+                    onSelect={() => handleSelect(`/streams/${stream.id}`)}
+                  >
+                    <Layers className="size-4" />
+                    <span>Go to {stream.name}</span>
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            </>
+          )}
+
           {skills && skills.length > 0 && (
             <>
               <CommandSeparator />
@@ -81,7 +108,7 @@ export function CommandPalette() {
                 {skills.map((skill) => (
                   <CommandItem
                     key={skill.name}
-                    onSelect={() => handleSelect(`/act?skill=${encodeURIComponent(skill.name)}`)}
+                    onSelect={() => handleSelect(`/chat?skill=${encodeURIComponent(skill.name)}`)}
                   >
                     <Zap className="size-4" />
                     <span>{skill.display_name}</span>
@@ -95,11 +122,11 @@ export function CommandPalette() {
           <CommandGroup heading="Search">
             <CommandItem
               onSelect={() => {
-                handleSelect('/history?search=')
+                handleSelect('/')
               }}
             >
               <Search className="size-4" />
-              <span>Search history...</span>
+              <span>Search...</span>
             </CommandItem>
           </CommandGroup>
         </CommandList>
