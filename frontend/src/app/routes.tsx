@@ -1,10 +1,8 @@
 import { lazy, Suspense } from 'react'
-import { Routes, Route } from 'react-router'
-import { HQPage } from '@/pages/HQPage'
-import { PrepPage } from '@/pages/PrepPage'
+import { Routes, Route, Navigate } from 'react-router'
+import { BriefingPage } from '@/features/briefing/components/BriefingPage'
+import { StreamDetailPage } from '@/features/streams/components/StreamDetailPage'
 import { ActPage } from '@/pages/ActPage'
-import { IntelPage } from '@/pages/IntelPage'
-import { HistoryPage } from '@/pages/HistoryPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
 
@@ -19,15 +17,21 @@ const PrivacyPage = lazy(() =>
 export function AppRoutes() {
   return (
     <Routes>
-      <Route path="/" element={<HQPage />} />
-      <Route path="/prep" element={<PrepPage />} />
-      <Route path="/act" element={<ActPage />} />
-      <Route path="/intel" element={<IntelPage />} />
-      <Route path="/history" element={<HistoryPage />} />
+      {/* Primary routes */}
+      <Route path="/" element={<BriefingPage />} />
+      <Route path="/streams/:id" element={<StreamDetailPage />} />
+      <Route path="/chat" element={<ActPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/terms" element={<Suspense fallback={null}><TermsPage /></Suspense>} />
       <Route path="/privacy" element={<Suspense fallback={null}><PrivacyPage /></Suspense>} />
+
+      {/* Redirects from old routes */}
+      <Route path="/hq" element={<Navigate to="/" replace />} />
+      <Route path="/prep" element={<Navigate to="/" replace />} />
+      <Route path="/act" element={<Navigate to="/chat" replace />} />
+      <Route path="/intel" element={<Navigate to="/" replace />} />
+      <Route path="/history" element={<Navigate to="/" replace />} />
     </Routes>
   )
 }
