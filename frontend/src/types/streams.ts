@@ -30,6 +30,11 @@ export interface WorkStreamDetail extends WorkStream {
   recent_entries: StreamEntry[]
 }
 
+export interface SourceAttribution {
+  type: string
+  name: string
+}
+
 export interface BriefingCard {
   card_type: 'meeting' | 'suggestion' | 'stale'
   title: string
@@ -38,6 +43,9 @@ export interface BriefingCard {
   stream_id: string | null
   sort_order: number
   metadata: Record<string, unknown>
+  reason: string | null
+  source_attribution: SourceAttribution[] | null
+  suggestion_key: string | null
 }
 
 export interface KnowledgeHealth {
