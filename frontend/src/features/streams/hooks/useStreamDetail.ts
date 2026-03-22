@@ -34,3 +34,16 @@ export function useCreateStream() {
     },
   })
 }
+
+export function useCreateSubThread(streamId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: ({ name, description }: { name: string; description?: string }) =>
+      api.post<void>(`/streams/${streamId}/sub-threads`, { name, description }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['streams', streamId] })
+      queryClient.invalidateQueries({ queryKey: ['streams'] })
+    },
+  })
+}

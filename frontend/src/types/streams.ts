@@ -1,5 +1,6 @@
 export interface WorkStream {
   id: string
+  parent_id: string | null
   name: string
   description: string | null
   density_score: number
@@ -9,6 +10,15 @@ export interface WorkStream {
   is_archived: boolean
   created_at: string
   updated_at: string
+}
+
+export interface SubThread {
+  id: string
+  name: string
+  description: string | null
+  density_score: number
+  entry_count: number
+  created_at: string
 }
 
 export interface WorkStreamEntity {
@@ -28,6 +38,7 @@ export interface StreamEntry {
 export interface WorkStreamDetail extends WorkStream {
   entities: WorkStreamEntity[]
   recent_entries: StreamEntry[]
+  sub_threads: SubThread[]
 }
 
 export interface SourceAttribution {

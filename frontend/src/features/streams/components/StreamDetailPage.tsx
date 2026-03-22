@@ -117,8 +117,11 @@ export function StreamDetailPage() {
 
         <TabsContent value="intelligence" className="mt-4">
           <StreamIntelligence
+            streamId={stream.id}
+            streamName={stream.name}
             entities={stream.entities}
             densityScore={stream.density_score}
+            subThreads={stream.sub_threads ?? []}
           />
         </TabsContent>
 
