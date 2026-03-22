@@ -69,7 +69,7 @@ async def chat(
     if body.stream_id:
         from flywheel.services.stream_context import load_stream_context
 
-        stream_context = await load_stream_context(body.stream_id, user.tenant_id)
+        stream_context = await load_stream_context(body.stream_id, user.tenant_id, db)
 
     # Classify intent via Haiku
     from flywheel.services.chat_orchestrator import classify_intent
