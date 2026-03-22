@@ -5,7 +5,7 @@ natural language and route to the correct skill. The orchestrator uses the
 platform's subsidized API key, NOT the user's BYOK key.
 
 Public API:
-    classify_intent(user_message, available_skills) -> dict
+    classify_intent(user_message, available_skills, history, stream_context) -> dict
 """
 
 from __future__ import annotations
@@ -24,26 +24,37 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 INTENT_SYSTEM_PROMPT = """You are a skill router for Flywheel, a knowledge compounding engine.
-Given the user's message and available skills, determine:
-1. Which skill to run (skill_name) -- must be one of the available skills
-2. What input text to pass to the skill (input_text)
-3. Your confidence level (0.0 to 1.0)
+Given the user's message and available skills, determine the appropriate action.
 
 Available skills:
 {skills_json}
 
+{stream_context_block}
+
 Respond with ONLY a JSON object, no markdown fences or extra text:
-- If clear match: {{"action": "execute", "skill_name": "...", "input_text": "...", "confidence": 0.0-1.0}}
-- If ambiguous: {{"action": "clarify", "message": "...", "candidates": ["skill1", "skill2"]}}
-- If no match: {{"action": "none", "message": "I can help with..."}}
+- If clear skill match: {{"action": "execute", "skill_name": "...", "input_text": "...", "confidence": 0.0-1.0}}
+- If ambiguous, could map to multiple skills: {{"action": "clarify", "message": "...", "candidates": ["skill1", "skill2"]}}
+- If conversational (question, greeting, follow-up, or request that does NOT require running a skill): {{"action": "conversational", "response": "your helpful reply here"}}
+- If completely off-topic or unsupported: {{"action": "none", "message": "I can help with..."}}
+
+Action guidelines:
+- "execute" -- user wants to run a skill (research, analyze, prepare, generate, etc.)
+- "clarify" -- ambiguous request that could map to multiple skills
+- "conversational" -- user is asking a question, making conversation, saying thanks, or requesting info that does NOT require a skill run (e.g., "what skills do you have?", "thanks!", "what did you find about Acme?", "hello")
+- "none" -- completely off-topic or unsupported request
 """
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
+# Maximum number of history messages to include in the Haiku prompt
+_MAX_HISTORY_MESSAGES = 5
 
 
 async def classify_intent(
     user_message: str,
     available_skills: list[dict],
+    history: list[dict] | None = None,
+    stream_context: str | None = None,
 ) -> dict:
     """Classify user intent using Haiku (fast, cheap: ~$0.005/call).
 
@@ -53,10 +64,14 @@ async def classify_intent(
     Args:
         user_message: The natural language message from the user.
         available_skills: List of skill metadata dicts with 'name' and 'description'.
+        history: Optional conversation history (list of dicts with 'role' and 'content').
+            Only the last 5 messages are included for context.
+        stream_context: Optional work stream context string from stream_id resolution.
+            Prepended to the system prompt to improve routing decisions.
 
     Returns:
-        Dict with 'action' key ('execute', 'clarify', or 'none') and
-        action-specific fields.
+        Dict with 'action' key ('execute', 'clarify', 'conversational', or 'none')
+        and action-specific fields.
     """
     if anthropic is None:
         raise ImportError("anthropic SDK required for chat orchestration")
@@ -68,11 +83,35 @@ async def classify_intent(
         indent=2,
     )
 
+    # Build stream context block for the system prompt
+    stream_context_block = ""
+    if stream_context:
+        stream_context_block = f"The user is working in the context of: {stream_context}"
+
+    system_prompt = INTENT_SYSTEM_PROMPT.format(
+        skills_json=skills_json,
+        stream_context_block=stream_context_block,
+    )
+
+    # Build messages list: include recent history for multi-turn context
+    messages: list[dict] = []
+    if history:
+        # Include last N messages for conversation context
+        recent_history = history[-_MAX_HISTORY_MESSAGES:]
+        for msg in recent_history:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role in ("user", "assistant") and content:
+                messages.append({"role": role, "content": content})
+
+    # Always append the current user message
+    messages.append({"role": "user", "content": user_message})
+
     response = await client.messages.create(
         model=_HAIKU_MODEL,
         max_tokens=500,
-        system=INTENT_SYSTEM_PROMPT.format(skills_json=skills_json),
-        messages=[{"role": "user", "content": user_message}],
+        system=system_prompt,
+        messages=messages,
     )
 
     text = response.content[0].text.strip()
