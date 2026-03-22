@@ -133,10 +133,47 @@ async def _build_meeting_cards(
     result = await session.execute(stmt)
     meetings = result.scalars().all()
 
+    # Load dismissed meeting keys
+    dismiss_stmt = select(SuggestionDismissal.suggestion_key).where(
+        and_(
+            SuggestionDismissal.suggestion_type == "meeting",
+            SuggestionDismissal.expires_at > now,
+        )
+    )
+    dismiss_result = await session.execute(dismiss_stmt)
+    dismissed_keys = {row[0] for row in dismiss_result.all()}
+
     cards: list[dict] = []
     for meeting in meetings:
+        meeting_key = str(meeting.id)
+        if meeting_key in dismissed_keys:
+            continue
+
         # Check for linked entities by matching meeting title words
         entity_matches = await _find_entity_matches(session, meeting.title)
+
+        # Build relative time for reason
+        delta = meeting.scheduled_at - now if meeting.scheduled_at else None
+        if delta:
+            hours = int(delta.total_seconds() / 3600)
+            if hours > 0:
+                relative_time = f"in {hours} hour{'s' if hours != 1 else ''}"
+            else:
+                minutes = int(delta.total_seconds() / 60)
+                relative_time = f"in {minutes} minute{'s' if minutes != 1 else ''}"
+        else:
+            relative_time = "soon"
+
+        reason = f"Showing because: meeting scheduled {relative_time}"
+        source_attribution = [{"type": "calendar", "name": "Google Calendar sync"}]
+
+        if entity_matches:
+            entity_names = ", ".join(m["name"] for m in entity_matches[:3])
+            reason += f" with context on {entity_names}"
+            source_attribution = [
+                {"type": "entity_match", "name": m["name"]}
+                for m in entity_matches[:3]
+            ] + source_attribution
 
         detail = (
             f"Scheduled for "
@@ -155,6 +192,8 @@ async def _build_meeting_cards(
                 else None,
                 "entity_matches": entity_matches,
                 "work_item_id": str(meeting.id),
+                "reason": reason,
+                "source_attribution": source_attribution,
             }
         )
 
@@ -237,6 +276,13 @@ async def _build_suggestion_cards(
             "title": s["title"],
             "detail": s["detail"],
             "suggestion_key": s["key"],
+            "reason": f"Showing because: {s['detail']}",
+            "source_attribution": [
+                {
+                    "type": "learning_engine",
+                    "name": f"Pattern detected from {s['type']}",
+                }
+            ],
         }
         if s.get("work_item_id"):
             card["work_item_id"] = s["work_item_id"]
@@ -317,6 +363,13 @@ async def _build_stale_cards(
                 "file_name": file_name,
                 "days_stale": days_stale,
                 "entry_count": entry_count,
+                "reason": f"Showing because: {file_name} hasn't been updated in {days_stale} days",
+                "source_attribution": [
+                    {
+                        "type": "staleness_check",
+                        "name": f"Last entry: {days_stale} days ago",
+                    }
+                ],
             }
         )
 
