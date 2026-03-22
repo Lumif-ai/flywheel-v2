@@ -31,6 +31,8 @@ router = APIRouter(prefix="/chat", tags=["chat"])
 
 class ChatRequest(BaseModel):
     message: str
+    history: list[dict] | None = None  # [{role: "user"|"assistant", content: str}]
+    stream_id: str | None = None
 
 
 class ChatResponse(BaseModel):
@@ -39,6 +41,7 @@ class ChatResponse(BaseModel):
     stream_url: str | None = None
     skill_name: str | None = None
     message: str | None = None
+    response: str | None = None  # Direct conversational response
     candidates: list[str] | None = None
 
 
@@ -61,11 +64,23 @@ async def chat(
             detail="The AI service is temporarily unavailable. Please try again in a minute.",
         )
 
+    # Resolve work stream context if stream_id provided
+    stream_context: str | None = None
+    if body.stream_id:
+        from flywheel.services.stream_context import load_stream_context
+
+        stream_context = await load_stream_context(body.stream_id, user.tenant_id)
+
     # Classify intent via Haiku
     from flywheel.services.chat_orchestrator import classify_intent
 
     available_skills = _get_available_skills()
-    intent = await classify_intent(body.message, available_skills)
+    intent = await classify_intent(
+        body.message,
+        available_skills,
+        history=body.history,
+        stream_context=stream_context,
+    )
 
     action = intent.get("action", "none")
 
@@ -128,6 +143,12 @@ async def chat(
             run_id=str(run.id),
             stream_url=f"/api/v1/skills/runs/{run.id}/stream",
             skill_name=skill_name,
+        )
+
+    elif action == "conversational":
+        return ChatResponse(
+            action="conversational",
+            response=intent.get("response", "I'm here to help!"),
         )
 
     elif action == "clarify":
