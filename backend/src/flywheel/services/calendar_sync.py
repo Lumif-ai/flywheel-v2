@@ -20,8 +20,9 @@ from googleapiclient.errors import HttpError
 from sqlalchemy import and_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.db.models import Integration, SuggestionDismissal, WorkItem
+from flywheel.db.models import Integration, MeetingClassification, SuggestionDismissal, WorkItem
 from flywheel.db.session import get_session_factory
+from flywheel.services.meeting_classifier import classify_meeting
 from flywheel.services.google_calendar import (
     TokenRevokedException,
     get_valid_credentials,
@@ -109,9 +110,10 @@ async def upsert_meeting_work_item(
         existing.scheduled_at = scheduled_at
         existing.data = data
         existing.status = "upcoming"  # Re-activate if previously cancelled
+        work_item_ref = existing
     else:
         # Create new work item
-        work_item = WorkItem(
+        work_item_ref = WorkItem(
             tenant_id=tenant_id,
             user_id=user_id,
             type="meeting",
@@ -122,7 +124,32 @@ async def upsert_meeting_work_item(
             external_id=external_id,
             scheduled_at=scheduled_at,
         )
-        db.add(work_item)
+        db.add(work_item_ref)
+
+    # Classify the meeting and store result in work_item.data
+    await db.flush()  # ensure work_item_ref has an id
+    try:
+        classification = await classify_meeting(db, tenant_id, work_item_ref)
+        updated_data = dict(work_item_ref.data or {})
+        updated_data["classification"] = classification
+        work_item_ref.data = updated_data
+
+        # Record auto-classifications for pattern learning
+        if classification["confidence"] == "high" and classification.get("stream_id"):
+            from uuid import UUID as _UUID
+
+            auto_record = MeetingClassification(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                work_item_id=work_item_ref.id,
+                stream_id=_UUID(classification["stream_id"]) if isinstance(classification["stream_id"], str) else classification["stream_id"],
+                email_domain=None,
+                confidence="high",
+                source=classification["source"],
+            )
+            db.add(auto_record)
+    except Exception:
+        logger.debug("Meeting classification failed for %s", work_item_ref.id, exc_info=True)
 
 
 # ---------------------------------------------------------------------------

@@ -657,6 +657,35 @@ class WorkStreamEntity(Base):
     )
 
 
+class MeetingClassification(Base):
+    __tablename__ = "meeting_classifications"
+    __table_args__ = (
+        Index("idx_mc_tenant_domain", "tenant_id", "email_domain"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    work_item_id: Mapped[UUID] = mapped_column(
+        ForeignKey("work_items.id", ondelete="CASCADE"), nullable=False
+    )
+    stream_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("work_streams.id", ondelete="SET NULL")
+    )
+    email_domain: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class ContextEntityEntry(Base):
     __tablename__ = "context_entity_entries"
 

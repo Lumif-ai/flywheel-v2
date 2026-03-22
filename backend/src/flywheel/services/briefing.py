@@ -149,6 +149,14 @@ async def _build_meeting_cards(
         if meeting_key in dismissed_keys:
             continue
 
+        # Read classification data (set by calendar_sync via meeting_classifier)
+        classification = (meeting.data or {}).get("classification", {})
+        confidence = classification.get("confidence")
+
+        # LOW confidence = internal meeting -> suppress from briefing
+        if confidence == "low":
+            continue
+
         # Check for linked entities by matching meeting title words
         entity_matches = await _find_entity_matches(session, meeting.title)
 
@@ -180,22 +188,32 @@ async def _build_meeting_cards(
             f"{meeting.scheduled_at.strftime('%b %d at %H:%M') if meeting.scheduled_at else 'soon'}"
         )
 
-        cards.append(
-            {
-                "type": "meeting",
-                "priority": "high",
-                "sort_order": 100,
-                "title": meeting.title,
-                "detail": detail,
-                "scheduled_at": meeting.scheduled_at.isoformat()
-                if meeting.scheduled_at
-                else None,
-                "entity_matches": entity_matches,
-                "work_item_id": str(meeting.id),
-                "reason": reason,
-                "source_attribution": source_attribution,
-            }
-        )
+        card: dict = {
+            "type": "meeting",
+            "priority": "high",
+            "sort_order": 100,
+            "title": meeting.title,
+            "detail": detail,
+            "scheduled_at": meeting.scheduled_at.isoformat()
+            if meeting.scheduled_at
+            else None,
+            "entity_matches": entity_matches,
+            "work_item_id": str(meeting.id),
+            "reason": reason,
+            "source_attribution": source_attribution,
+            "classification_confidence": confidence,
+        }
+
+        # Auto-classified meetings (domain pattern) get change option
+        if confidence == "high" and classification.get("source") == "auto_domain":
+            card["auto_classified"] = True
+            card["change_option"] = True
+
+        # Set stream_id from classification if present
+        if classification.get("stream_id"):
+            card["stream_id"] = classification["stream_id"]
+
+        cards.append(card)
 
     return cards
 
