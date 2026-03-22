@@ -1,0 +1,113 @@
+import { NavLink } from 'react-router'
+import { Plus, Archive } from 'lucide-react'
+import {
+  SidebarGroup,
+  SidebarGroupLabel,
+  SidebarGroupContent,
+  SidebarMenu,
+  SidebarMenuItem,
+  SidebarMenuButton,
+  SidebarMenuSkeleton,
+} from '@/components/ui/sidebar'
+import { useStreams } from '@/features/briefing/hooks/useStreams'
+import { DensityDot } from './DensityIndicator'
+
+const MAX_VISIBLE = 7
+
+export function StreamSidebar() {
+  const { data, isLoading } = useStreams()
+
+  const streams = data?.items ?? []
+  const activeStreams = streams.filter((s) => !s.is_archived)
+  const dormantStreams = streams.filter((s) => s.is_archived)
+  const visibleStreams = activeStreams.slice(0, MAX_VISIBLE)
+  const overflowCount = activeStreams.length - MAX_VISIBLE
+
+  if (isLoading) {
+    return (
+      <SidebarGroup>
+        <SidebarGroupLabel>Work Streams</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {Array.from({ length: 3 }).map((_, i) => (
+              <SidebarMenuItem key={i}>
+                <SidebarMenuSkeleton />
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+    )
+  }
+
+  return (
+    <>
+      <SidebarGroup>
+        <SidebarGroupLabel>Work Streams</SidebarGroupLabel>
+        <SidebarGroupContent>
+          <SidebarMenu>
+            {visibleStreams.map((stream) => (
+              <SidebarMenuItem key={stream.id}>
+                <SidebarMenuButton
+                  render={<NavLink to={`/streams/${stream.id}`} />}
+                  tooltip={stream.name}
+                >
+                  <span className="truncate flex-1">{stream.name}</span>
+                  <DensityDot score={stream.density_score} />
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+
+            {overflowCount > 0 && (
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  render={<NavLink to="/streams" />}
+                  tooltip="View all streams"
+                >
+                  <span className="text-muted-foreground text-xs">
+                    +{overflowCount} more
+                  </span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            )}
+
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                render={<NavLink to="/streams/new" />}
+                tooltip="Create new stream"
+              >
+                <Plus className="size-4" />
+                <span>New Stream</span>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroupContent>
+      </SidebarGroup>
+
+      {dormantStreams.length > 0 && (
+        <SidebarGroup>
+          <SidebarGroupLabel>
+            <Archive className="size-3 mr-1" />
+            Dormant
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {dormantStreams.map((stream) => (
+                <SidebarMenuItem key={stream.id}>
+                  <SidebarMenuButton
+                    render={<NavLink to={`/streams/${stream.id}`} />}
+                    tooltip={stream.name}
+                  >
+                    <span className="truncate flex-1 text-muted-foreground">
+                      {stream.name}
+                    </span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+      )}
+    </>
+  )
+}
