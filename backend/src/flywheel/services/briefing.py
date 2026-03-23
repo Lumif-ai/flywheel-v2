@@ -12,16 +12,18 @@ import datetime
 import logging
 from uuid import UUID
 
-from sqlalchemy import func, select, and_
+from sqlalchemy import distinct, func, select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.db.models import (
     ContextEntity,
+    ContextEntityEntry,
     ContextEntry,
     SuggestionDismissal,
     User,
     WorkItem,
     WorkStream,
+    WorkStreamEntity,
 )
 from flywheel.services.learning_engine import generate_suggestions
 from flywheel.services.nudge_engine import select_nudge
@@ -60,6 +62,9 @@ async def assemble_briefing(
     stale_cards = await _build_stale_cards(session, today, suggestion_cards)
     knowledge_health = await _build_knowledge_health(session)
 
+    # Personal gap cards (only for users who completed team onboarding)
+    personal_gap_cards = await _build_personal_gap_cards(session, user_id, tenant_id)
+
     # Nudge engine: select at most one nudge per day
     try:
         nudge = await select_nudge(session, user_id, tenant_id)
@@ -67,8 +72,8 @@ async def assemble_briefing(
         logger.warning("Nudge engine failed", exc_info=True)
         nudge = None
 
-    # Merge and sort: meetings (100) < suggestions (200) < stale (300+)
-    all_cards = meeting_cards + suggestion_cards + stale_cards
+    # Merge and sort: meetings (100) < suggestions (200) < personal gaps (250) < stale (300+)
+    all_cards = meeting_cards + suggestion_cards + personal_gap_cards + stale_cards
     all_cards.sort(key=lambda c: c["sort_order"])
 
     # Truncate to max
@@ -402,6 +407,127 @@ async def _build_stale_cards(
         )
 
         if len(cards) >= MAX_STALE_CARDS:
+            break
+
+    return cards
+
+
+# ---------------------------------------------------------------------------
+# Personal gap cards (priority 2.5, sort_order 250)
+# ---------------------------------------------------------------------------
+
+MAX_GAP_CARDS = 3
+
+
+async def _build_personal_gap_cards(
+    session: AsyncSession, user_id: UUID, tenant_id: UUID
+) -> list[dict]:
+    """Build cards showing team context gaps for the current user.
+
+    Only shown for users who have completed team onboarding (joined_streams
+    exists in User.settings). Compares team entry counts per stream against
+    the user's own contributions.
+    """
+    # Check if user has joined_streams in settings
+    try:
+        user_stmt = select(User.settings).where(User.id == user_id)
+        user_result = await session.execute(user_stmt)
+        settings = user_result.scalar_one_or_none()
+        if not settings or not settings.get("joined_streams"):
+            return []
+    except Exception:
+        logger.debug("Could not check user joined_streams", exc_info=True)
+        return []
+
+    # Query all active streams for the tenant
+    stream_stmt = (
+        select(WorkStream)
+        .where(WorkStream.archived_at.is_(None))
+        .order_by(WorkStream.name)
+    )
+    result = await session.execute(stream_stmt)
+    streams = result.scalars().all()
+
+    cards: list[dict] = []
+    for stream in streams:
+        # Get entity IDs for this stream
+        entity_ids_stmt = select(WorkStreamEntity.entity_id).where(
+            WorkStreamEntity.stream_id == stream.id
+        )
+        entity_ids_result = await session.execute(entity_ids_stmt)
+        entity_ids = [row[0] for row in entity_ids_result.all()]
+
+        if not entity_ids:
+            continue
+
+        # Total entries from all team members for this stream's entities
+        team_count_stmt = (
+            select(func.count(distinct(ContextEntityEntry.entry_id)))
+            .join(
+                ContextEntry,
+                ContextEntityEntry.entry_id == ContextEntry.id,
+            )
+            .where(
+                ContextEntityEntry.entity_id.in_(entity_ids),
+                ContextEntry.deleted_at.is_(None),
+            )
+        )
+        team_count = (await session.execute(team_count_stmt)).scalar_one()
+
+        if team_count == 0:
+            continue
+
+        # Entries from the current user
+        my_count_stmt = (
+            select(func.count(distinct(ContextEntityEntry.entry_id)))
+            .join(
+                ContextEntry,
+                ContextEntityEntry.entry_id == ContextEntry.id,
+            )
+            .where(
+                ContextEntityEntry.entity_id.in_(entity_ids),
+                ContextEntry.user_id == user_id,
+                ContextEntry.deleted_at.is_(None),
+            )
+        )
+        my_count = (await session.execute(my_count_stmt)).scalar_one()
+
+        if my_count == 0:
+            # Zero contributions -- medium priority gap card
+            cards.append({
+                "type": "personal_gap",
+                "priority": "medium",
+                "sort_order": 250,
+                "title": f"Your team knows {team_count} things about {stream.name}",
+                "detail": "You've had 0 meetings with them. View what the team knows.",
+                "stream_id": str(stream.id),
+                "reason": f"Team context gap -- {team_count} entries from other members, 0 from you",
+                "source_attribution": [
+                    {
+                        "type": "team_gap",
+                        "name": f"{team_count} team entries, 0 yours",
+                    }
+                ],
+            })
+        elif my_count < team_count * 0.3:
+            # Low contribution ratio -- low priority gap card
+            cards.append({
+                "type": "personal_gap",
+                "priority": "low",
+                "sort_order": 255,
+                "title": f"Your team knows {team_count} things about {stream.name}. You've contributed {my_count}.",
+                "detail": f"You've contributed {my_count} of {team_count} entries.",
+                "stream_id": str(stream.id),
+                "reason": f"Low contribution ratio -- {my_count}/{team_count} entries",
+                "source_attribution": [
+                    {
+                        "type": "team_gap",
+                        "name": f"{team_count} team entries, {my_count} yours",
+                    }
+                ],
+            })
+
+        if len(cards) >= MAX_GAP_CARDS:
             break
 
     return cards
