@@ -68,8 +68,9 @@ class User(Base):
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=text("gen_random_uuid()")
     )
-    email: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     name: Mapped[str | None] = mapped_column(Text)
+    is_anonymous: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     settings: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime.datetime] = mapped_column(
@@ -756,4 +757,81 @@ class ContextEntityEntry(Base):
     )
     mention_type: Mapped[str] = mapped_column(
         Text, server_default="explicit"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SKILL REGISTRY TABLES (DB-backed skill definitions and tenant access)
+# ---------------------------------------------------------------------------
+
+
+class SkillDefinition(Base):
+    __tablename__ = "skill_definitions"
+    __table_args__ = (
+        UniqueConstraint("name", name="uq_skill_defs_name"),
+        Index("idx_skill_defs_name", "name"),
+        Index(
+            "idx_skill_defs_enabled",
+            "enabled",
+            postgresql_where=text("enabled = true"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    version: Mapped[str] = mapped_column(Text, nullable=False, server_default="0.0.0")
+    description: Mapped[str | None] = mapped_column(Text)
+    web_tier: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("1")
+    )
+    system_prompt: Mapped[str | None] = mapped_column(Text)
+    contract_reads: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    contract_writes: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    engine_module: Mapped[str | None] = mapped_column(Text)
+    parameters: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    token_budget: Mapped[int | None] = mapped_column(Integer)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class TenantSkill(Base):
+    __tablename__ = "tenant_skills"
+    __table_args__ = (
+        Index(
+            "idx_ts_tenant_enabled",
+            "tenant_id",
+            postgresql_where=text("enabled = true"),
+        ),
+    )
+
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), primary_key=True
+    )
+    skill_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_definitions.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
+    pricing_tier: Mapped[str] = mapped_column(Text, server_default="included")
+    activated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
     )
