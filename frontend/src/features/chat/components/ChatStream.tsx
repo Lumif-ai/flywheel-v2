@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
 import { AlertCircle } from 'lucide-react'
+import { useQueryClient } from '@tanstack/react-query'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useSSE } from '@/lib/sse'
@@ -17,6 +18,7 @@ export function ChatStream({ runId }: ChatStreamProps) {
   const appendChunk = useChatStore((s) => s.appendChunk)
   const setStreamOutput = useChatStore((s) => s.setStreamOutput)
   const setStreamError = useChatStore((s) => s.setStreamError)
+  const queryClient = useQueryClient()
 
   const handleEvent = useCallback(
     (event: SSEEvent) => {
@@ -52,6 +54,8 @@ export function ChatStream({ runId }: ChatStreamProps) {
               .then((res) => setStreamOutput(res.rendered_html ?? ''))
               .catch(() => setStreamOutput(''))
           }
+          // Invalidate streams to pick up density changes from context writes
+          queryClient.invalidateQueries({ queryKey: ['streams'] })
           break
         }
         case 'error':
@@ -59,7 +63,7 @@ export function ChatStream({ runId }: ChatStreamProps) {
           break
       }
     },
-    [setStreamStatus, appendChunk, setStreamOutput, setStreamError],
+    [setStreamStatus, appendChunk, setStreamOutput, setStreamError, queryClient],
   )
 
   useSSE(

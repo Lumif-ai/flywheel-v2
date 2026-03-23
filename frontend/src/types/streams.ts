@@ -1,12 +1,23 @@
+export interface DensityDetails {
+  entity_count: number
+  entry_count: number
+  meeting_count: number
+  people_count: number
+  gap_count: number
+  strong_dimensions: string[]
+  gap_dimensions: string[]
+}
+
 export interface WorkStream {
   id: string
   parent_id: string | null
   name: string
   description: string | null
   density_score: number
-  entity_count: number
-  entry_count: number
-  meeting_count: number
+  density_details: DensityDetails | null
+  entity_count?: number
+  entry_count?: number
+  meeting_count?: number
   is_archived: boolean
   created_at: string
   updated_at: string

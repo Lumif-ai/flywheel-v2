@@ -6,7 +6,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useStreamDetail, useRenameStream } from '../hooks/useStreamDetail'
-import { DensityBar } from './DensityIndicator'
+import { StreamDensityCard } from './DensityIndicator'
 import { StreamTimeline } from './StreamTimeline'
 import { StreamIntelligence } from './StreamIntelligence'
 import { StreamChat } from './StreamChat'
@@ -100,7 +100,10 @@ export function StreamDetailPage() {
           )}
         </div>
 
-        <DensityBar score={stream.density_score} showLabel />
+        <StreamDensityCard
+          densityScore={stream.density_score}
+          details={stream.density_details ?? null}
+        />
       </div>
 
       {/* Tabs */}

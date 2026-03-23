@@ -10,7 +10,7 @@ import {
   SidebarMenuSkeleton,
 } from '@/components/ui/sidebar'
 import { useStreams } from '@/features/briefing/hooks/useStreams'
-import { DensityDot } from './DensityIndicator'
+import { StreamDensityCard } from './DensityIndicator'
 
 const MAX_VISIBLE = 7
 
@@ -53,7 +53,7 @@ export function StreamSidebar() {
                   tooltip={stream.name}
                 >
                   <span className="truncate flex-1">{stream.name}</span>
-                  <DensityDot score={stream.density_score} />
+                  <StreamDensityCard densityScore={stream.density_score} details={stream.density_details} compact />
                 </SidebarMenuButton>
               </SidebarMenuItem>
             ))}
