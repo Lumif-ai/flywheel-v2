@@ -18,7 +18,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
-from flywheel.api.skills import _get_available_skills
+from flywheel.api.skills import _get_available_skills_db
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import SkillRun
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit
@@ -74,7 +74,7 @@ async def chat(
     # Classify intent via Haiku
     from flywheel.services.chat_orchestrator import classify_intent
 
-    available_skills = _get_available_skills()
+    available_skills = await _get_available_skills_db(db, user.tenant_id)
     intent = await classify_intent(
         body.message,
         available_skills,
@@ -127,7 +127,7 @@ async def chat(
             await db.execute(
                 sa_text("""
                     UPDATE skill_runs
-                    SET events_log = events_log || :event::jsonb
+                    SET events_log = events_log || CAST(:event AS jsonb)
                     WHERE id = :run_id
                 """),
                 {"run_id": str(run.id), "event": json.dumps([routing_event])},
