@@ -1,5 +1,6 @@
 ---
 name: spec
+version: "1.4"
 description: >-
   Turn vague ideas into executable specifications through propose-then-react drafting,
   adversarial review, and acceptance criteria tightening. Ingests existing artifacts
@@ -13,9 +14,6 @@ description: >-
 ---
 
 # spec
-
-> **Version:** 1.4 | **Created:** 2026-03-19
-> **Changelog:** See [Changelog](#changelog) at end of file.
 
 ## Philosophy
 

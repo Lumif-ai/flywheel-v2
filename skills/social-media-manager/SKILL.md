@@ -1,5 +1,6 @@
 ---
 name: social-media-manager
+version: "1.1"
 description: >
   Content pipeline for founders and operators to draft, manage, and publish social media posts
   on LinkedIn and X/Twitter. Mines context store and git history for "postable moments," drafts
@@ -16,9 +17,6 @@ description: >
   Also triggers on: "I want to post about my learnings", "draft something about [event]",
   "what's in my content backlog", "show content stats", "review my posting cadence".
 ---
-
-> **Version:** 1.1 | **Last Updated:** 2026-03-14
-> **Changelog:** See [Changelog](#changelog) at end of file.
 
 # Social Media Manager
 
