@@ -44,3 +44,50 @@ export function useClassifyMeeting() {
     },
   })
 }
+
+export function useNudgeDismiss() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (params: { nudge_type: string; nudge_key: string }) =>
+      api.post<{ dismissed: boolean }>('/briefing/nudge/dismiss', params),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['briefing'] })
+    },
+  })
+}
+
+export function useNudgeSubmit() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (params: { nudge_key: string; stream_id: string; text: string }) =>
+      api.post<{ submitted: boolean; entry_id: string }>(
+        '/briefing/nudge/submit',
+        params,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['briefing'] })
+      queryClient.invalidateQueries({ queryKey: ['streams'] })
+    },
+  })
+}
+
+export function useNudgeResearch() {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (params: {
+      nudge_key: string
+      entity_id: string
+      entity_name: string
+    }) =>
+      api.post<{ triggered: boolean; work_item_id: string }>(
+        '/briefing/nudge/research',
+        params,
+      ),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['briefing'] })
+    },
+  })
+}

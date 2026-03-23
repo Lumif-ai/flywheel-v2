@@ -93,9 +93,24 @@ export interface KnowledgeHealth {
   total_entries: number
 }
 
+export interface NudgeResponse {
+  type: 'integration_connect' | 'knowledge_gap' | 'context_enrichment'
+  key: string
+  title: string
+  body: string
+  provider?: string
+  action_url?: string
+  action_label?: string
+  stream_id?: string
+  stream_name?: string
+  entity_id?: string
+  entity_name?: string
+  has_research_action?: boolean
+}
+
 export interface BriefingResponse {
   greeting: string
   cards: BriefingCard[]
   knowledge_health: KnowledgeHealth
-  nudge: null
+  nudge: NudgeResponse | null
 }
