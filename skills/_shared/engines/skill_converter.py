@@ -40,6 +40,7 @@ ENGINE_REGISTRY = {
     "gtm-pipeline": "gtm_pipeline",
     "investor-update": "investor_update",
     "ctx-investor-update": "investor_update",
+    "company-intel": "company_intel",
 }
 
 # Sections to strip from system prompt (low-value for execution)
