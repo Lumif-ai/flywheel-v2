@@ -495,8 +495,23 @@ async def execute_run(run: SkillRun) -> None:
         # Check agent connection for browser tool availability
         agent_connected = agent_manager.is_connected(run.user_id) if run.user_id else False
 
-        # Tier 3 skills require the agent -- fail fast if not connected
-        if run.skill_name in TIER_3_SKILLS and not agent_connected:
+        # Load skill metadata from DB (RT-02/RT-03: DB is runtime source of truth)
+        skill_meta = await _load_skill_from_db(factory, run.skill_name)
+        if skill_meta is None:
+            logger.warning(
+                "Run %s: skill '%s' not found in DB, falling back to filesystem",
+                run.id, run.skill_name,
+            )
+
+        # Tier check: use DB web_tier if available, else fall back to hardcoded set
+        skill_web_tier = skill_meta["web_tier"] if skill_meta else None
+        if skill_web_tier == 3 and not agent_connected:
+            raise ValueError(
+                "This skill requires the local agent for browser automation. "
+                "Start the agent with: flywheel agent start"
+            )
+        elif skill_meta is None and run.skill_name in TIER_3_SKILLS and not agent_connected:
+            # Fallback: hardcoded TIER_3_SKILLS for skills not yet seeded in DB
             raise ValueError(
                 "This skill requires the local agent for browser automation. "
                 "Start the agent with: flywheel agent start"
@@ -516,17 +531,22 @@ async def execute_run(run: SkillRun) -> None:
             factory, run.tenant_id, active_focus_id
         )
         logger.info(
-            "Run %s: active_focus=%s, merged_settings_keys=%s, agent_connected=%s",
+            "Run %s: active_focus=%s, merged_settings_keys=%s, agent_connected=%s, skill_from_db=%s",
             run.id,
             active_focus_id,
             list(merged_settings.keys()) if merged_settings else [],
             agent_connected,
+            skill_meta is not None,
         )
 
         try:
-            # Engine dispatch: skills with dedicated Python engines bypass
-            # the generic LLM tool-use loop (and don't need SKILL.md files)
-            if run.skill_name in ENGINE_SKILLS:
+            # Engine dispatch (RT-03): check engine_module from DB, fall back
+            # to hardcoded ENGINE_SKILLS set for non-seeded skills.
+            has_engine = (
+                (skill_meta and skill_meta["engine_module"])
+                or (skill_meta is None and run.skill_name in ENGINE_SKILLS)
+            )
+            if has_engine:
                 if run.skill_name == "company-intel":
                     output, token_usage, tool_calls = await _execute_company_intel(
                         api_key=api_key,
@@ -536,8 +556,15 @@ async def execute_run(run: SkillRun) -> None:
                         tenant_id=run.tenant_id,
                     )
                 else:
-                    raise ValueError(f"Engine skill '{run.skill_name}' has no engine dispatch")
+                    engine_mod = skill_meta["engine_module"] if skill_meta else None
+                    raise ValueError(
+                        f"Engine skill '{run.skill_name}' (engine_module={engine_mod}) "
+                        f"has no engine dispatch"
+                    )
             else:
+                # Resolve system_prompt: prefer DB, fall back to filesystem
+                db_system_prompt = skill_meta["system_prompt"] if skill_meta else None
+
                 output, token_usage, tool_calls = await _execute_with_tools(
                     api_key=api_key,
                     skill_name=run.skill_name,
@@ -547,6 +574,7 @@ async def execute_run(run: SkillRun) -> None:
                     factory=factory,
                     run_id=run.id,
                     agent_connected=agent_connected,
+                    system_prompt_override=db_system_prompt,
                 )
             anthropic_breaker.record_success()
         except Exception as exec_err:
@@ -972,6 +1000,7 @@ async def _execute_with_tools(
     run_id: UUID,
     max_iterations: int = 25,
     agent_connected: bool = False,
+    system_prompt_override: str | None = None,
 ) -> tuple[str, dict, list]:
     """Execute a skill using AsyncAnthropic with the tool registry.
 
@@ -989,6 +1018,8 @@ async def _execute_with_tools(
         run_id: SkillRun UUID for event logging.
         max_iterations: Maximum tool_use loop iterations (default 25).
         agent_connected: Whether the user's local agent is connected.
+        system_prompt_override: If provided (from DB), use this instead of
+            parsing SKILL.md from the filesystem. Enables RT-02.
 
     Returns:
         Tuple of (output_text, token_usage_dict, tool_calls_list).
@@ -997,16 +1028,23 @@ async def _execute_with_tools(
 
     client = anthropic.AsyncAnthropic(api_key=api_key)
 
-    # Build system prompt from SKILL.md
-    _skills_engines_dir = str(
-        Path(__file__).resolve().parents[4] / "skills" / "_shared" / "engines"
-    )
-    if _skills_engines_dir not in sys.path:
-        sys.path.insert(0, _skills_engines_dir)
-    from skill_converter import convert_skill
+    # Build system prompt: prefer DB override (RT-02), fall back to SKILL.md
+    if system_prompt_override:
+        system_prompt = system_prompt_override
+    else:
+        logger.warning(
+            "Run %s: no DB system_prompt for '%s', falling back to SKILL.md",
+            run_id, skill_name,
+        )
+        _skills_engines_dir = str(
+            Path(__file__).resolve().parents[4] / "skills" / "_shared" / "engines"
+        )
+        if _skills_engines_dir not in sys.path:
+            sys.path.insert(0, _skills_engines_dir)
+        from skill_converter import convert_skill
 
-    spec = convert_skill(skill_name)
-    system_prompt = spec.system_prompt
+        spec = convert_skill(skill_name)
+        system_prompt = spec.system_prompt
 
     # Snapshot tool definitions for version safety
     # When agent is not connected, exclude browser tools so Claude never
