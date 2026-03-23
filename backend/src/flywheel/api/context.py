@@ -39,6 +39,7 @@ class AppendEntryRequest(BaseModel):
     source: str
     detail: str | None = None
     confidence: str = "medium"
+    metadata: dict | None = None
 
 
 class BatchEntryItem(BaseModel):
@@ -47,6 +48,7 @@ class BatchEntryItem(BaseModel):
     source: str
     detail: str | None = None
     confidence: str = "medium"
+    metadata: dict | None = None
 
 
 class BatchEntriesRequest(BaseModel):
@@ -75,6 +77,7 @@ def _entry_to_dict(e: ContextEntry) -> dict:
         "evidence_count": e.evidence_count,
         "content": e.content,
         "focus_id": str(e.focus_id) if e.focus_id else None,
+        "metadata": e.metadata_ or {},
         "created_at": e.created_at.isoformat() if e.created_at else None,
         "updated_at": e.updated_at.isoformat() if e.updated_at else None,
     }

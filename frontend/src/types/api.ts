@@ -29,6 +29,7 @@ export interface ContextEntry {
   created_at: string
   updated_at: string
   visibility: string
+  metadata?: Record<string, unknown>
 }
 
 export interface WorkItem {

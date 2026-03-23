@@ -194,6 +194,9 @@ class ContextEntry(Base):
     flag_related: Mapped["ContextEntry | None"] = relationship(
         "ContextEntry", remote_side="ContextEntry.id", foreign_keys=[flag_related_id]
     )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )

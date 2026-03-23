@@ -107,6 +107,7 @@ async def append_entry(
     """
     detail = entry.get("detail")
     confidence = entry.get("confidence", "medium")
+    metadata = entry.get("metadata") or {}
     content_raw = entry.get("content", "")
     if isinstance(content_raw, list):
         content = "\n".join(content_raw)
@@ -149,6 +150,8 @@ async def append_entry(
         existing.evidence_count += 1
         if existing.content.strip() != content.strip():
             existing.content = content
+        if metadata:
+            existing.metadata_ = {**(existing.metadata_ or {}), **metadata}
         await session.flush()
         result_entry = existing
         event_type = "evidence_incremented"
@@ -162,6 +165,7 @@ async def append_entry(
             detail=detail,
             confidence=confidence,
             content=content,
+            metadata_=metadata,
             date=date.today(),
             focus_id=focus_id,
         )
