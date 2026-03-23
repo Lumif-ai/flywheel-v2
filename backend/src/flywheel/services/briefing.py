@@ -24,6 +24,7 @@ from flywheel.db.models import (
     WorkStream,
 )
 from flywheel.services.learning_engine import generate_suggestions
+from flywheel.services.nudge_engine import select_nudge
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +42,9 @@ STALE_THRESHOLD_DAYS = 90
 # ---------------------------------------------------------------------------
 
 
-async def assemble_briefing(session: AsyncSession, user_id: UUID) -> dict:
+async def assemble_briefing(
+    session: AsyncSession, user_id: UUID, tenant_id: UUID
+) -> dict:
     """Assemble the briefing for a user: greeting, cards, knowledge health, nudge.
 
     Returns a dict matching the BriefingResponse schema:
@@ -57,6 +60,13 @@ async def assemble_briefing(session: AsyncSession, user_id: UUID) -> dict:
     stale_cards = await _build_stale_cards(session, today, suggestion_cards)
     knowledge_health = await _build_knowledge_health(session)
 
+    # Nudge engine: select at most one nudge per day
+    try:
+        nudge = await select_nudge(session, user_id, tenant_id)
+    except Exception:
+        logger.warning("Nudge engine failed", exc_info=True)
+        nudge = None
+
     # Merge and sort: meetings (100) < suggestions (200) < stale (300+)
     all_cards = meeting_cards + suggestion_cards + stale_cards
     all_cards.sort(key=lambda c: c["sort_order"])
@@ -69,7 +79,7 @@ async def assemble_briefing(session: AsyncSession, user_id: UUID) -> dict:
         "cards": cards,
         "card_count": len(cards),
         "knowledge_health": knowledge_health,
-        "nudge": None,  # Phase 37 will implement nudge engine with priority ranking
+        "nudge": nudge,
     }
 
 

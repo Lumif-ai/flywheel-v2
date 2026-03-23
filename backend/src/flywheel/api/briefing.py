@@ -17,12 +17,20 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from sqlalchemy import select
 
-from flywheel.db.models import SuggestionDismissal, Tenant, WorkItem
+from flywheel.db.models import (
+    ContextEntry,
+    SuggestionDismissal,
+    Tenant,
+    User,
+    WorkItem,
+    WorkStream,
+)
 from flywheel.services.briefing import assemble_briefing
 from flywheel.services.meeting_classifier import (
     get_domain_rules,
     record_classification,
 )
+from flywheel.services.nudge_engine import record_nudge_action
 
 router = APIRouter(prefix="/briefing", tags=["briefing"])
 
@@ -81,12 +89,58 @@ class KnowledgeHealth(BaseModel):
     health_level: str  # "strong" | "growing" | "early"
 
 
+class NudgeResponse(BaseModel):
+    type: str  # "integration_connect" | "knowledge_gap" | "context_enrichment"
+    key: str
+    title: str
+    body: str
+    provider: str | None = None
+    action_url: str | None = None
+    action_label: str | None = None
+    stream_id: str | None = None
+    stream_name: str | None = None
+    entity_id: str | None = None
+    entity_name: str | None = None
+    has_research_action: bool = False
+
+
 class BriefingResponse(BaseModel):
     greeting: str
     cards: list[BriefingCard]
     card_count: int
     knowledge_health: KnowledgeHealth
-    nudge: dict | None = None
+    nudge: NudgeResponse | None = None
+
+
+class NudgeDismissRequest(BaseModel):
+    nudge_type: str
+    nudge_key: str
+
+
+class NudgeDismissResponse(BaseModel):
+    dismissed: bool
+
+
+class NudgeSubmitRequest(BaseModel):
+    nudge_key: str
+    stream_id: str
+    text: str  # The user's inline text input
+
+
+class NudgeSubmitResponse(BaseModel):
+    submitted: bool
+    entry_id: str
+
+
+class NudgeResearchRequest(BaseModel):
+    nudge_key: str
+    entity_id: str
+    entity_name: str
+
+
+class NudgeResearchResponse(BaseModel):
+    triggered: bool
+    work_item_id: str
 
 
 # ---------------------------------------------------------------------------
@@ -105,7 +159,7 @@ async def get_briefing(
     (meetings > suggestions > stale context), knowledge health
     metrics from work stream density, and nudge placeholder.
     """
-    result = await assemble_briefing(db, user.sub)
+    result = await assemble_briefing(db, user.sub, user.tenant_id)
     return result
 
 
@@ -156,7 +210,6 @@ async def classify_meeting_endpoint(
     from the same email domain, future meetings auto-classify via pattern learning.
     """
     from uuid import UUID as _UUID
-    from flywheel.db.models import WorkStream
 
     work_item_id = _UUID(body.work_item_id)
     stream_id = _UUID(body.stream_id)
@@ -227,4 +280,154 @@ async def classify_meeting_endpoint(
     return ClassifyMeetingResponse(
         classified=True,
         stream_name=final_stream_name,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /briefing/nudge/dismiss
+# ---------------------------------------------------------------------------
+
+
+@router.post("/nudge/dismiss", response_model=NudgeDismissResponse)
+async def dismiss_nudge(
+    body: NudgeDismissRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Dismiss a nudge for 7 days.
+
+    Creates a SuggestionDismissal with type='nudge' and records a
+    nudge_interaction with action='dismissed'. The nudge will not
+    resurface until the dismissal expires.
+    """
+    now = datetime.datetime.now(datetime.timezone.utc)
+
+    # Create 7-day dismissal
+    dismissal = SuggestionDismissal(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        suggestion_type="nudge",
+        suggestion_key=body.nudge_key,
+        dismissed_at=now,
+        expires_at=now + datetime.timedelta(days=7),
+    )
+    db.add(dismissal)
+
+    # Record nudge interaction
+    await record_nudge_action(
+        db, user.tenant_id, user.sub,
+        body.nudge_type, body.nudge_key, "dismissed",
+    )
+
+    await db.commit()
+    return NudgeDismissResponse(dismissed=True)
+
+
+# ---------------------------------------------------------------------------
+# POST /briefing/nudge/submit
+# ---------------------------------------------------------------------------
+
+
+@router.post("/nudge/submit", response_model=NudgeSubmitResponse)
+async def submit_nudge(
+    body: NudgeSubmitRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Submit inline text for a knowledge gap nudge.
+
+    Creates a ContextEntry from the user's text input and records
+    the nudge interaction as completed.
+    """
+    from uuid import UUID as _UUID
+
+    stream_id = _UUID(body.stream_id)
+
+    # Fetch stream name for detail field
+    stream_result = await db.execute(
+        select(WorkStream.name).where(WorkStream.id == stream_id)
+    )
+    stream_name = stream_result.scalar_one_or_none() or "knowledge-gaps"
+
+    # Create context entry from user's text
+    entry = ContextEntry(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        file_name="knowledge-gaps",
+        source="user-nudge",
+        detail=stream_name,
+        confidence="medium",
+        content=body.text,
+    )
+    db.add(entry)
+    await db.flush()  # Get entry.id
+
+    # Record nudge interaction as completed
+    await record_nudge_action(
+        db, user.tenant_id, user.sub,
+        "knowledge_gap", body.nudge_key, "completed",
+        data={"entry_id": str(entry.id)},
+    )
+
+    await db.commit()
+    return NudgeSubmitResponse(submitted=True, entry_id=str(entry.id))
+
+
+# ---------------------------------------------------------------------------
+# POST /briefing/nudge/research
+# ---------------------------------------------------------------------------
+
+
+@router.post("/nudge/research", response_model=NudgeResearchResponse)
+async def trigger_research(
+    body: NudgeResearchRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Trigger background research for a context enrichment nudge.
+
+    Requires the user to have a BYOK API key configured. Creates a
+    WorkItem with type='nudge_research' for the job queue worker.
+    """
+    from fastapi import HTTPException
+
+    # Check if user has BYOK API key
+    user_result = await db.execute(
+        select(User.api_key_encrypted).where(User.id == user.sub)
+    )
+    api_key = user_result.scalar_one_or_none()
+
+    if api_key is None:
+        raise HTTPException(
+            status_code=400,
+            detail="API key required for research. Add one in Settings.",
+        )
+
+    # Create work item for job queue
+    work_item = WorkItem(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        type="nudge_research",
+        title=f"Research {body.entity_name}",
+        status="pending",
+        source="nudge",
+        data={
+            "entity_id": body.entity_id,
+            "entity_name": body.entity_name,
+            "nudge_key": body.nudge_key,
+        },
+    )
+    db.add(work_item)
+    await db.flush()  # Get work_item.id
+
+    # Record nudge interaction as completed
+    await record_nudge_action(
+        db, user.tenant_id, user.sub,
+        "context_enrichment", body.nudge_key, "completed",
+        data={"work_item_id": str(work_item.id)},
+    )
+
+    await db.commit()
+    return NudgeResearchResponse(
+        triggered=True, work_item_id=str(work_item.id)
     )
