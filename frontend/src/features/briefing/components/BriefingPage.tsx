@@ -1,9 +1,11 @@
 import { useMemo } from 'react'
 import { useBriefing } from '../hooks/useBriefing'
+import { useStreams } from '../hooks/useStreams'
 import { BriefingCard } from './BriefingCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
 import { SoftSignupCard, isSignupCardDismissed } from '@/features/onboarding/components/SoftSignupCard'
+import { StreamDensityCard } from '@/features/streams/components/DensityIndicator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
@@ -11,7 +13,10 @@ import { InboxIcon, Calendar, ArrowRight } from 'lucide-react'
 
 export function BriefingPage() {
   const { data, isLoading, error } = useBriefing()
+  const { data: streamsData } = useStreams()
   const user = useAuthStore(state => state.user)
+
+  const streams = streamsData?.items ?? []
 
   const isAnonymous = useMemo(() => {
     if (!user) return true
@@ -65,6 +70,29 @@ export function BriefingPage() {
         ) : data?.knowledge_health ? (
           <KnowledgeHealthBar health={data.knowledge_health} />
         ) : null}
+
+        {/* Your Streams - per-stream density */}
+        {streams.length > 0 && (
+          <div className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Your Streams</h2>
+            <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+              {streams.map((stream) => (
+                <Link
+                  key={stream.id}
+                  to={`/streams/${stream.id}`}
+                  className="rounded-xl border bg-card p-4 transition-colors hover:bg-accent/50"
+                >
+                  <p className="mb-2 text-sm font-medium truncate">{stream.name}</p>
+                  <StreamDensityCard
+                    densityScore={stream.density_score}
+                    details={stream.density_details}
+                    compact
+                  />
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Cards Grid */}
         {isLoading ? (
