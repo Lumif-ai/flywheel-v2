@@ -1,5 +1,9 @@
 """Skill execution -- async tool_use loop (web) and sync gateway bridge (CLI).
 
+Skill metadata (system_prompt, engine_module, web_tier) is sourced from the
+skill_definitions table, seeded by ``flywheel db seed``. No filesystem
+scanning or hardcoded skill sets in the runtime path.
+
 Web execution uses AsyncAnthropic with a tool_use loop through the tool
 registry. CLI/Slack execution still uses the sync execution_gateway via
 _execute_with_api_key(). Both paths share BYOK key decryption, event
@@ -38,25 +42,6 @@ from flywheel.services.cost_tracker import calculate_cost
 
 logger = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# Skill Browser Tiers:
-# - Tier 1: Cloud-only skills. No browser tools needed. Always available.
-# - Tier 2: Skills that benefit from browser but work without.
-#   When agent not connected: browser tools excluded from tool list,
-#   skill runs with reduced capability + note in output.
-# - Tier 3: Skills that REQUIRE browser automation to function.
-#   When agent not connected: execution blocked with clear error message.
-#
-# Classification is by skill name in TIER_3_SKILLS set.
-# All other skills with browser tool usage are implicitly Tier 2.
-# Skills that never use browser tools are implicitly Tier 1.
-# ---------------------------------------------------------------------------
-TIER_3_SKILLS: set[str] = {"gtm-web-scraper", "dogfood-tester"}
-
-# Skills with dedicated Python engines that bypass the LLM tool-use loop.
-# These run their own crawl/structure/write logic directly.
-ENGINE_SKILLS: set[str] = {"company-intel"}
-
 # Markers in tool results that indicate a browser step was skipped
 AGENT_SKIP_MARKERS = ["AGENT_NOT_CONNECTED", "AGENT_TIMEOUT"]
 
@@ -64,10 +49,6 @@ AGENT_SKIP_MARKERS = ["AGENT_NOT_CONNECTED", "AGENT_TIMEOUT"]
 # The execution_gateway reads ANTHROPIC_API_KEY from os.environ, so we
 # must set it before calling execute_skill and restore it after.
 _env_lock = threading.Lock()
-
-# Path to the engines directory (v1 execution gateway location)
-_ENGINES_DIR = Path(__file__).resolve().parents[3] / "engines"
-
 
 async def _load_skill_from_db(
     factory: async_sessionmaker[AsyncSession],
@@ -503,15 +484,9 @@ async def execute_run(run: SkillRun) -> None:
                 run.id, run.skill_name,
             )
 
-        # Tier check: use DB web_tier if available, else fall back to hardcoded set
+        # Tier check: use DB web_tier (seeded from SKILL.md frontmatter)
         skill_web_tier = skill_meta["web_tier"] if skill_meta else None
         if skill_web_tier == 3 and not agent_connected:
-            raise ValueError(
-                "This skill requires the local agent for browser automation. "
-                "Start the agent with: flywheel agent start"
-            )
-        elif skill_meta is None and run.skill_name in TIER_3_SKILLS and not agent_connected:
-            # Fallback: hardcoded TIER_3_SKILLS for skills not yet seeded in DB
             raise ValueError(
                 "This skill requires the local agent for browser automation. "
                 "Start the agent with: flywheel agent start"
@@ -540,12 +515,8 @@ async def execute_run(run: SkillRun) -> None:
         )
 
         try:
-            # Engine dispatch (RT-03): check engine_module from DB, fall back
-            # to hardcoded ENGINE_SKILLS set for non-seeded skills.
-            has_engine = (
-                (skill_meta and skill_meta["engine_module"])
-                or (skill_meta is None and run.skill_name in ENGINE_SKILLS)
-            )
+            # Engine dispatch (RT-03): check engine_module from DB
+            has_engine = bool(skill_meta and skill_meta["engine_module"])
             if has_engine:
                 if run.skill_name == "company-intel":
                     output, token_usage, tool_calls = await _execute_company_intel(
@@ -1029,6 +1000,7 @@ async def _execute_with_tools(
     client = anthropic.AsyncAnthropic(api_key=api_key)
 
     # Build system prompt: prefer DB override (RT-02), fall back to SKILL.md
+    # TODO: Remove filesystem fallback after confirming all skills are seeded
     if system_prompt_override:
         system_prompt = system_prompt_override
     else:

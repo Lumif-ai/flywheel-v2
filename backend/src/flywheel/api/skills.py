@@ -1,5 +1,8 @@
 """Skill endpoints: listing, run management, SSE streaming, execution history.
 
+Skill metadata is sourced from the skill_definitions table, seeded by the
+``flywheel db seed`` CLI command. No filesystem scanning at runtime.
+
 Endpoints:
 - GET  /skills                    -- list available skills
 - POST /skills/runs               -- start a skill run
@@ -14,11 +17,9 @@ import asyncio
 import datetime
 import json
 import logging
-from pathlib import Path
 from typing import Any
 from uuid import UUID
 
-import yaml
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -34,9 +35,6 @@ from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_conc
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/skills", tags=["skills"])
-
-# Directory where skill definitions live (relative to project root)
-SKILLS_DIR = Path(__file__).resolve().parents[4] / "skills"
 
 
 # ---------------------------------------------------------------------------
@@ -117,46 +115,6 @@ def _get_tier_message(tier: int) -> str | None:
     if tier == 2:
         return "Works on web with reduced capability. Connect your local agent for deeper research."
     return None  # Tier 1: no message needed, full functionality
-
-
-def _parse_skill_frontmatter_filesystem(skill_dir: Path) -> dict[str, Any] | None:
-    """Parse SKILL.md YAML frontmatter from a skill directory."""
-    skill_md = skill_dir / "SKILL.md"
-    if not skill_md.exists():
-        return None
-    try:
-        text = skill_md.read_text(encoding="utf-8")
-        if not text.startswith("---"):
-            return None
-        end = text.index("---", 3)
-        fm = yaml.safe_load(text[3:end])
-        if not isinstance(fm, dict):
-            return None
-        web_tier = fm.get("web_tier", 1)
-        return {
-            "name": fm.get("name", skill_dir.name),
-            "description": fm.get("description", ""),
-            "version": fm.get("version", "0.0.0"),
-            "tags": fm.get("tags", []),
-            "web_tier": web_tier,
-            "tier_message": _get_tier_message(web_tier),
-        }
-    except Exception:
-        logger.debug("Failed to parse SKILL.md in %s", skill_dir)
-        return None
-
-
-def _get_available_skills_filesystem() -> list[dict[str, Any]]:
-    """Scan the skills directory and return parsed metadata (legacy fallback)."""
-    if not SKILLS_DIR.is_dir():
-        return []
-    skills = []
-    for child in sorted(SKILLS_DIR.iterdir()):
-        if child.is_dir():
-            meta = _parse_skill_frontmatter_filesystem(child)
-            if meta is not None:
-                skills.append(meta)
-    return skills
 
 
 async def _get_available_skills_db(db: AsyncSession, tenant_id: UUID) -> list[dict[str, Any]]:
