@@ -683,6 +683,31 @@ class DensitySnapshot(Base):
     )
 
 
+class NudgeInteraction(Base):
+    __tablename__ = "nudge_interactions"
+    __table_args__ = (
+        Index("idx_ni_tenant_user", "tenant_id", "user_id"),
+        Index("idx_ni_tenant_type", "tenant_id", "nudge_type", text("created_at DESC")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    nudge_type: Mapped[str] = mapped_column(Text, nullable=False)
+    nudge_key: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class MeetingClassification(Base):
     __tablename__ = "meeting_classifications"
     __table_args__ = (
