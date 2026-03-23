@@ -115,7 +115,7 @@ export function StreamDetailPage() {
         </TabsList>
 
         <TabsContent value="timeline" className="mt-4">
-          <StreamTimeline entries={stream.recent_entries} />
+          <StreamTimeline entries={stream.recent_entries} streamId={stream.id} />
         </TabsContent>
 
         <TabsContent value="intelligence" className="mt-4">

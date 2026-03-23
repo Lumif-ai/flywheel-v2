@@ -1,7 +1,9 @@
 import type { StreamEntry } from '@/types/streams'
+import { GrowthChart } from './GrowthChart'
 
 interface StreamTimelineProps {
   entries: StreamEntry[]
+  streamId?: string
 }
 
 function formatRelativeTime(dateStr: string): string {
@@ -24,13 +26,16 @@ function truncate(text: string, maxLength: number): string {
   return text.slice(0, maxLength).trimEnd() + '...'
 }
 
-export function StreamTimeline({ entries }: StreamTimelineProps) {
+export function StreamTimeline({ entries, streamId }: StreamTimelineProps) {
   if (entries.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-12 text-center">
-        <p className="text-sm text-muted-foreground">
-          No activity yet. Context entries will appear here as you work.
-        </p>
+      <div className="space-y-6">
+        {streamId && <GrowthChart streamId={streamId} />}
+        <div className="flex flex-col items-center justify-center py-12 text-center">
+          <p className="text-sm text-muted-foreground">
+            No activity yet. Context entries will appear here as you work.
+          </p>
+        </div>
       </div>
     )
   }
@@ -41,6 +46,12 @@ export function StreamTimeline({ entries }: StreamTimelineProps) {
 
   return (
     <div className="space-y-3">
+      {streamId && (
+        <>
+          <GrowthChart streamId={streamId} />
+          <hr className="my-6 border-border" />
+        </>
+      )}
       {sorted.map((entry) => (
         <div
           key={entry.id}

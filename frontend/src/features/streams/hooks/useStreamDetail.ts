@@ -1,6 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import type { WorkStreamDetail } from '@/types/streams'
+import type { WorkStreamDetail, GrowthResponse } from '@/types/streams'
 
 export function useStreamDetail(id: string) {
   return useQuery({
@@ -32,6 +32,14 @@ export function useCreateStream() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['streams'] })
     },
+  })
+}
+
+export function useStreamGrowth(streamId: string) {
+  return useQuery({
+    queryKey: ['streams', streamId, 'growth'],
+    queryFn: () => api.get<GrowthResponse>(`/streams/${streamId}/growth`),
+    enabled: !!streamId,
   })
 }
 

@@ -52,6 +52,19 @@ export interface WorkStreamDetail extends WorkStream {
   sub_threads: SubThread[]
 }
 
+export interface GrowthWeek {
+  week_start: string
+  density_score: number
+  sources: { meetings: number; research: number; integrations: number }
+  highlights: string[]
+}
+
+export interface GrowthResponse {
+  status: 'ok' | 'too_early'
+  message?: string
+  weeks: GrowthWeek[]
+}
+
 export interface SourceAttribution {
   type: string
   name: string
