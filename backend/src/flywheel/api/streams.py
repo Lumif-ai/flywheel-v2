@@ -135,7 +135,10 @@ async def _recompute_density(
                     "entity_count": 0,
                     "entry_count": 0,
                     "meeting_count": 0,
+                    "people_count": 0,
                     "gap_count": 0,
+                    "strong_dimensions": [],
+                    "gap_dimensions": [],
                 },
             )
         )
@@ -171,6 +174,21 @@ async def _recompute_density(
     else:
         meeting_count = 0
 
+    # Count people: entities where entity_type = 'person'
+    if entity_ids:
+        people_stmt = (
+            select(func.count())
+            .select_from(ContextEntity)
+            .where(
+                ContextEntity.id.in_(entity_ids),
+                ContextEntity.entity_type == "person",
+            )
+        )
+        people_result = await db.execute(people_stmt)
+        people_count = people_result.scalar() or 0
+    else:
+        people_count = 0
+
     # Gap count: entities with fewer than 3 entries
     gap_count = sum(
         1 for eid in entity_ids
@@ -181,11 +199,28 @@ async def _recompute_density(
     raw_score = (entity_count * 10) + (entry_count * 2) + (meeting_count * 5) - (gap_count * 10)
     score = max(0, min(100, raw_score))
 
+    # Dimension analysis
+    strong_dimensions: list[str] = []
+    gap_dimensions: list[str] = []
+    for label, value, threshold in [
+        ("Entities", entity_count, 3),
+        ("Context", entry_count, 10),
+        ("Meetings", meeting_count, 3),
+        ("People", people_count, 2),
+    ]:
+        if value >= threshold:
+            strong_dimensions.append(label)
+        else:
+            gap_dimensions.append(label)
+
     density_details = {
         "entity_count": entity_count,
         "entry_count": entry_count,
         "meeting_count": meeting_count,
+        "people_count": people_count,
         "gap_count": gap_count,
+        "strong_dimensions": strong_dimensions,
+        "gap_dimensions": gap_dimensions,
     }
 
     await db.execute(
@@ -405,6 +440,7 @@ async def get_stream(
     result = _stream_to_dict(stream)
     result["entities"] = [_entity_to_dict(e) for e in entities]
     result["density"] = stream.density_details
+    result["density_details"] = stream.density_details
     result["recent_entries"] = recent_entries
     result["sub_threads"] = sub_threads
 
