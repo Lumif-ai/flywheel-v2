@@ -27,7 +27,9 @@ from uuid import UUID
 from sqlalchemy import text as sa_text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from flywheel.db.models import ContextEntry, Focus, SkillRun, Tenant, User, UserFocus
+from flywheel.db.models import (
+    ContextEntry, Focus, SkillDefinition, SkillRun, Tenant, User, UserFocus,
+)
 from flywheel.db.session import get_session_factory
 from sqlalchemy import select
 
@@ -51,6 +53,10 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 TIER_3_SKILLS: set[str] = {"gtm-web-scraper", "dogfood-tester"}
 
+# Skills with dedicated Python engines that bypass the LLM tool-use loop.
+# These run their own crawl/structure/write logic directly.
+ENGINE_SKILLS: set[str] = {"company-intel"}
+
 # Markers in tool results that indicate a browser step was skipped
 AGENT_SKIP_MARKERS = ["AGENT_NOT_CONNECTED", "AGENT_TIMEOUT"]
 
@@ -61,6 +67,44 @@ _env_lock = threading.Lock()
 
 # Path to the engines directory (v1 execution gateway location)
 _ENGINES_DIR = Path(__file__).resolve().parents[3] / "engines"
+
+
+async def _load_skill_from_db(
+    factory: async_sessionmaker[AsyncSession],
+    skill_name: str,
+) -> dict | None:
+    """Load skill metadata from the skill_definitions table.
+
+    Queries SkillDefinition where name == skill_name and enabled == True.
+    Returns a dict with keys: system_prompt, contract, engine_module,
+    parameters, web_tier, token_budget. Returns None if not found.
+
+    This is the single source of truth for skill metadata at execution time,
+    replacing filesystem-based SKILL.md parsing and hardcoded sets.
+    """
+    async with factory() as session:
+        result = await session.execute(
+            select(SkillDefinition).where(
+                SkillDefinition.name == skill_name,
+                SkillDefinition.enabled.is_(True),
+            )
+        )
+        row = result.scalar_one_or_none()
+
+    if row is None:
+        return None
+
+    return {
+        "system_prompt": row.system_prompt,
+        "contract": {
+            "reads": list(row.contract_reads) if row.contract_reads else [],
+            "writes": list(row.contract_writes) if row.contract_writes else [],
+        },
+        "engine_module": row.engine_module,
+        "parameters": row.parameters or {},
+        "web_tier": row.web_tier,
+        "token_budget": row.token_budget,
+    }
 
 
 def merge_settings(tenant_settings: dict | None, focus_settings: dict | None) -> dict:
@@ -426,9 +470,14 @@ async def execute_run(run: SkillRun) -> None:
         # Retrieve and decrypt user's BYOK API key
         api_key = await _get_user_api_key(factory, run.user_id)
         if api_key is None:
-            raise ValueError(
-                "No API key configured. Please add your Anthropic API key in Settings."
-            )
+            # Fall back to subsidy key for onboarding skills (anonymous users)
+            from flywheel.config import settings
+            if run.skill_name in ("company-intel",) and settings.flywheel_subsidy_api_key:
+                api_key = settings.flywheel_subsidy_api_key
+            else:
+                raise ValueError(
+                    "No API key configured. Please add your Anthropic API key in Settings."
+                )
 
         # Look up user's active focus before creating RunContext
         active_focus_id = await _get_user_active_focus(
@@ -475,16 +524,30 @@ async def execute_run(run: SkillRun) -> None:
         )
 
         try:
-            output, token_usage, tool_calls = await _execute_with_tools(
-                api_key=api_key,
-                skill_name=run.skill_name,
-                input_text=run.input_text or "",
-                registry=registry,
-                context=run_context,
-                factory=factory,
-                run_id=run.id,
-                agent_connected=agent_connected,
-            )
+            # Engine dispatch: skills with dedicated Python engines bypass
+            # the generic LLM tool-use loop (and don't need SKILL.md files)
+            if run.skill_name in ENGINE_SKILLS:
+                if run.skill_name == "company-intel":
+                    output, token_usage, tool_calls = await _execute_company_intel(
+                        api_key=api_key,
+                        input_text=run.input_text or "",
+                        factory=factory,
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                    )
+                else:
+                    raise ValueError(f"Engine skill '{run.skill_name}' has no engine dispatch")
+            else:
+                output, token_usage, tool_calls = await _execute_with_tools(
+                    api_key=api_key,
+                    skill_name=run.skill_name,
+                    input_text=run.input_text or "",
+                    registry=registry,
+                    context=run_context,
+                    factory=factory,
+                    run_id=run.id,
+                    agent_connected=agent_connected,
+                )
             anthropic_breaker.record_success()
         except Exception as exec_err:
             # Check if this is an Anthropic API error for circuit breaker tracking
@@ -631,6 +694,228 @@ async def execute_run(run: SkillRun) -> None:
         })
 
         logger.error("Run %s failed (skill=%s): %s", run.id, run.skill_name, e)
+
+
+async def _execute_company_intel(
+    api_key: str,
+    input_text: str,
+    factory: async_sessionmaker,
+    run_id: UUID,
+    tenant_id: UUID,
+) -> tuple[str, dict, list]:
+    """Execute the company-intel engine directly, bypassing the LLM tool-use loop.
+
+    The company-intel skill has a dedicated Python engine that handles crawling,
+    LLM structuring, web enrichment, and context store writes. This avoids the
+    need for a SKILL.md file and the generic tool-use loop.
+
+    Args:
+        api_key: Anthropic API key (BYOK or subsidy).
+        input_text: Company URL to crawl.
+        factory: Session factory for event logging and context writes.
+        run_id: SkillRun UUID for event logging.
+        tenant_id: Tenant UUID for context store writes.
+
+    Returns:
+        Tuple of (output_text, token_usage_dict, tool_calls_list).
+    """
+    from flywheel.engines.company_intel import (
+        crawl_company,
+        structure_intelligence,
+        enrich_with_web_research,
+    )
+    from flywheel.storage import append_entry as async_append_entry
+
+    url = input_text.strip()
+    output_parts = []
+    tool_calls = []
+
+    # Stage 1: Crawl the website
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "crawling", "message": f"Crawling {url}..."},
+    })
+
+    crawl_result = await crawl_company(url)
+    pages_crawled = crawl_result.get("pages_crawled", 0)
+    tool_calls.append({"tool": "crawl_company", "input": url, "result_length": pages_crawled})
+
+    if not crawl_result.get("success"):
+        output_parts.append(f"Could not crawl {url}. No pages returned content.")
+        return "\n\n".join(output_parts), {}, tool_calls
+
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {
+            "stage": "crawled",
+            "message": f"Crawled {pages_crawled} pages",
+        },
+    })
+
+    # Combine raw page text for structuring
+    raw_text = "\n\n---\n\n".join(
+        f"[{path}]\n{text}" for path, text in crawl_result["raw_pages"].items()
+    )
+
+    # Stage 2: Structure with LLM
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "structuring", "message": "Analyzing company information..."},
+    })
+
+    # Set API key for sync Anthropic client used by structure_intelligence
+    original_key = os.environ.get("ANTHROPIC_API_KEY")
+    os.environ["ANTHROPIC_API_KEY"] = api_key
+    try:
+        intelligence = await asyncio.to_thread(
+            structure_intelligence, raw_text, "website-crawl"
+        )
+    finally:
+        if original_key is not None:
+            os.environ["ANTHROPIC_API_KEY"] = original_key
+        else:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    tool_calls.append({"tool": "structure_intelligence", "input": "raw_text", "result_length": len(str(intelligence))})
+
+    if not intelligence.get("structured"):
+        output_parts.append(f"Crawled {pages_crawled} pages but could not structure the data.")
+        return "\n\n".join(output_parts), {}, tool_calls
+
+    company_name = intelligence.get("company_name", url)
+    intelligence["_source_url"] = url
+
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "structured", "message": f"Identified: {company_name}"},
+    })
+
+    # Stage 3: Enrich with web research
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "enriching", "message": "Researching company online..."},
+    })
+
+    os.environ["ANTHROPIC_API_KEY"] = api_key
+    try:
+        enriched = await asyncio.to_thread(
+            enrich_with_web_research, company_name, intelligence
+        )
+    finally:
+        if original_key is not None:
+            os.environ["ANTHROPIC_API_KEY"] = original_key
+        else:
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+
+    tool_calls.append({"tool": "enrich_with_web_research", "input": company_name, "result_length": len(str(enriched))})
+
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "enriched", "message": "Web research complete"},
+    })
+
+    # Stage 4: Write to context store (async, tenant-scoped)
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "writing", "message": "Saving company intelligence..."},
+    })
+
+    from flywheel.engines.company_intel import (
+        _build_positioning_content,
+        _build_list_content,
+    )
+    from datetime import date as date_type
+
+    today = date_type.today().isoformat()
+    source = "company-intel-onboarding"
+    write_results = {}
+
+    section_map = {
+        "positioning.md": _build_positioning_content(enriched),
+        "icp-profiles.md": _build_list_content(
+            enriched.get("target_customers", []), "target-customer-profiles"
+        ),
+        "competitive-intel.md": _build_list_content(
+            enriched.get("competitors", []), "competitive-landscape"
+        ),
+        "product-modules.md": _build_list_content(
+            enriched.get("products", []), "product-inventory"
+        ),
+        "market-taxonomy.md": _build_list_content(
+            enriched.get("industries", []), "industry-verticals"
+        ),
+    }
+
+    files_written = 0
+    for filename, (content_lines, detail) in section_map.items():
+        if not content_lines:
+            continue
+
+        entry = {
+            "detail": detail,
+            "confidence": "medium",
+            "content": content_lines,
+        }
+
+        try:
+            async with factory() as session:
+                # Set tenant context for RLS
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                await async_append_entry(
+                    session=session,
+                    file=filename.replace(".md", ""),
+                    entry=entry,
+                    source=source,
+                )
+                await session.commit()
+            write_results[filename] = "OK"
+            files_written += 1
+        except Exception as e:
+            write_results[filename] = f"ERROR: {e}"
+            logger.warning("Context write failed for %s: %s", filename, e)
+
+    tool_calls.append({"tool": "write_context", "input": str(list(section_map.keys())), "result_length": files_written})
+
+    # Build output summary
+    output_parts.append(f"# Company Intelligence: {company_name}")
+    output_parts.append(f"\nCrawled {pages_crawled} pages from {url}")
+
+    if enriched.get("what_they_do"):
+        output_parts.append(f"\n**What they do:** {enriched['what_they_do']}")
+    if enriched.get("products"):
+        output_parts.append(f"\n**Products:** {', '.join(str(p) for p in enriched['products'])}")
+    if enriched.get("target_customers"):
+        output_parts.append(f"\n**Target customers:** {', '.join(str(c) for c in enriched['target_customers'])}")
+    if enriched.get("competitors"):
+        output_parts.append(f"\n**Competitors:** {', '.join(str(c) for c in enriched['competitors'])}")
+    if enriched.get("industries"):
+        output_parts.append(f"\n**Industries:** {', '.join(str(i) for i in enriched['industries'])}")
+    if enriched.get("key_differentiators"):
+        output_parts.append(f"\n**Key differentiators:** {', '.join(str(d) for d in enriched['key_differentiators'])}")
+    if enriched.get("key_people"):
+        people = enriched["key_people"]
+        if isinstance(people, list) and people:
+            people_strs = []
+            for p in people:
+                if isinstance(p, dict):
+                    people_strs.append(f"{p.get('name', '?')} ({p.get('title', '?')})")
+                else:
+                    people_strs.append(str(p))
+            output_parts.append(f"\n**Key people:** {', '.join(people_strs)}")
+    if enriched.get("funding"):
+        output_parts.append(f"\n**Funding:** {enriched['funding']}")
+    if enriched.get("headquarters"):
+        output_parts.append(f"\n**Headquarters:** {enriched['headquarters']}")
+
+    output_parts.append(f"\n\nWrote intelligence to {files_written} context files.")
+
+    # Token usage is approximate (sync client doesn't easily return counts)
+    token_usage = {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-20250514"}
+
+    return "\n".join(output_parts), token_usage, tool_calls
 
 
 def _append_skipped_steps_note(
@@ -914,7 +1199,7 @@ async def _append_event_atomic(
         await session.execute(
             sa_text("""
                 UPDATE skill_runs
-                SET events_log = events_log || :event::jsonb
+                SET events_log = events_log || CAST(:event AS jsonb)
                 WHERE id = :run_id
             """),
             {"run_id": str(run_id), "event": json.dumps([event_dict])},
