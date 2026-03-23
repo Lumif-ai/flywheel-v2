@@ -5,6 +5,7 @@ import { StreamDetailPage } from '@/features/streams/components/StreamDetailPage
 import { ActPage } from '@/pages/ActPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
+import { InviteAcceptPage } from '@/pages/InviteAcceptPage'
 
 // Lazy-loaded public pages (infrequently accessed)
 const TermsPage = lazy(() =>
@@ -23,6 +24,7 @@ export function AppRoutes() {
       <Route path="/chat" element={<ActPage />} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/invite" element={<InviteAcceptPage />} />
       <Route path="/terms" element={<Suspense fallback={null}><TermsPage /></Suspense>} />
       <Route path="/privacy" element={<Suspense fallback={null}><PrivacyPage /></Suspense>} />
 

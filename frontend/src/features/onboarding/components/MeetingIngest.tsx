@@ -62,8 +62,17 @@ const PLATFORMS = [
 // Component
 // ---------------------------------------------------------------------------
 
-export function MeetingIngest() {
+interface MeetingIngestProps {
+  onComplete?: () => void
+  onSkip?: () => void
+}
+
+export function MeetingIngest({ onComplete, onSkip }: MeetingIngestProps = {}) {
   const { createdStreams, skipToBriefing, goToBriefing } = useOnboarding()
+
+  // Allow parent to override callbacks (used by TeamOnboarding)
+  const handleComplete = onComplete ?? goToBriefing
+  const handleSkip = onSkip ?? skipToBriefing
 
   // Local state
   const [notes, setNotes] = useState<NoteItem[]>([])
@@ -233,7 +242,7 @@ export function MeetingIngest() {
         )}
 
         <button
-          onClick={goToBriefing}
+          onClick={handleComplete}
           className="w-full py-3 px-4 rounded-lg bg-primary text-primary-foreground font-medium hover:bg-primary/90 transition-colors"
         >
           Continue to your briefing
@@ -393,7 +402,7 @@ export function MeetingIngest() {
       {/* Skip */}
       <div className="text-center">
         <button
-          onClick={skipToBriefing}
+          onClick={handleSkip}
           className="text-sm text-muted-foreground hover:text-foreground transition-colors"
         >
           Skip for now
