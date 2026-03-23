@@ -259,6 +259,7 @@ async def append_entry(
         detail=body.detail,
         confidence=body.confidence,
         content=body.content,
+        metadata_=body.metadata or {},
         date=datetime.date.today(),
         focus_id=focus_id,
     )
@@ -331,6 +332,7 @@ async def batch_entries(
             detail=item.detail,
             confidence=item.confidence,
             content=item.content,
+            metadata_=item.metadata or {},
             date=today,
             focus_id=focus_id,
         )

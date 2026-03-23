@@ -251,6 +251,7 @@ async def ingest_meeting_notes(
             detail=title or "Meeting notes",
             content=content,
             confidence="medium",
+            metadata_={},
         )
         db.add(ce)
         await db.flush()

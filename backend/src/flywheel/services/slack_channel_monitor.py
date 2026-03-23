@@ -242,6 +242,7 @@ async def process_channel_message(event: dict, db: AsyncSession) -> None:
         detail=f"Slack #{channel} | keywords: {', '.join(matched)}",
         confidence="medium",
         content=intel["content"],
+        metadata_={},
     )
     db.add(entry)
     await db.commit()

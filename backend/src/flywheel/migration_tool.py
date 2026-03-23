@@ -353,6 +353,7 @@ async def migrate_file(
             evidence_count=parsed.evidence_count,
             content=content_text,
             date=entry_date,
+            metadata_={},
         )
         session.add(new_entry)
         result.entries_inserted += 1

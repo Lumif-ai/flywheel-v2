@@ -197,6 +197,7 @@ async def promote(
                 detail=entry.get("detail"),
                 content=entry.get("content", ""),
                 confidence=entry.get("confidence", "medium"),
+                metadata_=entry.get("metadata") or {},
             )
             db.add(ce)
 

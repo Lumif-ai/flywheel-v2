@@ -96,6 +96,8 @@ class MockContextEntry:
         self.updated_at = updated_at or datetime.datetime(2026, 3, 20, tzinfo=datetime.timezone.utc)
         self.deleted_at = deleted_at
         self.search_vector = search_vector
+        self.focus_id = None
+        self.metadata_ = {}
 
 
 def _mock_db(execute_side_effects=None):

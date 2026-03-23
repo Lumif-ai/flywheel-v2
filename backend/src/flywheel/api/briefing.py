@@ -358,6 +358,7 @@ async def submit_nudge(
         detail=stream_name,
         confidence="medium",
         content=body.text,
+        metadata_={},
     )
     db.add(entry)
     await db.flush()  # Get entry.id
