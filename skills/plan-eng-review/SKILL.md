@@ -11,6 +11,7 @@ allowed-tools:
   - Glob
   - AskUserQuestion
 # Utility skill: memory not applicable (stateless operation)
+web_tier: 1
 ---
 
 # Plan Review Mode

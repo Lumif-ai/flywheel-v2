@@ -19,6 +19,7 @@ dependencies:
 output:
   - context-store-writes
   - sender-profile-compat
+web_tier: 2
 ---
 
 # gtm-my-company

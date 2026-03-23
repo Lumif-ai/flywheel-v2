@@ -11,6 +11,7 @@ allowed-tools:
   - Bash
   - Read
 # Utility skill: memory not applicable (stateless operation)
+web_tier: 3
 ---
 
 # gstack: Persistent Browser for Claude Code

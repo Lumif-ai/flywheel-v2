@@ -12,6 +12,7 @@ allowed-tools:
   - Grep
   - Glob
   - AskUserQuestion
+web_tier: 1
 ---
 
 # Pre-Landing PR Review

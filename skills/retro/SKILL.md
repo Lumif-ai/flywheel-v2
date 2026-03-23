@@ -9,6 +9,7 @@ allowed-tools:
   - Read
   - Write
   - Glob
+web_tier: 1
 ---
 
 # /retro — Weekly Engineering Retrospective

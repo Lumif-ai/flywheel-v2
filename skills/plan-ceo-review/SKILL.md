@@ -13,6 +13,7 @@ allowed-tools:
   - Bash
   - AskUserQuestion
 # Utility skill: memory not applicable (stateless operation)
+web_tier: 1
 ---
 
 # Mega Plan Review Mode

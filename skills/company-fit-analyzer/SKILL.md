@@ -7,6 +7,7 @@ description: >
   and outreach drafting.
 compatibility: "Requires Playwright MCP server connected and active."
 version: "1.0"
+web_tier: 3
 ---
 
 > **DEPRECATED:** This skill has been superseded by `/gtm-company-fit-analyzer` (85% feature

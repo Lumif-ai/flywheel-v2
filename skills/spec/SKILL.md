@@ -11,6 +11,7 @@ description: >-
   "review this spec", "is this spec complete", "find gaps", "tighten the spec",
   "spec review", "what am I missing", "help me define requirements", or shares an idea
   they want to turn into a buildable specification.
+web_tier: 1
 ---
 
 # spec

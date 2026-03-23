@@ -11,6 +11,7 @@ allowed-tools:
   - Grep
   - Glob
   - AskUserQuestion
+web_tier: 1
 ---
 
 # Ship: Fully Automated Ship Workflow

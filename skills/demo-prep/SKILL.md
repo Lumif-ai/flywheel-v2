@@ -16,6 +16,7 @@ triggers:
   - "demo for"
   - "prep a demo"
   - "seed demo"
+web_tier: 2
 ---
 
 # Demo Prep

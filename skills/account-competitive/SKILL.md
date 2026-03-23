@@ -19,6 +19,7 @@ dependencies:
 output:
   - account-competitive-analysis
   - context-store-cross-references
+web_tier: 1
 ---
 
 # account-competitive

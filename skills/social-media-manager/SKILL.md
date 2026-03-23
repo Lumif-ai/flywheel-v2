@@ -16,6 +16,7 @@ description: >
   "show my vocabulary", "content pillars".
   Also triggers on: "I want to post about my learnings", "draft something about [event]",
   "what's in my content backlog", "show content stats", "review my posting cadence".
+web_tier: 1
 ---
 
 # Social Media Manager

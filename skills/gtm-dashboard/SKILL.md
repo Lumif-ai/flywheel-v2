@@ -9,6 +9,7 @@ description: >
 compatibility: "Requires at least one pipeline run or outreach session to have data."
 version: "1.1"
 context-aware: true
+web_tier: 2
 ---
 
 # GTM Dashboard Skill

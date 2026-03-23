@@ -6,6 +6,7 @@ description: >
   Name+Company key), safer merge code, and context store integration.
 compatibility: "Requires Playwright MCP server to be connected and active in Claude Code or Claude.ai."
 version: "1.0"
+web_tier: 3
 ---
 
 > **DEPRECATED:** This skill has been superseded by `/gtm-web-scraper-extractor` (87% feature

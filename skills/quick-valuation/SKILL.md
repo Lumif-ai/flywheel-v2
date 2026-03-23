@@ -2,6 +2,7 @@
 name: quick-valuation
 version: "1.0"
 description: "Fast, executive-style company valuation — 1-2 page summary with named comparable companies, implied valuation range, and key risks. No methodology explanation. Use when a user wants a quick company valuation, back-of-envelope estimate, comps-based valuation, executive summary valuation, or says 'quick valuation', 'what is this company worth', 'ballpark valuation', 'value this quickly', 'comps analysis', or 'how much is X worth'. Produces concise, board-ready output assuming the audience understands finance. Triggers on any valuation request where speed and conciseness matter more than a full report. Also use when user explicitly asks for a 'quick' or 'short' or 'executive' valuation."
+web_tier: 1
 ---
 
 # Quick Valuation — Executive Style

@@ -16,6 +16,7 @@ description: >
   gtm-outbound-messenger skills installed.
 compatibility: "Requires Playwright MCP, gtm-web-scraper-extractor, gtm-company-fit-analyzer, and gtm-outbound-messenger skills."
 context-aware: true
+web_tier: 2
 ---
 
 # Leads Pipeline Skill

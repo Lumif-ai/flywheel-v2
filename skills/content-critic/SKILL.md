@@ -10,6 +10,7 @@ description: >
   "check this draft", "content QA", "post quality check", "does this sound like me",
   "AI smell check", "ready to publish?". Also auto-triggers when social-media-manager
   produces a draft and the user says "review" or "how does it look".
+web_tier: 1
 ---
 
 > **Version:** 1.0 | **Last Updated:** 2026-03-15
