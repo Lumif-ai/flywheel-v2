@@ -27,7 +27,7 @@ from sse_starlette.sse import EventSourceResponse
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import ContextEntry, SkillRun, WorkItem
+from flywheel.db.models import ContextEntry, SkillDefinition, SkillRun, TenantSkill, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit
 
@@ -119,7 +119,7 @@ def _get_tier_message(tier: int) -> str | None:
     return None  # Tier 1: no message needed, full functionality
 
 
-def _parse_skill_frontmatter(skill_dir: Path) -> dict[str, Any] | None:
+def _parse_skill_frontmatter_filesystem(skill_dir: Path) -> dict[str, Any] | None:
     """Parse SKILL.md YAML frontmatter from a skill directory."""
     skill_md = skill_dir / "SKILL.md"
     if not skill_md.exists():
@@ -146,17 +146,48 @@ def _parse_skill_frontmatter(skill_dir: Path) -> dict[str, Any] | None:
         return None
 
 
-def _get_available_skills() -> list[dict[str, Any]]:
-    """Scan the skills directory and return parsed metadata."""
+def _get_available_skills_filesystem() -> list[dict[str, Any]]:
+    """Scan the skills directory and return parsed metadata (legacy fallback)."""
     if not SKILLS_DIR.is_dir():
         return []
     skills = []
     for child in sorted(SKILLS_DIR.iterdir()):
         if child.is_dir():
-            meta = _parse_skill_frontmatter(child)
+            meta = _parse_skill_frontmatter_filesystem(child)
             if meta is not None:
                 skills.append(meta)
     return skills
+
+
+async def _get_available_skills_db(db: AsyncSession, tenant_id: UUID) -> list[dict[str, Any]]:
+    """Query skill_definitions joined with tenant_skills for a tenant.
+
+    Returns only skills where both skill_definitions.enabled AND
+    tenant_skills.enabled are True, ordered by name ASC.
+    """
+    stmt = (
+        select(SkillDefinition)
+        .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+        .where(
+            TenantSkill.tenant_id == tenant_id,
+            TenantSkill.enabled == True,  # noqa: E712
+            SkillDefinition.enabled == True,  # noqa: E712
+        )
+        .order_by(SkillDefinition.name.asc())
+    )
+    result = await db.execute(stmt)
+    rows = result.scalars().all()
+    return [
+        {
+            "name": sd.name,
+            "description": sd.description or "",
+            "version": sd.version,
+            "tags": list(sd.tags) if sd.tags else [],
+            "web_tier": sd.web_tier,
+            "tier_message": _get_tier_message(sd.web_tier),
+        }
+        for sd in rows
+    ]
 
 
 def _run_to_dict(run: SkillRun, *, detail: bool = False) -> dict[str, Any]:
@@ -189,9 +220,10 @@ def _run_to_dict(run: SkillRun, *, detail: bool = False) -> dict[str, Any]:
 @router.get("/")
 async def list_skills(
     user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
 ) -> dict[str, Any]:
-    """Return available skills with metadata parsed from SKILL.md files."""
-    return {"items": _get_available_skills()}
+    """Return available skills from DB, scoped to tenant."""
+    return {"items": await _get_available_skills_db(db, user.tenant_id)}
 
 
 # ---------------------------------------------------------------------------
@@ -213,9 +245,18 @@ async def start_run(
     await check_anonymous_run_limit(user.sub, user.is_anonymous, db)
     await check_concurrent_run_limit(user.sub, db)
 
-    # Validate skill exists
-    available = [s["name"] for s in _get_available_skills()]
-    if body.skill_name not in available:
+    # Validate skill exists in DB and is enabled for this tenant
+    skill_check = await db.execute(
+        select(SkillDefinition.id)
+        .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+        .where(
+            SkillDefinition.name == body.skill_name,
+            SkillDefinition.enabled == True,  # noqa: E712
+            TenantSkill.tenant_id == user.tenant_id,
+            TenantSkill.enabled == True,  # noqa: E712
+        )
+    )
+    if skill_check.scalar_one_or_none() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Skill '{body.skill_name}' not found",
