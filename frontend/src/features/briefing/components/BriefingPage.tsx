@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useBriefing } from '../hooks/useBriefing'
 import { useStreams } from '../hooks/useStreams'
 import { BriefingCard } from './BriefingCard'
+import { NudgeCard } from './NudgeCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
 import { SoftSignupCard, isSignupCardDismissed } from '@/features/onboarding/components/SoftSignupCard'
@@ -9,7 +10,7 @@ import { StreamDensityCard } from '@/features/streams/components/DensityIndicato
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
-import { InboxIcon, Calendar, ArrowRight } from 'lucide-react'
+import { InboxIcon } from 'lucide-react'
 
 export function BriefingPage() {
   const { data, isLoading, error } = useBriefing()
@@ -71,6 +72,9 @@ export function BriefingPage() {
           <KnowledgeHealthBar health={data.knowledge_health} />
         ) : null}
 
+        {/* Nudge */}
+        {data?.nudge && <NudgeCard nudge={data.nudge} />}
+
         {/* Your Streams - per-stream density */}
         {streams.length > 0 && (
           <div className="space-y-3">
@@ -124,37 +128,7 @@ export function BriefingPage() {
           </div>
         )}
 
-        {/* Nudge */}
-        {data?.nudge && (
-          <div className="rounded-xl border border-blue-200 bg-blue-50/50 p-4">
-            <p className="text-sm text-blue-800">
-              {JSON.stringify(data.nudge)}
-            </p>
-          </div>
-        )}
       </div>
-
-      {/* Calendar connect suggestion for anonymous users */}
-      {isAnonymous && (
-        <div className="mx-6 mb-4 rounded-lg border border-dashed p-4 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <Calendar className="w-5 h-5 text-muted-foreground" />
-            <div>
-              <p className="text-sm font-medium">Connect your calendar</p>
-              <p className="text-xs text-muted-foreground">
-                Auto-detect meetings and prep briefings
-              </p>
-            </div>
-          </div>
-          <Link
-            to="/settings"
-            className="inline-flex items-center gap-1 text-sm text-primary hover:underline"
-          >
-            Set up
-            <ArrowRight className="w-3 h-3" />
-          </Link>
-        </div>
-      )}
 
       {/* Global Chat Input - pinned at bottom */}
       <div className="border-t bg-background p-4">
