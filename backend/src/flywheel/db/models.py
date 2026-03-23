@@ -657,6 +657,32 @@ class WorkStreamEntity(Base):
     )
 
 
+class DensitySnapshot(Base):
+    __tablename__ = "density_snapshots"
+    __table_args__ = (
+        Index("idx_ds_stream_week", "stream_id", "week_start"),
+        UniqueConstraint("stream_id", "week_start", name="uq_ds_stream_week"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    stream_id: Mapped[UUID] = mapped_column(
+        ForeignKey("work_streams.id", ondelete="CASCADE"), nullable=False
+    )
+    week_start: Mapped[datetime.date] = mapped_column(Date, nullable=False)
+    density_score: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False)
+    details: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class MeetingClassification(Base):
     __tablename__ = "meeting_classifications"
     __table_args__ = (

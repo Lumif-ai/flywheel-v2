@@ -22,6 +22,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
@@ -30,6 +31,7 @@ from flywheel.db.models import (
     ContextEntity,
     ContextEntityEntry,
     ContextEntry,
+    DensitySnapshot,
     WorkStream,
     WorkStreamEntity,
 )
@@ -231,6 +233,62 @@ async def _recompute_density(
             density_details=density_details,
         )
     )
+
+    # Snapshot current week's density for growth tracking
+    await _snapshot_density(stream_id, tenant_id, score, density_details, db)
+
+
+async def _snapshot_density(
+    stream_id: UUID,
+    tenant_id: UUID | None,
+    score: int,
+    details: dict,
+    db: AsyncSession,
+) -> None:
+    """Upsert a density snapshot for the current week (Monday).
+
+    Called automatically after every density recomputation so that
+    weekly growth data accumulates without a scheduled job.
+    """
+    today = datetime.date.today()
+    monday = today - datetime.timedelta(days=today.weekday())
+
+    # We need a tenant_id -- if not passed, look it up from the stream
+    if tenant_id is None:
+        stmt = select(WorkStream.tenant_id).where(WorkStream.id == stream_id)
+        result = await db.execute(stmt)
+        tenant_id = result.scalar_one_or_none()
+        if tenant_id is None:
+            return
+
+    # Build sources breakdown from details
+    sources = details.get("sources", {
+        "meetings": details.get("meeting_count", 0),
+        "research": 0,
+        "integrations": 0,
+    })
+    snapshot_details = {
+        "entry_count": details.get("entry_count", 0),
+        "meeting_count": details.get("meeting_count", 0),
+        "people_count": details.get("people_count", 0),
+        "sources": sources,
+    }
+
+    insert_stmt = pg_insert(DensitySnapshot).values(
+        tenant_id=tenant_id,
+        stream_id=stream_id,
+        week_start=monday,
+        density_score=Decimal(str(score)),
+        details=snapshot_details,
+    )
+    upsert_stmt = insert_stmt.on_conflict_do_update(
+        constraint="uq_ds_stream_week",
+        set_={
+            "density_score": insert_stmt.excluded.density_score,
+            "details": insert_stmt.excluded.details,
+        },
+    )
+    await db.execute(upsert_stmt)
 
 
 async def recompute_density_for_entities(
@@ -698,3 +756,111 @@ async def list_sub_threads(
     """List sub-threads for a parent stream with density and entry counts."""
     await _get_stream_or_404(stream_id, db)
     return await _get_sub_threads(stream_id, db)
+
+
+# ---------------------------------------------------------------------------
+# GET /streams/{stream_id}/growth
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{stream_id}/growth")
+async def get_stream_growth(
+    stream_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Return last 8 weeks of density growth data for a stream.
+
+    Returns status "too_early" if the stream was created less than 7 days
+    ago or has no density snapshots yet.
+    """
+    stream = await _get_stream_or_404(stream_id, db)
+
+    # Check if stream is too new for growth tracking
+    if stream.created_at:
+        age = datetime.datetime.now(datetime.timezone.utc) - stream.created_at
+        if age.days < 7:
+            return {
+                "status": "too_early",
+                "message": "Growth tracking starts after your first week",
+                "weeks": [],
+            }
+
+    # Fetch last 8 weeks of snapshots
+    stmt = (
+        select(DensitySnapshot)
+        .where(DensitySnapshot.stream_id == stream_id)
+        .order_by(DensitySnapshot.week_start.desc())
+        .limit(8)
+    )
+    result = await db.execute(stmt)
+    snapshots = result.scalars().all()
+
+    if not snapshots:
+        return {
+            "status": "too_early",
+            "message": "Growth tracking starts after your first week",
+            "weeks": [],
+        }
+
+    # Build weeks list (chronological order for chart display)
+    snapshots_sorted = sorted(snapshots, key=lambda s: s.week_start)
+
+    weeks = []
+    prev_details = None
+    for snap in snapshots_sorted:
+        details = snap.details or {}
+        sources = details.get("sources", {
+            "meetings": details.get("meeting_count", 0),
+            "research": 0,
+            "integrations": 0,
+        })
+
+        # Generate highlights by comparing to previous week
+        highlights = _compute_highlights(details, prev_details)
+
+        weeks.append({
+            "week_start": snap.week_start.isoformat(),
+            "density_score": float(snap.density_score),
+            "sources": sources,
+            "highlights": highlights,
+        })
+        prev_details = details
+
+    return {
+        "status": "ok",
+        "weeks": weeks,
+    }
+
+
+def _compute_highlights(
+    current: dict, previous: dict | None
+) -> list[str]:
+    """Generate human-readable highlight strings from week-over-week changes."""
+    if previous is None:
+        # First week -- summarize what exists
+        highlights = []
+        entry_count = current.get("entry_count", 0)
+        if entry_count > 0:
+            highlights.append(f"Added {entry_count} entries")
+        meeting_count = current.get("meeting_count", 0)
+        if meeting_count > 0:
+            highlights.append(f"{meeting_count} meeting notes")
+        people_count = current.get("people_count", 0)
+        if people_count > 0:
+            highlights.append(f"{people_count} people tracked")
+        return highlights if highlights else ["Growth tracking started"]
+
+    highlights = []
+    for key, label in [
+        ("entry_count", "entries"),
+        ("meeting_count", "meetings"),
+        ("people_count", "people"),
+    ]:
+        curr_val = current.get(key, 0)
+        prev_val = previous.get(key, 0)
+        delta = curr_val - prev_val
+        if delta > 0:
+            highlights.append(f"Added {delta} new {label}")
+
+    return highlights if highlights else ["No changes this week"]
