@@ -71,7 +71,7 @@ export interface SourceAttribution {
 }
 
 export interface BriefingCard {
-  card_type: 'meeting' | 'suggestion' | 'stale'
+  card_type: 'meeting' | 'suggestion' | 'stale' | 'personal_gap'
   title: string
   body: string
   entity_name: string | null

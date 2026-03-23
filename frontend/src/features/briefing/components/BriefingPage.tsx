@@ -2,6 +2,7 @@ import { useMemo } from 'react'
 import { useBriefing } from '../hooks/useBriefing'
 import { useStreams } from '../hooks/useStreams'
 import { BriefingCard } from './BriefingCard'
+import { PersonalGapCard } from './PersonalGapCard'
 import { NudgeCard } from './NudgeCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
@@ -107,9 +108,30 @@ export function BriefingPage() {
           </div>
         ) : data?.cards && data.cards.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-            {data.cards.map((card, i) => (
-              <BriefingCard key={i} card={card} />
-            ))}
+            {data.cards.map((card, i) => {
+              if (card.card_type === 'personal_gap') {
+                // Parse teamCount/myCount from reason field ("X entries from other members, Y from you")
+                let teamCount = 0
+                let myCount = 0
+                if (card.reason) {
+                  const teamMatch = card.reason.match(/(\d+)\s+entr(?:y|ies)\s+from\s+other/)
+                  const myMatch = card.reason.match(/(\d+)\s+from\s+you/)
+                  if (teamMatch) teamCount = parseInt(teamMatch[1], 10)
+                  if (myMatch) myCount = parseInt(myMatch[1], 10)
+                }
+                return (
+                  <PersonalGapCard
+                    key={i}
+                    title={card.title}
+                    detail={card.body}
+                    streamId={card.stream_id ?? ''}
+                    teamCount={teamCount}
+                    myCount={myCount}
+                  />
+                )
+              }
+              return <BriefingCard key={i} card={card} />
+            })}
           </div>
         ) : (
           <div className="flex flex-col items-center justify-center py-16 text-center">
