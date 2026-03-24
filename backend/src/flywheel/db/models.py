@@ -835,3 +835,57 @@ class TenantSkill(Base):
     activated_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+
+
+# ---------------------------------------------------------------------------
+# DOCUMENT TABLES (persistent, shareable document artifacts from skill runs)
+# ---------------------------------------------------------------------------
+
+
+class Document(Base):
+    __tablename__ = "documents"
+    __table_args__ = (
+        Index("idx_documents_tenant", "tenant_id"),
+        Index("idx_documents_type", "tenant_id", "document_type"),
+        Index(
+            "idx_documents_share",
+            "share_token",
+            unique=True,
+            postgresql_where=text("share_token IS NOT NULL"),
+        ),
+        # Note: GIN index on metadata column is created in the migration, not here,
+        # because the ORM attribute name (metadata_) differs from the DB column (metadata).
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    document_type: Mapped[str] = mapped_column(Text, nullable=False)
+    mime_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="text/html"
+    )
+    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size_bytes: Mapped[int | None] = mapped_column(Integer)
+    skill_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_runs.id", ondelete="SET NULL")
+    )
+    share_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
