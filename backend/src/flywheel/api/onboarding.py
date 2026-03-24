@@ -22,6 +22,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -162,6 +163,7 @@ class MeetingPrepRequest(BaseModel):
     linkedin_url: str = Field(..., min_length=1, max_length=500)
     agenda: str = Field(default="", max_length=2000)
     meeting_type: str = Field(default="discovery", max_length=50)
+    company_name: str = Field(default="", max_length=200)
 
 
 class MeetingNote(BaseModel):
@@ -197,13 +199,49 @@ async def promote(
             detail="Already authenticated",
         )
 
-    # Derive tenant name from email domain
-    domain = body.email.split("@")[1] if "@" in body.email else "Personal"
+    # Extract and normalize domain from email
+    raw_domain = body.email.split("@")[1] if "@" in body.email else None
+    normalized_domain = raw_domain.lower().removeprefix("www.") if raw_domain else None
 
-    # Create tenant
-    tenant = Tenant(name=domain)
-    db.add(tenant)
-    await db.flush()
+    # -------------------------------------------------------------------
+    # Tenant-per-domain: reuse existing tenant when one already owns this
+    # domain, otherwise create a new one.
+    # -------------------------------------------------------------------
+    existing_tenant = None
+    if normalized_domain:
+        result = await db.execute(
+            select(Tenant).where(Tenant.domain == normalized_domain)
+        )
+        existing_tenant = result.scalar_one_or_none()
+
+    if existing_tenant:
+        tenant = existing_tenant
+        # Clear domain on the anonymous user's auto-provisioned tenant so
+        # the unique constraint isn't violated if it was set during crawl.
+        anon_tenant_id = user.tenant_id or user.sub
+        if anon_tenant_id and str(anon_tenant_id) != str(tenant.id):
+            from sqlalchemy import text as sa_text
+            await db.execute(
+                sa_text("UPDATE tenants SET domain = NULL WHERE id = :tid AND domain IS NOT NULL"),
+                {"tid": str(anon_tenant_id)},
+            )
+    else:
+        # Create new tenant with domain set immediately
+        try:
+            tenant = Tenant(
+                name=raw_domain or "Personal",
+                domain=normalized_domain,
+            )
+            db.add(tenant)
+            await db.flush()
+        except IntegrityError:
+            # Race condition: another request just created a tenant with the
+            # same domain.  Roll back the failed INSERT and fetch the winner.
+            await db.rollback()
+            result = await db.execute(
+                select(Tenant).where(Tenant.domain == normalized_domain)
+            )
+            tenant = result.scalar_one()
 
     # Create or update user row
     existing_user = (
@@ -218,13 +256,24 @@ async def promote(
         existing_user.email = body.email
         await db.flush()
 
-    # Create user_tenants
-    ut = UserTenant(
-        user_id=user.sub, tenant_id=tenant.id, role="admin", active=True
-    )
-    db.add(ut)
+    # Create user_tenants link (skip if already exists for this tenant)
+    existing_ut = (
+        await db.execute(
+            select(UserTenant).where(
+                UserTenant.user_id == user.sub,
+                UserTenant.tenant_id == tenant.id,
+            )
+        )
+    ).scalar_one_or_none()
 
-    # Copy onboarding session data into context_entries for new tenant
+    if existing_ut is None:
+        ut = UserTenant(
+            user_id=user.sub, tenant_id=tenant.id, role="admin", active=True
+        )
+        db.add(ut)
+
+    # Copy onboarding session data into context_entries for the tenant,
+    # skipping entries that already exist (when joining an existing tenant).
     onboarding_rows = (
         await db.execute(
             select(OnboardingSession).where(
@@ -237,11 +286,27 @@ async def promote(
         data = session_row.data or {}
         entries = data.get("context_entries", [])
         for entry in entries:
+            file_name = entry.get("file_name", "onboarding.md")
+            source = entry.get("source", "onboarding")
+
+            # Check for existing entry to avoid duplicates
+            dup = (
+                await db.execute(
+                    select(ContextEntry.id).where(
+                        ContextEntry.tenant_id == tenant.id,
+                        ContextEntry.file_name == file_name,
+                        ContextEntry.source == source,
+                    )
+                )
+            ).scalar_one_or_none()
+            if dup is not None:
+                continue
+
             ce = ContextEntry(
                 tenant_id=tenant.id,
                 user_id=user.sub,
-                file_name=entry.get("file_name", "onboarding.md"),
-                source=entry.get("source", "onboarding"),
+                file_name=file_name,
+                source=source,
                 detail=entry.get("detail"),
                 content=entry.get("content", ""),
                 confidence=entry.get("confidence", "medium"),
@@ -569,6 +634,8 @@ async def meeting_prep(
         input_parts.append(f"Agenda: {body.agenda.strip()}")
     if body.meeting_type:
         input_parts.append(f"Type: {body.meeting_type}")
+    if body.company_name and body.company_name.strip():
+        input_parts.append(f"Company: {body.company_name.strip()}")
 
     run = SkillRun(
         tenant_id=tenant_id,

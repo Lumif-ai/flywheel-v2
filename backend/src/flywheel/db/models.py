@@ -43,6 +43,14 @@ class Base(DeclarativeBase):
 
 class Tenant(Base):
     __tablename__ = "tenants"
+    __table_args__ = (
+        Index(
+            "uq_tenants_domain",
+            "domain",
+            unique=True,
+            postgresql_where=text("domain IS NOT NULL"),
+        ),
+    )
 
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=text("gen_random_uuid()")

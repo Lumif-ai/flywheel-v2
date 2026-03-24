@@ -810,6 +810,30 @@ async def _execute_company_intel(
         output_parts.append(f"Could not crawl {url}. No pages returned content.")
         return "\n\n".join(output_parts), {}, tool_calls
 
+    # Save domain to tenant EARLY so cache lookups work for concurrent users.
+    # Must happen before structure_intelligence (which is the expensive step).
+    import urllib.parse as _urlparse_early
+    _parsed_early = _urlparse_early.urlparse(url if url.startswith("http") else f"https://{url}")
+    _early_domain = (_parsed_early.hostname or url).removeprefix("www.").lower()
+    try:
+        async with factory() as _dsess:
+            await _dsess.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            # Only set domain if tenant doesn't already have one
+            await _dsess.execute(
+                sa_text(
+                    "UPDATE tenants SET domain = :d WHERE id = :tid AND domain IS NULL"
+                ),
+                {"d": _early_domain, "tid": str(tenant_id)},
+            )
+            await _dsess.commit()
+    except Exception as _early_err:
+        # IntegrityError from unique constraint is fine -- another tenant already
+        # owns this domain (handled at promote time).  Log and continue.
+        logger.debug("Early domain save skipped or failed: %s", _early_err)
+
     await _append_event_atomic(factory, run_id, {
         "event": "stage",
         "data": {
@@ -1012,26 +1036,11 @@ async def _execute_company_intel(
         ),
     }
 
-    # Normalize domain and save to tenant record (cache lookup uses tenant.domain)
+    # Domain was already saved early (before structure_intelligence).
+    # Re-derive for metadata use only -- no DB write needed here.
     import urllib.parse as _urlparse
     _parsed = _urlparse.urlparse(url if url.startswith("http") else f"https://{url}")
     company_domain = (_parsed.hostname or url).removeprefix("www.").lower()
-
-    # Persist domain on the tenant so cache-first onboarding can find it
-    try:
-        async with factory() as session:
-            await session.execute(
-                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                {"tid": str(tenant_id)},
-            )
-            from flywheel.db.models import Tenant as _Tenant
-            await session.execute(
-                sa_text("UPDATE tenants SET domain = :d WHERE id = :tid"),
-                {"d": company_domain, "tid": str(tenant_id)},
-            )
-            await session.commit()
-    except Exception as e:
-        logger.warning("Failed to save domain to tenant: %s", e)
 
     files_written = 0
     for filename, (content_lines, detail) in section_map.items():
@@ -1162,6 +1171,7 @@ async def _execute_meeting_prep(
     linkedin_url = ""
     agenda = ""
     meeting_type = "discovery"
+    company_name = ""
 
     for line in input_text.strip().split("\n"):
         if line.startswith("LinkedIn:"):
@@ -1170,6 +1180,8 @@ async def _execute_meeting_prep(
             agenda = line.split(":", 1)[1].strip()
         elif line.startswith("Type:"):
             meeting_type = line.split(":", 1)[1].strip()
+        elif line.startswith("Company:"):
+            company_name = line.split(":", 1)[1].strip()
 
     # Extract person name from LinkedIn URL slug (e.g. /in/cheok-yen-kwan -> Cheok Yen Kwan)
     person_name = "the contact"
@@ -1178,12 +1190,9 @@ async def _execute_meeting_prep(
         slug = slug_match.group(1)
         person_name = slug.replace("-", " ").title()
 
-    # Try to extract company from the URL or we'll discover it during research
-    company_name = ""
-
     logger.info(
-        "Meeting prep: person=%s, url=%s, agenda=%s, type=%s",
-        person_name, linkedin_url, agenda, meeting_type,
+        "Meeting prep: person=%s, url=%s, agenda=%s, type=%s, company=%s",
+        person_name, linkedin_url, agenda, meeting_type, company_name,
     )
 
     # ------------------------------------------------------------------
@@ -1240,9 +1249,63 @@ async def _execute_meeting_prep(
 
     # Helper to run a sync Anthropic web_search call in a thread
     def _research_person() -> tuple[dict, dict]:
-        """Web search for person info. Returns (person_data, usage)."""
+        """Web search for person info. Returns (person_data, usage).
+
+        Uses the full LinkedIn URL as the primary search query for accurate
+        disambiguation (prevents wrong-person matches for common names).
+        Falls back to name-only search if no LinkedIn URL is available.
+        Tracks research_source confidence: linkedin_indexed or name_search.
+        """
         try:
             client = anthropic.Anthropic(api_key=api_key)
+
+            # Build the search prompt with LinkedIn URL as primary identifier
+            if linkedin_url:
+                company_hint = (
+                    f"\nThey work at {company_name}. " if company_name else ""
+                )
+                search_prompt = (
+                    f"Research the person at this LinkedIn profile: {linkedin_url}\n"
+                    f"Find information about them from Google-indexed sources that "
+                    f"reference this LinkedIn URL or the person it belongs to.\n"
+                    f"Their name appears to be: {person_name}\n"
+                    f"{company_hint}\n"
+                    f"IMPORTANT: Use the LinkedIn URL as the primary search query to "
+                    f"find the EXACT right person. Do NOT rely on name alone — common "
+                    f"names match multiple people. Search for the URL itself, and also "
+                    f"search for the person's name combined with any company/role info "
+                    f"found from the URL-based search.\n\n"
+                    f"Do NOT try to fetch LinkedIn directly — it blocks automated access. "
+                    f"Instead search Google for cached/indexed LinkedIn data, news articles, "
+                    f"conference talks, blog posts, and other sources that reference this "
+                    f"specific profile URL.\n\n"
+                )
+                research_source = "linkedin_indexed"
+            else:
+                company_hint = (
+                    f" at {company_name}" if company_name else ""
+                )
+                search_prompt = (
+                    f"Research this person for a meeting briefing: {person_name}"
+                    f"{company_hint}.\n\n"
+                    f"Search Google for information about them — their role, company, "
+                    f"background from news articles, conference talks, blog posts, etc.\n\n"
+                )
+                research_source = "name_search"
+
+            search_prompt += (
+                f"After researching, return ONLY a JSON object (no markdown fencing) with:\n"
+                f"- name: string (their full name)\n"
+                f"- title: string (current job title)\n"
+                f"- company: string (current company name)\n"
+                f"- location: string or null\n"
+                f"- summary: string (2-3 sentence professional summary)\n"
+                f"- education: list of strings (degrees/schools) or empty list\n"
+                f"- experience_highlights: list of strings (notable career highlights)\n"
+                f"- interests: list of strings (professional interests, topics they speak/write about)\n"
+                f"- mutual_context: string or null (anything relevant for building rapport)\n"
+            )
+
             response = client.messages.create(
                 model="claude-sonnet-4-20250514",
                 max_tokens=3000,
@@ -1253,25 +1316,7 @@ async def _execute_meeting_prep(
                 }],
                 messages=[{
                     "role": "user",
-                    "content": (
-                        f"Research this person for a meeting briefing. "
-                        f"Their LinkedIn profile is: {linkedin_url}\n"
-                        f"Their name appears to be: {person_name}\n\n"
-                        f"Search Google for information about them. "
-                        f"Do NOT try to fetch LinkedIn directly — it blocks automated access. "
-                        f"Instead search for their name, role, company, and background from "
-                        f"Google-indexed sources, news articles, conference talks, blog posts, etc.\n\n"
-                        f"After researching, return ONLY a JSON object (no markdown fencing) with:\n"
-                        f"- name: string (their full name)\n"
-                        f"- title: string (current job title)\n"
-                        f"- company: string (current company name)\n"
-                        f"- location: string or null\n"
-                        f"- summary: string (2-3 sentence professional summary)\n"
-                        f"- education: list of strings (degrees/schools) or empty list\n"
-                        f"- experience_highlights: list of strings (notable career highlights)\n"
-                        f"- interests: list of strings (professional interests, topics they speak/write about)\n"
-                        f"- mutual_context: string or null (anything relevant for building rapport)\n"
-                    ),
+                    "content": search_prompt,
                 }],
             )
 
@@ -1295,6 +1340,9 @@ async def _execute_meeting_prep(
             else:
                 person_data = {"name": person_name, "raw_text": full_text}
 
+            # Track research source confidence
+            person_data["research_source"] = research_source
+
             usage = {
                 "input_tokens": response.usage.input_tokens,
                 "output_tokens": response.usage.output_tokens,
@@ -1302,7 +1350,7 @@ async def _execute_meeting_prep(
             return person_data, usage
         except Exception:
             logger.exception("_research_person failed")
-            return {"name": person_name}, {"input_tokens": 0, "output_tokens": 0}
+            return {"name": person_name, "research_source": "name_search"}, {"input_tokens": 0, "output_tokens": 0}
 
     def _research_company(co_name: str) -> tuple[dict, dict]:
         """Web search for company info. Returns (company_data, usage)."""
@@ -1570,12 +1618,31 @@ async def _execute_meeting_prep(
                     "This demonstrates compounding intelligence.\n\n"
                 )
 
+            # Add research confidence warning for name-only fallback
+            research_source = person_data.get("research_source", "linkedin_indexed")
+            if research_source == "name_search":
+                user_content += (
+                    "## IMPORTANT: Research Confidence Warning\n"
+                    "LinkedIn profile could not be accessed or was not provided. "
+                    "Research is based on web search by name only — there is a risk "
+                    "of wrong-person matches for common names.\n\n"
+                    "You MUST include a visible warning banner at the TOP of the "
+                    "briefing HTML (after the header), styled as:\n"
+                    '`<div style="background: #FEF3C7; border: 1px solid #F59E0B; '
+                    "border-radius: 8px; padding: 12px 16px; margin-bottom: 24px; "
+                    'font-size: 14px; color: #92400E;">`\n'
+                    "with text: 'Note: LinkedIn profile could not be accessed directly. "
+                    "This briefing is based on web search by name — please verify the "
+                    "person details are correct.'\n\n"
+                )
+
             user_content += (
                 f"### Meeting Details\n"
                 f"- Person: {person_name}\n"
                 f"- Company: {company_name or 'Unknown'}\n"
                 f"- LinkedIn: {linkedin_url}\n"
-                f"- Meeting type: {meeting_type}\n\n"
+                f"- Meeting type: {meeting_type}\n"
+                f"- Research source: {research_source}\n\n"
                 "Generate the HTML briefing now. Focus on business intelligence, "
                 "NOT interview questions."
             )
