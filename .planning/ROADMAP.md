@@ -133,12 +133,12 @@ Plans:
   4. User receives an in-app alert for a priority-5 email even when the Email page is not open
   5. Thread list with 500+ emails scrolls without jank (virtual scrolling active, no DOM node bloat)
 
-**Plans:** TBD
+**Plans:** 3 plans
 
 Plans:
-- [ ] 05-01: api/email.py (GET threads, GET thread detail, POST approve/edit/dismiss, GET digest, POST manual sync)
-- [ ] 05-02: EmailPage.tsx, ThreadList.tsx with virtualization, ThreadCard.tsx, DraftReview.tsx, Zustand store and React Query hooks
-- [ ] 05-03: In-app alert integration for priority-5 emails, daily digest view
+- [ ] 05-01-PLAN.md — Backend read API: GET threads, GET thread detail, GET digest, POST manual sync + api.ts put method
+- [ ] 05-02-PLAN.md — Email inbox frontend: types, Zustand store, React Query hooks, EmailPage with virtualized ThreadList, ThreadDetail sheet, DraftReview
+- [ ] 05-03-PLAN.md — In-app critical email alerts (Sonner), daily digest view, sidebar nav link
 
 ---
 
