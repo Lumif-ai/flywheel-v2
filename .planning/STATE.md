@@ -94,6 +94,10 @@ Recent decisions affecting current work:
 - [Phase 5, Plan 04]: AuthenticatedAlerts wrapper component — correct React pattern for conditionally running hooks; useEmailThreads never fires on standalone routes
 - [Phase 5, Plan 04]: useSearchParams + setSearchParams({}, { replace: true }) for thread auto-open — one-shot open that does not re-trigger on refresh, no history entry added
 - [Phase 5, Plan 04]: IIFE in JSX for msgTier computation — co-locates per-message tier calc with badge render without restructuring MessageRow
+- [Phase 6, Plan 01]: voice_update_min_edits default=1 — every edit triggers update; Haiku returns empty JSON for trivial diffs (no-op path avoids wasted Haiku calls)
+- [Phase 6, Plan 01]: make_interval(days => :days) not string interpolation — avoids SQL injection and asyncpg parameterization issues with interval expressions
+- [Phase 6, Plan 01]: Diff captured as strings before null in approve_draft — ORM object expires after commit; background task receives string values not ORM refs
+- [Phase 6, Plan 01]: dismiss_signal injected before EMAIL TO SCORE block in scorer user_message — visible to Haiku scoring rubric
 - [Phase 6, Plan 02]: FEED-03 already satisfied by existing architecture — new messages in existing threads arrive as messagesAdded events and get scored through the existing _score_new_emails path; thread priority auto-refreshes via read-time MAX query (SCORE-07); no new code needed, documentation only
 
 ### Pending Todos
@@ -109,5 +113,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-25
-Stopped at: Phase 6 Plan 02 complete — FEED-03 thread re-scoring documented in gmail_sync.py.
+Stopped at: Phase 6 Plan 01 complete — voice updater engine, dismiss tracker, config settings, approve_draft wiring, scorer dismiss signal injection.
 Resume file: None
