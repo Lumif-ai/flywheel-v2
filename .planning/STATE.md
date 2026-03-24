@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 3 of 6 (Email Scorer Skill)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-03-24 — Phase 2 complete (2/2 plans, verified 5/5 must-haves)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-03-24 — Phase 3 Plan 01 complete (email-scorer skill + scoring engine)
 
-Progress: [█████░░░░░] 33%
+Progress: [█████░░░░░] 38%
 
 ## Performance Metrics
 
@@ -55,6 +55,11 @@ Recent decisions affecting current work:
 - [Phase 2, Plan 02]: Only top-20 substantive bodies sent to Haiku — cost control while preserving recency signal
 - [Phase 2, Plan 02]: Voice init failure is non-fatal — email sync always completes regardless of Haiku call outcome
 - [Phase 2, Plan 02]: Minimum 3 substantive bodies required before profile creation — prevents meaningless profiles
+- [Phase 3, Plan 01]: Scorer bypasses execute_run() — called directly from sync loop with subsidy key (no user_id in background context)
+- [Phase 3, Plan 01]: plainto_tsquery for FTS — prevents SQL errors from email subject punctuation (commas, parens)
+- [Phase 3, Plan 01]: Hallucination filtering on context_refs — LLM-returned IDs validated against pre-fetched sets before storage
+- [Phase 3, Plan 01]: Non-fatal scoring — exceptions log only email.id (no PII), return None, sync always completes
+- [Phase 3, Plan 01]: Caller-commits pattern — scoring engine does not call db.commit(), consistent with Phase 2 pattern
 
 ### Pending Todos
 
@@ -62,7 +67,6 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 3]: Scorer prompt engineering is uncharted — flag for `/gsd:research-phase` before planning Phase 3
 - [Phase 4]: Draft context assembly and voice injection format need validation — flag for `/gsd:research-phase` before planning Phase 4
 - [Pre-Phase 5]: `gmail.readonly` restricted scope verification takes 2-6 weeks — initiate no later than end of Phase 2
 - [Phase 5]: Tailwind v4 + `@tailwindcss/typography` plugin compatibility needs verification at Phase 5 setup
@@ -70,5 +74,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 2 complete, verified, roadmap updated. Phase 3 ready to plan (research flagged as needed).
+Stopped at: Phase 3 Plan 01 complete (email-scorer SKILL.md + email_scorer.py engine). Ready for Plan 02 (gmail sync integration).
 Resume file: None
