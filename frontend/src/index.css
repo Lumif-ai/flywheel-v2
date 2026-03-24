@@ -53,6 +53,21 @@
 
 :root {
     /* Lumif.ai Brand Theme */
+
+    /* Design language: Calm Precision */
+    --page-bg: #F9FAFB;
+    --card-bg: #FFFFFF;
+    --heading-text: #121212;
+    --body-text: #374151;
+    --secondary-text: #6B7280;
+    --subtle-border: rgba(229,231,235,0.6);
+    --brand-coral: #E94D35;
+    --brand-gradient-end: #D4432E;
+    --brand-tint: rgba(233,77,53,0.04);
+    --brand-light: rgba(233,77,53,0.1);
+    --success: #22C55E;
+    --warning: #F59E0B;
+    --error: #EF4444;
     --background: oklch(1 0 0);
     --foreground: oklch(0.145 0 0);                   /* #121212 */
     --card: oklch(1 0 0);
