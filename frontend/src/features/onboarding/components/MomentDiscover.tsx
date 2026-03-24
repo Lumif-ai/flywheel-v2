@@ -1,12 +1,13 @@
 /**
  * MomentDiscover - Second onboarding moment.
  *
- * Shows intelligence cascading in as the company-intel crawl runs.
- * Categories animate in with stagger. Shimmer skeletons for pending.
- * Auto-advances to align after crawl completes + 1s pause.
+ * Two phases:
+ * 1. Cascade: shimmer skeletons, stagger animation, auto-scroll as crawl runs
+ * 2. Edit mode: users can remove, add, and inline-edit discovered items.
+ *    "Looks good" CTA confirms edits and advances to Align.
  */
 
-import { useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Building2,
   Package,
@@ -15,11 +16,14 @@ import {
   Cpu,
   UserCheck,
   DollarSign,
+  Pencil,
+  X,
+  Plus,
   type LucideIcon,
 } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { animationClasses, staggerDelay } from '@/lib/animations'
-import type { CrawlItem } from '../hooks/useOnboarding'
+import type { CrawlItem, CrawlItemMeta, EditedCategory } from '../hooks/useOnboarding'
 
 // ---------------------------------------------------------------------------
 // Category icon mapping
@@ -35,8 +39,6 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
   financial: DollarSign,
 }
 
-const CATEGORY_LABELS = ['Company', 'Products', 'Customers', 'Market', 'Technology', 'Team', 'Financial']
-
 // ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
@@ -46,7 +48,13 @@ interface MomentDiscoverProps {
   crawlTotal: number
   crawlStatus: string | null
   isComplete: boolean
+  editMode: boolean
+  editedItems: Record<string, EditedCategory>
   onComplete: () => void
+  onRemoveItem: (category: string, itemIndex: number) => void
+  onAddItem: (category: string, text: string) => void
+  onEditItem: (category: string, itemIndex: number, newText: string) => void
+  onConfirmEdits: () => void
 }
 
 // ---------------------------------------------------------------------------
@@ -67,6 +75,157 @@ function ShimmerSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
+// Inline Add Input
+// ---------------------------------------------------------------------------
+
+function InlineAddInput({ onAdd }: { onAdd: (text: string) => void }) {
+  const [active, setActive] = useState(false)
+  const [value, setValue] = useState('')
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  const handleSubmit = useCallback(() => {
+    const trimmed = value.trim()
+    if (trimmed) {
+      onAdd(trimmed)
+    }
+    setValue('')
+    setActive(false)
+  }, [value, onAdd])
+
+  useEffect(() => {
+    if (active) inputRef.current?.focus()
+  }, [active])
+
+  if (!active) {
+    return (
+      <button
+        type="button"
+        onClick={() => setActive(true)}
+        className="inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 transition-colors hover:bg-black/5"
+        style={{
+          fontSize: typography.caption.size,
+          color: colors.secondaryText,
+          cursor: 'pointer',
+        }}
+      >
+        <Plus className="h-3 w-3" />
+        Add
+      </button>
+    )
+  }
+
+  return (
+    <input
+      ref={inputRef}
+      type="text"
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter') handleSubmit()
+        if (e.key === 'Escape') { setValue(''); setActive(false) }
+      }}
+      onBlur={handleSubmit}
+      className="inline-block rounded-full px-2.5 py-0.5 outline-none ring-1"
+      style={{
+        fontSize: typography.caption.size,
+        color: colors.bodyText,
+        background: colors.cardBg,
+        borderColor: colors.brandCoral,
+        minWidth: '100px',
+        maxWidth: '200px',
+      }}
+      placeholder="Type and press Enter"
+    />
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Editable Item Pill
+// ---------------------------------------------------------------------------
+
+function EditableItemPill({
+  text,
+  deleted,
+  isUserAdded,
+  onRemove,
+  onEdit,
+}: {
+  text: string
+  deleted?: boolean
+  isUserAdded: boolean
+  onRemove: () => void
+  onEdit: (newText: string) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [editValue, setEditValue] = useState(text)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing) inputRef.current?.focus()
+  }, [editing])
+
+  const handleSave = useCallback(() => {
+    const trimmed = editValue.trim()
+    if (trimmed && trimmed !== text) {
+      onEdit(trimmed)
+    }
+    setEditing(false)
+  }, [editValue, text, onEdit])
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="text"
+        value={editValue}
+        onChange={(e) => setEditValue(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') handleSave()
+          if (e.key === 'Escape') { setEditValue(text); setEditing(false) }
+        }}
+        onBlur={handleSave}
+        className="inline-block rounded-full px-2.5 py-0.5 outline-none ring-1"
+        style={{
+          fontSize: typography.caption.size,
+          color: colors.bodyText,
+          background: colors.cardBg,
+          borderColor: colors.brandCoral,
+          minWidth: '80px',
+        }}
+      />
+    )
+  }
+
+  return (
+    <span
+      className="group relative inline-flex items-center rounded-full px-2.5 py-0.5 cursor-pointer"
+      style={{
+        fontSize: typography.caption.size,
+        background: colors.cardBg,
+        border: `1px solid ${colors.subtleBorder}`,
+        color: deleted ? colors.secondaryText : colors.bodyText,
+        textDecoration: deleted ? 'line-through' : 'none',
+        opacity: deleted ? 0.5 : 1,
+        borderLeft: isUserAdded ? `3px solid ${colors.brandCoral}` : undefined,
+      }}
+      onClick={() => { if (!deleted) setEditing(true) }}
+    >
+      {text}
+      {!deleted && (
+        <button
+          type="button"
+          onClick={(e) => { e.stopPropagation(); onRemove() }}
+          className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity"
+          style={{ color: colors.secondaryText }}
+        >
+          <X className="h-3 w-3" />
+        </button>
+      )}
+    </span>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
@@ -75,32 +234,30 @@ export function MomentDiscover({
   crawlTotal,
   crawlStatus,
   isComplete,
+  editMode,
+  editedItems,
   onComplete,
+  onRemoveItem,
+  onAddItem,
+  onEditItem,
+  onConfirmEdits,
 }: MomentDiscoverProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
-  const autoAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  // Auto-scroll as new items arrive
+  // Auto-scroll as new items arrive (cascade phase only)
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [crawlItems.length])
-
-  // Auto-advance 1 second after crawl completes
-  useEffect(() => {
-    if (isComplete) {
-      autoAdvanceRef.current = setTimeout(() => {
-        onComplete()
-      }, 3000)
+    if (!editMode) {
+      bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
     }
-    return () => {
-      if (autoAdvanceRef.current) {
-        clearTimeout(autoAdvanceRef.current)
-      }
-    }
-  }, [isComplete, onComplete])
+  }, [crawlItems.length, editMode])
 
   // How many shimmer slots to show while loading
   const shimmerCount = isComplete ? 0 : Math.max(0, 3 - crawlItems.length)
+
+  const handleConfirmAndComplete = useCallback(() => {
+    onConfirmEdits()
+    onComplete()
+  }, [onConfirmEdits, onComplete])
 
   return (
     <div
@@ -122,7 +279,7 @@ export function MomentDiscover({
             marginBottom: spacing.tight,
           }}
         >
-          {isComplete ? 'Discovery complete' : (
+          {editMode ? 'Review what we found' : isComplete ? 'Discovery complete' : (
             <>
               Discovering intelligence
               <span className="inline-flex ml-1">
@@ -134,7 +291,16 @@ export function MomentDiscover({
           )}
         </h1>
 
-        {crawlTotal > 0 ? (
+        {editMode ? (
+          <p
+            style={{
+              fontSize: typography.body.size,
+              color: colors.secondaryText,
+            }}
+          >
+            Add anything we missed.
+          </p>
+        ) : crawlTotal > 0 ? (
           <p
             className="tabular-nums"
             style={{
@@ -169,19 +335,33 @@ export function MomentDiscover({
       >
         {crawlItems.map((group, i) => {
           const IconComponent = CATEGORY_ICONS[group.category] ?? Building2
+          const edited = editedItems[group.category]
+          const displayItems = editMode && edited ? edited.items : group.items
+          const displayMeta = editMode && edited ? edited.meta : null
+
           return (
             <div
               key={i}
-              className={animationClasses.fadeSlideUp}
+              className={`${animationClasses.fadeSlideUp} relative`}
               style={{
                 animationDelay: staggerDelay(i),
                 animationFillMode: 'both',
                 borderRadius: '8px',
-                border: `1px solid ${colors.subtleBorder}`,
+                border: editMode
+                  ? `1px dashed ${colors.subtleBorder}`
+                  : `1px solid ${colors.subtleBorder}`,
                 background: colors.brandTint,
                 padding: '12px 16px',
               }}
             >
+              {/* Edit mode indicator */}
+              {editMode && (
+                <Pencil
+                  className="absolute top-3 right-3 h-3.5 w-3.5"
+                  style={{ color: colors.secondaryText, opacity: 0.5 }}
+                />
+              )}
+
               <div className="flex items-center gap-2 mb-1.5">
                 <IconComponent className="h-4 w-4 shrink-0" style={{ color: colors.brandCoral }} />
                 <span
@@ -200,24 +380,47 @@ export function MomentDiscover({
                     color: colors.secondaryText,
                   }}
                 >
-                  {group.items.length}
+                  {editMode && displayMeta
+                    ? displayItems.filter((_, idx) => !displayMeta[idx]?.deleted).length
+                    : group.items.length}
                 </span>
               </div>
+
               <div className="flex flex-wrap gap-1.5">
-                {group.items.map((item, j) => (
-                  <span
-                    key={j}
-                    className="inline-block rounded-full px-2.5 py-0.5"
-                    style={{
-                      fontSize: typography.caption.size,
-                      background: colors.cardBg,
-                      border: `1px solid ${colors.subtleBorder}`,
-                      color: colors.bodyText,
-                    }}
-                  >
-                    {item}
-                  </span>
-                ))}
+                {displayItems.map((item, j) => {
+                  if (editMode && displayMeta) {
+                    const meta = displayMeta[j]
+                    return (
+                      <EditableItemPill
+                        key={j}
+                        text={item}
+                        deleted={meta?.deleted}
+                        isUserAdded={meta?.source === 'user_input'}
+                        onRemove={() => onRemoveItem(group.category, j)}
+                        onEdit={(newText) => onEditItem(group.category, j, newText)}
+                      />
+                    )
+                  }
+                  return (
+                    <span
+                      key={j}
+                      className="inline-block rounded-full px-2.5 py-0.5"
+                      style={{
+                        fontSize: typography.caption.size,
+                        background: colors.cardBg,
+                        border: `1px solid ${colors.subtleBorder}`,
+                        color: colors.bodyText,
+                      }}
+                    >
+                      {item}
+                    </span>
+                  )
+                })}
+
+                {/* Add button in edit mode */}
+                {editMode && (
+                  <InlineAddInput onAdd={(text) => onAddItem(group.category, text)} />
+                )}
               </div>
             </div>
           )
@@ -238,6 +441,25 @@ export function MomentDiscover({
 
         <div ref={bottomRef} />
       </div>
+
+      {/* "Looks good" CTA in edit mode */}
+      {editMode && (
+        <div style={{ marginTop: spacing.element, textAlign: 'center' }}>
+          <button
+            type="button"
+            onClick={handleConfirmAndComplete}
+            className="w-full rounded-lg py-3 px-6 text-white font-semibold transition-all hover:opacity-90"
+            style={{
+              background: `linear-gradient(135deg, ${colors.brandCoral}, ${colors.brandGradientEnd})`,
+              fontSize: typography.body.size,
+              border: 'none',
+              cursor: 'pointer',
+            }}
+          >
+            Looks good
+          </button>
+        </div>
+      )}
     </div>
   )
 }

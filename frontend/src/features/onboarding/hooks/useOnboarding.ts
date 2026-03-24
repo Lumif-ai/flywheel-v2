@@ -27,6 +27,17 @@ export interface CrawlItem {
   count: number
 }
 
+export interface CrawlItemMeta {
+  source: 'crawler' | 'user_input'
+  confidence: 'crawled' | 'verified' | 'confirmed'
+  deleted?: boolean
+}
+
+export interface EditedCategory {
+  items: string[]
+  meta: CrawlItemMeta[]
+}
+
 export interface ParsedStream {
   name: string
   description: string
@@ -40,6 +51,16 @@ export interface CreatedStream {
   density_score: number
 }
 
+export interface PriorityOption {
+  id: 'grow_revenue' | 'raise_capital' | 'track_competitors'
+  label: string
+  subLabel: string
+  capabilityCount: number
+  capabilities: string[]
+  focusArea: string
+  firstAction: string
+}
+
 export interface OnboardingState {
   phase: OnboardingPhase
   crawlItems: CrawlItem[]
@@ -51,7 +72,44 @@ export interface OnboardingState {
   error: string | null
   loading: boolean
   sseUrl: string | null
+  editedItems: Record<string, EditedCategory>
+  editMode: boolean
+  selectedPriorities: string[]
 }
+
+// ---------------------------------------------------------------------------
+// Priority options (skills-backed)
+// ---------------------------------------------------------------------------
+
+const PRIORITY_OPTIONS: PriorityOption[] = [
+  {
+    id: 'grow_revenue',
+    label: 'Grow revenue',
+    subLabel: 'Research prospects, score leads, prep for every sales meeting',
+    capabilityCount: 10,
+    capabilities: ['account-research', 'account-competitive', 'account-strategy', 'gtm-company-fit-analyzer', 'gtm-leads-pipeline', 'gtm-outbound-messenger', 'gtm-web-scraper-extractor', 'gtm-dashboard', 'sales-collateral', 'demo-prep'],
+    focusArea: 'Revenue',
+    firstAction: 'Paste a prospect\'s website to get your first account brief',
+  },
+  {
+    id: 'raise_capital',
+    label: 'Raise capital',
+    subLabel: 'Investor briefs, valuation snapshots, monthly updates',
+    capabilityCount: 4,
+    capabilities: ['meeting-prep', 'investor-update', 'valuation-expert', 'quick-valuation'],
+    focusArea: 'Fundraise',
+    firstAction: 'Who\'s your next investor meeting with?',
+  },
+  {
+    id: 'track_competitors',
+    label: 'Track competitors',
+    subLabel: 'Competitive landscapes, market shifts, pricing benchmarks',
+    capabilityCount: 3,
+    capabilities: ['account-research', 'account-competitive', 'gtm-company-fit-analyzer'],
+    focusArea: 'Market',
+    firstAction: 'Name a competitor to start tracking',
+  },
+]
 
 // ---------------------------------------------------------------------------
 // Initial state
@@ -68,6 +126,9 @@ const initialState: OnboardingState = {
   error: null,
   loading: false,
   sseUrl: null,
+  editedItems: {},
+  editMode: false,
+  selectedPriorities: [],
 }
 
 // ---------------------------------------------------------------------------
@@ -112,13 +173,35 @@ export function useOnboarding() {
       }
       case 'done': {
         const totalItems = (data.total_items as number) ?? stateRef.current.crawlItems.length
-        setState((s) => ({
-          ...s,
-          phase: 'crawl_complete',
-          crawlTotal: totalItems,
-          crawlStatus: null,
-          sseUrl: null,
-        }))
+        // Auto-enter edit mode: copy crawlItems into editedItems
+        const edited: Record<string, EditedCategory> = {}
+        const currentItems = [...stateRef.current.crawlItems]
+        // Include any items from this last event batch
+        for (const group of currentItems) {
+          edited[group.category] = {
+            items: [...group.items],
+            meta: group.items.map(() => ({ source: 'crawler' as const, confidence: 'crawled' as const })),
+          }
+        }
+        setState((s) => {
+          // Re-derive from latest state to capture all items
+          const freshEdited: Record<string, EditedCategory> = {}
+          for (const group of s.crawlItems) {
+            freshEdited[group.category] = {
+              items: [...group.items],
+              meta: group.items.map(() => ({ source: 'crawler' as const, confidence: 'crawled' as const })),
+            }
+          }
+          return {
+            ...s,
+            phase: 'crawl_complete',
+            crawlTotal: totalItems,
+            crawlStatus: null,
+            sseUrl: null,
+            editMode: true,
+            editedItems: freshEdited,
+          }
+        })
         break
       }
       case 'error':
@@ -288,6 +371,106 @@ export function useOnboarding() {
     setState({ ...initialState })
   }, [])
 
+  // ---- Edit mode actions (MomentDiscover) ----
+
+  const removeItem = useCallback((category: string, itemIndex: number) => {
+    setState((s) => {
+      const edited = { ...s.editedItems }
+      if (!edited[category]) return s
+      const cat = { ...edited[category], meta: [...edited[category].meta] }
+      cat.meta[itemIndex] = { ...cat.meta[itemIndex], deleted: true }
+      edited[category] = cat
+      return { ...s, editedItems: edited }
+    })
+  }, [])
+
+  const addItem = useCallback((category: string, text: string) => {
+    setState((s) => {
+      const edited = { ...s.editedItems }
+      const cat = edited[category]
+        ? { items: [...edited[category].items], meta: [...edited[category].meta] }
+        : { items: [], meta: [] }
+      cat.items.push(text)
+      cat.meta.push({ source: 'user_input', confidence: 'verified' })
+      edited[category] = cat
+      return { ...s, editedItems: edited }
+    })
+  }, [])
+
+  const editItem = useCallback((category: string, itemIndex: number, newText: string) => {
+    setState((s) => {
+      const edited = { ...s.editedItems }
+      if (!edited[category]) return s
+      const cat = { items: [...edited[category].items], meta: [...edited[category].meta] }
+      cat.items[itemIndex] = newText
+      cat.meta[itemIndex] = { ...cat.meta[itemIndex], confidence: 'verified' }
+      edited[category] = cat
+      return { ...s, editedItems: edited }
+    })
+  }, [])
+
+  const confirmEdits = useCallback(() => {
+    setState((s) => {
+      // Write edited items back to crawlItems
+      const updatedCrawlItems = s.crawlItems.map((group) => {
+        const edited = s.editedItems[group.category]
+        if (!edited) return group
+        // Filter out deleted items
+        const finalItems: string[] = []
+        for (let i = 0; i < edited.items.length; i++) {
+          if (!edited.meta[i]?.deleted) {
+            finalItems.push(edited.items[i])
+          }
+        }
+        return { ...group, items: finalItems, count: finalItems.length }
+      })
+      return {
+        ...s,
+        crawlItems: updatedCrawlItems,
+        crawlTotal: updatedCrawlItems.reduce((sum, g) => sum + g.items.length, 0),
+        editMode: false,
+      }
+    })
+  }, [])
+
+  // ---- Priority selection actions (MomentAlign) ----
+
+  const togglePriority = useCallback((id: string) => {
+    setState((s) => {
+      const selected = s.selectedPriorities.includes(id)
+        ? s.selectedPriorities.filter((p) => p !== id)
+        : [...s.selectedPriorities, id]
+      return { ...s, selectedPriorities: selected }
+    })
+  }, [])
+
+  const confirmPriorities = useCallback(async () => {
+    setState((s) => ({ ...s, loading: true, error: null }))
+    try {
+      const selected = stateRef.current.selectedPriorities
+      const options = PRIORITY_OPTIONS.filter((o) => selected.includes(o.id))
+      const streams = options.map((o) => ({
+        name: o.focusArea,
+        description: o.subLabel,
+        entity_seeds: [] as string[],
+      }))
+      const res = await api.post<{ created: CreatedStream[] }>('/onboarding/create-streams', { streams })
+      queryClient.invalidateQueries({ queryKey: ['streams'] })
+      setState((s) => ({
+        ...s,
+        createdStreams: res.created,
+        phase: 'meeting_notes',
+        loading: false,
+      }))
+    } catch (err) {
+      setState((s) => ({
+        ...s,
+        loading: false,
+        error: err instanceof Error ? err.message : 'Failed to create focus areas',
+      }))
+    }
+  }, [queryClient])
+
   return {
     ...state,
     startCrawl,
@@ -301,5 +484,14 @@ export function useOnboarding() {
     skipToBriefing,
     goToBriefing,
     retry,
+    // Edit mode actions
+    removeItem,
+    addItem,
+    editItem,
+    confirmEdits,
+    // Priority actions
+    togglePriority,
+    confirmPriorities,
+    priorityOptions: PRIORITY_OPTIONS,
   }
 }
