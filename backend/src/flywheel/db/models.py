@@ -86,6 +86,28 @@ class User(Base):
     )
 
 
+class Company(Base):
+    """Shared company intel cache -- NOT tenant-scoped, no RLS.
+
+    Stores structured intelligence per domain so any tenant can get an
+    instant cache hit without cross-tenant queries.
+    """
+    __tablename__ = "companies"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    domain: Mapped[str] = mapped_column(Text, unique=True)
+    name: Mapped[str | None] = mapped_column(Text)
+    intel: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    crawled_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 # ---------------------------------------------------------------------------
 # TENANT-SCOPED TABLES (all have tenant_id FK, RLS enforced)
 # ---------------------------------------------------------------------------

@@ -1011,7 +1011,40 @@ async def _execute_company_intel(
                 },
             })
 
-    # Stage 4: Write to context store (async, tenant-scoped)
+    # Stage 4a: Upsert into shared companies table (cache for all tenants)
+    import urllib.parse as _urlparse_co
+    _parsed_co = _urlparse_co.urlparse(url if url.startswith("http") else f"https://{url}")
+    _co_domain = (_parsed_co.hostname or url).removeprefix("www.").lower()
+
+    # Merge intelligence + enrichment for the cached intel dict
+    _merged_intel = {**intelligence, **enriched}
+    _merged_intel.pop("_source_url", None)  # keep source_url out of shared cache
+
+    try:
+        from flywheel.db.models import Company
+        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+
+        async with factory() as _co_sess:
+            _co_stmt = _pg_insert(Company).values(
+                domain=_co_domain,
+                name=_merged_intel.get("company_name"),
+                intel=_merged_intel,
+                crawled_at=datetime.now(timezone.utc),
+            ).on_conflict_do_update(
+                index_elements=["domain"],
+                set_={
+                    "name": _merged_intel.get("company_name"),
+                    "intel": _merged_intel,
+                    "crawled_at": datetime.now(timezone.utc),
+                },
+            )
+            await _co_sess.execute(_co_stmt)
+            await _co_sess.commit()
+        logger.info("Upserted companies cache for domain=%s", _co_domain)
+    except Exception as _co_err:
+        logger.error("Companies table upsert failed for %s: %s", _co_domain, _co_err)
+
+    # Stage 4b: Write to context store (async, tenant-scoped)
     await _append_event_atomic(factory, run_id, {
         "event": "stage",
         "data": {"stage": "writing", "message": "Saving company intelligence..."},

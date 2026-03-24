@@ -26,7 +26,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import ContextCatalog, ContextEntry, SkillRun, Tenant
+from flywheel.db.models import Company, ContextCatalog, ContextEntry, SkillRun, Tenant
 
 router = APIRouter(prefix="/context", tags=["context"])
 
@@ -75,8 +75,6 @@ class OnboardingCacheResponse(BaseModel):
     entry_count: int = 0
     last_updated: str | None = None
     groups: list[OnboardingCacheGroup] = Field(default_factory=list)
-    missing_categories: list[str] = Field(default_factory=list)
-    partial: bool = False
 
 
 class OnboardingRefreshResponse(BaseModel):
@@ -551,30 +549,110 @@ async def search_entries(
 
 
 # ---------------------------------------------------------------------------
-# GET /context/onboarding-cache — tenant-scoped onboarding cache check
+# GET /context/onboarding-cache — shared companies table lookup
 # ---------------------------------------------------------------------------
 
 
-# Expected onboarding categories — used to detect partial cache hits
-EXPECTED_CATEGORIES = {"positioning", "product-modules", "icp-profiles", "competitive-intel", "market-taxonomy"}
-
-# file_name → (icon, label) mapping — mirrors _build_discoveries in skill_executor
-_FILE_DISPLAY: dict[str, tuple[str, str]] = {
-    "positioning": ("Building2", "Positioning"),
-    "product-modules": ("Package", "Product Modules"),
-    "icp-profiles": ("UserCheck", "Icp Profiles"),
-    "competitive-intel": ("Swords", "Competitive Intel"),
-    "market-taxonomy": ("TrendingUp", "Market Taxonomy"),
-}
+def _normalize_domain(raw: str) -> str:
+    """Normalize a URL or domain string to a bare lowercase domain."""
+    import urllib.parse as _urlparse
+    _parsed = _urlparse.urlparse(raw if raw.startswith("http") else f"https://{raw}")
+    return (_parsed.hostname or raw).removeprefix("www.").lower()
 
 
-def _split_entry_items(entry: ContextEntry) -> list[str]:
-    """Split a context entry's content back into individual display items."""
-    content = (entry.content or "").strip()
-    if not content:
-        return []
-    lines = [line.strip() for line in content.split("\n") if line.strip()]
-    return lines
+def _build_groups_from_intel(intel: dict) -> list[OnboardingCacheGroup]:
+    """Convert a companies.intel JSONB dict into CrawlItem-shaped groups."""
+    groups: list[OnboardingCacheGroup] = []
+
+    # Company overview
+    overview_items: list[str] = []
+    if intel.get("company_name"):
+        overview_items.append(intel["company_name"])
+    if intel.get("what_they_do"):
+        overview_items.append(intel["what_they_do"])
+    if intel.get("tagline"):
+        overview_items.append(intel["tagline"])
+    if intel.get("headquarters"):
+        overview_items.append(f"HQ: {intel['headquarters']}")
+    if intel.get("founding_year"):
+        overview_items.append(f"Founded: {intel['founding_year']}")
+    if intel.get("employees"):
+        overview_items.append(f"Team size: {intel['employees']}")
+    if overview_items:
+        groups.append(OnboardingCacheGroup(
+            category="company_info", icon="Building2", label="Company",
+            items=overview_items, count=len(overview_items),
+        ))
+
+    # Products + differentiators + pricing
+    product_items: list[str] = []
+    for p in (intel.get("products") or [])[:6]:
+        product_items.append(p if isinstance(p, str) else p.get("name", str(p)) if isinstance(p, dict) else str(p))
+    for d in (intel.get("key_differentiators") or [])[:4]:
+        product_items.append(str(d))
+    if intel.get("pricing_model"):
+        product_items.append(f"Pricing: {intel['pricing_model']}")
+    if product_items:
+        groups.append(OnboardingCacheGroup(
+            category="product", icon="Package", label="Products",
+            items=product_items, count=len(product_items),
+        ))
+
+    # Customers
+    customer_items: list[str] = []
+    for c in (intel.get("target_customers") or [])[:6]:
+        customer_items.append(c if isinstance(c, str) else c.get("name", str(c)) if isinstance(c, dict) else str(c))
+    if customer_items:
+        groups.append(OnboardingCacheGroup(
+            category="customer", icon="UserCheck", label="Customers",
+            items=customer_items, count=len(customer_items),
+        ))
+
+    # Competitors
+    competitor_items: list[str] = []
+    for c in (intel.get("competitors") or [])[:6]:
+        competitor_items.append(c if isinstance(c, str) else c.get("name", str(c)) if isinstance(c, dict) else str(c))
+    if competitor_items:
+        groups.append(OnboardingCacheGroup(
+            category="competitive", icon="Swords", label="Competitors",
+            items=competitor_items, count=len(competitor_items),
+        ))
+
+    # Market (industries + market_position)
+    market_items: list[str] = []
+    for i in (intel.get("industries") or [])[:6]:
+        market_items.append(str(i))
+    if intel.get("market_position"):
+        market_items.append(str(intel["market_position"]))
+    if market_items:
+        groups.append(OnboardingCacheGroup(
+            category="market", icon="TrendingUp", label="Market",
+            items=market_items, count=len(market_items),
+        ))
+
+    # Funding
+    if intel.get("funding"):
+        groups.append(OnboardingCacheGroup(
+            category="financial", icon="DollarSign", label="Funding",
+            items=[str(intel["funding"])], count=1,
+        ))
+
+    # Key people
+    people = intel.get("key_people") or []
+    if people:
+        people_items: list[str] = []
+        for p in people[:5]:
+            if isinstance(p, dict):
+                people_items.append(f"{p.get('name', '?')} — {p.get('title', '?')}")
+            else:
+                people_items.append(str(p))
+        if people_items:
+            groups.append(OnboardingCacheGroup(
+                category="team", icon="Users", label="Key People",
+                items=people_items, count=len(people_items),
+            ))
+
+    return groups
 
 
 @router.get("/onboarding-cache", response_model=OnboardingCacheResponse)
@@ -583,99 +661,36 @@ async def onboarding_cache(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Cache check for onboarding intel. Uses tenants.domain as the
-    authoritative lookup — finds the tenant that owns this domain, then
-    queries their onboarding entries.
+    """Cache check for onboarding intel.
 
-    Falls back to current tenant RLS if no domain provided.
-
-    Returns groups shaped like CrawlItem (category, icon, label, items[]) so the
-    frontend can consume cache hits identically to fresh crawl SSE events.
+    Queries the shared companies table by domain — no tenant involvement.
+    Returns groups shaped like CrawlItem so the frontend can consume cache
+    hits identically to fresh crawl SSE events.
     """
-    entries = []
-
-    if domain:
-        # Normalize domain
-        import urllib.parse as _urlparse
-        _parsed = _urlparse.urlparse(domain if domain.startswith("http") else f"https://{domain}")
-        normalized = (_parsed.hostname or domain).removeprefix("www.").lower()
-
-        # Find tenant that owns this domain (authoritative lookup)
-        owner_result = await db.execute(
-            text("SELECT id FROM tenants WHERE domain = :d LIMIT 1"),
-            {"d": normalized},
-        )
-        owner_row = owner_result.first()
-        if owner_row:
-            owner_tid = str(owner_row[0])
-            cross_result = await db.execute(
-                text(
-                    "SELECT file_name, content, updated_at, created_at "
-                    "FROM context_entries "
-                    "WHERE tenant_id = :tid AND source = 'company-intel-onboarding' "
-                    "AND deleted_at IS NULL"
-                ),
-                {"tid": owner_tid},
-            )
-            from types import SimpleNamespace
-            entries = [
-                SimpleNamespace(
-                    file_name=r[0], content=r[1],
-                    updated_at=r[2], created_at=r[3],
-                )
-                for r in cross_result.all()
-            ]
-
-    # Fallback: current tenant (RLS-scoped) — for returning users in same session
-    if not entries:
-        base = select(ContextEntry).where(
-            ContextEntry.deleted_at.is_(None),
-            ContextEntry.source == "company-intel-onboarding",
-        )
-        result = await db.execute(base)
-        entries = result.scalars().all()
-
-    if not entries:
+    if not domain:
         return OnboardingCacheResponse(exists=False)
 
-    last_updated = max(
-        (e.updated_at or e.created_at for e in entries),
-        default=None,
-    )
+    normalized = _normalize_domain(domain)
 
-    # Build CrawlItem-shaped groups: split content back into items
-    groups: list[OnboardingCacheGroup] = []
-    total_items = 0
-    for e in entries:
-        items = _split_entry_items(e)
-        if not items:
-            continue
-        icon, label = _FILE_DISPLAY.get(
-            e.file_name, ("Building2", e.file_name.replace("-", " ").replace("_", " ").title())
-        )
-        groups.append(OnboardingCacheGroup(
-            category=e.file_name,
-            icon=icon,
-            label=label,
-            items=items,
-            count=len(items),
-        ))
-        total_items += len(items)
+    # Simple lookup — no tenant involvement
+    result = await db.execute(
+        select(Company).where(Company.domain == normalized)
+    )
+    company = result.scalar_one_or_none()
+
+    if not company or not company.intel:
+        return OnboardingCacheResponse(exists=False)
+
+    groups = _build_groups_from_intel(company.intel)
 
     if not groups:
         return OnboardingCacheResponse(exists=False)
 
-    found_categories = {g.category for g in groups}
-    missing = sorted(EXPECTED_CATEGORIES - found_categories)
-    is_partial = len(missing) > 0 and len(found_categories) > 0
-
     return OnboardingCacheResponse(
         exists=True,
-        entry_count=total_items,
-        last_updated=last_updated.isoformat() if last_updated else None,
+        entry_count=sum(len(g.items) for g in groups),
+        last_updated=company.crawled_at.isoformat() if company.crawled_at else None,
         groups=groups,
-        missing_categories=missing,
-        partial=is_partial,
     )
 
 
