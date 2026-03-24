@@ -103,8 +103,6 @@ Plans:
 
 **Requirements:** DRAFT-01, DRAFT-02, DRAFT-03, DRAFT-04, DRAFT-05, DRAFT-06, DRAFT-07, DRAFT-08
 
-**Research flag:** Needs `/gsd:research-phase` during planning. Context assembly strategy, voice profile injection format, and cold-start draft behavior need deliberate prompt engineering validation before implementation.
-
 **Success Criteria** (what must be TRUE):
   1. Emails with priority 3+ have an EmailDraft row within the configurable visibility delay window (immediately for `delay=0`)
   2. Draft body reflects the user's characteristic tone, sign-off style, and typical length drawn from their voice profile
@@ -112,11 +110,11 @@ Plans:
   4. After draft is sent, `EmailDraft.draft_body` is nulled — the full body is not retained
   5. When Gmail API returns 401/403 during on-demand body fetch, the system falls back to snippet and surfaces a structured error (not a silent empty draft)
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 04-01: email-drafter skill (SKILL.md, SkillDefinition seed, on-demand body fetch, voice profile injection, context assembly)
-- [ ] 04-02: Draft lifecycle: visibility delay, approve/edit/dismiss actions, body nulling on send, structured error handling
+- [ ] 04-01-PLAN.md — email_drafter.py engine with voice injection, context assembly, on-demand body fetch, and SKILL.md
+- [ ] 04-02-PLAN.md — Sync loop drafting integration, REST API (approve/edit/dismiss), gmail-read send_reply, dispatch fix
 
 ---
 
