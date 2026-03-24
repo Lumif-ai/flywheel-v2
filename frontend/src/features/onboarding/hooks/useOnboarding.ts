@@ -506,43 +506,61 @@ export function useOnboarding() {
 
   const loadCachedIntel = useCallback(async (domain: string, categories: string[]): Promise<boolean> => {
     // Fetch entries from context API for this domain using the entries-by-file endpoint
-    // FTS search on domain names is unreliable, so query each known category file directly
+    // Only include entries that actually mention this domain
     try {
       const allItems: CrawlItem[] = []
       const edited: Record<string, EditedCategory> = {}
 
-      // Fetch entries for each category file returned by company lookup
+      // Icon mapping for known category types
+      const categoryIcons: Record<string, string> = {
+        company_info: 'Building2', product: 'Package', products: 'Package',
+        team: 'Users', market: 'TrendingUp', technology: 'Cpu',
+        customer: 'UserCheck', customers_served: 'UserCheck',
+        financial: 'DollarSign', contacts: 'Users',
+      }
+
       for (const fileName of categories) {
         try {
-          const res = await api.get<{ items: { file_name: string; content: string; source: string; confidence: string }[] }>(
+          const res = await api.get<{ items: { file_name: string; content: string; detail: string; source: string; confidence: string }[] }>(
             `/context/files/${encodeURIComponent(fileName)}/entries?limit=100`
           )
-          if (res.items && res.items.length > 0) {
-            // Filter entries that mention this domain
-            const relevant = res.items.filter(e =>
-              e.content.toLowerCase().includes(domain.toLowerCase())
-            )
-            const entries = relevant.length > 0 ? relevant : res.items
-            const cat = fileName.replace('.md', '').replace('company-', '')
-            const itemTexts = entries.map(e => e.content)
-            const group: CrawlItem = {
-              category: cat,
-              icon: 'Building2',
-              label: cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-              items: itemTexts,
-              count: itemTexts.length,
-            }
-            allItems.push(group)
-            edited[cat] = {
-              items: [...itemTexts],
-              meta: entries.map(e => ({
-                source: (e.source === 'user_input' ? 'user_input' : 'crawler') as 'crawler' | 'user_input',
-                confidence: (e.confidence === 'verified' ? 'verified' : 'crawled') as 'crawled' | 'verified' | 'confirmed',
-              })),
-            }
+          if (!res.items || res.items.length === 0) continue
+
+          // ONLY use entries that mention this domain — no fallback
+          const relevant = res.items.filter(e =>
+            e.content.toLowerCase().includes(domain.toLowerCase())
+          )
+          if (relevant.length === 0) continue
+
+          const cat = fileName.replace('.md', '').replace('company-', '')
+          // Use detail field (short) when available, otherwise extract first line from content
+          const itemTexts = relevant.map(e => {
+            if (e.detail && e.detail.length > 0 && e.detail.length < 200) return e.detail
+            // Extract first meaningful line, strip HTML/cite tags, truncate
+            const cleaned = e.content
+              .replace(/<cite[^>]*>.*?<\/cite>/g, '')
+              .replace(/<[^>]+>/g, '')
+              .trim()
+            const firstLine = cleaned.split('\n').find(l => l.trim().length > 0) ?? cleaned
+            return firstLine.length > 120 ? firstLine.slice(0, 117) + '...' : firstLine
+          })
+
+          const group: CrawlItem = {
+            category: cat,
+            icon: categoryIcons[cat] ?? 'Building2',
+            label: cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+            items: itemTexts,
+            count: itemTexts.length,
+          }
+          allItems.push(group)
+          edited[cat] = {
+            items: [...itemTexts],
+            meta: relevant.map(e => ({
+              source: (e.source === 'user_input' ? 'user_input' : 'crawler') as 'crawler' | 'user_input',
+              confidence: (e.confidence === 'verified' ? 'verified' : 'crawled') as 'crawled' | 'verified' | 'confirmed',
+            })),
           }
         } catch {
-          // Skip files that fail — partial data is better than none
           continue
         }
       }
@@ -559,7 +577,6 @@ export function useOnboarding() {
       }))
       return true
     } catch {
-      // Fallback to full crawl
       return false
     }
   }, [])

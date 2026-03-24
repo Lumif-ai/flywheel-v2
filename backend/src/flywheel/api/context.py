@@ -585,14 +585,15 @@ async def company_lookup(
     """Cache-first company lookup: check if we already have intelligence for a domain."""
     normalized = _normalize_domain(domain)
 
-    # Build query: source matches known onboarding sources OR file_name/content contains domain
+    # Build query: entries must mention this domain (in content OR file_name)
+    # AND optionally come from known onboarding sources for relevance
+    domain_match = or_(
+        ContextEntry.file_name.ilike(f"%{normalized}%"),
+        ContextEntry.content.ilike(f"%{normalized}%"),
+    )
     base = select(ContextEntry).where(
         ContextEntry.deleted_at.is_(None),
-        or_(
-            ContextEntry.source.in_(_ONBOARDING_SOURCES),
-            ContextEntry.file_name.ilike(f"%{normalized}%"),
-            ContextEntry.content.ilike(f"%{normalized}%"),
-        ),
+        domain_match,
     )
 
     result = await db.execute(base)

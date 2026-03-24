@@ -40,6 +40,15 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
 }
 
 // ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/** Check if any items are long enough to need list layout instead of pills */
+function hasLongItems(items: string[]): boolean {
+  return items.some(item => item.length > 60)
+}
+
+// ---------------------------------------------------------------------------
 // Props
 // ---------------------------------------------------------------------------
 
@@ -326,11 +335,9 @@ export function MomentDiscover({
 
       {/* Category cards */}
       <div
-        className="space-y-3 overflow-y-auto rounded-lg"
+        className="space-y-3 overflow-y-auto"
         style={{
           maxHeight: '28rem',
-          padding: spacing.card,
-          border: `1px solid ${colors.subtleBorder}`,
         }}
       >
         {crawlItems.map((group, i) => {
@@ -386,10 +393,44 @@ export function MomentDiscover({
                 </span>
               </div>
 
-              <div className="flex flex-wrap gap-1.5">
+              <div className={hasLongItems(displayItems) ? 'space-y-1.5' : 'flex flex-wrap gap-1.5'}>
                 {displayItems.map((item, j) => {
+                  const isLong = item.length > 60
                   if (editMode && displayMeta) {
                     const meta = displayMeta[j]
+                    if (isLong) {
+                      return (
+                        <div
+                          key={j}
+                          className="group flex items-start gap-2"
+                          style={{
+                            opacity: meta?.deleted ? 0.4 : 1,
+                            textDecoration: meta?.deleted ? 'line-through' : 'none',
+                          }}
+                        >
+                          <span
+                            className="flex-1 text-sm leading-snug cursor-pointer rounded px-2 py-1 hover:bg-black/5"
+                            style={{
+                              color: colors.bodyText,
+                              borderLeft: meta?.source === 'user_input' ? `3px solid ${colors.brandCoral}` : '3px solid transparent',
+                            }}
+                            onClick={() => { if (!meta?.deleted) onEditItem(group.category, j, item) }}
+                          >
+                            {item}
+                          </span>
+                          {!meta?.deleted && (
+                            <button
+                              type="button"
+                              onClick={() => onRemoveItem(group.category, j)}
+                              className="shrink-0 mt-1 opacity-0 group-hover:opacity-100 transition-opacity"
+                              style={{ color: colors.secondaryText }}
+                            >
+                              <X className="h-3.5 w-3.5" />
+                            </button>
+                          )}
+                        </div>
+                      )
+                    }
                     return (
                       <EditableItemPill
                         key={j}
@@ -399,6 +440,17 @@ export function MomentDiscover({
                         onRemove={() => onRemoveItem(group.category, j)}
                         onEdit={(newText) => onEditItem(group.category, j, newText)}
                       />
+                    )
+                  }
+                  if (isLong) {
+                    return (
+                      <div
+                        key={j}
+                        className="text-sm leading-snug rounded px-2 py-1"
+                        style={{ color: colors.bodyText }}
+                      >
+                        {item}
+                      </div>
                     )
                   }
                   return (
