@@ -8,6 +8,7 @@
 
 import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router'
+import { Loader2 } from 'lucide-react'
 import { useOnboarding } from '@/features/onboarding/hooks/useOnboarding'
 import { MomentArrive } from '@/features/onboarding/components/MomentArrive'
 import { MomentDiscover } from '@/features/onboarding/components/MomentDiscover'
@@ -64,21 +65,33 @@ export function OnboardingPage() {
     crawlStatus,
     phase: crawlPhase,
     error,
-    startCrawl,
-    parseStreams,
-    confirmStreams,
-    parsedStreams,
     retry,
+    // Edit mode (Plan 02)
+    editMode,
+    editedItems,
+    removeItem,
+    addItem,
+    editItem,
+    confirmEdits,
+    // Priorities (Plan 02)
+    selectedPriorities,
+    togglePriority,
+    confirmPriorities,
+    priorityOptions,
+    // Cache-first (Plan 03)
+    cacheChecking,
+    cacheResult,
+    startWithCacheCheck,
   } = onboarding
 
   // ---- Moment handlers ----
 
   const handleArriveComplete = useCallback(
-    (url: string) => {
-      startCrawl(url)
+    async (url: string) => {
       setMoment('discover')
+      await startWithCacheCheck(url)
     },
-    [startCrawl],
+    [startWithCacheCheck],
   )
 
   const handleDiscoverComplete = useCallback(() => {
@@ -121,25 +134,55 @@ export function OnboardingPage() {
       {/* Current moment */}
       <div className="w-full flex-1 flex items-center justify-center py-12">
         {moment === 'arrive' && (
-          <MomentArrive onComplete={handleArriveComplete} />
+          <MomentArrive onComplete={handleArriveComplete} cacheChecking={cacheChecking} />
         )}
 
         {moment === 'discover' && (
-          <MomentDiscover
-            crawlItems={crawlItems}
-            crawlTotal={crawlTotal}
-            crawlStatus={crawlStatus}
-            isComplete={crawlPhase === 'crawl_complete'}
-            onComplete={handleDiscoverComplete}
-          />
+          <>
+            {/* Cache status banner */}
+            {cacheResult?.exists && (
+              <div
+                style={{
+                  textAlign: 'center',
+                  marginBottom: '12px',
+                  fontSize: '14px',
+                  color: colors.secondaryText,
+                }}
+              >
+                {cacheResult.last_updated &&
+                  (Date.now() - new Date(cacheResult.last_updated).getTime()) / (1000 * 60 * 60 * 24) < 7 ? (
+                  <span>Welcome back — here's what we know about {cacheResult.domain}</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5">
+                    Here's what we know — refreshing for latest
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: colors.secondaryText }} />
+                  </span>
+                )}
+              </div>
+            )}
+            <MomentDiscover
+              crawlItems={crawlItems}
+              crawlTotal={crawlTotal}
+              crawlStatus={crawlStatus}
+              isComplete={crawlPhase === 'crawl_complete'}
+              editMode={editMode}
+              editedItems={editedItems}
+              onComplete={handleDiscoverComplete}
+              onRemoveItem={removeItem}
+              onAddItem={addItem}
+              onEditItem={editItem}
+              onConfirmEdits={confirmEdits}
+            />
+          </>
         )}
 
         {moment === 'align' && (
           <MomentAlign
             onComplete={handleAlignComplete}
-            parseStreams={parseStreams}
-            confirmStreams={confirmStreams}
-            parsedStreams={parsedStreams}
+            selectedPriorities={selectedPriorities}
+            onTogglePriority={togglePriority}
+            onConfirmPriorities={confirmPriorities}
+            priorityOptions={priorityOptions}
           />
         )}
 
