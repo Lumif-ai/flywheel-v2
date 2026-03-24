@@ -504,35 +504,55 @@ export function useOnboarding() {
     }
   }, [ensureSession])
 
-  const loadCachedIntel = useCallback(async (domain: string): Promise<boolean> => {
-    // Fetch entries from context API for this domain
+  const loadCachedIntel = useCallback(async (domain: string, categories: string[]): Promise<boolean> => {
+    // Fetch entries from context API for this domain using the entries-by-file endpoint
+    // FTS search on domain names is unreliable, so query each known category file directly
     try {
-      const res = await api.get<{ items: { file_name: string; content: string }[] }>(
-        `/context/search?q=${encodeURIComponent(domain)}&limit=100`
-      )
-      // Group entries by file_name into CrawlItem format
-      const grouped: Record<string, CrawlItem> = {}
-      for (const entry of res.items) {
-        const cat = entry.file_name.replace('.md', '').replace('company-', '')
-        if (!grouped[cat]) {
-          grouped[cat] = { category: cat, icon: 'Building2', label: cat, items: [], count: 0 }
-        }
-        grouped[cat].items.push(entry.content)
-        grouped[cat].count = grouped[cat].items.length
-      }
-      const items = Object.values(grouped)
-      // Build editedItems from grouped data
+      const allItems: CrawlItem[] = []
       const edited: Record<string, EditedCategory> = {}
-      for (const group of items) {
-        edited[group.category] = {
-          items: [...group.items],
-          meta: group.items.map(() => ({ source: 'crawler' as const, confidence: 'crawled' as const })),
+
+      // Fetch entries for each category file returned by company lookup
+      for (const fileName of categories) {
+        try {
+          const res = await api.get<{ items: { file_name: string; content: string; source: string; confidence: string }[] }>(
+            `/context/files/${encodeURIComponent(fileName)}/entries?limit=100`
+          )
+          if (res.items && res.items.length > 0) {
+            // Filter entries that mention this domain
+            const relevant = res.items.filter(e =>
+              e.content.toLowerCase().includes(domain.toLowerCase())
+            )
+            const entries = relevant.length > 0 ? relevant : res.items
+            const cat = fileName.replace('.md', '').replace('company-', '')
+            const itemTexts = entries.map(e => e.content)
+            const group: CrawlItem = {
+              category: cat,
+              icon: 'Building2',
+              label: cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
+              items: itemTexts,
+              count: itemTexts.length,
+            }
+            allItems.push(group)
+            edited[cat] = {
+              items: [...itemTexts],
+              meta: entries.map(e => ({
+                source: (e.source === 'user_input' ? 'user_input' : 'crawler') as 'crawler' | 'user_input',
+                confidence: (e.confidence === 'verified' ? 'verified' : 'crawled') as 'crawled' | 'verified' | 'confirmed',
+              })),
+            }
+          }
+        } catch {
+          // Skip files that fail — partial data is better than none
+          continue
         }
       }
+
+      if (allItems.length === 0) return false
+
       setState(s => ({
         ...s,
-        crawlItems: items,
-        crawlTotal: items.reduce((acc, g) => acc + g.items.length, 0),
+        crawlItems: allItems,
+        crawlTotal: allItems.reduce((acc, g) => acc + g.items.length, 0),
         phase: 'crawl_complete',
         editMode: true,
         editedItems: edited,
@@ -552,7 +572,7 @@ export function useOnboarding() {
         ? (Date.now() - new Date(res.last_updated).getTime()) / (1000 * 60 * 60 * 24)
         : Infinity
 
-      const loaded = await loadCachedIntel(domain)
+      const loaded = await loadCachedIntel(domain, res.categories)
       if (!loaded) {
         // Fallback to full crawl
         await startCrawl(url)

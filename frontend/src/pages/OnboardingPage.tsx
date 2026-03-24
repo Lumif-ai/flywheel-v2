@@ -138,7 +138,7 @@ export function OnboardingPage() {
         )}
 
         {moment === 'discover' && (
-          <>
+          <div className="w-full" style={{ maxWidth: '640px' }}>
             {/* Cache status banner */}
             {cacheResult?.exists && (
               <div
@@ -151,10 +151,10 @@ export function OnboardingPage() {
               >
                 {cacheResult.last_updated &&
                   (Date.now() - new Date(cacheResult.last_updated).getTime()) / (1000 * 60 * 60 * 24) < 7 ? (
-                  <span>Welcome back — here's what we know about {cacheResult.domain}</span>
+                  <span>Welcome back — here&apos;s what we know about {cacheResult.domain}</span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5">
-                    Here's what we know — refreshing for latest
+                    Here&apos;s what we know — refreshing for latest
                     <Loader2 className="h-3.5 w-3.5 animate-spin" style={{ color: colors.secondaryText }} />
                   </span>
                 )}
@@ -173,7 +173,7 @@ export function OnboardingPage() {
               onEditItem={editItem}
               onConfirmEdits={confirmEdits}
             />
-          </>
+          </div>
         )}
 
         {moment === 'align' && (
