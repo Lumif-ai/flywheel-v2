@@ -35,6 +35,7 @@ from flywheel.api.skills import router as skills_router
 from flywheel.api.documents import router as documents_router
 from flywheel.api.briefing import router as briefing_router
 from flywheel.api.streams import router as streams_router
+from flywheel.api.profile import router as profile_router
 from flywheel.api.team_onboarding import router as team_onboarding_router
 from flywheel.api.tenant import router as tenant_router
 from flywheel.api.user import router as user_router
@@ -158,6 +159,7 @@ def create_app() -> FastAPI:
     app.include_router(streams_router, prefix="/api/v1")
     app.include_router(briefing_router, prefix="/api/v1")
     app.include_router(team_onboarding_router, prefix="/api/v1")
+    app.include_router(profile_router, prefix="/api/v1")
     app.include_router(agent_ws_router, prefix="/api/v1")
 
     return app
