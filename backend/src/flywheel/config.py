@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     environment: str = "development"  # development, staging, production
     sentry_dsn: str = ""  # empty = disabled
 
+    # Email drafting
+    draft_visibility_delay_days: int = 0  # 0 = immediate visibility for dogfood
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
