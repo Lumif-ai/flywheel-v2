@@ -16,7 +16,7 @@ The email copilot adds Gmail read sync, context-powered email scoring, voice-lea
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Data Layer and Gmail Foundation** - DB models, migrations, and separate Gmail read OAuth
+- [x] **Phase 1: Data Layer and Gmail Foundation** - DB models, migrations, and separate Gmail read OAuth ✓ (2026-03-24)
 - [ ] **Phase 2: Sync Worker and Voice Profile** - Background polling, incremental sync, and voice extraction
 - [ ] **Phase 3: Email Scorer Skill** - Context-powered 5-tier scoring via skill executor
 - [ ] **Phase 4: Email Drafter Skill** - On-demand draft generation with voice profile injection
@@ -42,8 +42,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Plans:** 2 plans
 
 Plans:
-- [ ] 01-01-PLAN.md — DB models and Alembic migration (emails, email_scores, email_drafts, email_voice_profiles with RLS)
-- [ ] 01-02-PLAN.md — gmail_read.py service and separate gmail-read OAuth flow
+- [x] 01-01-PLAN.md — DB models and Alembic migration (emails, email_scores, email_drafts, email_voice_profiles with RLS) ✓
+- [x] 01-02-PLAN.md — gmail_read.py service and separate gmail-read OAuth flow ✓
 
 ---
 
@@ -171,7 +171,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Data Layer and Gmail Foundation | 0/2 | Not started | - |
+| 1. Data Layer and Gmail Foundation | 2/2 | ✓ Complete | 2026-03-24 |
 | 2. Sync Worker and Voice Profile | 0/2 | Not started | - |
 | 3. Email Scorer Skill | 0/2 | Not started | - |
 | 4. Email Drafter Skill | 0/2 | Not started | - |
