@@ -17,7 +17,7 @@ The email copilot adds Gmail read sync, context-powered email scoring, voice-lea
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data Layer and Gmail Foundation** - DB models, migrations, and separate Gmail read OAuth ✓ (2026-03-24)
-- [ ] **Phase 2: Sync Worker and Voice Profile** - Background polling, incremental sync, and voice extraction
+- [x] **Phase 2: Sync Worker and Voice Profile** - Background polling, incremental sync, and voice extraction ✓ (2026-03-24)
 - [ ] **Phase 3: Email Scorer Skill** - Context-powered 5-tier scoring via skill executor
 - [ ] **Phase 4: Email Drafter Skill** - On-demand draft generation with voice profile injection
 - [ ] **Phase 5: Review API and Frontend** - REST endpoints and scored inbox with draft approval UI
@@ -65,8 +65,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — email_sync_loop() background worker with historyId incremental sync and 404 full-sync fallback
-- [ ] 02-02-PLAN.md — voice_profile_init() with sent-mail filtering and EmailVoiceProfile persistence
+- [x] 02-01-PLAN.md — email_sync_loop() background worker with historyId incremental sync and 404 full-sync fallback ✓
+- [x] 02-02-PLAN.md — voice_profile_init() with sent-mail filtering and EmailVoiceProfile persistence ✓
 
 ---
 
@@ -172,7 +172,7 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Data Layer and Gmail Foundation | 2/2 | ✓ Complete | 2026-03-24 |
-| 2. Sync Worker and Voice Profile | 0/2 | Not started | - |
+| 2. Sync Worker and Voice Profile | 2/2 | ✓ Complete | 2026-03-24 |
 | 3. Email Scorer Skill | 0/2 | Not started | - |
 | 4. Email Drafter Skill | 0/2 | Not started | - |
 | 5. Review API and Frontend | 0/3 | Not started | - |

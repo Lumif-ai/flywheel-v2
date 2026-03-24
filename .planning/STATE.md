@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
-**Current focus:** Phase 2 — Sync Worker and Voice Profile
+**Current focus:** Phase 3 — Email Scorer Skill
 
 ## Current Position
 
-Phase: 2 of 6 (Sync Worker and Voice Profile)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-03-24 — Phase 2, Plan 02 complete (voice profile extraction)
+Phase: 3 of 6 (Email Scorer Skill)
+Plan: 0 of 2 in current phase
+Status: Ready to plan
+Last activity: 2026-03-24 — Phase 2 complete (2/2 plans, verified 5/5 must-haves)
 
 Progress: [█████░░░░░] 33%
 
@@ -70,5 +70,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 2, Plan 02 complete. Voice profile extraction shipped (voice_profile_init + _is_substantive + _extract_voice_profile in gmail_sync.py). Phase 2 fully complete. Ready for Phase 3 (email scoring) — research needed first.
+Stopped at: Phase 2 complete, verified, roadmap updated. Phase 3 ready to plan (research flagged as needed).
 Resume file: None
