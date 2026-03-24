@@ -98,7 +98,7 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
           }}
           onKeyDown={handleKeyDown}
           placeholder="acme.com"
-          className="h-12 text-base"
+          className="h-12 text-base border-[var(--subtle-border)] focus:border-[var(--brand-coral)] focus:ring-1 focus:ring-[var(--brand-coral)]"
           autoFocus
         />
         <Button
@@ -107,9 +107,9 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
           size="lg"
           className="h-12 gap-2 px-6"
           style={{
-            background: `linear-gradient(135deg, ${colors.brandCoral}, ${colors.brandGradientEnd})`,
+            backgroundColor: colors.brandCoral,
             border: 'none',
-            color: 'white',
+            color: '#fff',
           }}
         >
           Go

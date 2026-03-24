@@ -64,7 +64,7 @@ export function MomentAlign({
     if (phase === 'done') {
       autoAdvanceRef.current = setTimeout(() => {
         onComplete()
-      }, 1500)
+      }, 3000)
     }
     return () => {
       if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current)

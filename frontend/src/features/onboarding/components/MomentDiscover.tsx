@@ -90,7 +90,7 @@ export function MomentDiscover({
     if (isComplete) {
       autoAdvanceRef.current = setTimeout(() => {
         onComplete()
-      }, 1000)
+      }, 3000)
     }
     return () => {
       if (autoAdvanceRef.current) {
