@@ -1,14 +1,13 @@
 /**
  * MomentArrive - First onboarding moment.
  *
- * Clean, minimal URL input. User pastes company URL and submits.
- * Reuses URL normalization/validation logic from UrlInput.
+ * A magic-portal URL input: unified search bar with embedded Go button,
+ * subtle coral glow on focus, no visible borders at rest.
+ * Inspired by Vercel's deploy input and Linear's onboarding.
  */
 
 import { useState, useCallback, type KeyboardEvent } from 'react'
 import { ArrowRight } from 'lucide-react'
-import { Input } from '@/components/ui/input'
-import { Button } from '@/components/ui/button'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { animationClasses } from '@/lib/animations'
 
@@ -32,9 +31,14 @@ function isValidUrl(url: string): boolean {
   }
 }
 
+const shadowRest = '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)'
+const shadowFocus =
+  '0 4px 16px rgba(233,77,53,0.12), 0 0 0 2px rgba(233,77,53,0.2)'
+
 export function MomentArrive({ onComplete }: MomentArriveProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
+  const [focused, setFocused] = useState(false)
 
   const handleSubmit = useCallback(() => {
     const url = normalizeUrl(value)
@@ -57,6 +61,8 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
     [handleSubmit],
   )
 
+  const canSubmit = value.trim().length > 0
+
   return (
     <div
       className={animationClasses.fadeSlideUp}
@@ -70,10 +76,10 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
       <div style={{ marginBottom: spacing.section }}>
         <h1
           style={{
-            fontSize: typography.pageTitle.size,
-            fontWeight: typography.pageTitle.weight,
-            lineHeight: typography.pageTitle.lineHeight,
-            letterSpacing: typography.pageTitle.letterSpacing,
+            fontSize: '36px',
+            fontWeight: 700,
+            lineHeight: 1.15,
+            letterSpacing: '-0.02em',
             color: colors.headingText,
             marginBottom: spacing.tight,
           }}
@@ -90,8 +96,24 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
         </p>
       </div>
 
-      <div className="flex gap-3" style={{ marginBottom: spacing.element }}>
-        <Input
+      {/* Unified search bar container */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px',
+          background: 'var(--card-bg)',
+          borderRadius: '16px',
+          boxShadow: focused ? shadowFocus : shadowRest,
+          transition: 'box-shadow 200ms ease-out',
+          padding: '6px 6px 6px 20px',
+          marginBottom: error ? '8px' : '0',
+        }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+      >
+        <input
+          type="text"
           value={value}
           onChange={(e) => {
             setValue(e.target.value)
@@ -99,30 +121,60 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
           }}
           onKeyDown={handleKeyDown}
           placeholder="acme.com"
-          className="h-12 text-base border-[var(--subtle-border)] focus:border-[var(--brand-coral)] focus:ring-1 focus:ring-[var(--brand-coral)]"
           autoFocus
-        />
-        <Button
-          onClick={handleSubmit}
-          disabled={!value.trim()}
-          size="lg"
-          className="h-12 gap-2 px-6"
           style={{
-            backgroundColor: colors.brandCoral,
+            flex: 1,
             border: 'none',
+            outline: 'none',
+            background: 'transparent',
+            fontSize: '16px',
+            lineHeight: '24px',
+            color: 'var(--heading-text)',
+            padding: '10px 0',
+            minWidth: 0,
+          }}
+        />
+        <button
+          onClick={handleSubmit}
+          disabled={!canSubmit}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: canSubmit ? colors.brandCoral : 'rgba(233,77,53,0.4)',
             color: '#fff',
+            border: 'none',
+            borderRadius: '12px',
+            padding: '10px 20px',
+            fontSize: '15px',
+            fontWeight: 600,
+            cursor: canSubmit ? 'pointer' : 'not-allowed',
+            transition: 'background-color 150ms ease, opacity 150ms ease',
+            opacity: canSubmit ? 1 : 0.7,
+            whiteSpace: 'nowrap',
+            flexShrink: 0,
           }}
         >
           Go
-          <ArrowRight className="h-4 w-4" />
-        </Button>
+          <ArrowRight style={{ width: '16px', height: '16px' }} />
+        </button>
       </div>
 
       {error && (
-        <p className="text-sm" style={{ color: colors.error }}>
+        <p style={{ color: colors.error, fontSize: '14px', marginTop: '8px' }}>
           {error}
         </p>
       )}
+
+      <p
+        style={{
+          color: 'var(--secondary-text)',
+          fontSize: '13px',
+          marginTop: '12px',
+        }}
+      >
+        Try: acme.com, stripe.com, or your company's website
+      </p>
     </div>
   )
 }
