@@ -141,7 +141,7 @@ export function DocumentLibrary() {
 
   return (
     <div
-      className="mx-auto w-full"
+      className="mx-auto w-full page-enter"
       style={{
         maxWidth: spacing.maxGrid,
         padding: `${spacing.section} ${spacing.pageDesktop}`,
@@ -159,6 +159,7 @@ export function DocumentLibrary() {
           fontSize: typography.pageTitle.size,
           fontWeight: typography.pageTitle.weight,
           lineHeight: typography.pageTitle.lineHeight,
+          letterSpacing: typography.pageTitle.letterSpacing,
           color: colors.headingText,
           marginBottom: spacing.card,
         }}
@@ -202,7 +203,7 @@ export function DocumentLibrary() {
 
       {/* Empty state */}
       {!loading && documents.length === 0 && (
-        <div className="text-center py-16">
+        <div className="text-center py-16 rounded-xl" style={{ backgroundColor: 'rgba(233,77,53,0.03)' }}>
           <FileText className="mx-auto mb-4 size-12" style={{ color: colors.secondaryText, opacity: 0.4 }} />
           <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
             No documents yet. Run a skill to create your first briefing.

@@ -46,6 +46,11 @@ export function StreamSidebar() {
         <SidebarGroupLabel className="text-xs uppercase tracking-wider" style={{ fontSize: '13px', color: 'var(--secondary-text)' }}>Focus Areas</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
+            {activeStreams.length === 0 && (
+              <p className="px-2 py-3 text-xs" style={{ color: 'var(--secondary-text)' }}>
+                No focus areas yet
+              </p>
+            )}
             {visibleStreams.map((stream) => {
               const density = stream.density_score ?? 0
               const dotColor = density > 70 ? '#22C55E' : density >= 30 ? '#F59E0B' : '#9CA3AF'

@@ -122,7 +122,7 @@ export function DocumentViewer() {
 
   return (
     <div
-      className="mx-auto w-full"
+      className="mx-auto w-full page-enter"
       style={{
         maxWidth: spacing.maxReading,
         padding: `${spacing.section} ${spacing.pageDesktop}`,
@@ -145,6 +145,7 @@ export function DocumentViewer() {
           fontSize: typography.pageTitle.size,
           fontWeight: typography.pageTitle.weight,
           lineHeight: typography.pageTitle.lineHeight,
+          letterSpacing: typography.pageTitle.letterSpacing,
           color: colors.headingText,
           marginBottom: spacing.tight,
         }}

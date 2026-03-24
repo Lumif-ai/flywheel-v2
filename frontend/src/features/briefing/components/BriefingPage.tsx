@@ -108,7 +108,7 @@ export function BriefingPage() {
   return (
     <div className="flex h-full flex-col">
       <div
-        className="flex-1 overflow-y-auto"
+        className="flex-1 overflow-y-auto page-enter"
         style={{
           padding: `${spacing.pageDesktop}`,
           background: colors.pageBg,
@@ -141,6 +141,7 @@ export function BriefingPage() {
                   fontSize: typography.pageTitle.size,
                   fontWeight: typography.pageTitle.weight,
                   lineHeight: typography.pageTitle.lineHeight,
+                  letterSpacing: typography.pageTitle.letterSpacing,
                   color: colors.headingText,
                 }}
               >
