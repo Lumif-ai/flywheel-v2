@@ -41,6 +41,9 @@ class Settings(BaseSettings):
     # Google Gmail OAuth (same Google Cloud project, separate scope)
     google_gmail_redirect_uri: str = "http://localhost:5173/api/v1/integrations/gmail/callback"
 
+    # Google Gmail Read OAuth (separate credential from send-only gmail)
+    google_gmail_read_redirect_uri: str = "http://localhost:5173/api/v1/integrations/gmail-read/callback"
+
     # Microsoft Outlook OAuth (Azure AD app registration)
     microsoft_client_id: str = ""
     microsoft_client_secret: str = ""

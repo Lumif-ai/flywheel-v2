@@ -4,8 +4,10 @@ Endpoints:
 - GET  /integrations/                          -- list integrations for tenant
 - GET  /integrations/google-calendar/authorize -- start OAuth flow
 - GET  /integrations/google-calendar/callback  -- OAuth callback (exchange code)
-- GET  /integrations/gmail/authorize           -- start Gmail OAuth flow
-- GET  /integrations/gmail/callback            -- Gmail OAuth callback
+- GET  /integrations/gmail/authorize           -- start Gmail OAuth flow (send-only)
+- GET  /integrations/gmail/callback            -- Gmail OAuth callback (send-only)
+- GET  /integrations/gmail-read/authorize      -- start Gmail Read OAuth flow (read+send)
+- GET  /integrations/gmail-read/callback       -- Gmail Read OAuth callback
 - GET  /integrations/outlook/authorize         -- start Outlook OAuth flow
 - GET  /integrations/outlook/callback          -- Outlook OAuth callback
 - GET  /integrations/slack/authorize           -- start Slack OAuth install flow
@@ -43,6 +45,11 @@ from flywheel.services.google_gmail import (
     generate_gmail_auth_url,
     serialize_credentials as serialize_gmail_credentials,
 )
+from flywheel.services.gmail_read import (
+    exchange_gmail_read_code,
+    generate_gmail_read_auth_url,
+    serialize_credentials as serialize_gmail_read_credentials,
+)
 from flywheel.services.microsoft_outlook import (
     exchange_outlook_code,
     generate_outlook_auth_url,
@@ -65,6 +72,7 @@ router = APIRouter(prefix="/integrations", tags=["integrations"])
 _PROVIDER_DISPLAY = {
     "google-calendar": "Google Calendar",
     "gmail": "Gmail",
+    "gmail-read": "Gmail (Read)",
     "outlook": "Outlook",
     "slack": "Slack",
 }
@@ -292,6 +300,108 @@ async def gmail_callback(
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
     integration.settings = {}  # Clear oauth_state
+    await db.commit()
+
+    return {"status": "connected", "id": str(integration.id)}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/gmail-read/authorize
+# ---------------------------------------------------------------------------
+
+
+@router.get("/gmail-read/authorize")
+async def authorize_gmail_read(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Start Gmail Read OAuth flow.
+
+    Creates a pending Integration row with provider="gmail-read" and a
+    cryptographic state parameter for CSRF protection. Returns the Google
+    authorization URL with gmail.readonly, gmail.modify, and gmail.send scopes.
+
+    IMPORTANT: This endpoint uses provider="gmail-read" exclusively and
+    NEVER queries or modifies provider="gmail" Integration rows.
+    """
+    state = secrets.token_urlsafe(32)
+
+    integration = Integration(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        provider="gmail-read",
+        status="pending",
+        settings={"oauth_state": state, "history_id": None},
+    )
+    db.add(integration)
+    await db.commit()
+    await db.refresh(integration)
+
+    auth_url = generate_gmail_read_auth_url(state)
+
+    return {"auth_url": auth_url, "state": state}
+
+
+# ---------------------------------------------------------------------------
+# GET /integrations/gmail-read/callback
+# ---------------------------------------------------------------------------
+
+
+@router.get("/gmail-read/callback")
+async def gmail_read_callback(
+    code: str = Query(..., description="Authorization code from Google"),
+    state: str = Query(..., description="State parameter for CSRF verification"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Handle Gmail Read OAuth callback.
+
+    Verifies the state parameter, exchanges the authorization code for
+    credentials (gmail.readonly + gmail.modify + gmail.send), encrypts them,
+    and updates the Integration row with provider="gmail-read".
+
+    IMPORTANT: The query filter is always provider="gmail-read". This callback
+    NEVER queries provider="gmail" rows.
+    """
+    result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == user.tenant_id,
+            Integration.provider == "gmail-read",
+            Integration.status == "pending",
+        )
+    )
+    pending = result.scalars().all()
+
+    integration = None
+    for p in pending:
+        if p.settings and p.settings.get("oauth_state") == state:
+            integration = p
+            break
+
+    if integration is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid OAuth state. Please restart the Gmail Read authorization flow.",
+        )
+
+    try:
+        creds = exchange_gmail_read_code(code)
+    except ValueError as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        await db.delete(integration)
+        await db.commit()
+        raise HTTPException(
+            status_code=400,
+            detail=f"Gmail Read OAuth code exchange failed: {exc}",
+        ) from exc
+
+    encrypted = serialize_gmail_read_credentials(creds)
+    integration.status = "connected"
+    integration.credentials_encrypted = encrypted
+    integration.settings = {"history_id": None}  # Clear oauth_state, keep history_id slot
     await db.commit()
 
     return {"status": "connected", "id": str(integration.id)}
