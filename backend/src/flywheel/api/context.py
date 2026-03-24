@@ -75,6 +75,8 @@ class OnboardingCacheResponse(BaseModel):
     entry_count: int = 0
     last_updated: str | None = None
     groups: list[OnboardingCacheGroup] = Field(default_factory=list)
+    missing_categories: list[str] = Field(default_factory=list)
+    partial: bool = False
 
 
 class OnboardingRefreshResponse(BaseModel):
@@ -553,6 +555,9 @@ async def search_entries(
 # ---------------------------------------------------------------------------
 
 
+# Expected onboarding categories — used to detect partial cache hits
+EXPECTED_CATEGORIES = {"positioning", "product-modules", "icp-profiles", "competitive-intel", "market-taxonomy"}
+
 # file_name → (icon, label) mapping — mirrors _build_discoveries in skill_executor
 _FILE_DISPLAY: dict[str, tuple[str, str]] = {
     "positioning": ("Building2", "Positioning"),
@@ -660,11 +665,17 @@ async def onboarding_cache(
     if not groups:
         return OnboardingCacheResponse(exists=False)
 
+    found_categories = {g.category for g in groups}
+    missing = sorted(EXPECTED_CATEGORIES - found_categories)
+    is_partial = len(missing) > 0 and len(found_categories) > 0
+
     return OnboardingCacheResponse(
         exists=True,
         entry_count=total_items,
         last_updated=last_updated.isoformat() if last_updated else None,
         groups=groups,
+        missing_categories=missing,
+        partial=is_partial,
     )
 
 

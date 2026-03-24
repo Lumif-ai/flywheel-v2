@@ -66,6 +66,8 @@ export interface CacheLookupResponse {
   entry_count: number
   last_updated: string | null
   groups: CrawlItem[]
+  missing_categories: string[]
+  partial: boolean
 }
 
 export interface OnboardingState {
@@ -84,6 +86,7 @@ export interface OnboardingState {
   selectedPriorities: string[]
   cacheResult: CacheLookupResponse | null
   cacheChecking: boolean
+  isUpdating: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -140,6 +143,7 @@ const initialState: OnboardingState = {
   selectedPriorities: [],
   cacheResult: null,
   cacheChecking: false,
+  isUpdating: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -151,6 +155,7 @@ export function useOnboarding() {
   const stateRef = useRef(state)
   stateRef.current = state
   const queryClient = useQueryClient()
+  const isMergeModeRef = useRef(false)
 
   // ---- SSE handler for crawl events ----
   const handleCrawlEvent = useCallback((event: SSEEvent) => {
@@ -174,16 +179,45 @@ export function useOnboarding() {
           items: (data.items as string[]) ?? [],
           count: (data.count as number) ?? stateRef.current.crawlItems.length + 1,
         }
-        setState((s) => ({
-          ...s,
-          crawlItems: [...s.crawlItems, item],
-          crawlTotal: s.crawlTotal + item.items.length,
-          crawlStatus: null,
-        }))
+        if (isMergeModeRef.current) {
+          // Merge mode: deduplicate by category+label, append new items only
+          setState((s) => {
+            const existingKeys = new Set(s.crawlItems.map(i => `${i.category}:${i.label}`))
+            const key = `${item.category}:${item.label}`
+            if (existingKeys.has(key)) {
+              // Replace existing category with updated data
+              const updated = s.crawlItems.map(i =>
+                `${i.category}:${i.label}` === key ? item : i
+              )
+              return {
+                ...s,
+                crawlItems: updated,
+                crawlTotal: updated.reduce((sum, g) => sum + g.items.length, 0),
+                crawlStatus: null,
+              }
+            }
+            const newItems = [...s.crawlItems, item]
+            return {
+              ...s,
+              crawlItems: newItems,
+              crawlTotal: newItems.reduce((sum, g) => sum + g.items.length, 0),
+              crawlStatus: null,
+            }
+          })
+        } else {
+          setState((s) => ({
+            ...s,
+            crawlItems: [...s.crawlItems, item],
+            crawlTotal: s.crawlTotal + item.items.length,
+            crawlStatus: null,
+          }))
+        }
         break
       }
       case 'done': {
         const totalItems = (data.total_items as number) ?? stateRef.current.crawlItems.length
+        const wasMergeMode = isMergeModeRef.current
+        isMergeModeRef.current = false
         // Auto-enter edit mode: copy crawlItems into editedItems
         const edited: Record<string, EditedCategory> = {}
         const currentItems = [...stateRef.current.crawlItems]
@@ -206,11 +240,14 @@ export function useOnboarding() {
           return {
             ...s,
             phase: 'crawl_complete',
-            crawlTotal: totalItems,
+            crawlTotal: wasMergeMode
+              ? s.crawlItems.reduce((sum, g) => sum + g.items.length, 0)
+              : totalItems,
             crawlStatus: null,
             sseUrl: null,
             editMode: true,
             editedItems: freshEdited,
+            isUpdating: false,
           }
         })
         break
@@ -218,12 +255,14 @@ export function useOnboarding() {
       case 'crawl_error': {
         const errorMsg = (data.error as string) ?? 'Crawl analysis failed';
         const retryable = (data.retryable as boolean) ?? false;
+        isMergeModeRef.current = false
         setState((s) => ({
           ...s,
           error: { message: errorMsg, retryable },
           loading: false,
           crawlStatus: null,
           sseUrl: null,
+          isUpdating: false,
         }))
         break
       }
@@ -525,6 +564,42 @@ export function useOnboarding() {
         }
       }
 
+      if (res.partial) {
+        // TWO-PHASE LOAD: show cached data immediately, crawl gaps in background
+        setState(s => ({
+          ...s,
+          crawlItems: res.groups,
+          crawlTotal: res.groups.reduce((acc, g) => acc + g.items.length, 0),
+          phase: 'crawling',
+          isUpdating: true,
+          error: null,
+        }))
+
+        // Start full crawl in merge mode — new items merge with cached
+        isMergeModeRef.current = true
+        try {
+          await ensureSession()
+          const crawlRes = await api.post<{ run_id: string }>('/onboarding/crawl', { url })
+          setState(s => ({
+            ...s,
+            sseUrl: `/api/v1/onboarding/crawl/${crawlRes.run_id}/stream`,
+          }))
+        } catch (err) {
+          isMergeModeRef.current = false
+          // Partial cache still usable — show what we have
+          setState(s => ({
+            ...s,
+            phase: 'crawl_complete',
+            editMode: true,
+            editedItems: edited,
+            isUpdating: false,
+            error: { message: 'Background update failed — showing cached data', retryable: true },
+          }))
+        }
+        return
+      }
+
+      // Full cache hit — skip crawl entirely
       setState(s => ({
         ...s,
         crawlItems: res.groups,
@@ -548,7 +623,7 @@ export function useOnboarding() {
 
     // No cache or empty — full crawl
     await startCrawl(url)
-  }, [checkCache, startCrawl])
+  }, [checkCache, startCrawl, ensureSession])
 
   return {
     ...state,
