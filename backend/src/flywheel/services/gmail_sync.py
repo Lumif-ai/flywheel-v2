@@ -205,6 +205,13 @@ async def _score_new_emails(
     SCORE-08: New messages in existing threads are scored here automatically.
     Thread priority (SCORE-07) is computed at read time via get_thread_priority().
 
+    FEED-03 (Thread Re-scoring): New messages in existing threads are automatically
+    handled here. When incremental sync picks up a messagesAdded event for an existing
+    thread, the new email_id is included in the email_ids list passed to this function.
+    The new message gets its own EmailScore row. Thread-level priority auto-updates
+    because get_thread_priority() is a read-time MAX query (SCORE-07) — no additional
+    re-scoring trigger is needed.
+
     Enforces the per-tenant daily cap before scoring. If the cap is reached,
     logs a warning and returns 0 without scoring any emails.
 
@@ -440,6 +447,7 @@ async def _full_sync(
             email_id = await upsert_email(
                 db, integration.tenant_id, integration.user_id, msg
             )
+            # FEED-03: Both new threads and new messages in existing threads get scored.
             new_email_ids.append(email_id)
             count += 1
 
@@ -551,6 +559,9 @@ async def sync_gmail(
             email_id = await upsert_email(
                 db, integration.tenant_id, integration.user_id, msg
             )
+            # FEED-03: New messages in existing threads arrive as messagesAdded events.
+            # Their email_ids go into new_email_ids -> _score_new_emails -> individual EmailScore rows.
+            # Thread priority auto-updates via get_thread_priority() MAX query at read time.
             new_email_ids.append(email_id)
             count += 1
             logger.debug(
