@@ -51,6 +51,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     cleaner_task = None
     calendar_sync_task = None
     cleanup_anon_task = None
+    gmail_sync_task = None
 
     # Startup
     if settings.flywheel_backend == "postgres":
@@ -69,16 +70,18 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
         from flywheel.services.calendar_sync import calendar_sync_loop
         from flywheel.services.anonymous_cleanup import anonymous_cleanup_loop
+        from flywheel.services.gmail_sync import email_sync_loop
 
         queue_task = asyncio.create_task(job_queue_loop())
         cleaner_task = asyncio.create_task(cleanup_stale_jobs())
         calendar_sync_task = asyncio.create_task(calendar_sync_loop())
         cleanup_anon_task = asyncio.create_task(anonymous_cleanup_loop())
+        gmail_sync_task = asyncio.create_task(email_sync_loop())
 
     yield
 
     # Shutdown
-    for task in (queue_task, cleaner_task, calendar_sync_task, cleanup_anon_task):
+    for task in (queue_task, cleaner_task, calendar_sync_task, cleanup_anon_task, gmail_sync_task):
         if task is not None:
             task.cancel()
             try:
