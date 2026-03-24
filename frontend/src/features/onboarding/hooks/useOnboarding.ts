@@ -526,10 +526,13 @@ export function useOnboarding() {
           )
           if (!res.items || res.items.length === 0) continue
 
-          // ONLY use entries that mention this domain — no fallback
-          const relevant = res.items.filter(e =>
-            e.content.toLowerCase().includes(domain.toLowerCase())
-          )
+          // ONLY use entries that mention this company — match domain or company name
+          const domainLower = domain.toLowerCase()
+          const namePart = domainLower.includes('.') ? domainLower.split('.')[0] : domainLower
+          const relevant = res.items.filter(e => {
+            const c = e.content.toLowerCase()
+            return c.includes(domainLower) || c.includes(namePart)
+          })
           if (relevant.length === 0) continue
 
           const cat = fileName.replace('.md', '').replace('company-', '')

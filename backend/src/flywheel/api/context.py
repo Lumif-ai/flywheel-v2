@@ -585,15 +585,28 @@ async def company_lookup(
     """Cache-first company lookup: check if we already have intelligence for a domain."""
     normalized = _normalize_domain(domain)
 
-    # Build query: entries must mention this domain (in content OR file_name)
-    # AND optionally come from known onboarding sources for relevance
-    domain_match = or_(
-        ContextEntry.file_name.ilike(f"%{normalized}%"),
-        ContextEntry.content.ilike(f"%{normalized}%"),
-    )
+    # Derive company name variants from domain for broader matching
+    # e.g. "movingwalls.com" → search for "movingwalls.com", "movingwalls", "moving walls"
+    name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
+    # Split camelCase or joined words: "movingwalls" → "moving walls" (crude but effective)
+    # Also try as-is for compound names
+    search_terms = [normalized, name_part]
+    # Add spaced variant for common patterns (lowercase only)
+    if len(name_part) > 4 and "_" not in name_part and "-" not in name_part:
+        # Try with space before each uppercase letter boundary (won't help all-lower but harmless)
+        spaced = name_part.replace("-", " ").replace("_", " ")
+        if spaced != name_part:
+            search_terms.append(spaced)
+
+    # Build OR conditions for all search variants
+    content_conditions = []
+    for term in search_terms:
+        content_conditions.append(ContextEntry.file_name.ilike(f"%{term}%"))
+        content_conditions.append(ContextEntry.content.ilike(f"%{term}%"))
+
     base = select(ContextEntry).where(
         ContextEntry.deleted_at.is_(None),
-        domain_match,
+        or_(*content_conditions),
     )
 
     result = await db.execute(base)
