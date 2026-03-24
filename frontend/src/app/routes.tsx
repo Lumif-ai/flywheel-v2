@@ -7,6 +7,11 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
 import { InviteAcceptPage } from '@/pages/InviteAcceptPage'
 
+// Lazy-loaded profile page
+const CompanyProfilePage = lazy(() =>
+  import('@/features/profile/components/CompanyProfilePage').then((m) => ({ default: m.CompanyProfilePage }))
+)
+
 // Lazy-loaded document pages
 const DocumentLibrary = lazy(() =>
   import('@/features/documents/components/DocumentLibrary').then((m) => ({ default: m.DocumentLibrary }))
@@ -36,6 +41,7 @@ export function AppRoutes() {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
+      <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />
       <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />
       <Route path="/documents/:id" element={<Suspense fallback={null}><DocumentViewer /></Suspense>} />
       <Route path="/terms" element={<Suspense fallback={null}><TermsPage /></Suspense>} />

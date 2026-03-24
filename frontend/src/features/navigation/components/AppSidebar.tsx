@@ -1,5 +1,5 @@
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText } from 'lucide-react'
+import { Home, Settings, FileText, Building2 } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import {
@@ -56,6 +56,16 @@ export function AppSidebar() {
                 >
                   <Home className="size-4" />
                   <span>Briefing</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname === '/profile'}
+                  render={<NavLink to="/profile" />}
+                  tooltip="Company Profile"
+                >
+                  <Building2 className="size-4" />
+                  <span>Company Profile</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>
