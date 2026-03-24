@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router'
 import { spacing, typography, colors } from '@/lib/design-tokens'
+import { Toast } from '@/components/ui/toast-notification'
 import { DocumentCard } from './DocumentCard'
 import { fetchDocuments, shareDocument } from '../api'
 import type { DocumentListItem } from '../api'
@@ -146,7 +147,6 @@ export function DocumentLibrary() {
       const url = `${window.location.origin}${res.share_url}`
       await navigator.clipboard.writeText(url)
       setShareToast(url)
-      setTimeout(() => setShareToast(null), 3000)
     } catch (err) {
       console.error('Failed to share document:', err)
     }
@@ -167,11 +167,7 @@ export function DocumentLibrary() {
         padding: `${spacing.section} ${spacing.pageDesktop}`,
       }}
     >
-      {shareToast && (
-        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--heading-text)] text-[var(--card-bg)] shadow-lg animate-fade-slide-up">
-          Link copied to clipboard
-        </div>
-      )}
+      <Toast message="Link copied to clipboard" visible={!!shareToast} onDismiss={() => setShareToast(null)} />
 
       {/* Page title */}
       <h1
