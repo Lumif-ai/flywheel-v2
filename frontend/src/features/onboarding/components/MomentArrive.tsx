@@ -7,12 +7,13 @@
  */
 
 import { useState, useCallback, type KeyboardEvent } from 'react'
-import { ArrowRight } from 'lucide-react'
+import { ArrowRight, Loader2 } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { animationClasses } from '@/lib/animations'
 
 interface MomentArriveProps {
   onComplete: (url: string) => void
+  cacheChecking?: boolean
 }
 
 function normalizeUrl(input: string): string {
@@ -35,7 +36,7 @@ const shadowRest = '0 2px 8px rgba(0,0,0,0.08), 0 0 0 1px rgba(0,0,0,0.04)'
 const shadowFocus =
   '0 4px 16px rgba(233,77,53,0.12), 0 0 0 2px rgba(233,77,53,0.2)'
 
-export function MomentArrive({ onComplete }: MomentArriveProps) {
+export function MomentArrive({ onComplete, cacheChecking }: MomentArriveProps) {
   const [value, setValue] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [focused, setFocused] = useState(false)
@@ -136,27 +137,36 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
         />
         <button
           onClick={handleSubmit}
-          disabled={!canSubmit}
+          disabled={!canSubmit || cacheChecking}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
             gap: '6px',
-            backgroundColor: canSubmit ? colors.brandCoral : 'rgba(233,77,53,0.4)',
+            backgroundColor: canSubmit && !cacheChecking ? colors.brandCoral : 'rgba(233,77,53,0.4)',
             color: '#fff',
             border: 'none',
             borderRadius: '12px',
             padding: '10px 20px',
             fontSize: '15px',
             fontWeight: 600,
-            cursor: canSubmit ? 'pointer' : 'not-allowed',
+            cursor: canSubmit && !cacheChecking ? 'pointer' : 'not-allowed',
             transition: 'background-color 150ms ease, opacity 150ms ease',
-            opacity: canSubmit ? 1 : 0.7,
+            opacity: canSubmit && !cacheChecking ? 1 : 0.7,
             whiteSpace: 'nowrap',
             flexShrink: 0,
           }}
         >
-          Go
-          <ArrowRight style={{ width: '16px', height: '16px' }} />
+          {cacheChecking ? (
+            <>
+              <Loader2 style={{ width: '16px', height: '16px' }} className="animate-spin" />
+              Checking...
+            </>
+          ) : (
+            <>
+              Go
+              <ArrowRight style={{ width: '16px', height: '16px' }} />
+            </>
+          )}
         </button>
       </div>
 

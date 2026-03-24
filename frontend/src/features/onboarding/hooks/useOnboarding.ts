@@ -61,6 +61,16 @@ export interface PriorityOption {
   firstAction: string
 }
 
+export interface CacheLookupResponse {
+  exists: boolean
+  domain: string
+  entry_count: number
+  last_updated: string | null
+  categories: string[]
+  source: string | null
+  verified_count: number
+}
+
 export interface OnboardingState {
   phase: OnboardingPhase
   crawlItems: CrawlItem[]
@@ -75,6 +85,8 @@ export interface OnboardingState {
   editedItems: Record<string, EditedCategory>
   editMode: boolean
   selectedPriorities: string[]
+  cacheResult: CacheLookupResponse | null
+  cacheChecking: boolean
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +141,8 @@ const initialState: OnboardingState = {
   editedItems: {},
   editMode: false,
   selectedPriorities: [],
+  cacheResult: null,
+  cacheChecking: false,
 }
 
 // ---------------------------------------------------------------------------
@@ -471,6 +485,92 @@ export function useOnboarding() {
     }
   }, [queryClient])
 
+  // ---- Cache-first actions ----
+
+  const checkCache = useCallback(async (url: string): Promise<CacheLookupResponse | null> => {
+    setState(s => ({ ...s, cacheChecking: true }))
+    try {
+      await ensureSession()
+      // Normalize to domain
+      const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '')
+      const res = await api.get<CacheLookupResponse>(`/context/company?domain=${encodeURIComponent(domain)}`)
+      setState(s => ({ ...s, cacheResult: res, cacheChecking: false }))
+      return res
+    } catch (err) {
+      // Cache check failed — proceed with normal crawl (graceful degradation)
+      console.warn('Cache check failed, proceeding with crawl:', err)
+      setState(s => ({ ...s, cacheResult: null, cacheChecking: false }))
+      return null
+    }
+  }, [ensureSession])
+
+  const loadCachedIntel = useCallback(async (domain: string): Promise<boolean> => {
+    // Fetch entries from context API for this domain
+    try {
+      const res = await api.get<{ items: { file_name: string; content: string }[] }>(
+        `/context/search?q=${encodeURIComponent(domain)}&limit=100`
+      )
+      // Group entries by file_name into CrawlItem format
+      const grouped: Record<string, CrawlItem> = {}
+      for (const entry of res.items) {
+        const cat = entry.file_name.replace('.md', '').replace('company-', '')
+        if (!grouped[cat]) {
+          grouped[cat] = { category: cat, icon: 'Building2', label: cat, items: [], count: 0 }
+        }
+        grouped[cat].items.push(entry.content)
+        grouped[cat].count = grouped[cat].items.length
+      }
+      const items = Object.values(grouped)
+      // Build editedItems from grouped data
+      const edited: Record<string, EditedCategory> = {}
+      for (const group of items) {
+        edited[group.category] = {
+          items: [...group.items],
+          meta: group.items.map(() => ({ source: 'crawler' as const, confidence: 'crawled' as const })),
+        }
+      }
+      setState(s => ({
+        ...s,
+        crawlItems: items,
+        crawlTotal: items.reduce((acc, g) => acc + g.items.length, 0),
+        phase: 'crawl_complete',
+        editMode: true,
+        editedItems: edited,
+      }))
+      return true
+    } catch {
+      // Fallback to full crawl
+      return false
+    }
+  }, [])
+
+  const startWithCacheCheck = useCallback(async (url: string) => {
+    const res = await checkCache(url)
+    if (res?.exists) {
+      const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '')
+      const daysSince = res.last_updated
+        ? (Date.now() - new Date(res.last_updated).getTime()) / (1000 * 60 * 60 * 24)
+        : Infinity
+
+      const loaded = await loadCachedIntel(domain)
+      if (!loaded) {
+        // Fallback to full crawl
+        await startCrawl(url)
+        return
+      }
+
+      if (daysSince >= 7) {
+        // Stale cache — trigger background refresh
+        api.post('/context/company/refresh', { domain }).catch((err: unknown) => {
+          console.warn('Background refresh failed:', err)
+        })
+      }
+    } else {
+      // No cache — full crawl
+      await startCrawl(url)
+    }
+  }, [checkCache, loadCachedIntel, startCrawl])
+
   return {
     ...state,
     startCrawl,
@@ -493,5 +593,9 @@ export function useOnboarding() {
     togglePriority,
     confirmPriorities,
     priorityOptions: PRIORITY_OPTIONS,
+    // Cache-first actions
+    checkCache,
+    loadCachedIntel,
+    startWithCacheCheck,
   }
 }
