@@ -12,7 +12,7 @@ import { BrandedCard } from '@/components/ui/branded-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
-import { InboxIcon, FileText, Clock } from 'lucide-react'
+import { InboxIcon, FileText, Building2, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 
@@ -43,17 +43,6 @@ function formatRelativeTime(dateStr: string): string {
   if (diffDay === 1) return 'yesterday'
   if (diffDay < 7) return `${diffDay}d ago`
   return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-function getDocIcon(docType: string) {
-  switch (docType) {
-    case 'meeting_prep':
-      return '📋'
-    case 'company_intel':
-      return '🏢'
-    default:
-      return '📄'
-  }
 }
 
 export function BriefingPage() {
@@ -288,7 +277,7 @@ export function BriefingPage() {
                     style={{ color: colors.secondaryText }}
                   />
                   <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-                    No documents yet. They'll appear here as you use Lumif.ai.
+                    No documents yet. They'll appear here as you use Flywheel.
                   </p>
                 </div>
               ) : (
@@ -299,7 +288,11 @@ export function BriefingPage() {
                       to={`/documents/${doc.id}`}
                       className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 no-underline hover:opacity-80 transition-opacity"
                     >
-                      <span className="text-base shrink-0">{getDocIcon(doc.doc_type)}</span>
+                      {doc.doc_type === 'company_intel' ? (
+                        <Building2 className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
+                      ) : (
+                        <FileText className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
+                      )}
                       <span
                         className="truncate flex-1"
                         style={{
