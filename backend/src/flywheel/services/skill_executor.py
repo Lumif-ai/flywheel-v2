@@ -810,30 +810,6 @@ async def _execute_company_intel(
         output_parts.append(f"Could not crawl {url}. No pages returned content.")
         return "\n\n".join(output_parts), {}, tool_calls
 
-    # Save domain to tenant EARLY so cache lookups work for concurrent users.
-    # Must happen before structure_intelligence (which is the expensive step).
-    import urllib.parse as _urlparse_early
-    _parsed_early = _urlparse_early.urlparse(url if url.startswith("http") else f"https://{url}")
-    _early_domain = (_parsed_early.hostname or url).removeprefix("www.").lower()
-    try:
-        async with factory() as _dsess:
-            await _dsess.execute(
-                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                {"tid": str(tenant_id)},
-            )
-            # Only set domain if tenant doesn't already have one
-            await _dsess.execute(
-                sa_text(
-                    "UPDATE tenants SET domain = :d WHERE id = :tid AND domain IS NULL"
-                ),
-                {"d": _early_domain, "tid": str(tenant_id)},
-            )
-            await _dsess.commit()
-    except Exception as _early_err:
-        # IntegrityError from unique constraint is fine -- another tenant already
-        # owns this domain (handled at promote time).  Log and continue.
-        logger.debug("Early domain save skipped or failed: %s", _early_err)
-
     await _append_event_atomic(factory, run_id, {
         "event": "stage",
         "data": {

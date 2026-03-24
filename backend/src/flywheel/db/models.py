@@ -43,20 +43,15 @@ class Base(DeclarativeBase):
 
 class Tenant(Base):
     __tablename__ = "tenants"
-    __table_args__ = (
-        Index(
-            "uq_tenants_domain",
-            "domain",
-            unique=True,
-            postgresql_where=text("domain IS NOT NULL"),
-        ),
-    )
 
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=text("gen_random_uuid()")
     )
     name: Mapped[str] = mapped_column(Text, nullable=False)
     domain: Mapped[str | None] = mapped_column(Text)
+    company_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("companies.id"), nullable=True, index=True
+    )
     settings: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     trial_expires_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True),
@@ -68,6 +63,8 @@ class Tenant(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+
+    company: Mapped["Company | None"] = relationship(lazy="selectin")
 
 
 class User(Base):

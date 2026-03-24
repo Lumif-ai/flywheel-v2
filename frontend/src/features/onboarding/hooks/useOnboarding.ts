@@ -2,7 +2,6 @@ import { useState, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
-import { getSupabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import type { SSEEvent } from '@/types/events'
 
@@ -282,28 +281,22 @@ export function useOnboarding() {
   useSSE(state.sseUrl, handleCrawlEvent)
 
   // ---- Anonymous auth guard ----
+  // Wait for AuthBootstrap to provide a token -- never create our own session.
+  // AuthBootstrap is the single source of truth for anonymous auth.
   const ensureSession = useCallback(async () => {
-    const { token } = useAuthStore.getState()
-    if (token) return // session already exists
+    if (useAuthStore.getState().token) return // session already exists
 
-    try {
-      const supabase = await getSupabase()
+    const maxWait = 5000 // 5 seconds
+    const interval = 100
+    let waited = 0
 
-      if (supabase) {
-        const { data, error } = await supabase.auth.signInAnonymously()
-        if (error) throw error
-        if (data.session?.access_token) {
-          useAuthStore.getState().setToken(data.session.access_token)
-          useAuthStore.getState().setUser({
-            id: data.user?.id ?? '',
-            email: null,
-            is_anonymous: true,
-          })
-        }
-      }
-      // If Supabase not configured, proceed without auth (local dev)
-    } catch (err) {
-      console.warn('Anonymous auth failed, proceeding without:', err)
+    while (!useAuthStore.getState().token && waited < maxWait) {
+      await new Promise(resolve => setTimeout(resolve, interval))
+      waited += interval
+    }
+
+    if (!useAuthStore.getState().token) {
+      throw new Error('Authentication not ready -- please refresh the page')
     }
   }, [])
 

@@ -22,13 +22,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from flywheel.api.deps import get_current_user, get_db_unscoped, get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import (
+    Company,
     ContextEntry,
     OnboardingSession,
     SkillRun,
@@ -194,6 +194,9 @@ async def promote(
     Called after the client has already triggered email confirmation via
     supabase.auth.updateUser({ email }). This endpoint creates the
     tenant, user row, and user_tenants record server-side.
+
+    Flow: find/create Company by email domain -> find/create Tenant linked
+    to that company via company_id -> create user + user_tenant link.
     """
     if not user.is_anonymous:
         raise HTTPException(
@@ -201,51 +204,54 @@ async def promote(
             detail="Already authenticated",
         )
 
-    # Extract and normalize domain from email
-    raw_domain = body.email.split("@")[1] if "@" in body.email else None
-    normalized_domain = raw_domain.lower().removeprefix("www.") if raw_domain else None
+    # 1. Extract and normalize domain from email
+    email_domain = body.email.split("@")[1].lower().removeprefix("www.") if "@" in body.email else None
 
-    # -------------------------------------------------------------------
-    # Tenant-per-domain: reuse existing tenant when one already owns this
-    # domain, otherwise create a new one.
-    # -------------------------------------------------------------------
-    existing_tenant = None
-    if normalized_domain:
-        result = await db.execute(
-            select(Tenant).where(Tenant.domain == normalized_domain)
-        )
-        existing_tenant = result.scalar_one_or_none()
+    # 2. Find or create company by domain
+    company = None
+    if email_domain:
+        company = (
+            await db.execute(select(Company).where(Company.domain == email_domain))
+        ).scalar_one_or_none()
 
-    if existing_tenant:
-        tenant = existing_tenant
-        # Clear domain on the anonymous user's auto-provisioned tenant so
-        # the unique constraint isn't violated if it was set during crawl.
-        anon_tenant_id = user.tenant_id or user.sub
-        if anon_tenant_id and str(anon_tenant_id) != str(tenant.id):
-            from sqlalchemy import text as sa_text
+        if not company:
+            company = Company(domain=email_domain, name=email_domain)
+            db.add(company)
+            await db.flush()
+
+    # 3. Find existing tenant for this company (tenant-per-company)
+    tenant = None
+    if company:
+        tenant = (
             await db.execute(
-                sa_text("UPDATE tenants SET domain = NULL WHERE id = :tid AND domain IS NOT NULL"),
-                {"tid": str(anon_tenant_id)},
+                select(Tenant).where(Tenant.company_id == company.id)
             )
-    else:
-        # Create new tenant with domain set immediately
-        try:
+        ).scalar_one_or_none()
+
+    if not tenant:
+        # Upgrade the anonymous tenant in-place or create a new one
+        anon_tenant = None
+        anon_tenant_id = user.tenant_id or user.sub
+        if anon_tenant_id:
+            anon_tenant = (
+                await db.execute(
+                    select(Tenant).where(Tenant.id == anon_tenant_id)
+                )
+            ).scalar_one_or_none()
+
+        if anon_tenant:
+            anon_tenant.company_id = company.id if company else None
+            anon_tenant.name = (company.name if company else None) or email_domain or "Personal"
+            tenant = anon_tenant
+        else:
             tenant = Tenant(
-                name=raw_domain or "Personal",
-                domain=normalized_domain,
+                name=email_domain or "Personal",
+                company_id=company.id if company else None,
             )
             db.add(tenant)
             await db.flush()
-        except IntegrityError:
-            # Race condition: another request just created a tenant with the
-            # same domain.  Roll back the failed INSERT and fetch the winner.
-            await db.rollback()
-            result = await db.execute(
-                select(Tenant).where(Tenant.domain == normalized_domain)
-            )
-            tenant = result.scalar_one()
 
-    # Create or update user row
+    # 4. Create or update user row
     existing_user = (
         await db.execute(select(User).where(User.id == user.sub))
     ).scalar_one_or_none()
@@ -258,7 +264,7 @@ async def promote(
         existing_user.email = body.email
         await db.flush()
 
-    # Create user_tenants link (skip if already exists for this tenant)
+    # 5. Create user_tenants link (skip if already exists for this tenant)
     existing_ut = (
         await db.execute(
             select(UserTenant).where(
@@ -274,7 +280,7 @@ async def promote(
         )
         db.add(ut)
 
-    # Copy onboarding session data into context_entries for the tenant,
+    # 6. Copy onboarding session data into context_entries for the tenant,
     # skipping entries that already exist (when joining an existing tenant).
     onboarding_rows = (
         await db.execute(
