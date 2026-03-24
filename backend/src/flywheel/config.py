@@ -65,6 +65,13 @@ class Settings(BaseSettings):
     # Email drafting
     draft_visibility_delay_days: int = 0  # 0 = immediate visibility for dogfood
 
+    # Feedback flywheel — voice update
+    voice_update_min_edits: int = 1  # minimum edit count before voice update triggers (1 = every edit)
+
+    # Feedback flywheel — dismiss signal
+    dismiss_lookback_days: int = 30  # rolling window for dismiss signal (days)
+    dismiss_threshold: int = 3  # minimum dismissals to trigger scoring signal
+
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
 
 
