@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 5 of 6 (Review API and Frontend)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-24 — Phase 5 Plan 01 complete (email read API endpoints + api.ts put method)
+Last activity: 2026-03-24 — Phase 5 Plan 02 complete (email inbox UI — virtual ThreadList, Sheet ThreadDetail, DraftReview, /email route)
 
-Progress: [████████░░] 72%
+Progress: [█████████░] 78%
 
 ## Performance Metrics
 
@@ -30,7 +30,7 @@ Progress: [████████░░] 72%
 | 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
 | 02-sync-worker-and-voice-profile | 2 | ~11 min | ~5.5 min |
 | 04-email-drafter-skill | 2 | ~9 min | ~4.5 min |
-| 05-review-api-and-frontend | 1 (in progress) | ~5 min | ~5 min |
+| 05-review-api-and-frontend | 2 (in progress) | ~9 min | ~4.5 min |
 
 *Updated after each plan completion*
 
@@ -81,6 +81,10 @@ Recent decisions affecting current work:
 - [Phase 5, Plan 01]: BackgroundTasks _run_sync() snapshots IDs before task — avoids ORM detached instance in background context
 - [Phase 5, Plan 01]: Thread max_priority computed only over unreplied messages — consistent with scoring intent
 - [Phase 5, Plan 01]: digest uses INNER JOIN (only scored emails are meaningful in digest)
+- [Phase 5, Plan 02]: FlatItem discriminated union for virtual list — enables tier headers + thread rows in single pass without separate header tracking
+- [Phase 5, Plan 02]: TIER_ORDER sort before flatItems build — deterministic critical-first ordering, recency within tier
+- [Phase 5, Plan 02]: ThreadDetail reads Zustand store internally — self-contained Sheet, no prop drilling through EmailPage
+- [Phase 5, Plan 02]: flex-1 min-h-0 on ThreadList container — required for useVirtualizer to work inside flex column layout
 
 ### Pending Todos
 
@@ -95,5 +99,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 5 Plan 01 complete — email read API endpoints (threads, thread detail, sync, digest) and api.ts put method. Phase 5 Plan 02 (inbox UI) is next.
+Stopped at: Phase 5 Plan 02 complete — email inbox UI (virtual ThreadList, ThreadDetail Sheet, DraftReview, /email route). Phase 5 Plan 03 (alerts + digest frontend) is next.
 Resume file: None
