@@ -78,11 +78,11 @@ export function BriefingPage() {
     let cancelled = false
     async function loadDocs() {
       try {
-        const result = await api.get<{ items: RecentDocument[] }>('/documents/', {
+        const result = await api.get<{ documents: RecentDocument[]; total: number }>('/documents/', {
           params: { limit: 3 },
         })
         if (!cancelled) {
-          setRecentDocs(result.items)
+          setRecentDocs(result.documents)
           setDocsLoading(false)
         }
       } catch {
