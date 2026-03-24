@@ -18,24 +18,30 @@ from __future__ import annotations
 
 import asyncio
 import email.utils
+import json
 import logging
+import re
 from datetime import datetime, timezone
 from uuid import UUID
 
+import anthropic
 from googleapiclient.errors import HttpError
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.db.models import Email, Integration
+from flywheel.config import settings
+from flywheel.db.models import Email, EmailVoiceProfile, Integration
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
     TokenRevokedException,
     get_history,
+    get_message_body,
     get_message_headers,
     get_profile,
     get_valid_credentials,
     list_message_headers,
+    list_sent_messages,
 )
 
 logger = logging.getLogger(__name__)
@@ -333,7 +339,7 @@ async def _sync_one_integration(factory, integration: Integration) -> int:
         intg = result.scalar_one()
 
         try:
-            return await sync_gmail(db, intg)
+            count = await sync_gmail(db, intg)
         except TokenRevokedException:
             logger.warning(
                 "Token revoked for integration %s, marking disconnected",
@@ -343,6 +349,218 @@ async def _sync_one_integration(factory, integration: Integration) -> int:
             intg.credentials_encrypted = None
             await db.commit()
             return 0
+
+        # Check if voice profile needs initialization (runs once per user)
+        existing_profile = await db.execute(
+            select(EmailVoiceProfile).where(
+                and_(
+                    EmailVoiceProfile.tenant_id == intg.tenant_id,
+                    EmailVoiceProfile.user_id == intg.user_id,
+                )
+            )
+        )
+        if existing_profile.scalar_one_or_none() is None:
+            try:
+                created = await voice_profile_init(db, intg)
+                if created:
+                    logger.info(
+                        "Voice profile initialized for integration %s", intg.id
+                    )
+            except Exception:
+                logger.exception(
+                    "Voice profile init failed for integration %s", intg.id
+                )
+                # Non-fatal — sync continues even if voice init fails
+
+        return count
+
+
+# ---------------------------------------------------------------------------
+# Voice profile extraction
+# ---------------------------------------------------------------------------
+
+VOICE_SYSTEM_PROMPT = """\
+You are analyzing email samples to extract a user's writing voice profile.
+Return a JSON object with exactly these fields:
+- tone: string (e.g., "professional and concise", "warm and conversational")
+- avg_length: integer (estimated average email length in words)
+- sign_off: string (most common sign-off phrase, e.g., "Best," or "Thanks,")
+- phrases: array of strings (3-5 characteristic phrases or expressions the person uses)
+- samples_analyzed: integer (number of emails you analyzed)
+
+Return only the JSON object, no other text.\
+"""
+
+_HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
+# Auto-reply / calendar / OOO patterns (case-insensitive match against body)
+_AUTO_REPLY_PATTERNS = [
+    "out of office",
+    "auto-reply",
+    "automatic reply",
+    "i am currently out",
+    "accepted:",
+    "declined:",
+    "tentative:",
+    "has accepted your invitation",
+    "this is an automated",
+    "do not reply to this",
+    "i'm ooo",
+    "i will be out",
+]
+
+
+def _is_substantive(body: str | None) -> bool:
+    """Return True only if the body is a real, substantive human-written email.
+
+    Filters out: None, empty strings, very short messages, auto-replies, OOO
+    messages, calendar acceptances/declines, and emails with fewer than 3 real
+    sentences.
+
+    Args:
+        body: Raw email body text.
+
+    Returns:
+        True if the email should be included in voice extraction samples.
+    """
+    if not body or len(body.strip()) < 50:
+        return False
+
+    lower = body.lower()
+    for pattern in _AUTO_REPLY_PATTERNS:
+        if pattern in lower:
+            return False
+
+    sentences = re.split(r"[.!?]\s+", body.strip())
+    real_sentences = [s for s in sentences if len(s.strip()) > 10]
+    return len(real_sentences) >= 3
+
+
+async def _extract_voice_profile(bodies: list[str]) -> dict:
+    """Call Haiku to extract a voice profile from a list of email bodies.
+
+    Uses the same AsyncAnthropic + json.loads + regex-fallback pattern as
+    onboarding_streams.py.
+
+    Args:
+        bodies: List of substantive email body strings to analyze.
+
+    Returns:
+        Parsed dict with keys: tone, avg_length, sign_off, phrases,
+        samples_analyzed.
+
+    Raises:
+        json.JSONDecodeError: If the LLM response cannot be parsed as JSON.
+    """
+    client = anthropic.AsyncAnthropic(api_key=settings.flywheel_subsidy_api_key)
+    response = await client.messages.create(
+        model=_HAIKU_MODEL,
+        max_tokens=1000,
+        system=VOICE_SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": "\n\n---\n\n".join(bodies)}],
+    )
+
+    text = response.content[0].text.strip()
+
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", text, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
+
+
+async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool:
+    """Extract the user's writing voice from substantive sent emails.
+
+    Idempotent: returns False immediately if an EmailVoiceProfile already exists
+    for this (tenant_id, user_id) pair. Skips if fewer than 3 substantive bodies
+    are found — not enough signal for a meaningful profile.
+
+    Sends at most 20 bodies to the LLM (cost control). Up to 100 substantive
+    bodies are collected from the most recent 200 sent messages.
+
+    Args:
+        db: Tenant-scoped async session (RLS enforced).
+        integration: gmail-read Integration row for the user.
+
+    Returns:
+        True if a new voice profile was created, False otherwise.
+    """
+    # Idempotency guard — bail out early if profile already exists
+    existing = await db.execute(
+        select(EmailVoiceProfile).where(
+            and_(
+                EmailVoiceProfile.tenant_id == integration.tenant_id,
+                EmailVoiceProfile.user_id == integration.user_id,
+            )
+        )
+    )
+    if existing.scalar_one_or_none() is not None:
+        return False
+
+    creds = await get_valid_credentials(integration)
+
+    # Fetch up to 200 sent message stubs
+    response = await list_sent_messages(creds, max_results=200)
+    stubs = response.get("messages", [])
+
+    # Collect up to 100 substantive bodies
+    substantive_bodies: list[str] = []
+    for stub in stubs:
+        if len(substantive_bodies) >= 100:
+            break
+        body = await get_message_body(creds, stub["id"])
+        if _is_substantive(body):
+            substantive_bodies.append(body)
+
+    if len(substantive_bodies) < 3:
+        logger.warning(
+            "voice_profile_init: not enough substantive emails for integration %s "
+            "(found %d, need at least 3)",
+            integration.id,
+            len(substantive_bodies),
+        )
+        return False
+
+    # Send only the 20 most recent bodies to control token cost
+    profile_data = await _extract_voice_profile(substantive_bodies[:20])
+
+    samples_count = profile_data.get("samples_analyzed", len(substantive_bodies[:20]))
+
+    stmt = (
+        pg_insert(EmailVoiceProfile)
+        .values(
+            tenant_id=integration.tenant_id,
+            user_id=integration.user_id,
+            tone=profile_data.get("tone"),
+            avg_length=profile_data.get("avg_length"),
+            sign_off=profile_data.get("sign_off"),
+            phrases=profile_data.get("phrases", []),
+            samples_analyzed=samples_count,
+        )
+        .on_conflict_do_update(
+            constraint="uq_voice_profile_tenant_user",
+            set_={
+                "tone": profile_data.get("tone"),
+                "avg_length": profile_data.get("avg_length"),
+                "sign_off": profile_data.get("sign_off"),
+                "phrases": profile_data.get("phrases", []),
+                "samples_analyzed": samples_count,
+                "updated_at": datetime.now(timezone.utc),
+            },
+        )
+    )
+    await db.execute(stmt)
+    await db.commit()
+
+    logger.info(
+        "Voice profile created for integration %s (%d samples analyzed)",
+        integration.id,
+        samples_count,
+    )
+    return True
 
 
 # ---------------------------------------------------------------------------
