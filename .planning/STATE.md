@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 2 of 6 (Sync Worker and Voice Profile)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-03-24 — Phase 1 complete (2/2 plans, verified 11/11 must-haves)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-03-24 — Phase 2, Plan 01 complete (Gmail sync worker)
 
-Progress: [██░░░░░░░░] 17%
+Progress: [███░░░░░░░] 25%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 2
-- Average duration: ~5 min
+- Total plans completed: 3
+- Average duration: ~4 min
 - Total execution time: ~0.2 hours
 
 **By Phase:**
@@ -28,6 +28,7 @@ Progress: [██░░░░░░░░] 17%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
+| 02-sync-worker-and-voice-profile | 1 | ~3 min | ~3 min |
 
 *Updated after each plan completion*
 
@@ -47,6 +48,9 @@ Recent decisions affecting current work:
 - [Phase 1, Plan 02]: No include_granted_scopes on gmail-read grant — isolates read credential from send-only gmail
 - [Phase 1, Plan 02]: Pre-allocate history_id=None in pending Integration row — Phase 2 sync worker expects this slot
 - [Phase 1, Plan 02]: Three scopes (readonly+modify+send) on single grant — avoids second OAuth prompt for draft approval
+- [Phase 2, Plan 01]: historyId captured from get_profile() BEFORE pagination in _full_sync — prevents missed messages during initial sync
+- [Phase 2, Plan 01]: Integration re-loaded inside tenant_session — avoids DetachedInstanceError when crossing session boundaries
+- [Phase 2, Plan 01]: asyncio.wait_for(60s) per integration + gather(return_exceptions=True) — concurrent multi-user polling, never crashes loop
 
 ### Pending Todos
 
@@ -62,5 +66,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 1 complete, verified, roadmap updated. Phase 2 ready to plan.
+Stopped at: Phase 2, Plan 01 complete. Gmail sync worker shipped (gmail_sync.py + main.py). Plan 02 (voice profile) ready.
 Resume file: None
