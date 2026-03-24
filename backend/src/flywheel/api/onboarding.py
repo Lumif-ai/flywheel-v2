@@ -55,6 +55,12 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "market": ["market", "industry", "competitor", "trend", "growth", "opportunity"],
     "technology": ["technology", "stack", "engineering", "api", "infrastructure", "security", "data"],
     "customer": ["customer", "client", "case study", "testimonial", "review", "user"],
+    "customers_served": [
+        "case study", "success story", "use case", "customer story",
+        "client", "testimonial", "logo", "trusted by", "used by",
+        "partner", "integration", "works with", "powered by",
+        "serving", "customers include", "our customers",
+    ],
     "financial": ["revenue", "funding", "investor", "valuation", "series", "ipo", "financial"],
 }
 
@@ -65,18 +71,53 @@ _CATEGORY_ICONS: dict[str, str] = {
     "market": "TrendingUp",
     "technology": "Cpu",
     "customer": "UserCheck",
+    "customers_served": "Award",
     "financial": "DollarSign",
 }
 
 
 def _detect_category(content: str) -> str:
-    """Detect category from content using keyword matching."""
+    """Detect category from content using keyword matching.
+
+    Prefers 'customers_served' over 'customer' when both score equally,
+    since customers_served is the more specific category.
+    """
     content_lower = content.lower()
     scores: dict[str, int] = {}
     for category, keywords in _CATEGORY_KEYWORDS.items():
         scores[category] = sum(1 for kw in keywords if kw in content_lower)
+    # Prefer customers_served over customer when scores are tied
+    if (
+        scores.get("customers_served", 0) > 0
+        and scores.get("customers_served", 0) >= scores.get("customer", 0)
+    ):
+        return "customers_served"
     best = max(scores, key=scores.get)  # type: ignore[arg-type]
     return best if scores[best] > 0 else "company_info"
+
+
+def _detect_confidence(category: str, content: str) -> str:
+    """Derive confidence level from category and content signals.
+
+    Per concept brief:
+    - Case study with named company + results = high
+    - Customer logo with alt text = medium
+    - Testimonial with title/company = medium
+    - Inferred from product description = low
+    - User-validated (from edit) = verified (handled upstream)
+    """
+    if category != "customers_served":
+        return "medium"
+    content_lower = content.lower()
+    # High: case study / success story patterns with results indicators
+    high_signals = ["case study", "success story", "customer story", "results", "increased", "reduced", "improved", "grew"]
+    if sum(1 for s in high_signals if s in content_lower) >= 2:
+        return "high"
+    # Low: inferred from product descriptions
+    low_signals = ["product", "platform", "solution", "feature"]
+    if sum(1 for s in low_signals if s in content_lower) >= 2 and "case study" not in content_lower:
+        return "low"
+    return "medium"
 
 
 # ---------------------------------------------------------------------------
@@ -350,14 +391,16 @@ async def crawl_stream(
                     # Discovery events: grouped intelligence items
                     if evt_type == "discovery" and isinstance(evt_data, dict):
                         item_count += 1
+                        category = evt_data.get("category", "company_info")
                         yield {
                             "event": "text",
                             "data": json.dumps({
-                                "category": evt_data.get("category", "company_info"),
+                                "category": category,
                                 "icon": evt_data.get("icon", "Building2"),
                                 "label": evt_data.get("label", ""),
                                 "items": evt_data.get("items", []),
                                 "count": item_count,
+                                "confidence": evt_data.get("confidence", "medium"),
                             }),
                         }
                     # Stage events: progress updates (shown as status text)
