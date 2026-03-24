@@ -21,13 +21,15 @@ import type { SSEEvent } from '@/types/events'
 
 interface MomentExperienceProps {
   onComplete: (briefingHtml?: string) => void
+  onSkip: () => void
+  onBack: () => void
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function MomentExperience({ onComplete }: MomentExperienceProps) {
+export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienceProps) {
   const [linkedinUrl, setLinkedinUrl] = useState('')
   const [agenda, setAgenda] = useState('')
   const [phase, setPhase] = useState<'input' | 'running' | 'done'>('input')
@@ -218,6 +220,25 @@ export function MomentExperience({ onComplete }: MomentExperienceProps) {
           Prepare briefing
           <ArrowRight className="h-4 w-4" />
         </Button>
+
+        <div className="flex items-center justify-between mt-4">
+          <button
+            type="button"
+            onClick={onBack}
+            className="text-sm hover:underline"
+            style={{ color: colors.secondaryText }}
+          >
+            ← Back
+          </button>
+          <button
+            type="button"
+            onClick={onSkip}
+            className="text-sm hover:underline"
+            style={{ color: colors.secondaryText }}
+          >
+            Skip for now →
+          </button>
+        </div>
       </div>
     )
   }

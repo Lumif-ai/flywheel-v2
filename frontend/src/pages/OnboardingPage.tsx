@@ -107,6 +107,10 @@ export function OnboardingPage() {
     setMoment('land')
   }, [])
 
+  const handleBack = useCallback((to: Moment) => {
+    setMoment(to)
+  }, [])
+
   const handleLandComplete = useCallback(() => {
     navigate('/')
   }, [navigate])
@@ -179,6 +183,7 @@ export function OnboardingPage() {
         {moment === 'align' && (
           <MomentAlign
             onComplete={handleAlignComplete}
+            onBack={() => handleBack('discover')}
             selectedPriorities={selectedPriorities}
             onTogglePriority={togglePriority}
             onConfirmPriorities={confirmPriorities}
@@ -187,7 +192,11 @@ export function OnboardingPage() {
         )}
 
         {moment === 'experience' && (
-          <MomentExperience onComplete={handleExperienceComplete} />
+          <MomentExperience
+            onComplete={handleExperienceComplete}
+            onSkip={() => setMoment('land')}
+            onBack={() => handleBack('align')}
+          />
         )}
 
         {moment === 'land' && (

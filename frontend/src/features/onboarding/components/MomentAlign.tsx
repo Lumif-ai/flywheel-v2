@@ -18,6 +18,7 @@ import type { PriorityOption } from '../hooks/useOnboarding'
 
 interface MomentAlignProps {
   onComplete: () => void
+  onBack: () => void
   selectedPriorities: string[]
   onTogglePriority: (id: string) => void
   onConfirmPriorities: () => Promise<void>
@@ -108,6 +109,7 @@ function PriorityCard({
 
 export function MomentAlign({
   onComplete,
+  onBack,
   selectedPriorities,
   onTogglePriority,
   onConfirmPriorities,
@@ -196,6 +198,14 @@ export function MomentAlign({
           ) : (
             'Continue'
           )}
+        </button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-4 text-sm hover:underline"
+          style={{ color: colors.secondaryText }}
+        >
+          ← Back
         </button>
       </div>
     </div>
