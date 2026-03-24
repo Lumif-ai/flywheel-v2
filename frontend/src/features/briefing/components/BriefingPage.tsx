@@ -6,6 +6,8 @@ import { PersonalGapCard } from './PersonalGapCard'
 import { NudgeCard } from './NudgeCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
+import { FirstVisitHero } from './FirstVisitHero'
+import { NextActionCta } from './NextActionCta'
 import { SoftSignupCard, isSignupCardDismissed } from '@/features/onboarding/components/SoftSignupCard'
 import { StreamDensityCard } from '@/features/streams/components/DensityIndicator'
 import { BrandedCard } from '@/components/ui/branded-card'
@@ -113,6 +115,8 @@ export function BriefingPage() {
     return ''
   }, [user])
 
+  const isFirstVisit = !isLoading && (data?.is_first_visit ?? false)
+
   if (error) {
     return (
       <div className="flex h-full items-center justify-center p-6">
@@ -136,305 +140,359 @@ export function BriefingPage() {
           className="mx-auto"
           style={{ maxWidth: spacing.maxGrid }}
         >
-          {/* Soft signup card for anonymous users */}
-          {showSignupCard && (
-            <div style={{ marginBottom: spacing.section }}>
-              <SoftSignupCard />
-            </div>
-          )}
-
-          {/* Greeting Section */}
-          {isLoading ? (
-            <div className="space-y-2" style={{ marginBottom: spacing.section }}>
-              <Skeleton className="h-8 w-64" />
-              <Skeleton className="h-4 w-40" />
-            </div>
-          ) : (
-            <div
-              className="flex items-baseline justify-between"
-              style={{ marginBottom: spacing.section }}
-            >
-              <h1
-                style={{
-                  fontSize: typography.pageTitle.size,
-                  fontWeight: typography.pageTitle.weight,
-                  lineHeight: typography.pageTitle.lineHeight,
-                  letterSpacing: typography.pageTitle.letterSpacing,
-                  color: colors.headingText,
-                }}
-              >
-                {getGreeting()}{userName ? `, ${userName}` : ''}.
-              </h1>
-              <span
-                style={{
-                  fontSize: typography.caption.size,
-                  color: colors.secondaryText,
-                }}
-              >
-                {new Date().toLocaleDateString('en-US', {
-                  month: 'short',
-                  day: 'numeric',
-                })}
-              </span>
-            </div>
-          )}
-
-          {/* Intelligence Health Card */}
-          {isLoading ? (
-            <div style={{ marginBottom: spacing.section }}>
-              <BrandedCard>
-                <div className="space-y-2">
+          {/* ----------------------------------------------------------------
+              FIRST-VISIT LAYOUT
+              Show hero content (briefing or intel summary) + next action CTA.
+              Suppress conversion CTAs, empty sections, and health metrics.
+          ----------------------------------------------------------------- */}
+          {isFirstVisit && data?.first_visit ? (
+            <div style={{ maxWidth: '720px', margin: '0 auto', width: '100%' }}>
+              {/* Greeting */}
+              {isLoading ? (
+                <div className="space-y-2" style={{ marginBottom: spacing.section }}>
+                  <Skeleton className="h-8 w-64" />
                   <Skeleton className="h-4 w-40" />
-                  <Skeleton className="h-2 w-full" />
-                  <Skeleton className="h-4 w-48" />
-                </div>
-              </BrandedCard>
-            </div>
-          ) : data?.knowledge_health ? (
-            <div style={{ marginBottom: spacing.section }}>
-              <BrandedCard hoverable={false}>
-                <KnowledgeHealthBar health={data.knowledge_health} />
-              </BrandedCard>
-            </div>
-          ) : null}
-
-          {/* Nudge */}
-          {data?.nudge && (
-            <div style={{ marginBottom: spacing.section }}>
-              <NudgeCard nudge={data.nudge} />
-            </div>
-          )}
-
-          {/* Your Focus Areas */}
-          {streams.length > 0 && (
-            <div style={{ marginBottom: spacing.section }}>
-              <h2
-                style={{
-                  fontSize: typography.sectionTitle.size,
-                  fontWeight: typography.sectionTitle.weight,
-                  lineHeight: typography.sectionTitle.lineHeight,
-                  color: colors.headingText,
-                  marginBottom: spacing.element,
-                }}
-              >
-                Your Focus Areas
-              </h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {streams.filter(s => !s.is_archived).map((stream) => (
-                  <Link
-                    key={stream.id}
-                    to={`/streams/${stream.id}`}
-                    className="block no-underline"
-                  >
-                    <BrandedCard variant="info">
-                      <p
-                        className="truncate"
-                        style={{
-                          fontSize: typography.body.size,
-                          fontWeight: '500',
-                          color: colors.headingText,
-                          marginBottom: spacing.tight,
-                        }}
-                      >
-                        {stream.name}
-                      </p>
-                      <StreamDensityCard
-                        densityScore={stream.density_score}
-                        details={stream.density_details}
-                        compact
-                      />
-                      <p
-                        className="mt-1"
-                        style={{
-                          fontSize: typography.caption.size,
-                          color: colors.secondaryText,
-                        }}
-                      >
-                        {stream.entry_count ?? stream.density_details?.entry_count ?? 0} items
-                      </p>
-                    </BrandedCard>
-                  </Link>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Recent Documents */}
-          <div style={{ marginBottom: spacing.section }}>
-            <h2
-              style={{
-                fontSize: typography.sectionTitle.size,
-                fontWeight: typography.sectionTitle.weight,
-                lineHeight: typography.sectionTitle.lineHeight,
-                color: colors.headingText,
-                marginBottom: spacing.element,
-              }}
-            >
-              Recent Documents
-            </h2>
-            <BrandedCard hoverable={false}>
-              {docsLoading ? (
-                <div className="space-y-3">
-                  {Array.from({ length: 3 }).map((_, i) => (
-                    <Skeleton key={i} className="h-6 w-full" />
-                  ))}
-                </div>
-              ) : recentDocs === null ? (
-                <div className="flex flex-col items-center gap-2 py-6">
-                  <div className="flex items-center gap-1.5">
-                    <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.3 }} />
-                    <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.2 }} />
-                    <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.15 }} />
-                  </div>
-                  <p style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
-                    Your briefings and research will appear here
-                  </p>
-                </div>
-              ) : recentDocs.length === 0 ? (
-                <div className="flex flex-col items-center gap-2 py-6">
-                  <div className="flex items-center gap-1.5">
-                    <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.3 }} />
-                    <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.2 }} />
-                    <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.15 }} />
-                  </div>
-                  <p style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
-                    Your briefings and research will appear here
-                  </p>
                 </div>
               ) : (
-                <div className="divide-y" style={{ borderColor: colors.subtleBorder }}>
-                  {recentDocs.map((doc) => (
-                    <Link
-                      key={doc.id}
-                      to={`/documents/${doc.id}`}
-                      className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 no-underline hover:opacity-80 transition-opacity"
-                    >
-                      {doc.doc_type === 'company_intel' ? (
-                        <Building2 className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
-                      ) : (
-                        <FileText className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
-                      )}
-                      <span
-                        className="truncate flex-1"
-                        style={{
-                          fontSize: typography.body.size,
-                          color: colors.headingText,
-                        }}
-                      >
-                        {doc.title}
-                      </span>
-                      <span
-                        className="shrink-0 flex items-center gap-1"
-                        style={{
-                          fontSize: typography.caption.size,
-                          color: colors.secondaryText,
-                        }}
-                      >
-                        <Clock className="size-3" />
-                        {formatRelativeTime(doc.created_at)}
-                      </span>
-                    </Link>
-                  ))}
+                <div style={{ marginBottom: spacing.section }}>
+                  <h1
+                    style={{
+                      fontSize: typography.pageTitle.size,
+                      fontWeight: typography.pageTitle.weight,
+                      lineHeight: typography.pageTitle.lineHeight,
+                      letterSpacing: typography.pageTitle.letterSpacing,
+                      color: colors.headingText,
+                      marginBottom: '4px',
+                    }}
+                  >
+                    Welcome to your workspace{userName ? `, ${userName}` : ''}.
+                  </h1>
+                  <p style={{ fontSize: typography.body.size, color: colors.secondaryText, margin: 0 }}>
+                    Here&apos;s what we built together during setup.
+                  </p>
                 </div>
               )}
-              <div className="mt-3 pt-3 border-t" style={{ borderColor: colors.subtleBorder }}>
-                <Link
-                  to="/documents"
-                  className="text-sm no-underline hover:underline"
-                  style={{ color: 'var(--brand-coral)' }}
-                >
-                  View all docs &rarr;
-                </Link>
-              </div>
-            </BrandedCard>
-          </div>
 
-          {/* Suggested Actions (cards from briefing API) */}
-          {isLoading ? (
-            <div style={{ marginBottom: spacing.section }}>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {Array.from({ length: 3 }).map((_, i) => (
-                  <Skeleton key={i} className="h-32 rounded-xl" />
-                ))}
+              {/* Hero content */}
+              <div style={{ marginBottom: spacing.section }}>
+                <FirstVisitHero
+                  briefingHtml={data.first_visit.briefing_html}
+                  intelSummary={data.first_visit.intel_summary}
+                  companyName={userName}
+                />
+              </div>
+
+              {/* Next action CTA */}
+              <div style={{ marginBottom: spacing.section }}>
+                <NextActionCta primaryPriority={data.first_visit.primary_priority} />
               </div>
             </div>
-          ) : data?.cards && data.cards.length > 0 ? (
-            <div style={{ marginBottom: spacing.section }}>
-              <h2
-                style={{
-                  fontSize: typography.sectionTitle.size,
-                  fontWeight: typography.sectionTitle.weight,
-                  lineHeight: typography.sectionTitle.lineHeight,
-                  color: colors.headingText,
-                  marginBottom: spacing.element,
-                }}
-              >
-                Suggested Actions
-              </h2>
-              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {data.cards.map((card, i) => {
-                  if (card.card_type === 'personal_gap') {
-                    let teamCount = 0
-                    let myCount = 0
-                    if (card.reason) {
-                      const teamMatch = card.reason.match(/(\d+)\s+entr(?:y|ies)\s+from\s+other/)
-                      const myMatch = card.reason.match(/(\d+)\s+from\s+you/)
-                      if (teamMatch) teamCount = parseInt(teamMatch[1], 10)
-                      if (myMatch) myCount = parseInt(myMatch[1], 10)
-                    }
-                    return (
-                      <PersonalGapCard
-                        key={i}
-                        title={card.title}
-                        detail={card.body}
-                        streamId={card.stream_id ?? ''}
-                        teamCount={teamCount}
-                        myCount={myCount}
-                      />
-                    )
-                  }
-                  return <BriefingCard key={i} card={card} />
-                })}
+          ) : (
+            /* ----------------------------------------------------------------
+               NORMAL DASHBOARD LAYOUT (returning users)
+            ----------------------------------------------------------------- */
+            <>
+              {/* Soft signup card for anonymous users */}
+              {showSignupCard && (
+                <div style={{ marginBottom: spacing.section }}>
+                  <SoftSignupCard />
+                </div>
+              )}
+
+              {/* Greeting Section */}
+              {isLoading ? (
+                <div className="space-y-2" style={{ marginBottom: spacing.section }}>
+                  <Skeleton className="h-8 w-64" />
+                  <Skeleton className="h-4 w-40" />
+                </div>
+              ) : (
+                <div
+                  className="flex items-baseline justify-between"
+                  style={{ marginBottom: spacing.section }}
+                >
+                  <h1
+                    style={{
+                      fontSize: typography.pageTitle.size,
+                      fontWeight: typography.pageTitle.weight,
+                      lineHeight: typography.pageTitle.lineHeight,
+                      letterSpacing: typography.pageTitle.letterSpacing,
+                      color: colors.headingText,
+                    }}
+                  >
+                    {getGreeting()}{userName ? `, ${userName}` : ''}.
+                  </h1>
+                  <span
+                    style={{
+                      fontSize: typography.caption.size,
+                      color: colors.secondaryText,
+                    }}
+                  >
+                    {new Date().toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })}
+                  </span>
+                </div>
+              )}
+
+              {/* Intelligence Health Card */}
+              {isLoading ? (
+                <div style={{ marginBottom: spacing.section }}>
+                  <BrandedCard>
+                    <div className="space-y-2">
+                      <Skeleton className="h-4 w-40" />
+                      <Skeleton className="h-2 w-full" />
+                      <Skeleton className="h-4 w-48" />
+                    </div>
+                  </BrandedCard>
+                </div>
+              ) : data?.knowledge_health ? (
+                <div style={{ marginBottom: spacing.section }}>
+                  <BrandedCard hoverable={false}>
+                    <KnowledgeHealthBar health={data.knowledge_health} />
+                  </BrandedCard>
+                </div>
+              ) : null}
+
+              {/* Nudge */}
+              {data?.nudge && (
+                <div style={{ marginBottom: spacing.section }}>
+                  <NudgeCard nudge={data.nudge} />
+                </div>
+              )}
+
+              {/* Your Focus Areas */}
+              {streams.length > 0 && (
+                <div style={{ marginBottom: spacing.section }}>
+                  <h2
+                    style={{
+                      fontSize: typography.sectionTitle.size,
+                      fontWeight: typography.sectionTitle.weight,
+                      lineHeight: typography.sectionTitle.lineHeight,
+                      color: colors.headingText,
+                      marginBottom: spacing.element,
+                    }}
+                  >
+                    Your Focus Areas
+                  </h2>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {streams.filter(s => !s.is_archived).map((stream) => (
+                      <Link
+                        key={stream.id}
+                        to={`/streams/${stream.id}`}
+                        className="block no-underline"
+                      >
+                        <BrandedCard variant="info">
+                          <p
+                            className="truncate"
+                            style={{
+                              fontSize: typography.body.size,
+                              fontWeight: '500',
+                              color: colors.headingText,
+                              marginBottom: spacing.tight,
+                            }}
+                          >
+                            {stream.name}
+                          </p>
+                          <StreamDensityCard
+                            densityScore={stream.density_score}
+                            details={stream.density_details}
+                            compact
+                          />
+                          <p
+                            className="mt-1"
+                            style={{
+                              fontSize: typography.caption.size,
+                              color: colors.secondaryText,
+                            }}
+                          >
+                            {stream.entry_count ?? stream.density_details?.entry_count ?? 0} items
+                          </p>
+                        </BrandedCard>
+                      </Link>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Recent Documents */}
+              <div style={{ marginBottom: spacing.section }}>
+                <h2
+                  style={{
+                    fontSize: typography.sectionTitle.size,
+                    fontWeight: typography.sectionTitle.weight,
+                    lineHeight: typography.sectionTitle.lineHeight,
+                    color: colors.headingText,
+                    marginBottom: spacing.element,
+                  }}
+                >
+                  Recent Documents
+                </h2>
+                <BrandedCard hoverable={false}>
+                  {docsLoading ? (
+                    <div className="space-y-3">
+                      {Array.from({ length: 3 }).map((_, i) => (
+                        <Skeleton key={i} className="h-6 w-full" />
+                      ))}
+                    </div>
+                  ) : recentDocs === null ? (
+                    <div className="flex flex-col items-center gap-2 py-6">
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.3 }} />
+                        <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.2 }} />
+                        <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.15 }} />
+                      </div>
+                      <p style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
+                        Your briefings and research will appear here
+                      </p>
+                    </div>
+                  ) : recentDocs.length === 0 ? (
+                    <div className="flex flex-col items-center gap-2 py-6">
+                      <div className="flex items-center gap-1.5">
+                        <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.3 }} />
+                        <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.2 }} />
+                        <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.15 }} />
+                      </div>
+                      <p style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
+                        Your briefings and research will appear here
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="divide-y" style={{ borderColor: colors.subtleBorder }}>
+                      {recentDocs.map((doc) => (
+                        <Link
+                          key={doc.id}
+                          to={`/documents/${doc.id}`}
+                          className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 no-underline hover:opacity-80 transition-opacity"
+                        >
+                          {doc.doc_type === 'company_intel' ? (
+                            <Building2 className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
+                          ) : (
+                            <FileText className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
+                          )}
+                          <span
+                            className="truncate flex-1"
+                            style={{
+                              fontSize: typography.body.size,
+                              color: colors.headingText,
+                            }}
+                          >
+                            {doc.title}
+                          </span>
+                          <span
+                            className="shrink-0 flex items-center gap-1"
+                            style={{
+                              fontSize: typography.caption.size,
+                              color: colors.secondaryText,
+                            }}
+                          >
+                            <Clock className="size-3" />
+                            {formatRelativeTime(doc.created_at)}
+                          </span>
+                        </Link>
+                      ))}
+                    </div>
+                  )}
+                  <div className="mt-3 pt-3 border-t" style={{ borderColor: colors.subtleBorder }}>
+                    <Link
+                      to="/documents"
+                      className="text-sm no-underline hover:underline"
+                      style={{ color: 'var(--brand-coral)' }}
+                    >
+                      View all docs &rarr;
+                    </Link>
+                  </div>
+                </BrandedCard>
               </div>
-            </div>
-          ) : !isLoading && streams.length === 0 ? (
-            <div
-              className="flex flex-col items-center justify-center text-center"
-              style={{ backgroundColor: 'rgba(233,77,53,0.02)', borderRadius: '16px', padding: '48px 24px' }}
-            >
-              <EmptyWorkspaceIllustration />
-              <h2
-                className="mt-5"
-                style={{
-                  fontSize: typography.sectionTitle.size,
-                  fontWeight: typography.sectionTitle.weight,
-                  color: colors.headingText,
-                }}
-              >
-                Build your knowledge graph
-              </h2>
-              <p
-                className="mt-1 max-w-sm"
-                style={{
-                  fontSize: typography.body.size,
-                  color: colors.secondaryText,
-                }}
-              >
-                Create a focus area for each project, account, or initiative
-                you're working on. Flywheel compounds everything you learn.
-              </p>
-              <Link
-                to="/streams/new"
-                className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium no-underline transition-all duration-200 hover:shadow-md hover:-translate-y-px"
-                style={{
-                  background: `linear-gradient(135deg, var(--brand-coral), var(--brand-gradient-end))`,
-                  color: '#fff',
-                }}
-              >
-                Create your first focus area
-              </Link>
-            </div>
-          ) : null}
+
+              {/* Suggested Actions (cards from briefing API) */}
+              {isLoading ? (
+                <div style={{ marginBottom: spacing.section }}>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {Array.from({ length: 3 }).map((_, i) => (
+                      <Skeleton key={i} className="h-32 rounded-xl" />
+                    ))}
+                  </div>
+                </div>
+              ) : data?.cards && data.cards.length > 0 ? (
+                <div style={{ marginBottom: spacing.section }}>
+                  <h2
+                    style={{
+                      fontSize: typography.sectionTitle.size,
+                      fontWeight: typography.sectionTitle.weight,
+                      lineHeight: typography.sectionTitle.lineHeight,
+                      color: colors.headingText,
+                      marginBottom: spacing.element,
+                    }}
+                  >
+                    Suggested Actions
+                  </h2>
+                  <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                    {data.cards.map((card, i) => {
+                      if (card.card_type === 'personal_gap') {
+                        let teamCount = 0
+                        let myCount = 0
+                        if (card.reason) {
+                          const teamMatch = card.reason.match(/(\d+)\s+entr(?:y|ies)\s+from\s+other/)
+                          const myMatch = card.reason.match(/(\d+)\s+from\s+you/)
+                          if (teamMatch) teamCount = parseInt(teamMatch[1], 10)
+                          if (myMatch) myCount = parseInt(myMatch[1], 10)
+                        }
+                        return (
+                          <PersonalGapCard
+                            key={i}
+                            title={card.title}
+                            detail={card.body}
+                            streamId={card.stream_id ?? ''}
+                            teamCount={teamCount}
+                            myCount={myCount}
+                          />
+                        )
+                      }
+                      return <BriefingCard key={i} card={card} />
+                    })}
+                  </div>
+                </div>
+              ) : !isLoading && streams.length === 0 ? (
+                <div
+                  className="flex flex-col items-center justify-center text-center"
+                  style={{ backgroundColor: 'rgba(233,77,53,0.02)', borderRadius: '16px', padding: '48px 24px' }}
+                >
+                  <EmptyWorkspaceIllustration />
+                  <h2
+                    className="mt-5"
+                    style={{
+                      fontSize: typography.sectionTitle.size,
+                      fontWeight: typography.sectionTitle.weight,
+                      color: colors.headingText,
+                    }}
+                  >
+                    Build your knowledge graph
+                  </h2>
+                  <p
+                    className="mt-1 max-w-sm"
+                    style={{
+                      fontSize: typography.body.size,
+                      color: colors.secondaryText,
+                    }}
+                  >
+                    Create a focus area for each project, account, or initiative
+                    you&apos;re working on. Flywheel compounds everything you learn.
+                  </p>
+                  <Link
+                    to="/streams/new"
+                    className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium no-underline transition-all duration-200 hover:shadow-md hover:-translate-y-px"
+                    style={{
+                      background: `linear-gradient(135deg, var(--brand-coral), var(--brand-gradient-end))`,
+                      color: '#fff',
+                    }}
+                  >
+                    Create your first focus area
+                  </Link>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       </div>
 

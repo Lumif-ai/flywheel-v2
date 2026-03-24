@@ -108,9 +108,21 @@ export interface NudgeResponse {
   has_research_action?: boolean
 }
 
+export interface FirstVisitData {
+  briefing_html: string | null
+  intel_summary: {
+    total_items: number
+    categories: { file_name: string; item_count: number }[]
+  } | null
+  primary_priority: string
+}
+
 export interface BriefingResponse {
   greeting: string
   cards: BriefingCard[]
+  card_count?: number
   knowledge_health: KnowledgeHealth
   nudge: NudgeResponse | null
+  is_first_visit: boolean
+  first_visit: FirstVisitData | null
 }
