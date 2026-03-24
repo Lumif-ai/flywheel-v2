@@ -1002,6 +1002,11 @@ async def _execute_company_intel(
         ),
     }
 
+    # Normalize domain for all entries so cache lookup works
+    import urllib.parse as _urlparse
+    _parsed = _urlparse.urlparse(url if url.startswith("http") else f"https://{url}")
+    company_domain = (_parsed.hostname or url).removeprefix("www.").lower()
+
     files_written = 0
     for filename, (content_lines, detail) in section_map.items():
         if not content_lines:
@@ -1011,6 +1016,7 @@ async def _execute_company_intel(
             "detail": detail,
             "confidence": "medium",
             "content": content_lines,
+            "metadata": {"company_domain": company_domain, "source_url": url},
         }
 
         try:

@@ -504,62 +504,61 @@ export function useOnboarding() {
     }
   }, [ensureSession])
 
-  const loadCachedIntel = useCallback(async (domain: string, categories: string[]): Promise<boolean> => {
-    // Fetch entries from context API for this domain using the entries-by-file endpoint
-    // Only include entries that actually mention this domain
+  const loadCachedIntel = useCallback(async (domain: string): Promise<boolean> => {
+    // Single endpoint: GET /context/company/{domain}/entries
+    // Returns entries grouped by category, scoped by metadata.company_domain
     try {
-      const allItems: CrawlItem[] = []
-      const edited: Record<string, EditedCategory> = {}
-
-      // Icon mapping for known category types
       const categoryIcons: Record<string, string> = {
         company_info: 'Building2', product: 'Package', products: 'Package',
-        team: 'Users', market: 'TrendingUp', technology: 'Cpu',
-        customer: 'UserCheck', customers_served: 'UserCheck',
+        'product-modules': 'Package', positioning: 'Building2',
+        team: 'Users', market: 'TrendingUp', 'market-taxonomy': 'TrendingUp',
+        technology: 'Cpu', customer: 'UserCheck', customers_served: 'UserCheck',
+        'icp-profiles': 'UserCheck', 'competitive-intel': 'TrendingUp',
         financial: 'DollarSign', contacts: 'Users',
       }
 
-      for (const fileName of categories) {
-        try {
-          const res = await api.get<{ items: { file_name: string; content: string; detail: string; source: string; confidence: string }[] }>(
-            `/context/files/${encodeURIComponent(fileName)}/entries?limit=100`
-          )
-          if (!res.items || res.items.length === 0) continue
+      const res = await api.get<{
+        domain: string
+        categories: string[]
+        entry_count: number
+        groups: Record<string, { content: string; detail: string; source: string; confidence: string }[]>
+      }>(`/context/company/${encodeURIComponent(domain)}/entries`)
 
-          // The backend company lookup already validated these categories belong
-          // to the queried company (via co-creation window). Use all entries.
-          const relevant = res.items
+      if (res.entry_count === 0) return false
 
-          const cat = fileName.replace('.md', '').replace('company-', '')
-          // Use detail field (short) when available, otherwise extract first line from content
-          const itemTexts = relevant.map(e => {
-            if (e.detail && e.detail.length > 0 && e.detail.length < 200) return e.detail
-            // Extract first meaningful line, strip HTML/cite tags, truncate
-            const cleaned = e.content
-              .replace(/<cite[^>]*>.*?<\/cite>/g, '')
-              .replace(/<[^>]+>/g, '')
-              .trim()
-            const firstLine = cleaned.split('\n').find(l => l.trim().length > 0) ?? cleaned
-            return firstLine.length > 120 ? firstLine.slice(0, 117) + '...' : firstLine
-          })
+      const allItems: CrawlItem[] = []
+      const edited: Record<string, EditedCategory> = {}
 
-          const group: CrawlItem = {
-            category: cat,
-            icon: categoryIcons[cat] ?? 'Building2',
-            label: cat.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase()),
-            items: itemTexts,
-            count: itemTexts.length,
-          }
-          allItems.push(group)
-          edited[cat] = {
-            items: [...itemTexts],
-            meta: relevant.map(e => ({
-              source: (e.source === 'user_input' ? 'user_input' : 'crawler') as 'crawler' | 'user_input',
-              confidence: (e.confidence === 'verified' ? 'verified' : 'crawled') as 'crawled' | 'verified' | 'confirmed',
-            })),
-          }
-        } catch {
-          continue
+      for (const [cat, entries] of Object.entries(res.groups)) {
+        // Use detail (short) or extract first line from content
+        const itemTexts = entries.map(e => {
+          if (e.detail && e.detail.length > 0 && e.detail.length < 200) return e.detail
+          const cleaned = e.content
+            .replace(/<cite[^>]*>.*?<\/cite>/g, '')
+            .replace(/<[^>]+>/g, '')
+            .trim()
+          const firstLine = cleaned.split('\n').find(l => l.trim().length > 0) ?? cleaned
+          return firstLine.length > 120 ? firstLine.slice(0, 117) + '...' : firstLine
+        })
+
+        const label = cat
+          .replace(/-/g, ' ')
+          .replace(/_/g, ' ')
+          .replace(/\b\w/g, c => c.toUpperCase())
+
+        allItems.push({
+          category: cat,
+          icon: categoryIcons[cat] ?? 'Building2',
+          label,
+          items: itemTexts,
+          count: itemTexts.length,
+        })
+        edited[cat] = {
+          items: [...itemTexts],
+          meta: entries.map(e => ({
+            source: (e.source === 'user_input' ? 'user_input' : 'crawler') as 'crawler' | 'user_input',
+            confidence: (e.confidence === 'verified' ? 'verified' : 'crawled') as 'crawled' | 'verified' | 'confirmed',
+          })),
         }
       }
 
@@ -587,7 +586,7 @@ export function useOnboarding() {
         ? (Date.now() - new Date(res.last_updated).getTime()) / (1000 * 60 * 60 * 24)
         : Infinity
 
-      const loaded = await loadCachedIntel(domain, res.categories)
+      const loaded = await loadCachedIntel(domain)
       if (!loaded) {
         // Fallback to full crawl
         await startCrawl(url)

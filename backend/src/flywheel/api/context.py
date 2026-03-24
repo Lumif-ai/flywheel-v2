@@ -585,65 +585,29 @@ async def company_lookup(
     """Cache-first company lookup: check if we already have intelligence for a domain."""
     normalized = _normalize_domain(domain)
 
-    # Derive company name variants from domain for broader matching
-    # e.g. "movingwalls.com" → search for "movingwalls.com", "movingwalls", "moving walls"
-    import re as _re
-    name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
-    search_terms = [normalized, name_part]
-    # Add spaced/separated variants
-    if "-" in name_part or "_" in name_part:
-        search_terms.append(name_part.replace("-", " ").replace("_", " "))
-    # For joined words, insert space before uppercase or try common splits
-    # "movingwalls" → "moving walls" via regex split on word boundaries
-    if name_part.isalpha() and len(name_part) > 5:
-        # CamelCase split: "MovingWalls" → "Moving Walls"
-        camel_split = _re.sub(r"([a-z])([A-Z])", r"\1 \2", name_part)
-        if camel_split != name_part:
-            search_terms.append(camel_split)
-        # Also add the name_part with % between each pair of chars for ILIKE
-        # This is expensive but catches "movingwalls" → "Moving Walls"
-        # by searching content ILIKE '%moving%walls%' (splitting at reasonable boundaries)
-
-    # Build OR conditions for all search variants
-    content_conditions = []
-    for term in search_terms:
-        content_conditions.append(ContextEntry.file_name.ilike(f"%{term}%"))
-        content_conditions.append(ContextEntry.content.ilike(f"%{term}%"))
-
-    # Phase 1: Find entries that directly mention the company
+    # Primary lookup: metadata company_domain (set by crawl pipeline)
+    # This is the authoritative way to find entries for a company
     base = select(ContextEntry).where(
         ContextEntry.deleted_at.is_(None),
-        or_(*content_conditions),
+        ContextEntry.metadata_["company_domain"].astext == normalized,
     )
     result = await db.execute(base)
-    seed_entries = result.scalars().all()
+    entries = result.scalars().all()
 
-    # Phase 2: If we found matches, also grab co-created entries from the same
-    # crawl session (same source, created within 5 minutes of matched entries).
-    # The onboarding crawl creates multiple entries but only some mention the
-    # company name — the others (market-taxonomy, products, etc.) don't.
-    entries = list(seed_entries)
-    if seed_entries:
-        from datetime import timedelta as _td
-        seed_sources = {e.source for e in seed_entries}
-        onboarding_sources = seed_sources & set(_ONBOARDING_SOURCES)
-        if onboarding_sources:
-            seed_times = [e.created_at for e in seed_entries if e.created_at]
-            if seed_times:
-                min_time = min(seed_times) - _td(minutes=5)
-                max_time = max(seed_times) + _td(minutes=5)
-                seed_ids = {e.id for e in seed_entries}
-                co_result = await db.execute(
-                    select(ContextEntry).where(
-                        ContextEntry.deleted_at.is_(None),
-                        ContextEntry.source.in_(list(onboarding_sources)),
-                        ContextEntry.created_at >= min_time,
-                        ContextEntry.created_at <= max_time,
-                        ContextEntry.id.notin_(seed_ids),
-                    )
-                )
-                co_entries = co_result.scalars().all()
-                entries.extend(co_entries)
+    # Fallback for entries created before metadata was populated:
+    # search content for domain or company name
+    if not entries:
+        name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
+        content_conditions = [
+            ContextEntry.content.ilike(f"%{normalized}%"),
+            ContextEntry.content.ilike(f"%{name_part}%"),
+        ]
+        fallback = select(ContextEntry).where(
+            ContextEntry.deleted_at.is_(None),
+            or_(*content_conditions),
+        )
+        result = await db.execute(fallback)
+        entries = result.scalars().all()
 
     if not entries:
         return CompanyLookupResponse(exists=False)
@@ -671,6 +635,57 @@ async def company_lookup(
         source=most_common_source,
         verified_count=verified_count,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /context/company/{domain}/entries — all entries for a company
+# ---------------------------------------------------------------------------
+
+
+@router.get("/company/{domain}/entries")
+async def company_entries(
+    domain: str,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Return all context entries for a company, grouped by category."""
+    normalized = _normalize_domain(domain)
+
+    # Primary: metadata company_domain
+    base = select(ContextEntry).where(
+        ContextEntry.deleted_at.is_(None),
+        ContextEntry.metadata_["company_domain"].astext == normalized,
+    )
+    result = await db.execute(base)
+    entries = result.scalars().all()
+
+    # Fallback: content-based matching for legacy entries
+    if not entries:
+        name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
+        fallback = select(ContextEntry).where(
+            ContextEntry.deleted_at.is_(None),
+            or_(
+                ContextEntry.content.ilike(f"%{normalized}%"),
+                ContextEntry.content.ilike(f"%{name_part}%"),
+            ),
+        )
+        result = await db.execute(fallback)
+        entries = result.scalars().all()
+
+    # Group by file_name (category)
+    grouped: dict[str, list[dict]] = {}
+    for e in entries:
+        cat = e.file_name
+        if cat not in grouped:
+            grouped[cat] = []
+        grouped[cat].append(_entry_to_dict(e))
+
+    return {
+        "domain": normalized,
+        "categories": sorted(grouped.keys()),
+        "entry_count": len(entries),
+        "groups": grouped,
+    }
 
 
 # ---------------------------------------------------------------------------
