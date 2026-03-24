@@ -19,6 +19,7 @@ from flywheel.db.models import (
     ContextEntity,
     ContextEntityEntry,
     ContextEntry,
+    SkillRun,
     SuggestionDismissal,
     User,
     WorkItem,
@@ -50,7 +51,7 @@ async def assemble_briefing(
     """Assemble the briefing for a user: greeting, cards, knowledge health, nudge.
 
     Returns a dict matching the BriefingResponse schema:
-    {greeting, cards[], card_count, knowledge_health, nudge}
+    {greeting, cards[], card_count, knowledge_health, nudge, is_first_visit, first_visit}
     """
     now = datetime.datetime.now(datetime.timezone.utc)
     today = now.date()
@@ -79,13 +80,112 @@ async def assemble_briefing(
     # Truncate to max
     cards = all_cards[:MAX_CARDS]
 
+    # First-visit detection and data
+    is_first_visit, first_visit_data = await _build_first_visit_data(session)
+
     return {
         "greeting": greeting,
         "cards": cards,
         "card_count": len(cards),
         "knowledge_health": knowledge_health,
         "nudge": nudge,
+        "is_first_visit": is_first_visit,
+        "first_visit": first_visit_data,
     }
+
+
+# ---------------------------------------------------------------------------
+# First-visit detection
+# ---------------------------------------------------------------------------
+
+
+async def _build_first_visit_data(session: AsyncSession) -> tuple[bool, dict | None]:
+    """Detect first-visit state and assemble first-visit payload.
+
+    First visit = tenant has 2 or fewer completed skill runs (onboarding runs only).
+    Returns (is_first_visit, first_visit_data_dict | None).
+    """
+    try:
+        # Count completed skill runs
+        run_count_result = await session.execute(
+            select(func.count()).select_from(
+                select(SkillRun).where(
+                    SkillRun.status == "completed",
+                ).subquery()
+            )
+        )
+        completed_runs = run_count_result.scalar() or 0
+        is_first_visit = completed_runs <= 2  # onboarding runs only
+
+        if not is_first_visit:
+            return False, None
+
+        # Fetch latest meeting-prep skill run with rendered HTML
+        briefing_html: str | None = None
+        run_result = await session.execute(
+            select(SkillRun).where(
+                SkillRun.skill_name == "meeting-prep",
+                SkillRun.status == "completed",
+                SkillRun.rendered_html.isnot(None),
+            ).order_by(SkillRun.created_at.desc()).limit(1)
+        )
+        meeting_prep_run = run_result.scalar_one_or_none()
+        if meeting_prep_run:
+            briefing_html = meeting_prep_run.rendered_html
+
+        # Fetch company intel context entries for intel summary
+        intel_summary: dict | None = None
+        entries_result = await session.execute(
+            select(ContextEntry).where(
+                ContextEntry.source == "company-intel-onboarding",
+                ContextEntry.deleted_at.is_(None),
+            )
+        )
+        entries = entries_result.scalars().all()
+        if entries:
+            categories = []
+            for e in entries:
+                items = [
+                    line.strip()
+                    for line in (e.content or "").split("\n")
+                    if line.strip()
+                ]
+                categories.append(
+                    {"file_name": e.file_name, "item_count": len(items)}
+                )
+            intel_summary = {
+                "total_items": sum(c["item_count"] for c in categories),
+                "categories": categories,
+            }
+
+        # Determine primary priority from active work streams
+        primary_priority = "grow_revenue"  # default
+        streams_result = await session.execute(
+            select(WorkStream.name).where(
+                WorkStream.archived_at.is_(None),
+            )
+        )
+        stream_names = [r[0] for r in streams_result.all()]
+        priority_map = {
+            "Revenue": "grow_revenue",
+            "Fundraise": "raise_capital",
+            "Market": "track_competitors",
+        }
+        for name in stream_names:
+            if name in priority_map:
+                primary_priority = priority_map[name]
+                break
+
+        first_visit_data = {
+            "briefing_html": briefing_html,
+            "intel_summary": intel_summary,
+            "primary_priority": primary_priority,
+        }
+        return True, first_visit_data
+
+    except Exception:
+        logger.warning("First-visit data assembly failed", exc_info=True)
+        return False, None
 
 
 # ---------------------------------------------------------------------------

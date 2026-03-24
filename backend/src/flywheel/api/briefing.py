@@ -104,12 +104,20 @@ class NudgeResponse(BaseModel):
     has_research_action: bool = False
 
 
+class FirstVisitData(BaseModel):
+    briefing_html: str | None = None
+    intel_summary: dict | None = None
+    primary_priority: str = "grow_revenue"
+
+
 class BriefingResponse(BaseModel):
     greeting: str
     cards: list[BriefingCard]
     card_count: int
     knowledge_health: KnowledgeHealth
     nudge: NudgeResponse | None = None
+    is_first_visit: bool = False
+    first_visit: FirstVisitData | None = None
 
 
 class NudgeDismissRequest(BaseModel):
