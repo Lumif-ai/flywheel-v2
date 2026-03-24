@@ -19,13 +19,14 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from flywheel.api.deps import get_current_user, get_db_unscoped, get_tenant_db, require_tenant
-from flywheel.auth.jwt import TokenPayload
+from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import (
     ContextEntry,
     OnboardingSession,
@@ -114,6 +115,12 @@ class StreamDef(BaseModel):
 
 class CreateStreamsRequest(BaseModel):
     streams: list[StreamDef] = Field(..., min_length=1, max_length=10)
+
+
+class MeetingPrepRequest(BaseModel):
+    linkedin_url: str = Field(..., min_length=1, max_length=500)
+    agenda: str = Field(default="", max_length=2000)
+    meeting_type: str = Field(default="discovery", max_length=50)
 
 
 class MeetingNote(BaseModel):
@@ -261,13 +268,13 @@ async def crawl(
     body: CrawlRequest,
     user: TokenPayload = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_unscoped),
-) -> EventSourceResponse:
-    """Start a company crawl and stream categorized results via SSE.
+):
+    """Start a company crawl and return the run_id for SSE streaming.
 
     Anonymous users can use this endpoint (no tenant required).
     Creates a SkillRun with skill_name='company-intel' and returns
-    an SSE stream that polls for events, emitting crawl_item events
-    with category, icon, content, and running count.
+    JSON with run_id. Frontend connects to /skills/runs/{run_id}/stream
+    for SSE events.
     """
     # Validate URL format
     if not _URL_RE.match(body.url):
@@ -276,9 +283,12 @@ async def crawl(
             detail="Invalid URL: must start with http:// or https://",
         )
 
+    # tenant_id is guaranteed by deps.get_current_user (auto-provisions anonymous users)
+    tenant_id = user.tenant_id or user.sub
+
     # Create SkillRun record
     run = SkillRun(
-        tenant_id=user.tenant_id or user.sub,
+        tenant_id=tenant_id,
         user_id=user.sub,
         skill_name="company-intel",
         input_text=body.url,
@@ -289,11 +299,29 @@ async def crawl(
     await db.refresh(run)
     await db.commit()
 
-    run_id = run.id
+    return {"run_id": str(run.id)}
+
+
+# SSE stream endpoint for crawl events (kept for backward compatibility)
+@router.get("/crawl/{run_id}/stream")
+async def crawl_stream(
+    run_id: str,
+    token: str | None = None,
+    cred: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+) -> EventSourceResponse:
+    """Stream crawl events via SSE for a given run_id.
+
+    Accepts JWT via Authorization header OR ?token= query param
+    (EventSource API cannot send custom headers).
+    """
+    jwt_token = cred.credentials if cred else token
+    if not jwt_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = decode_jwt(jwt_token)
 
     async def event_generator():
-        # Yield started event immediately
-        yield {"event": "started", "data": json.dumps({"run_id": str(run_id)})}
+        # Yield started event (mapped to 'stage' for useSSE compatibility)
+        yield {"event": "stage", "data": json.dumps({"run_id": str(run_id), "stage": "started"})}
 
         factory = get_session_factory()
         seen_events = 0
@@ -315,34 +343,104 @@ async def crawl(
                 # Yield any new events with category enrichment
                 events_log = skill_run.events_log or []
                 for evt in events_log[seen_events:]:
-                    item_count += 1
-                    evt_data = evt.get("data", evt)
-                    content = ""
-                    if isinstance(evt_data, dict):
-                        content = evt_data.get("content", evt_data.get("message", ""))
-                    elif isinstance(evt_data, str):
-                        content = evt_data
-
-                    category = _detect_category(content)
-                    icon = _CATEGORY_ICONS.get(category, "Building2")
-
-                    yield {
-                        "event": "crawl_item",
-                        "data": json.dumps({
-                            "category": category,
-                            "icon": icon,
-                            "content": content,
-                            "count": item_count,
-                        }),
-                    }
                     seen_events += 1
+                    evt_type = evt.get("event", "")
+                    evt_data = evt.get("data", evt)
+
+                    # Discovery events: grouped intelligence items
+                    if evt_type == "discovery" and isinstance(evt_data, dict):
+                        item_count += 1
+                        yield {
+                            "event": "text",
+                            "data": json.dumps({
+                                "category": evt_data.get("category", "company_info"),
+                                "icon": evt_data.get("icon", "Building2"),
+                                "label": evt_data.get("label", ""),
+                                "items": evt_data.get("items", []),
+                                "count": item_count,
+                            }),
+                        }
+                    # Stage events: progress updates (shown as status text)
+                    elif evt_type == "stage" and isinstance(evt_data, dict):
+                        yield {
+                            "event": "stage",
+                            "data": json.dumps({
+                                "stage": evt_data.get("stage", ""),
+                                "message": evt_data.get("message", ""),
+                            }),
+                        }
 
                 if skill_run.status in ("completed", "failed"):
                     yield {
-                        "event": "crawl_complete",
+                        "event": "done",
                         "data": json.dumps({
                             "total_items": item_count,
                             "summary": f"{item_count} entries deposited into your context store",
+                        }),
+                    }
+                    return
+            finally:
+                await session.close()
+
+    return EventSourceResponse(event_generator())
+
+
+# ---------------------------------------------------------------------------
+# GET /onboarding/run/{run_id}/stream -- generic SSE for onboarding skill runs
+# ---------------------------------------------------------------------------
+
+
+@router.get("/run/{run_id}/stream")
+async def onboarding_run_stream(
+    run_id: str,
+    token: str | None = None,
+    cred: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
+) -> EventSourceResponse:
+    """Stream events for any onboarding skill run (meeting-prep, etc.).
+
+    Same auth pattern as crawl_stream: accepts JWT via header or ?token= query param.
+    Passes through all events from events_log as-is, plus rendered_html in done event.
+    """
+    jwt_token = cred.credentials if cred else token
+    if not jwt_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    decode_jwt(jwt_token)
+
+    async def event_generator():
+        # Yield an initial event so the SSE connection is established immediately
+        yield {"event": "stage", "data": json.dumps({"stage": "queued", "message": "Preparing..."})}
+
+        factory = get_session_factory()
+        seen_events = 0
+
+        while True:
+            await asyncio.sleep(1)
+
+            session = factory()
+            try:
+                result = await session.execute(
+                    select(SkillRun).where(SkillRun.id == run_id)
+                )
+                skill_run = result.scalar_one_or_none()
+                if skill_run is None:
+                    yield {"event": "error", "data": json.dumps({"message": "Run not found"})}
+                    return
+
+                events_log = skill_run.events_log or []
+                for evt in events_log[seen_events:]:
+                    seen_events += 1
+                    evt_type = evt.get("event", "stage")
+                    evt_data = evt.get("data", evt)
+                    yield {"event": evt_type, "data": json.dumps(evt_data)}
+
+                if skill_run.status in ("completed", "failed"):
+                    yield {
+                        "event": "done",
+                        "data": json.dumps({
+                            "status": skill_run.status,
+                            "rendered_html": skill_run.rendered_html or "",
+                            "output": skill_run.output or "",
+                            "error": skill_run.error,
                         }),
                     }
                     return
@@ -399,6 +497,49 @@ async def create_streams(
         db=db,
     )
     return {"created": created}
+
+
+# ---------------------------------------------------------------------------
+# POST /onboarding/meeting-prep (authenticated, anonymous allowed)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/meeting-prep")
+async def meeting_prep(
+    body: MeetingPrepRequest,
+    user: TokenPayload = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """Start a meeting prep run and return run_id for SSE streaming.
+
+    Takes a LinkedIn URL and optional agenda. Creates a SkillRun with
+    skill_name='meeting-prep' that the job queue worker picks up.
+    The input_text is formatted as "LinkedIn: {url}\nAgenda: {agenda}".
+
+    Anonymous users can use this (subsidized).
+    """
+    tenant_id = user.tenant_id or user.sub
+
+    # Format input for the meeting-prep skill
+    input_parts = [f"LinkedIn: {body.linkedin_url.strip()}"]
+    if body.agenda.strip():
+        input_parts.append(f"Agenda: {body.agenda.strip()}")
+    if body.meeting_type:
+        input_parts.append(f"Type: {body.meeting_type}")
+
+    run = SkillRun(
+        tenant_id=tenant_id,
+        user_id=user.sub,
+        skill_name="meeting-prep",
+        input_text="\n".join(input_parts),
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    await db.commit()
+
+    return {"run_id": str(run.id)}
 
 
 # ---------------------------------------------------------------------------

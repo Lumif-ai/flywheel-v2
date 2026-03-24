@@ -238,6 +238,24 @@ async def me(
 
 
 # ---------------------------------------------------------------------------
+# GET /auth/api-key (authenticated -- check if user has a stored key)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/api-key")
+async def get_api_key_status(
+    user: TokenPayload = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """Check whether the authenticated user has a stored API key."""
+    result = await db.execute(
+        select(User.api_key_encrypted).where(User.id == user.sub)
+    )
+    encrypted = result.scalar_one_or_none()
+    return {"has_api_key": encrypted is not None}
+
+
+# ---------------------------------------------------------------------------
 # POST /auth/api-key (authenticated, requires tenant)
 # ---------------------------------------------------------------------------
 

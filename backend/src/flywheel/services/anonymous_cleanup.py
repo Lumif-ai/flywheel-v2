@@ -60,15 +60,17 @@ async def _cleanup_stale_anonymous_users():
     deleted_count = 0
 
     async with AsyncSession(engine) as db:
-        # Find local users who are still anonymous
+        # Find local users who are still anonymous.
+        # Note: User.id IS the Supabase Auth UID (set during anonymous provisioning),
+        # so no separate supabase_uid column is needed.
         if hasattr(User, "is_anonymous"):
             result = await db.execute(
-                select(User.id, User.supabase_uid)
+                select(User.id)
                 .where(User.is_anonymous == True)  # noqa: E712
                 .where(User.created_at < cutoff)
             )
         else:
-            # Fallback: users with no email (though current schema has email NOT NULL)
+            # Fallback: users with no email
             result = await db.execute(
                 select(User.id)
                 .where(User.email.is_(None))
@@ -79,7 +81,7 @@ async def _cleanup_stale_anonymous_users():
 
     for row in stale_users:
         user_id = row[0]
-        auth_uid = row[1] if len(row) > 1 else str(user_id)
+        auth_uid = str(user_id)  # User.id IS the Supabase Auth UID
         try:
             # Delete from Supabase Auth (synchronous SDK call)
             await asyncio.to_thread(

@@ -453,7 +453,7 @@ async def execute_run(run: SkillRun) -> None:
         if api_key is None:
             # Fall back to subsidy key for onboarding skills (anonymous users)
             from flywheel.config import settings
-            if run.skill_name in ("company-intel",) and settings.flywheel_subsidy_api_key:
+            if run.skill_name in ("company-intel", "meeting-prep") and settings.flywheel_subsidy_api_key:
                 api_key = settings.flywheel_subsidy_api_key
             else:
                 raise ValueError(
@@ -515,16 +515,30 @@ async def execute_run(run: SkillRun) -> None:
         )
 
         try:
-            # Engine dispatch (RT-03): check engine_module from DB
+            # Engine dispatch (RT-03): check engine_module from DB,
+            # with fallback for company-intel which has a dedicated Python engine
+            # and must work even before skill_definitions is seeded.
             has_engine = bool(skill_meta and skill_meta["engine_module"])
-            if has_engine:
-                if run.skill_name == "company-intel":
+            is_company_intel = run.skill_name == "company-intel"
+            is_meeting_prep = run.skill_name == "meeting-prep"
+            if has_engine or is_company_intel or is_meeting_prep:
+                if is_company_intel:
                     output, token_usage, tool_calls = await _execute_company_intel(
                         api_key=api_key,
                         input_text=run.input_text or "",
                         factory=factory,
                         run_id=run.id,
                         tenant_id=run.tenant_id,
+                        user_id=run.user_id,
+                    )
+                elif is_meeting_prep:
+                    output, token_usage, tool_calls = await _execute_meeting_prep(
+                        api_key=api_key,
+                        input_text=run.input_text or "",
+                        factory=factory,
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        user_id=run.user_id,
                     )
                 else:
                     engine_mod = skill_meta["engine_module"] if skill_meta else None
@@ -574,13 +588,17 @@ async def execute_run(run: SkillRun) -> None:
 
         # Render HTML output
         rendered_html = None
-        try:
-            from flywheel.engines.output_renderer import render_output
-            rendered_html = render_output(
-                run.skill_name, output, tool_attribution
-            )
-        except Exception as e:
-            logger.warning("Output rendering failed for %s: %s", run.skill_name, e)
+        if is_meeting_prep:
+            # Meeting-prep engine returns HTML directly as output
+            rendered_html = output
+        else:
+            try:
+                from flywheel.engines.output_renderer import render_output
+                rendered_html = render_output(
+                    run.skill_name, output, tool_attribution
+                )
+            except Exception as e:
+                logger.warning("Output rendering failed for %s: %s", run.skill_name, e)
 
         # Update run record with results
         total_tokens = (
@@ -701,6 +719,7 @@ async def _execute_company_intel(
     factory: async_sessionmaker,
     run_id: UUID,
     tenant_id: UUID,
+    user_id: UUID | None = None,
 ) -> tuple[str, dict, list]:
     """Execute the company-intel engine directly, bypassing the LLM tool-use loop.
 
@@ -762,18 +781,9 @@ async def _execute_company_intel(
         "data": {"stage": "structuring", "message": "Analyzing company information..."},
     })
 
-    # Set API key for sync Anthropic client used by structure_intelligence
-    original_key = os.environ.get("ANTHROPIC_API_KEY")
-    os.environ["ANTHROPIC_API_KEY"] = api_key
-    try:
-        intelligence = await asyncio.to_thread(
-            structure_intelligence, raw_text, "website-crawl"
-        )
-    finally:
-        if original_key is not None:
-            os.environ["ANTHROPIC_API_KEY"] = original_key
-        else:
-            os.environ.pop("ANTHROPIC_API_KEY", None)
+    intelligence = await asyncio.to_thread(
+        structure_intelligence, raw_text, "website-crawl", api_key=api_key
+    )
 
     tool_calls.append({"tool": "structure_intelligence", "input": "raw_text", "result_length": len(str(intelligence))})
 
@@ -795,23 +805,132 @@ async def _execute_company_intel(
         "data": {"stage": "enriching", "message": "Researching company online..."},
     })
 
-    os.environ["ANTHROPIC_API_KEY"] = api_key
-    try:
-        enriched = await asyncio.to_thread(
-            enrich_with_web_research, company_name, intelligence
-        )
-    finally:
-        if original_key is not None:
-            os.environ["ANTHROPIC_API_KEY"] = original_key
-        else:
-            os.environ.pop("ANTHROPIC_API_KEY", None)
+    enriched = await asyncio.to_thread(
+        enrich_with_web_research, company_name, intelligence, api_key=api_key
+    )
 
     tool_calls.append({"tool": "enrich_with_web_research", "input": company_name, "result_length": len(str(enriched))})
+
+    # Helper to build grouped discovery events from an intelligence dict
+    def _build_discoveries(data: dict) -> list[dict]:
+        """Build grouped discovery events — one per category with items list."""
+        groups: list[dict] = []
+
+        # Company overview
+        overview_items = []
+        if data.get("company_name"):
+            overview_items.append(data["company_name"])
+        if data.get("what_they_do"):
+            overview_items.append(data["what_they_do"])
+        if data.get("headquarters"):
+            overview_items.append(f"HQ: {data['headquarters']}")
+        if data.get("founding_year"):
+            overview_items.append(f"Founded: {data['founding_year']}")
+        if data.get("employees"):
+            overview_items.append(f"Team size: {data['employees']}")
+        if overview_items:
+            groups.append({"category": "company_info", "icon": "Building2",
+                           "label": "Company", "items": overview_items})
+
+        # Products
+        products = data.get("products") or []
+        if products:
+            items = []
+            for p in products[:6]:
+                items.append(p if isinstance(p, str) else p.get("name", str(p)) if isinstance(p, dict) else str(p))
+            groups.append({"category": "product", "icon": "Package",
+                           "label": "Products", "items": items})
+
+        # Target customers / ICP
+        customers = data.get("target_customers") or []
+        if customers:
+            items = []
+            for c in customers[:6]:
+                items.append(c if isinstance(c, str) else c.get("name", str(c)) if isinstance(c, dict) else str(c))
+            groups.append({"category": "customer", "icon": "UserCheck",
+                           "label": "Ideal Customers", "items": items})
+
+        # Industries
+        industries = data.get("industries") or []
+        if industries:
+            items = [str(i) for i in industries[:6]]
+            groups.append({"category": "market", "icon": "TrendingUp",
+                           "label": "Industries", "items": items})
+
+        # Competitors
+        competitors = data.get("competitors") or []
+        if competitors:
+            items = []
+            for c in competitors[:6]:
+                items.append(c if isinstance(c, str) else c.get("name", str(c)) if isinstance(c, dict) else str(c))
+            groups.append({"category": "market", "icon": "TrendingUp",
+                           "label": "Competitors", "items": items})
+
+        # Differentiators
+        diffs = data.get("key_differentiators") or []
+        if diffs:
+            items = [str(d) for d in diffs[:4]]
+            groups.append({"category": "technology", "icon": "Cpu",
+                           "label": "Differentiators", "items": items})
+
+        # Funding
+        if data.get("funding"):
+            groups.append({"category": "financial", "icon": "DollarSign",
+                           "label": "Funding", "items": [str(data["funding"])]})
+
+        # Key people (from enrichment)
+        people = data.get("key_people") or []
+        if people:
+            items = []
+            for p in people[:5]:
+                if isinstance(p, dict):
+                    items.append(f"{p.get('name', '?')} — {p.get('title', '?')}")
+                else:
+                    items.append(str(p))
+            groups.append({"category": "team", "icon": "Users",
+                           "label": "Key People", "items": items})
+
+        return groups
+
+    # Emit structured discoveries immediately (don't wait for enrichment)
+    structured_groups = _build_discoveries(intelligence)
+    discovery_count = 0
+    for group in structured_groups:
+        discovery_count += 1
+        await _append_event_atomic(factory, run_id, {
+            "event": "discovery",
+            "data": {
+                "category": group["category"],
+                "icon": group["icon"],
+                "label": group["label"],
+                "items": group["items"],
+                "count": discovery_count,
+            },
+        })
 
     await _append_event_atomic(factory, run_id, {
         "event": "stage",
         "data": {"stage": "enriched", "message": "Web research complete"},
     })
+
+    # Emit enrichment-only discoveries (key_people, funding, headquarters etc.
+    # that weren't in the structured output)
+    enrichment_groups = _build_discoveries(enriched)
+    # Only emit groups that are new or have more items than structured
+    structured_labels = {g["label"] for g in structured_groups}
+    for group in enrichment_groups:
+        if group["label"] not in structured_labels:
+            discovery_count += 1
+            await _append_event_atomic(factory, run_id, {
+                "event": "discovery",
+                "data": {
+                    "category": group["category"],
+                    "icon": group["icon"],
+                    "label": group["label"],
+                    "items": group["items"],
+                    "count": discovery_count,
+                },
+            })
 
     # Stage 4: Write to context store (async, tenant-scoped)
     await _append_event_atomic(factory, run_id, {
@@ -858,10 +977,15 @@ async def _execute_company_intel(
 
         try:
             async with factory() as session:
-                # Set tenant context for RLS
+                # Set tenant + user context for RLS and NOT NULL constraint
                 await session.execute(
                     sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
                     {"tid": str(tenant_id)},
+                )
+                _uid = str(user_id) if user_id else str(tenant_id)
+                await session.execute(
+                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                    {"uid": _uid},
                 )
                 await async_append_entry(
                     session=session,
@@ -874,7 +998,7 @@ async def _execute_company_intel(
             files_written += 1
         except Exception as e:
             write_results[filename] = f"ERROR: {e}"
-            logger.warning("Context write failed for %s: %s", filename, e)
+            logger.error("Context write failed for %s: %s", filename, e)
 
     tool_calls.append({"tool": "write_context", "input": str(list(section_map.keys())), "result_length": files_written})
 
@@ -911,10 +1035,715 @@ async def _execute_company_intel(
 
     output_parts.append(f"\n\nWrote intelligence to {files_written} context files.")
 
+    # Surface any write errors in output
+    failed_writes = {k: v for k, v in write_results.items() if v != "OK"}
+    if failed_writes:
+        output_parts.append("\nNote: Some context writes failed:")
+        for fname, err in failed_writes.items():
+            output_parts.append(f"  - {fname}: {err}")
+            logger.error("Context write failed for %s: %s", fname, err)
+
     # Token usage is approximate (sync client doesn't easily return counts)
     token_usage = {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-20250514"}
 
     return "\n".join(output_parts), token_usage, tool_calls
+
+
+async def _execute_meeting_prep(
+    api_key: str,
+    input_text: str,
+    factory: async_sessionmaker,
+    run_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID | None = None,
+) -> tuple[str, dict, list]:
+    """Execute the meeting-prep engine: research person + company, generate HTML briefing.
+
+    Parses LinkedIn URL and agenda from input_text, runs parallel web_search
+    research for the person and their company, generates a polished HTML briefing
+    via LLM, and writes contact info to the context store.
+
+    Args:
+        api_key: Anthropic API key (BYOK or subsidy).
+        input_text: Formatted as "LinkedIn: {url}\\nAgenda: {agenda}\\nType: {type}".
+        factory: Session factory for event logging and context writes.
+        run_id: SkillRun UUID for event logging.
+        tenant_id: Tenant UUID for context store writes.
+
+    Returns:
+        Tuple of (html_output, token_usage_dict, tool_calls_list).
+    """
+    import re
+    import anthropic
+
+    tool_calls = []
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    # ------------------------------------------------------------------
+    # Stage 1: Parse input
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "parsing", "message": "Preparing research..."},
+    })
+
+    # Extract fields from formatted input
+    linkedin_url = ""
+    agenda = ""
+    meeting_type = "discovery"
+
+    for line in input_text.strip().split("\n"):
+        if line.startswith("LinkedIn:"):
+            linkedin_url = line.split(":", 1)[1].strip()
+        elif line.startswith("Agenda:"):
+            agenda = line.split(":", 1)[1].strip()
+        elif line.startswith("Type:"):
+            meeting_type = line.split(":", 1)[1].strip()
+
+    # Extract person name from LinkedIn URL slug (e.g. /in/cheok-yen-kwan -> Cheok Yen Kwan)
+    person_name = "the contact"
+    slug_match = re.search(r"/in/([^/?]+)", linkedin_url)
+    if slug_match:
+        slug = slug_match.group(1)
+        person_name = slug.replace("-", " ").title()
+
+    # Try to extract company from the URL or we'll discover it during research
+    company_name = ""
+
+    logger.info(
+        "Meeting prep: person=%s, url=%s, agenda=%s, type=%s",
+        person_name, linkedin_url, agenda, meeting_type,
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 1b: Check context store for existing knowledge (the flywheel)
+    # ------------------------------------------------------------------
+    existing_contact = ""
+    existing_company_intel = ""
+    existing_meetings = ""
+    try:
+        from flywheel.storage import read_context, query_context
+        _uid = str(user_id) if user_id else str(tenant_id)
+        async with factory() as session:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            await session.execute(
+                sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                {"uid": _uid},
+            )
+            # Search for this person in contacts
+            contacts = await query_context(session, "contacts", search=person_name)
+            if contacts:
+                existing_contact = "\n".join(
+                    f"- {e.get('content', '')[:200]}" for e in contacts[:2]
+                )
+                logger.info("Meeting prep: found existing contact data for %s", person_name)
+
+            # Search for company intel
+            if company_name:
+                positioning = await query_context(session, "positioning", search=company_name)
+                if positioning:
+                    existing_company_intel = "\n".join(
+                        f"- {e.get('content', '')[:200]}" for e in positioning[:2]
+                    )
+
+            # Search for prior meetings with this person
+            meetings = await query_context(session, "meeting-history", search=person_name)
+            if meetings:
+                existing_meetings = "\n".join(
+                    f"- {e.get('content', '')[:200]}" for e in meetings[:3]
+                )
+                logger.info("Meeting prep: found %d prior meetings with %s", len(meetings), person_name)
+    except Exception as e:
+        logger.warning("Context lookup failed (proceeding with fresh research): %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 2 & 3: Research person + company via web_search
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "researching", "message": f"Researching {person_name}..."},
+    })
+
+    # Helper to run a sync Anthropic web_search call in a thread
+    def _research_person() -> tuple[dict, dict]:
+        """Web search for person info. Returns (person_data, usage)."""
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=3000,
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 5,
+                }],
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Research this person for a meeting briefing. "
+                        f"Their LinkedIn profile is: {linkedin_url}\n"
+                        f"Their name appears to be: {person_name}\n\n"
+                        f"Search Google for information about them. "
+                        f"Do NOT try to fetch LinkedIn directly — it blocks automated access. "
+                        f"Instead search for their name, role, company, and background from "
+                        f"Google-indexed sources, news articles, conference talks, blog posts, etc.\n\n"
+                        f"After researching, return ONLY a JSON object (no markdown fencing) with:\n"
+                        f"- name: string (their full name)\n"
+                        f"- title: string (current job title)\n"
+                        f"- company: string (current company name)\n"
+                        f"- location: string or null\n"
+                        f"- summary: string (2-3 sentence professional summary)\n"
+                        f"- education: list of strings (degrees/schools) or empty list\n"
+                        f"- experience_highlights: list of strings (notable career highlights)\n"
+                        f"- interests: list of strings (professional interests, topics they speak/write about)\n"
+                        f"- mutual_context: string or null (anything relevant for building rapport)\n"
+                    ),
+                }],
+            )
+
+            # Extract text from response
+            text_parts = []
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text_parts.append(block.text)
+
+            full_text = "\n".join(text_parts).strip()
+
+            # Parse JSON from response
+            import json as _json
+            json_match = re.search(r'\{[\s\S]*\}', full_text)
+            person_data = {}
+            if json_match:
+                try:
+                    person_data = _json.loads(json_match.group())
+                except _json.JSONDecodeError:
+                    person_data = {"name": person_name, "raw_text": full_text}
+            else:
+                person_data = {"name": person_name, "raw_text": full_text}
+
+            usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
+            return person_data, usage
+        except Exception:
+            logger.exception("_research_person failed")
+            return {"name": person_name}, {"input_tokens": 0, "output_tokens": 0}
+
+    def _research_company(co_name: str) -> tuple[dict, dict]:
+        """Web search for company info. Returns (company_data, usage)."""
+        if not co_name:
+            return {}, {"input_tokens": 0, "output_tokens": 0}
+
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                tools=[{
+                    "type": "web_search_20250305",
+                    "name": "web_search",
+                    "max_uses": 3,
+                }],
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Research the company '{co_name}' for a meeting briefing.\n\n"
+                        f"Search for: what they do, key products/services, industry, "
+                        f"company size, recent news, funding, competitors.\n\n"
+                        f"Return ONLY a JSON object (no markdown fencing) with:\n"
+                        f"- company_name: string\n"
+                        f"- what_they_do: string (1-2 sentence summary)\n"
+                        f"- products: list of strings\n"
+                        f"- industry: string\n"
+                        f"- size: string (e.g. '50-200 employees')\n"
+                        f"- recent_news: list of strings (2-3 recent headlines)\n"
+                        f"- competitors: list of strings\n"
+                        f"- headquarters: string or null\n"
+                    ),
+                }],
+            )
+
+            text_parts = []
+            for block in response.content:
+                if hasattr(block, "text"):
+                    text_parts.append(block.text)
+
+            full_text = "\n".join(text_parts).strip()
+
+            import json as _json
+            json_match = re.search(r'\{[\s\S]*\}', full_text)
+            company_data = {}
+            if json_match:
+                try:
+                    company_data = _json.loads(json_match.group())
+                except _json.JSONDecodeError:
+                    company_data = {"company_name": co_name, "raw_text": full_text}
+            else:
+                company_data = {"company_name": co_name, "raw_text": full_text}
+
+            usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
+            return company_data, usage
+        except Exception:
+            logger.exception("_research_company failed for %s", co_name)
+            return {"company_name": co_name}, {"input_tokens": 0, "output_tokens": 0}
+
+    # Run person research first (we need company name for company research)
+    person_data, person_usage = await asyncio.to_thread(_research_person)
+    total_input_tokens += person_usage.get("input_tokens", 0)
+    total_output_tokens += person_usage.get("output_tokens", 0)
+    tool_calls.append({
+        "tool": "web_search_person",
+        "input": linkedin_url,
+        "result_length": len(str(person_data)),
+    })
+
+    # Extract company name from person research
+    company_name = person_data.get("company", "")
+    person_name = person_data.get("name", person_name)
+
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {
+            "stage": "person_researched",
+            "message": f"Found: {person_name}" + (f" at {company_name}" if company_name else ""),
+        },
+    })
+
+    # Now research the company (if we have a name)
+    if company_name:
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "researching_company", "message": f"Researching {company_name}..."},
+        })
+
+        company_data, company_usage = await asyncio.to_thread(
+            _research_company, company_name
+        )
+        total_input_tokens += company_usage.get("input_tokens", 0)
+        total_output_tokens += company_usage.get("output_tokens", 0)
+        tool_calls.append({
+            "tool": "web_search_company",
+            "input": company_name,
+            "result_length": len(str(company_data)),
+        })
+    else:
+        company_data = {}
+
+    # ------------------------------------------------------------------
+    # Stage 4: Generate HTML briefing via LLM
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "generating", "message": "Generating briefing..."},
+    })
+
+    # Pre-load tenant context asynchronously (before entering sync thread)
+    _tenant_context_preloaded = ""
+    try:
+        ctx_files = ["positioning", "icp-profiles", "competitive-intel",
+                     "product-modules", "market-taxonomy"]
+        ctx_parts = []
+        for cf in ctx_files:
+            try:
+                async with factory() as _s:
+                    await _s.execute(
+                        sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                        {"tid": str(tenant_id)},
+                    )
+                    from sqlalchemy import select as _sel
+                    from flywheel.db.models import ContextEntry as _CE
+                    _rows = (await _s.execute(
+                        _sel(_CE.content).where(
+                            _CE.tenant_id == tenant_id,
+                            _CE.file_name == cf,
+                            _CE.deleted_at.is_(None),
+                        ).limit(5)
+                    )).scalars().all()
+                    if _rows:
+                        ctx_parts.append(f"### {cf}\n" + "\n".join(
+                            r[:500] if isinstance(r, str) else str(r)[:500] for r in _rows
+                        ))
+            except Exception:
+                continue
+        if ctx_parts:
+            _tenant_context_preloaded = "\n\n".join(ctx_parts)
+    except Exception:
+        pass
+
+    def _generate_briefing() -> tuple[str, dict]:
+        """Generate HTML briefing using the meeting-prep SKILL.md prompt.
+
+        Loads the full SKILL.md system prompt (from DB or filesystem) and
+        provides pre-collected research as context. Instructs Claude to skip
+        Steps 0-5 (research, already done by engine) and execute Steps 6-8
+        (hypothesis, questions, HTML briefing).
+        """
+        try:
+            client = anthropic.Anthropic(api_key=api_key)
+
+            today_str = datetime.now().strftime("%B %d, %Y")
+
+            # Load the meeting-prep SKILL.md system prompt
+            # Try DB first (skill_definitions), fall back to filesystem
+            skill_prompt = None
+            try:
+                import asyncio as _aio
+                _meta = _aio.get_event_loop().run_until_complete(
+                    _load_skill_from_db(factory, "meeting-prep")
+                )
+                if _meta and _meta.get("system_prompt"):
+                    skill_prompt = _meta["system_prompt"]
+            except Exception:
+                pass
+
+            if not skill_prompt:
+                # Fall back to reading SKILL.md from filesystem
+                skill_md_path = Path(__file__).resolve().parents[4] / "skills" / "meeting-prep" / "SKILL.md"
+                if skill_md_path.exists():
+                    raw = skill_md_path.read_text()
+                    # Strip YAML frontmatter
+                    if raw.startswith("---"):
+                        end = raw.find("---", 3)
+                        if end != -1:
+                            skill_prompt = raw[end + 3:].strip()
+                        else:
+                            skill_prompt = raw
+                    else:
+                        skill_prompt = raw
+
+            if not skill_prompt:
+                skill_prompt = "You are a meeting preparation specialist."
+
+            # Use pre-loaded tenant context (loaded async before thread)
+            tenant_context = _tenant_context_preloaded
+
+            # Build system prompt: focused on intel briefing (no questions)
+            system_prompt = (
+                f"{skill_prompt}\n\n"
+                "---\n\n"
+                "IMPORTANT OVERRIDE FOR THIS EXECUTION:\n\n"
+                "Steps 0-5 (research) have ALREADY been completed by the engine.\n\n"
+                "Your job: Generate a **business intelligence briefing** as HTML.\n\n"
+                "CRITICAL CONTENT RULES:\n"
+                "- DO NOT include 'Suggested Questions' or 'Question' sections\n"
+                "- DO NOT include objection prep sections\n"
+                "- FOCUS on business-relevant intelligence that helps the user "
+                "understand this person and their company in the context of "
+                "the user's OWN business\n"
+                "- If tenant context is provided below, cross-reference: how does "
+                "the contact's company relate to the tenant's business? Are they "
+                "a potential customer, partner, competitor?\n"
+                "- Include: partnership announcements, marketing spend/budgets, "
+                "technology investments, relevant industry news\n"
+                "- Include: other key people in the contact's team/department "
+                "(if found in research)\n"
+                "- Make every piece of intel actionable and specific\n\n"
+                "BRIEFING SECTIONS (in this order):\n"
+                "1. Header — person name, title, company, meeting date\n"
+                "2. About [Person] — role, background, career highlights\n"
+                "3. About [Company] — what they do, size, industry position\n"
+                "4. Business Relevance — how this company relates to YOUR business "
+                "(cross-reference tenant context), relevant spend, partnerships, "
+                "competitor usage\n"
+                "5. Key Team Members — other people in relevant roles at the company\n"
+                "6. Recent News & Signals — industry-relevant announcements, "
+                "funding, partnerships, regulatory changes\n"
+                "7. Talking Points — 3-4 specific, non-intrusive conversation starters "
+                "based on the intel\n\n"
+                "Output ONLY the HTML. No markdown fencing, no explanation.\n\n"
+                "HTML constraints: ONLY inline styles, no external CSS, no <style> blocks.\n"
+                "Design tokens:\n"
+                "- Font: Inter, -apple-system, sans-serif\n"
+                "- Max width: 720px, centered, padding 48px 24px\n"
+                "- Brand accent: #E94D35 (warm coral)\n"
+                "- Headings: #121212, Body: #374151, Secondary: #6B7280\n"
+                "- Sections separated by hr with border-top: 1px solid #E5E7EB\n"
+            )
+
+            import json as _json
+            user_content = (
+                f"Generate a business intelligence briefing for a **{meeting_type}** "
+                f"call on {today_str}.\n\n"
+                f"## Pre-Collected Research Data\n\n"
+                f"### Person Research\n"
+                f"```json\n{_json.dumps(person_data, indent=2, default=str)}\n```\n\n"
+                f"### Company Research\n"
+                f"```json\n{_json.dumps(company_data, indent=2, default=str)}\n```\n\n"
+            )
+            if tenant_context:
+                user_content += (
+                    f"## Our Business Context (tenant's own data)\n"
+                    f"Use this to cross-reference and show business relevance:\n\n"
+                    f"{tenant_context}\n\n"
+                )
+            if agenda:
+                user_content += f"### Meeting Agenda\n{agenda}\n\n"
+
+            # Add prior interaction context (the flywheel payoff)
+            if existing_contact or existing_meetings:
+                user_content += "## Prior Knowledge (from previous interactions)\n\n"
+                if existing_contact:
+                    user_content += f"### What we already knew about this person\n{existing_contact}\n\n"
+                if existing_meetings:
+                    user_content += f"### Previous meetings/interactions\n{existing_meetings}\n\n"
+                user_content += (
+                    "IMPORTANT: Reference prior interactions in the briefing. "
+                    "Show what's NEW since the last meeting vs what we already knew. "
+                    "This demonstrates compounding intelligence.\n\n"
+                )
+
+            user_content += (
+                f"### Meeting Details\n"
+                f"- Person: {person_name}\n"
+                f"- Company: {company_name or 'Unknown'}\n"
+                f"- LinkedIn: {linkedin_url}\n"
+                f"- Meeting type: {meeting_type}\n\n"
+                "Generate the HTML briefing now. Focus on business intelligence, "
+                "NOT interview questions."
+            )
+
+            response = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=8000,
+                system=system_prompt,
+                messages=[{"role": "user", "content": user_content}],
+            )
+
+            html = ""
+            for block in response.content:
+                if hasattr(block, "text"):
+                    html += block.text
+
+            # Strip markdown fencing if present
+            html = html.strip()
+            if html.startswith("```html"):
+                html = html[7:]
+            if html.startswith("```"):
+                html = html[3:]
+            if html.endswith("```"):
+                html = html[:-3]
+            html = html.strip()
+
+            usage = {
+                "input_tokens": response.usage.input_tokens,
+                "output_tokens": response.usage.output_tokens,
+            }
+            return html, usage
+        except Exception:
+            logger.exception("_generate_briefing failed")
+            raise
+
+    html_briefing, briefing_usage = await asyncio.to_thread(_generate_briefing)
+    total_input_tokens += briefing_usage.get("input_tokens", 0)
+    total_output_tokens += briefing_usage.get("output_tokens", 0)
+    tool_calls.append({
+        "tool": "generate_briefing",
+        "input": "person + company research",
+        "result_length": len(html_briefing),
+    })
+
+    # ------------------------------------------------------------------
+    # Stage 5: Write ALL research to context store (the flywheel)
+    #
+    # Every meeting prep compounds intelligence:
+    # 1. contacts       — person details (deduped by name)
+    # 2. meeting-history — what we prepped for, when, with whom
+    # 3. Company intel   — positioning, competitors, products (if new)
+    # 4. relationship-intel — how this person connects to our business
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "writing", "message": "Saving to context store..."},
+    })
+
+    from flywheel.storage import append_entry as async_append_entry
+
+    _uid = str(user_id) if user_id else str(tenant_id)
+    files_written = 0
+
+    async def _write_entry(file: str, detail: str, content_lines: list[str], source: str = "meeting-prep") -> bool:
+        """Write a single context entry with proper RLS context. Returns True on success."""
+        nonlocal files_written
+        if not content_lines:
+            return False
+        try:
+            async with factory() as session:
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                await session.execute(
+                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                    {"uid": _uid},
+                )
+                await async_append_entry(
+                    session=session,
+                    file=file,
+                    entry={"detail": detail, "confidence": "medium", "content": content_lines},
+                    source=source,
+                )
+                await session.commit()
+            files_written += 1
+            return True
+        except Exception as e:
+            logger.error("Context write failed for %s/%s: %s", file, detail, e)
+            return False
+
+    # --- 1. Contact card (deduped by person name) ---
+    contact_lines = []
+    if person_data.get("name"):
+        contact_lines.append(f"Name: {person_data['name']}")
+    if person_data.get("title"):
+        contact_lines.append(f"Title: {person_data['title']}")
+    if person_data.get("company"):
+        contact_lines.append(f"Company: {person_data['company']}")
+    if person_data.get("location"):
+        contact_lines.append(f"Location: {person_data['location']}")
+    if linkedin_url:
+        contact_lines.append(f"LinkedIn: {linkedin_url}")
+    if person_data.get("summary"):
+        contact_lines.append(f"Summary: {person_data['summary']}")
+    if person_data.get("education"):
+        for edu in person_data["education"][:3]:
+            contact_lines.append(f"Education: {edu}")
+    if person_data.get("experience_highlights"):
+        for exp in person_data["experience_highlights"][:3]:
+            contact_lines.append(f"Experience: {exp}")
+    if person_data.get("interests"):
+        contact_lines.append(f"Interests: {', '.join(person_data['interests'][:5])}")
+
+    pname = person_data.get("name", "unknown")
+    await _write_entry("contacts", f"{pname}", contact_lines)
+
+    # --- 2. Meeting history (every prep is a compounding event) ---
+    from datetime import datetime as _dt
+    meeting_lines = [
+        f"Date: {_dt.now().strftime('%Y-%m-%d')}",
+        f"Type: {meeting_type}",
+        f"Contact: {pname}",
+    ]
+    if person_data.get("company"):
+        meeting_lines.append(f"Company: {person_data['company']}")
+    if agenda:
+        meeting_lines.append(f"Agenda: {agenda}")
+    if linkedin_url:
+        meeting_lines.append(f"LinkedIn: {linkedin_url}")
+    meeting_lines.append("Status: prepared")
+
+    await _write_entry(
+        "meeting-history",
+        f"{pname} — {meeting_type} — {_dt.now().strftime('%Y-%m-%d')}",
+        meeting_lines,
+    )
+
+    # --- 3. Company intel (only if we researched the company) ---
+    if company_data and company_data.get("company_name"):
+        co = company_data
+
+        # Positioning
+        pos_lines = []
+        if co.get("company_name"):
+            pos_lines.append(f"Company: {co['company_name']}")
+        if co.get("what_they_do"):
+            pos_lines.append(f"Description: {co['what_they_do']}")
+        if co.get("industry"):
+            pos_lines.append(f"Industry: {co['industry']}")
+        if co.get("size"):
+            pos_lines.append(f"Size: {co['size']}")
+        if co.get("headquarters"):
+            pos_lines.append(f"Headquarters: {co['headquarters']}")
+        await _write_entry(
+            "positioning",
+            f"{co['company_name']} — from meeting-prep",
+            pos_lines,
+            source="meeting-prep",
+        )
+
+        # Competitors
+        competitors = co.get("competitors", [])
+        if competitors:
+            await _write_entry(
+                "competitive-intel",
+                f"{co['company_name']} competitors",
+                [str(c) for c in competitors[:6]],
+                source="meeting-prep",
+            )
+
+        # Products
+        products = co.get("products", [])
+        if products:
+            await _write_entry(
+                "product-modules",
+                f"{co['company_name']} products",
+                [str(p) for p in products[:6]],
+                source="meeting-prep",
+            )
+
+        # Recent news (high-value signal for future preps)
+        news = co.get("recent_news", [])
+        if news:
+            news_lines = []
+            for n in news[:5]:
+                if isinstance(n, dict):
+                    news_lines.append(f"{n.get('title', '')} ({n.get('date', '')})")
+                else:
+                    news_lines.append(str(n))
+            await _write_entry(
+                "market-signals",
+                f"{co['company_name']} — recent news",
+                news_lines,
+                source="meeting-prep",
+            )
+
+    # --- 4. Relationship intel (how this person connects to our business) ---
+    rel_lines = []
+    if person_data.get("mutual_context"):
+        rel_lines.append(f"Mutual context: {person_data['mutual_context']}")
+    if agenda:
+        rel_lines.append(f"Discussion topic: {agenda}")
+    if meeting_type:
+        rel_lines.append(f"Relationship stage: {meeting_type}")
+    if person_data.get("interests"):
+        rel_lines.append(f"Their interests: {', '.join(person_data['interests'][:5])}")
+
+    if rel_lines:
+        await _write_entry(
+            "relationship-intel",
+            f"{pname} — relationship context",
+            rel_lines,
+        )
+
+    tool_calls.append({
+        "tool": "write_context",
+        "input": f"{files_written} context files",
+        "result_length": files_written,
+    })
+
+    logger.info("Meeting prep wrote %d context files for %s", files_written, pname)
+
+    # ------------------------------------------------------------------
+    # Stage 6: Return HTML briefing
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "complete", "message": "Briefing ready"},
+    })
+
+    token_usage = {
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_output_tokens,
+        "model": "claude-sonnet-4-20250514",
+    }
+
+    return html_briefing, token_usage, tool_calls
 
 
 def _append_skipped_steps_note(
@@ -1025,6 +1854,16 @@ async def _execute_with_tools(
         skill_name=skill_name,
         exclude_browser=not agent_connected,
     )
+
+    # Replace any custom web_search tool with Anthropic's server-side built-in.
+    # The built-in is resolved by the API — no Tavily dependency, no local handler.
+    # Gives every skill web research without requiring a local browser agent.
+    tool_defs = [t for t in tool_defs if t.get("name") != "web_search"]
+    tool_defs.append({
+        "type": "web_search_20250305",
+        "name": "web_search",
+        "max_uses": 5,
+    })
 
     # Initial message
     messages = [{"role": "user", "content": input_text}]

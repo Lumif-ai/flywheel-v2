@@ -16,6 +16,8 @@ from uuid import UUID
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from datetime import datetime, timezone
+
 from flywheel.config import settings
 from flywheel.db.models import (
     ContextEntity,
@@ -142,6 +144,29 @@ async def create_streams_batch(
         List of created stream dicts with id, name, density_score.
     """
     created = []
+
+    # Archive existing non-archived streams for this tenant so re-onboarding
+    # doesn't hit the unique constraint on (tenant_id, name).  This lets
+    # anonymous users from the same company retry without being blocked.
+    existing_streams = (
+        await db.execute(
+            select(WorkStream).where(
+                WorkStream.tenant_id == tenant_id,
+                WorkStream.archived_at.is_(None),
+            )
+        )
+    ).scalars().all()
+
+    if existing_streams:
+        now = datetime.now(timezone.utc)
+        for ws in existing_streams:
+            ws.archived_at = now
+        await db.flush()
+        logger.info(
+            "Archived %d existing streams for tenant %s before re-onboarding",
+            len(existing_streams),
+            tenant_id,
+        )
 
     for stream_data in streams:
         name = stream_data["name"][:100]

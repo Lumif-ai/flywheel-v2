@@ -45,18 +45,21 @@ async def get_tenant_session(
 ) -> AsyncSession:
     """Create a new AsyncSession with RLS tenant/user context.
 
-    Sets session-level config variables that RLS policies read:
+    Sets transaction-local config variables that RLS policies read:
     - app.tenant_id: tenant isolation
     - app.user_id: visibility (private entries)
     - app.focus_id: active focus context (optional)
 
+    Uses is_local=true so settings are scoped to the current transaction
+    and do NOT leak to other requests via connection pool reuse.
+
     Then downgrades to app_user role so RLS policies are enforced.
     """
     session = session_factory()
-    await session.execute(text("SELECT set_config('app.tenant_id', :tid, false)"), {"tid": tenant_id})
-    await session.execute(text("SELECT set_config('app.user_id', :uid, false)"), {"uid": user_id})
+    await session.execute(text("SELECT set_config('app.tenant_id', :tid, true)"), {"tid": tenant_id})
+    await session.execute(text("SELECT set_config('app.user_id', :uid, true)"), {"uid": user_id})
     if focus_id:
-        await session.execute(text("SELECT set_config('app.focus_id', :fid, false)"), {"fid": focus_id})
+        await session.execute(text("SELECT set_config('app.focus_id', :fid, true)"), {"fid": focus_id})
     await session.execute(text("SET ROLE app_user"))
     return session
 

@@ -99,60 +99,64 @@ async def crawl_company(url: str, max_pages: int = 5) -> dict:
     # Normalize URL: strip trailing slash
     base_url = url.rstrip("/")
 
+    import asyncio as _asyncio
+
     pages_to_crawl = CRAWL_PAGES[:max_pages]
+
+    async def _fetch_page(client, base, path):
+        """Fetch and parse a single page. Returns (path, text) or None."""
+        page_url = base + path
+        try:
+            resp = await client.get(page_url)
+            resp.raise_for_status()
+
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            meta_parts = []
+            title_tag = soup.find("title")
+            if title_tag and title_tag.string:
+                meta_parts.append("Title: %s" % title_tag.string.strip())
+            for meta in soup.find_all("meta"):
+                name = meta.get("name", "") or meta.get("property", "")
+                content = meta.get("content", "")
+                if content and name in (
+                    "description", "og:description", "og:title",
+                    "og:site_name", "keywords", "author",
+                    "twitter:description", "twitter:title",
+                ):
+                    meta_parts.append("%s: %s" % (name, content))
+
+            for tag in soup.find_all(["script", "style", "nav", "footer"]):
+                tag.decompose()
+
+            converter = html2text.HTML2Text()
+            converter.ignore_links = False
+            converter.ignore_images = True
+            converter.body_width = 0
+            body_text = converter.handle(str(soup)).strip()
+
+            text = "\n".join(meta_parts)
+            if body_text:
+                text = text + "\n\n" + body_text if text else body_text
+
+            if text.strip():
+                return (path or "/", text.strip())
+        except (httpx.HTTPError, httpx.HTTPStatusError):
+            pass
+        return None
 
     async with httpx.AsyncClient(
         follow_redirects=True,
         timeout=10.0,
         headers={"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"},
     ) as client:
-        for path in pages_to_crawl:
-            page_url = base_url + path
-            try:
-                resp = await client.get(page_url)
-                resp.raise_for_status()
-
-                # Parse HTML
-                soup = BeautifulSoup(resp.text, "html.parser")
-
-                # Extract meta information (works even for SPA sites)
-                meta_parts = []
-                title_tag = soup.find("title")
-                if title_tag and title_tag.string:
-                    meta_parts.append("Title: %s" % title_tag.string.strip())
-                for meta in soup.find_all("meta"):
-                    name = meta.get("name", "") or meta.get("property", "")
-                    content = meta.get("content", "")
-                    if content and name in (
-                        "description", "og:description", "og:title",
-                        "og:site_name", "keywords", "author",
-                        "twitter:description", "twitter:title",
-                    ):
-                        meta_parts.append("%s: %s" % (name, content))
-
-                # Strip unwanted tags and extract body text
-                for tag in soup.find_all(["script", "style", "nav", "footer"]):
-                    tag.decompose()
-
-                converter = html2text.HTML2Text()
-                converter.ignore_links = False
-                converter.ignore_images = True
-                converter.body_width = 0
-                body_text = converter.handle(str(soup)).strip()
-
-                # Combine meta info + body text
-                # For SPA sites, body may be empty but meta has useful info
-                text = "\n".join(meta_parts)
-                if body_text:
-                    text = text + "\n\n" + body_text if text else body_text
-
-                if text.strip():
-                    result["raw_pages"][path or "/"] = text.strip()
-                    result["pages_crawled"] += 1
-
-            except (httpx.HTTPError, httpx.HTTPStatusError):
-                # Skip failed pages, continue with others
-                continue
+        results = await _asyncio.gather(
+            *[_fetch_page(client, base_url, path) for path in pages_to_crawl]
+        )
+        for r in results:
+            if r is not None:
+                result["raw_pages"][r[0]] = r[1]
+                result["pages_crawled"] += 1
 
     result["success"] = result["pages_crawled"] > 0
     return result
@@ -253,7 +257,7 @@ def build_guided_questions() -> list:
 # ---------------------------------------------------------------------------
 
 
-def structure_intelligence(raw_text: str, source_label: str) -> dict:
+def structure_intelligence(raw_text: str, source_label: str, *, api_key: str | None = None) -> dict:
     """Use LLM to structure raw text into company intelligence dict.
 
     Falls back to returning raw text if anthropic SDK is unavailable.
@@ -261,6 +265,7 @@ def structure_intelligence(raw_text: str, source_label: str) -> dict:
     Args:
         raw_text: Raw crawled or uploaded text.
         source_label: Label describing the source (e.g. "website-crawl").
+        api_key: Optional explicit API key. If None, reads from env.
 
     Returns:
         Dict with intelligence keys (company_name, tagline, etc.)
@@ -272,7 +277,7 @@ def structure_intelligence(raw_text: str, source_label: str) -> dict:
         return {"raw_text": raw_text, "structured": False}
 
     try:
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
         system_prompt = (
             "You are extracting company intelligence from raw text. "
@@ -310,7 +315,9 @@ def structure_intelligence(raw_text: str, source_label: str) -> dict:
         intelligence["structured"] = True
         return intelligence
 
-    except Exception:
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).error("structure_intelligence failed: %s: %s", type(exc).__name__, exc)
         return {"raw_text": raw_text, "structured": False}
 
 
@@ -357,7 +364,7 @@ def structure_from_answers(answers: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def enrich_with_web_research(company_name: str, intelligence: dict) -> dict:
+def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: str | None = None) -> dict:
     """Enrich intelligence using Anthropic's server-side web search.
 
     Uses Claude's built-in web_search_20250305 tool which performs real web
@@ -424,7 +431,7 @@ def enrich_with_web_research(company_name: str, intelligence: dict) -> dict:
     ) % (company_name, company_url, known_summary)
 
     try:
-        client = anthropic.Anthropic()
+        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
@@ -432,7 +439,7 @@ def enrich_with_web_research(company_name: str, intelligence: dict) -> dict:
             tools=[{
                 "type": "web_search_20250305",
                 "name": "web_search",
-                "max_uses": 10,
+                "max_uses": 5,
             }],
             messages=[{"role": "user", "content": user_message}],
         )
@@ -517,28 +524,29 @@ def write_company_intelligence(
     intelligence: dict,
     agent_id: str = AGENT_ID,
 ) -> dict:
-    """Write structured intelligence to context store files.
+    """DEPRECATED: Use skill_executor's async write loop instead.
 
-    Maps intelligence fields to context store files:
-      - company_name/tagline/what_they_do/key_differentiators -> positioning.md
-      - target_customers -> icp-profiles.md
-      - competitors -> competitive-intel.md
-      - products -> product-modules.md
-      - industries -> market-taxonomy.md
+    This function uses the v1 flatfile API signature which is incompatible
+    with the Postgres backend. The skill executor (_execute_company_intel)
+    has its own async write loop that properly sets RLS context and uses
+    the correct append_entry signature.
 
-    Args:
-        intelligence: Dict with company intelligence (from structure_intelligence
-            or structure_from_answers).
-        agent_id: Agent ID for context store writes. Defaults to "company-intel".
-
-    Returns:
-        Dict of {filename: "OK"|"DEDUP"|"ERROR: msg"}.
+    Kept for backward compatibility with the flatfile backend only.
     """
+    import logging
+    logging.getLogger(__name__).warning(
+        "write_company_intelligence() called — this is deprecated. "
+        "Use the skill executor's async write loop instead."
+    )
+
+    import os
+    if os.environ.get("FLYWHEEL_BACKEND", "flatfile").lower() != "flatfile":
+        return {"error": "write_company_intelligence() only works with flatfile backend"}
+
     today = datetime.now().strftime("%Y-%m-%d")
     source = "company-intel-onboarding"
     results = {}
 
-    # Map sections to context files
     section_map = {
         "positioning.md": _build_positioning_content(intelligence),
         "icp-profiles.md": _build_list_content(
@@ -561,7 +569,6 @@ def write_company_intelligence(
 
     for filename, (content_lines, detail) in section_map.items():
         if not content_lines:
-            # Skip empty content
             continue
 
         entry = {

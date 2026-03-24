@@ -19,6 +19,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.auth.jwt import TokenPayload, decode_jwt
+from flywheel.auth.anonymous import ensure_provisioned
 from flywheel.db.session import get_db, get_session_factory, get_tenant_session
 
 _bearer = HTTPBearer(auto_error=False)
@@ -27,14 +28,27 @@ _bearer = HTTPBearer(auto_error=False)
 async def get_current_user(
     cred: HTTPAuthorizationCredentials | None = Depends(_bearer),
 ) -> TokenPayload:
-    """Extract and validate the JWT from the Authorization header."""
+    """Extract and validate the JWT from the Authorization header.
+
+    For anonymous Supabase users, auto-provisions User + Tenant + UserTenant
+    rows on first API call so downstream endpoints don't hit FK violations.
+    """
     if cred is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Not authenticated",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return decode_jwt(cred.credentials)
+    token = decode_jwt(cred.credentials)
+
+    # Auto-provision anonymous users into app tables
+    if token.is_anonymous:
+        tenant_id = await ensure_provisioned(token.sub, is_anonymous=True)
+        if tenant_id and token.tenant_id is None:
+            # Patch app_metadata so downstream sees the tenant
+            token.app_metadata["tenant_id"] = str(tenant_id)
+
+    return token
 
 
 async def require_tenant(

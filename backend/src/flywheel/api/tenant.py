@@ -114,6 +114,50 @@ class DeleteTenantResponse(BaseModel):
     grace_period_ends: str
 
 
+class TenantListItem(BaseModel):
+    id: str
+    name: str
+    slug: str
+    plan: str
+    member_limit: int
+
+
+# ---------------------------------------------------------------------------
+# GET /tenants (list all tenants for current user)
+# ---------------------------------------------------------------------------
+
+
+@router.get("", response_model=list[TenantListItem])
+async def list_tenants(
+    user: TokenPayload = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """List all tenants the authenticated user belongs to.
+
+    Returns tenant info in the shape the frontend TenantSwitcher expects:
+    id, name, slug, plan, member_limit.
+    """
+    result = await db.execute(
+        select(Tenant, UserTenant.role)
+        .join(UserTenant, UserTenant.tenant_id == Tenant.id)
+        .where(UserTenant.user_id == user.sub)
+        .where(Tenant.deleted_at.is_(None))
+    )
+    items = []
+    for tenant, role in result.all():
+        settings = tenant.settings or {}
+        items.append(
+            TenantListItem(
+                id=str(tenant.id),
+                name=tenant.name,
+                slug=settings.get("slug", tenant.name.lower().replace(" ", "-")),
+                plan=settings.get("plan", "free"),
+                member_limit=settings.get("member_limit", DEFAULT_MEMBER_LIMIT),
+            )
+        )
+    return items
+
+
 # ---------------------------------------------------------------------------
 # GET /tenants/current
 # ---------------------------------------------------------------------------

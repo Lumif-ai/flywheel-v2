@@ -1,8 +1,15 @@
 """FastAPI application factory."""
 
 import asyncio
+import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+
+# Configure application logging so worker/engine messages are visible
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
 
 import sentry_sdk
 from fastapi import FastAPI, Request

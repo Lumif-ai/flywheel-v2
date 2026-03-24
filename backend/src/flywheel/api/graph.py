@@ -266,8 +266,8 @@ async def update_aliases(
     await db.execute(
         text(
             "UPDATE tenants SET settings = jsonb_set("
-            "COALESCE(settings, '{}'::jsonb), "
-            "'{entity_aliases}', :aliases_json::jsonb"
+            "COALESCE(settings, CAST('{}' AS jsonb)), "
+            "'{entity_aliases}', CAST(:aliases_json AS jsonb)"
             ") WHERE id = :tid"
         ),
         {"aliases_json": aliases_json, "tid": str(user.tenant_id)},
