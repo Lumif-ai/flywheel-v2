@@ -27,11 +27,13 @@ from uuid import UUID
 import anthropic
 from googleapiclient.errors import HttpError
 from sqlalchemy import and_, select
+from sqlalchemy import text as sa_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.config import settings
-from flywheel.db.models import Email, EmailVoiceProfile, Integration
+from flywheel.db.models import Email, EmailScore, EmailVoiceProfile, Integration
+from flywheel.engines.email_scorer import score_email
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
     TokenRevokedException,
@@ -79,7 +81,7 @@ async def upsert_email(
     tenant_id: UUID,
     user_id: UUID,
     msg: dict,
-) -> None:
+) -> UUID:
     """Upsert a single email row from a Gmail message metadata dict.
 
     Extracts header fields, builds an Email row, and issues a PostgreSQL
@@ -92,6 +94,9 @@ async def upsert_email(
         tenant_id: UUID of the tenant owning this message.
         user_id: UUID of the user whose gmail-read integration produced this.
         msg: Gmail API message dict (metadata format — no body).
+
+    Returns:
+        UUID of the upserted Email row (for scoring integration).
     """
     # Extract headers into a lookup dict
     raw_headers = msg.get("payload", {}).get("headers", [])
@@ -138,14 +143,168 @@ async def upsert_email(
                 "synced_at": datetime.now(timezone.utc),
             },
         )
+        .returning(Email.id)
     )
-    await db.execute(stmt)
+    result = await db.execute(stmt)
+    email_id: UUID = result.scalar_one()
 
     logger.debug(
         "upserted email message_id=%s thread_id=%s",
         msg["id"],
         msg["threadId"],
     )
+    return email_id
+
+
+# ---------------------------------------------------------------------------
+# Scoring integration helpers
+# ---------------------------------------------------------------------------
+
+
+async def _check_daily_scoring_cap(
+    db: AsyncSession,
+    tenant_id: UUID,
+    cap: int = 500,
+) -> int:
+    """Return remaining scoring budget for today. Default cap: 500/day.
+
+    Counts EmailScore rows created today (UTC) for the given tenant by joining
+    email_scores to emails on tenant_id. Uses scored_at >= today so re-scoring
+    an email that was already scored today counts against the cap.
+
+    Args:
+        db: Tenant-scoped async session (RLS enforced).
+        tenant_id: Tenant UUID.
+        cap: Maximum number of scores allowed per day (default 500).
+
+    Returns:
+        Remaining budget: max(0, cap - count_today). Returns 0 if cap reached.
+    """
+    today_utc = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    result = await db.execute(
+        sa_text(
+            "SELECT COUNT(*) FROM email_scores es "
+            "JOIN emails e ON es.email_id = e.id "
+            "WHERE e.tenant_id = :tid AND es.scored_at >= :today"
+        ).bindparams(tid=tenant_id, today=today_utc)
+    )
+    count = result.scalar_one()
+    return max(0, cap - count)
+
+
+async def _score_new_emails(
+    db: AsyncSession,
+    tenant_id: UUID,
+    email_ids: list[UUID],
+) -> int:
+    """Score a batch of newly synced emails. Returns count of emails scored.
+
+    SCORE-08: New messages in existing threads are scored here automatically.
+    Thread priority (SCORE-07) is computed at read time via get_thread_priority().
+
+    Enforces the per-tenant daily cap before scoring. If the cap is reached,
+    logs a warning and returns 0 without scoring any emails.
+
+    Per-email exceptions are caught and logged (non-fatal) — one bad email
+    never blocks the rest or the sync cycle.
+
+    Args:
+        db: Tenant-scoped async session (RLS enforced). Caller commits after
+            this function returns.
+        tenant_id: Tenant UUID.
+        email_ids: List of Email UUIDs from the current sync batch.
+
+    Returns:
+        Number of emails successfully scored.
+    """
+    if not email_ids:
+        return 0
+
+    # Check daily cap
+    remaining = await _check_daily_scoring_cap(db, tenant_id)
+    if remaining == 0:
+        logger.warning(
+            "Daily scoring cap reached for tenant %s — skipping %d email(s)",
+            tenant_id,
+            len(email_ids),
+        )
+        return 0
+
+    # Truncate to remaining budget
+    ids_to_score = email_ids[:remaining]
+    total = len(email_ids)
+
+    # Load Email ORM rows for the IDs to score
+    result = await db.execute(
+        select(Email).where(Email.id.in_(ids_to_score))
+    )
+    emails = result.scalars().all()
+
+    scored_count = 0
+    for email in emails:
+        try:
+            score = await score_email(db, tenant_id, email)
+            if score is None:
+                logger.warning(
+                    "score_email returned None for email_id=%s tenant_id=%s",
+                    email.id,
+                    tenant_id,
+                )
+            else:
+                scored_count += 1
+        except Exception:
+            logger.exception(
+                "Unexpected error scoring email_id=%s tenant_id=%s",
+                email.id,
+                tenant_id,
+            )
+            # Non-fatal: continue scoring remaining emails
+
+    # Single commit for the entire batch (caller-commits pattern)
+    await db.commit()
+
+    logger.info(
+        "Scored %d/%d emails for tenant %s",
+        scored_count,
+        total,
+        tenant_id,
+    )
+    return scored_count
+
+
+async def get_thread_priority(
+    db: AsyncSession,
+    tenant_id: UUID,
+    gmail_thread_id: str,
+) -> int | None:
+    """Compute thread priority as MAX(priority) of unhandled messages in the thread.
+
+    SCORE-07: Thread-level priority is a read-time computation — not a stored
+    column. The highest priority score among all unhandled (is_replied=False)
+    messages in the thread determines the thread's displayed priority.
+
+    Used by Phase 5 API layer — exported for import.
+
+    Args:
+        db: Tenant-scoped async session (RLS enforced).
+        tenant_id: Tenant UUID.
+        gmail_thread_id: Gmail thread ID string (e.g. "187abc123def4567").
+
+    Returns:
+        Integer priority 1-5, or None if no scored messages exist for the thread.
+    """
+    result = await db.execute(
+        sa_text(
+            "SELECT MAX(es.priority) FROM email_scores es "
+            "JOIN emails e ON es.email_id = e.id "
+            "WHERE e.tenant_id = :tid "
+            "AND e.gmail_thread_id = :thread_id "
+            "AND e.is_replied = FALSE"
+        ).bindparams(tid=tenant_id, thread_id=gmail_thread_id)
+    )
+    return result.scalar_one_or_none()
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +343,7 @@ async def _full_sync(
     )
 
     count = 0
+    new_email_ids: list[UUID] = []
     page_token: str | None = None
 
     while True:
@@ -197,7 +357,10 @@ async def _full_sync(
 
         for stub in messages:
             msg = await get_message_headers(creds, stub["id"])
-            await upsert_email(db, integration.tenant_id, integration.user_id, msg)
+            email_id = await upsert_email(
+                db, integration.tenant_id, integration.user_id, msg
+            )
+            new_email_ids.append(email_id)
             count += 1
 
         page_token = response.get("nextPageToken")
@@ -217,6 +380,20 @@ async def _full_sync(
         integration.id,
         count,
     )
+
+    # Score new emails AFTER commit — scoring failure cannot lose synced emails
+    if new_email_ids:
+        try:
+            scored = await _score_new_emails(db, integration.tenant_id, new_email_ids)
+            logger.info(
+                "Scored %d new emails for integration %s", scored, integration.id
+            )
+        except Exception:
+            logger.exception(
+                "Scoring failed for integration %s", integration.id
+            )
+            # Non-fatal — sync is already committed, scoring failure doesn't lose emails
+
     return count
 
 
@@ -272,6 +449,7 @@ async def sync_gmail(
     # Gmail omits "history" key when there are no new records — use .get()
     history_records = response.get("history", [])
     count = 0
+    new_email_ids: list[UUID] = []
 
     for record in history_records:
         for added_entry in record.get("messagesAdded", []):
@@ -280,7 +458,10 @@ async def sync_gmail(
             if not message_id:
                 continue
             msg = await get_message_headers(creds, message_id)
-            await upsert_email(db, integration.tenant_id, integration.user_id, msg)
+            email_id = await upsert_email(
+                db, integration.tenant_id, integration.user_id, msg
+            )
+            new_email_ids.append(email_id)
             count += 1
             logger.debug(
                 "incremental sync: upserted message_id=%s for integration %s",
@@ -304,6 +485,19 @@ async def sync_gmail(
             integration.id,
             count,
         )
+
+    # Score new emails AFTER commit — scoring failure cannot lose synced emails
+    if new_email_ids:
+        try:
+            scored = await _score_new_emails(db, integration.tenant_id, new_email_ids)
+            logger.info(
+                "Scored %d new emails for integration %s", scored, integration.id
+            )
+        except Exception:
+            logger.exception(
+                "Scoring failed for integration %s", integration.id
+            )
+            # Non-fatal — sync is already committed, scoring failure doesn't lose emails
 
     return count
 
