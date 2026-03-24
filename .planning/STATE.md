@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
-**Current focus:** Phase 4 — Email Drafter Skill
+**Current focus:** Phase 5 — Review API and Frontend
 
 ## Current Position
 
-Phase: 4 of 6 (Email Drafter Skill)
-Plan: 2 of 2 in current phase
-Status: Phase 4 complete
-Last activity: 2026-03-24 — Phase 4 Plan 02 complete (sync wiring + draft lifecycle API)
+Phase: 5 of 6 (Review API and Frontend)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-24 — Phase 5 Plan 01 complete (email read API endpoints + api.ts put method)
 
-Progress: [████████░░] 66%
+Progress: [████████░░] 72%
 
 ## Performance Metrics
 
@@ -30,6 +30,7 @@ Progress: [████████░░] 66%
 | 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
 | 02-sync-worker-and-voice-profile | 2 | ~11 min | ~5.5 min |
 | 04-email-drafter-skill | 2 | ~9 min | ~4.5 min |
+| 05-review-api-and-frontend | 1 (in progress) | ~5 min | ~5 min |
 
 *Updated after each plan completion*
 
@@ -76,6 +77,10 @@ Recent decisions affecting current work:
 - [Phase 4, Plan 02]: send first, null body after — approve endpoint nulls draft_body only on confirmed Gmail send success
 - [Phase 4, Plan 02]: user_edits for edits — preserves original draft_body for Phase 6 diff analysis
 - [Phase 4, Plan 02]: get_message_id_header on-demand — no schema change; lightweight metadata call at approval time
+- [Phase 5, Plan 01]: Single JOIN + Python grouping for thread list — one DB round-trip, no N+1 per thread
+- [Phase 5, Plan 01]: BackgroundTasks _run_sync() snapshots IDs before task — avoids ORM detached instance in background context
+- [Phase 5, Plan 01]: Thread max_priority computed only over unreplied messages — consistent with scoring intent
+- [Phase 5, Plan 01]: digest uses INNER JOIN (only scored emails are meaningful in digest)
 
 ### Pending Todos
 
@@ -90,5 +95,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 4 Plan 02 complete — sync wiring + draft lifecycle API. Phase 4 is fully complete. Phase 5 (frontend draft inbox) is next.
+Stopped at: Phase 5 Plan 01 complete — email read API endpoints (threads, thread detail, sync, digest) and api.ts put method. Phase 5 Plan 02 (inbox UI) is next.
 Resume file: None
