@@ -1,5 +1,5 @@
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2 } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import {
@@ -38,9 +38,16 @@ export function AppSidebar() {
           <div className="mx-3 mb-2">
             <Link
               to="/settings"
-              className="block text-xs text-amber-600 bg-amber-50 rounded-md px-3 py-2 hover:bg-amber-100 transition-colors"
+              className="flex items-center gap-1.5 no-underline hover:opacity-80 transition-opacity"
+              style={{
+                fontSize: '12px',
+                color: 'var(--secondary-text)',
+                padding: '6px 8px',
+                borderRadius: '6px',
+              }}
             >
-              Add your API key to unlock AI features
+              <Lock className="size-3 shrink-0" />
+              <span>API key needed for AI features</span>
             </Link>
           </div>
         )}
