@@ -860,6 +860,13 @@ async def _execute_company_intel(
     tool_calls.append({"tool": "structure_intelligence", "input": "raw_text", "result_length": len(str(intelligence))})
 
     if not intelligence.get("structured"):
+        await _append_event_atomic(factory, run_id, {
+            "event": "crawl_error",
+            "data": {
+                "error": "Unable to analyze company website. The AI service may be temporarily unavailable.",
+                "retryable": True,
+            },
+        })
         output_parts.append(f"Crawled {pages_crawled} pages but could not structure the data.")
         return "\n\n".join(output_parts), {}, tool_calls
 
@@ -935,7 +942,7 @@ async def _execute_company_intel(
             items = []
             for c in competitors[:6]:
                 items.append(c if isinstance(c, str) else c.get("name", str(c)) if isinstance(c, dict) else str(c))
-            groups.append({"category": "market", "icon": "TrendingUp",
+            groups.append({"category": "competitive", "icon": "Swords",
                            "label": "Competitors", "items": items})
 
         # Differentiators

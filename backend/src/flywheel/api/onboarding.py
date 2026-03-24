@@ -53,7 +53,8 @@ _CATEGORY_KEYWORDS: dict[str, list[str]] = {
     "company_info": ["about", "mission", "founded", "headquarters", "history", "overview", "company"],
     "product": ["product", "service", "solution", "platform", "feature", "pricing", "plan"],
     "team": ["team", "leadership", "ceo", "cto", "founder", "executive", "employee", "hire"],
-    "market": ["market", "industry", "competitor", "trend", "growth", "opportunity"],
+    "market": ["market", "industry", "trend", "growth", "opportunity"],
+    "competitive": ["competitor", "competing", "rival", "alternative", "versus", "vs"],
     "technology": ["technology", "stack", "engineering", "api", "infrastructure", "security", "data"],
     "customer": ["customer", "client", "case study", "testimonial", "review", "user"],
     "customers_served": [
@@ -70,6 +71,7 @@ _CATEGORY_ICONS: dict[str, str] = {
     "product": "Package",
     "team": "Users",
     "market": "TrendingUp",
+    "competitive": "Swords",
     "technology": "Cpu",
     "customer": "UserCheck",
     "customers_served": "Award",
@@ -477,6 +479,16 @@ async def crawl_stream(
                                 "message": evt_data.get("message", ""),
                             }),
                         }
+                    # Crawl error events: LLM failure with retryable flag
+                    elif evt_type == "crawl_error" and isinstance(evt_data, dict):
+                        yield {
+                            "event": "crawl_error",
+                            "data": json.dumps({
+                                "error": evt_data.get("error", "An error occurred"),
+                                "retryable": evt_data.get("retryable", False),
+                            }),
+                        }
+                        return  # Stop streaming after error
 
                 if skill_run.status in ("completed", "failed"):
                     yield {

@@ -15,6 +15,8 @@ Functions:
   6. write_company_intelligence(intelligence, agent_id) - write to context store
 """
 
+from __future__ import annotations
+
 import os
 import sys
 from datetime import datetime
@@ -42,6 +44,9 @@ ACCEPTED_MIMETYPES = {
 MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 
 AGENT_ID = "company-intel"
+
+MAX_LLM_RETRIES = 2
+LLM_TIMEOUT = 30  # seconds
 
 # Intelligence output keys (shared schema across all tiers)
 INTELLIGENCE_KEYS = [
@@ -276,49 +281,84 @@ def structure_intelligence(raw_text: str, source_label: str, *, api_key: str | N
     except ImportError:
         return {"raw_text": raw_text, "structured": False}
 
-    try:
-        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+    import json
+    import logging
+    import time
 
-        system_prompt = (
-            "You are extracting company intelligence from raw text. "
-            "Extract ONLY information that is explicitly present in the text. "
-            "Do NOT invent or assume any information. "
-            "Return a JSON object with these keys:\n"
-            "- company_name: string\n"
-            "- tagline: string (or null)\n"
-            "- what_they_do: string (1-2 sentence summary)\n"
-            "- products: list of strings\n"
-            "- target_customers: list of strings\n"
-            "- industries: list of strings\n"
-            "- competitors: list of strings (or empty list)\n"
-            "- pricing_model: string (or null)\n"
-            "- key_differentiators: list of strings\n\n"
-            "Return ONLY valid JSON. No markdown fencing."
-        )
+    _log = logging.getLogger(__name__)
 
-        message = client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=2000,
-            system=system_prompt,
-            messages=[
-                {
-                    "role": "user",
-                    "content": "Extract company intelligence from this text (source: %s):\n\n%s"
-                    % (source_label, raw_text[:8000]),
-                }
-            ],
-        )
+    client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
 
-        import json
-        response_text = message.content[0].text.strip()
-        intelligence = json.loads(response_text)
-        intelligence["structured"] = True
-        return intelligence
+    system_prompt = (
+        "You are extracting company intelligence from raw text. "
+        "Extract ONLY information that is explicitly present in the text. "
+        "Do NOT invent or assume any information. "
+        "Return a JSON object with these keys:\n"
+        "- company_name: string\n"
+        "- tagline: string (or null)\n"
+        "- what_they_do: string (1-2 sentence summary)\n"
+        "- products: list of strings\n"
+        "- target_customers: list of strings\n"
+        "- industries: list of strings\n"
+        "- competitors: list of strings (or empty list)\n"
+        "- pricing_model: string (or null)\n"
+        "- key_differentiators: list of strings\n\n"
+        "Return ONLY valid JSON. No markdown fencing."
+    )
 
-    except Exception as exc:
-        import logging
-        logging.getLogger(__name__).error("structure_intelligence failed: %s: %s", type(exc).__name__, exc)
-        return {"raw_text": raw_text, "structured": False}
+    last_error = None
+    for attempt in range(MAX_LLM_RETRIES + 1):
+        try:
+            message = client.messages.create(
+                model="claude-sonnet-4-20250514",
+                max_tokens=2000,
+                timeout=LLM_TIMEOUT,
+                system=system_prompt,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": "Extract company intelligence from this text (source: %s):\n\n%s"
+                        % (source_label, raw_text[:8000]),
+                    }
+                ],
+            )
+
+            response_text = message.content[0].text.strip()
+            intelligence = json.loads(response_text)
+
+            # Basic structural validation
+            if "company_name" not in intelligence:
+                raise ValueError("Missing company_name in LLM response")
+
+            intelligence["structured"] = True
+            return intelligence
+
+        except json.JSONDecodeError as exc:
+            last_error = exc
+            _log.warning("structure_intelligence attempt %d/%d: JSON decode error: %s", attempt + 1, MAX_LLM_RETRIES + 1, exc)
+        except anthropic.APITimeoutError as exc:
+            last_error = exc
+            _log.warning("structure_intelligence attempt %d/%d: timeout: %s", attempt + 1, MAX_LLM_RETRIES + 1, exc)
+        except anthropic.APIStatusError as exc:
+            if exc.status_code < 500:
+                # 4xx errors won't improve with retry
+                _log.error("structure_intelligence failed with client error (%d): %s", exc.status_code, exc)
+                return {"raw_text": raw_text, "structured": False}
+            last_error = exc
+            _log.warning("structure_intelligence attempt %d/%d: server error (%d): %s", attempt + 1, MAX_LLM_RETRIES + 1, exc.status_code, exc)
+        except ValueError as exc:
+            last_error = exc
+            _log.warning("structure_intelligence attempt %d/%d: validation error: %s", attempt + 1, MAX_LLM_RETRIES + 1, exc)
+        except Exception as exc:
+            _log.error("structure_intelligence failed: %s: %s", type(exc).__name__, exc)
+            return {"raw_text": raw_text, "structured": False}
+
+        # Exponential backoff before retry
+        if attempt < MAX_LLM_RETRIES:
+            time.sleep(2 ** attempt)
+
+    _log.error("structure_intelligence exhausted %d retries. Last error: %s", MAX_LLM_RETRIES + 1, last_error)
+    return {"raw_text": raw_text, "structured": False}
 
 
 # ---------------------------------------------------------------------------
@@ -436,6 +476,7 @@ def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: 
         response = client.messages.create(
             model="claude-sonnet-4-20250514",
             max_tokens=4096,
+            timeout=60,
             tools=[{
                 "type": "web_search_20250305",
                 "name": "web_search",
@@ -509,6 +550,10 @@ def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: 
         enriched["_enriched"] = True
         return enriched
 
+    except anthropic.APITimeoutError as exc:
+        import logging
+        logging.getLogger(__name__).warning("Web search enrichment timed out (60s): %s", exc)
+        return intelligence
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("Web search enrichment failed: %s", exc)

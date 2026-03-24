@@ -63,12 +63,9 @@ export interface PriorityOption {
 
 export interface CacheLookupResponse {
   exists: boolean
-  domain: string
   entry_count: number
   last_updated: string | null
-  categories: string[]
-  source: string | null
-  verified_count: number
+  groups: CrawlItem[]
 }
 
 export interface OnboardingState {
@@ -79,7 +76,7 @@ export interface OnboardingState {
   parsedStreams: ParsedStream[]
   createdStreams: CreatedStream[]
   briefingHtml: string | null
-  error: string | null
+  error: { message: string; retryable: boolean } | null
   loading: boolean
   sseUrl: string | null
   editedItems: Record<string, EditedCategory>
@@ -218,10 +215,22 @@ export function useOnboarding() {
         })
         break
       }
+      case 'crawl_error': {
+        const errorMsg = (data.error as string) ?? 'Crawl analysis failed';
+        const retryable = (data.retryable as boolean) ?? false;
+        setState((s) => ({
+          ...s,
+          error: { message: errorMsg, retryable },
+          loading: false,
+          crawlStatus: null,
+          sseUrl: null,
+        }))
+        break
+      }
       case 'error':
         setState((s) => ({
           ...s,
-          error: (data.message as string) ?? 'Crawl failed',
+          error: { message: (data.message as string) ?? 'Crawl failed', retryable: false },
           phase: 'url_input',
           crawlStatus: null,
           sseUrl: null,
@@ -284,7 +293,7 @@ export function useOnboarding() {
       setState((s) => ({
         ...s,
         phase: 'url_input',
-        error: err instanceof Error ? err.message : 'Failed to start crawl',
+        error: { message: err instanceof Error ? err.message : 'Failed to start crawl', retryable: true },
       }))
     }
   }, [ensureSession])
@@ -307,7 +316,7 @@ export function useOnboarding() {
       setState((s) => ({
         ...s,
         loading: false,
-        error: err instanceof Error ? err.message : 'Failed to parse streams',
+        error: { message: err instanceof Error ? err.message : 'Failed to parse streams', retryable: false },
       }))
     }
   }, [])
@@ -360,7 +369,7 @@ export function useOnboarding() {
       setState((s) => ({
         ...s,
         loading: false,
-        error: err instanceof Error ? err.message : 'Failed to create streams',
+        error: { message: err instanceof Error ? err.message : 'Failed to create streams', retryable: false },
       }))
     }
   }, [])
@@ -480,7 +489,7 @@ export function useOnboarding() {
       setState((s) => ({
         ...s,
         loading: false,
-        error: err instanceof Error ? err.message : 'Failed to create focus areas',
+        error: { message: err instanceof Error ? err.message : 'Failed to create focus areas', retryable: false },
       }))
     }
   }, [queryClient])
@@ -491,9 +500,8 @@ export function useOnboarding() {
     setState(s => ({ ...s, cacheChecking: true }))
     try {
       await ensureSession()
-      // Normalize to domain
       const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '')
-      const res = await api.get<CacheLookupResponse>(`/context/company?domain=${encodeURIComponent(domain)}`)
+      const res = await api.get<CacheLookupResponse>(`/context/onboarding-cache?domain=${encodeURIComponent(domain)}`)
       setState(s => ({ ...s, cacheResult: res, cacheChecking: false }))
       return res
     } catch (err) {
@@ -504,106 +512,43 @@ export function useOnboarding() {
     }
   }, [ensureSession])
 
-  const loadCachedIntel = useCallback(async (domain: string): Promise<boolean> => {
-    // Single endpoint: GET /context/company/{domain}/entries
-    // Returns entries grouped by category, scoped by metadata.company_domain
-    try {
-      const categoryIcons: Record<string, string> = {
-        company_info: 'Building2', product: 'Package', products: 'Package',
-        'product-modules': 'Package', positioning: 'Building2',
-        team: 'Users', market: 'TrendingUp', 'market-taxonomy': 'TrendingUp',
-        technology: 'Cpu', customer: 'UserCheck', customers_served: 'UserCheck',
-        'icp-profiles': 'UserCheck', 'competitive-intel': 'TrendingUp',
-        financial: 'DollarSign', contacts: 'Users',
-      }
+  const startWithCacheCheck = useCallback(async (url: string) => {
+    const res = await checkCache(url)
 
-      const res = await api.get<{
-        domain: string
-        categories: string[]
-        entry_count: number
-        groups: Record<string, { content: string; detail: string; source: string; confidence: string }[]>
-      }>(`/context/company/${encodeURIComponent(domain)}/entries`)
-
-      if (res.entry_count === 0) return false
-
-      const allItems: CrawlItem[] = []
+    if (res?.exists && res.groups.length > 0) {
+      // Backend returns CrawlItem-shaped groups — use directly
       const edited: Record<string, EditedCategory> = {}
-
-      for (const [cat, entries] of Object.entries(res.groups)) {
-        // Use detail (short) or extract first line from content
-        const itemTexts = entries.map(e => {
-          if (e.detail && e.detail.length > 0 && e.detail.length < 200) return e.detail
-          const cleaned = e.content
-            .replace(/<cite[^>]*>.*?<\/cite>/g, '')
-            .replace(/<[^>]+>/g, '')
-            .trim()
-          const firstLine = cleaned.split('\n').find(l => l.trim().length > 0) ?? cleaned
-          return firstLine.length > 120 ? firstLine.slice(0, 117) + '...' : firstLine
-        })
-
-        const label = cat
-          .replace(/-/g, ' ')
-          .replace(/_/g, ' ')
-          .replace(/\b\w/g, c => c.toUpperCase())
-
-        allItems.push({
-          category: cat,
-          icon: categoryIcons[cat] ?? 'Building2',
-          label,
-          items: itemTexts,
-          count: itemTexts.length,
-        })
-        edited[cat] = {
-          items: [...itemTexts],
-          meta: entries.map(e => ({
-            source: (e.source === 'user_input' ? 'user_input' : 'crawler') as 'crawler' | 'user_input',
-            confidence: (e.confidence === 'verified' ? 'verified' : 'crawled') as 'crawled' | 'verified' | 'confirmed',
-          })),
+      for (const group of res.groups) {
+        edited[group.category] = {
+          items: [...group.items],
+          meta: group.items.map(() => ({ source: 'crawler' as const, confidence: 'crawled' as const })),
         }
       }
 
-      if (allItems.length === 0) return false
-
       setState(s => ({
         ...s,
-        crawlItems: allItems,
-        crawlTotal: allItems.reduce((acc, g) => acc + g.items.length, 0),
+        crawlItems: res.groups,
+        crawlTotal: res.groups.reduce((acc, g) => acc + g.items.length, 0),
         phase: 'crawl_complete',
         editMode: true,
         editedItems: edited,
       }))
-      return true
-    } catch {
-      return false
-    }
-  }, [])
 
-  const startWithCacheCheck = useCallback(async (url: string) => {
-    const res = await checkCache(url)
-    if (res?.exists) {
-      const domain = new URL(url.startsWith('http') ? url : `https://${url}`).hostname.replace(/^www\./, '')
+      // Stale check (>7 days) — trigger background refresh
       const daysSince = res.last_updated
         ? (Date.now() - new Date(res.last_updated).getTime()) / (1000 * 60 * 60 * 24)
         : Infinity
-
-      const loaded = await loadCachedIntel(domain)
-      if (!loaded) {
-        // Fallback to full crawl
-        await startCrawl(url)
-        return
-      }
-
       if (daysSince >= 7) {
-        // Stale cache — trigger background refresh
-        api.post('/context/company/refresh', { domain }).catch((err: unknown) => {
+        api.post('/context/onboarding-cache/refresh').catch((err: unknown) => {
           console.warn('Background refresh failed:', err)
         })
       }
-    } else {
-      // No cache — full crawl
-      await startCrawl(url)
+      return
     }
-  }, [checkCache, loadCachedIntel, startCrawl])
+
+    // No cache or empty — full crawl
+    await startCrawl(url)
+  }, [checkCache, startCrawl])
 
   return {
     ...state,
@@ -629,7 +574,6 @@ export function useOnboarding() {
     priorityOptions: PRIORITY_OPTIONS,
     // Cache-first actions
     checkCache,
-    loadCachedIntel,
     startWithCacheCheck,
   }
 }

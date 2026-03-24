@@ -9,26 +9,24 @@
 - PATCH /context/entries/{entry_id} -- update entry content/confidence
 - DELETE /context/entries/{entry_id} -- soft-delete entry
 - GET /context/search             -- cross-file full-text search
-- GET /context/company            -- cache-first company lookup by domain
-- POST /context/company/refresh   -- trigger background re-crawl for a company
+- GET /context/onboarding-cache   -- tenant-scoped onboarding cache check
+- POST /context/onboarding-cache/refresh -- trigger background re-crawl
 """
 
 from __future__ import annotations
 
 import datetime
-import urllib.parse
-from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_, select, text, update
+from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import ContextCatalog, ContextEntry, SkillRun
+from flywheel.db.models import ContextCatalog, ContextEntry, SkillRun, Tenant
 
 router = APIRouter(prefix="/context", tags=["context"])
 
@@ -64,21 +62,22 @@ class UpdateEntryRequest(BaseModel):
     confidence: str | None = None
 
 
-class CompanyLookupResponse(BaseModel):
+class OnboardingCacheGroup(BaseModel):
+    category: str
+    icon: str
+    label: str
+    items: list[str]
+    count: int
+
+
+class OnboardingCacheResponse(BaseModel):
     exists: bool
-    domain: str | None = None
     entry_count: int = 0
     last_updated: str | None = None
-    categories: list[str] = []
-    source: str | None = None
-    verified_count: int = 0
+    groups: list[OnboardingCacheGroup] = Field(default_factory=list)
 
 
-class CompanyRefreshRequest(BaseModel):
-    domain: str
-
-
-class CompanyRefreshResponse(BaseModel):
+class OnboardingRefreshResponse(BaseModel):
     run_id: str
     message: str
 
@@ -550,163 +549,151 @@ async def search_entries(
 
 
 # ---------------------------------------------------------------------------
-# Helpers — domain normalization
+# GET /context/onboarding-cache — tenant-scoped onboarding cache check
 # ---------------------------------------------------------------------------
 
 
-def _normalize_domain(raw: str) -> str:
-    """Normalize a domain string: strip scheme, www., trailing slashes, lowercase."""
-    raw = raw.strip().lower()
-    # If it looks like a full URL, extract hostname
-    if raw.startswith("http://") or raw.startswith("https://"):
-        parsed = urllib.parse.urlparse(raw)
-        raw = parsed.hostname or raw
-    # Strip www. prefix
-    if raw.startswith("www."):
-        raw = raw[4:]
-    # Strip trailing slashes
-    raw = raw.rstrip("/")
-    return raw
+# file_name → (icon, label) mapping — mirrors _build_discoveries in skill_executor
+_FILE_DISPLAY: dict[str, tuple[str, str]] = {
+    "positioning": ("Building2", "Positioning"),
+    "product-modules": ("Package", "Product Modules"),
+    "icp-profiles": ("UserCheck", "Icp Profiles"),
+    "competitive-intel": ("Swords", "Competitive Intel"),
+    "market-taxonomy": ("TrendingUp", "Market Taxonomy"),
+}
 
 
-# ---------------------------------------------------------------------------
-# GET /context/company — cache-first company lookup
-# ---------------------------------------------------------------------------
+def _split_entry_items(entry: ContextEntry) -> list[str]:
+    """Split a context entry's content back into individual display items."""
+    content = (entry.content or "").strip()
+    if not content:
+        return []
+    lines = [line.strip() for line in content.split("\n") if line.strip()]
+    return lines
 
-_ONBOARDING_SOURCES = ("onboarding", "company-intel", "company-intel-onboarding", "meeting-prep", "account-research")
 
-
-@router.get("/company", response_model=CompanyLookupResponse)
-async def company_lookup(
-    domain: str = Query(..., min_length=1),
+@router.get("/onboarding-cache", response_model=OnboardingCacheResponse)
+async def onboarding_cache(
+    domain: str | None = Query(None),
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Cache-first company lookup: check if we already have intelligence for a domain."""
-    normalized = _normalize_domain(domain)
+    """Cache check for onboarding intel. Uses tenants.domain as the
+    authoritative lookup — finds the tenant that owns this domain, then
+    queries their onboarding entries.
 
-    # Primary lookup: metadata company_domain (set by crawl pipeline)
-    # This is the authoritative way to find entries for a company
-    base = select(ContextEntry).where(
-        ContextEntry.deleted_at.is_(None),
-        ContextEntry.metadata_["company_domain"].astext == normalized,
-    )
-    result = await db.execute(base)
-    entries = result.scalars().all()
+    Falls back to current tenant RLS if no domain provided.
 
-    # Fallback for entries created before metadata was populated:
-    # search content for domain or company name
-    if not entries:
-        name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
-        content_conditions = [
-            ContextEntry.content.ilike(f"%{normalized}%"),
-            ContextEntry.content.ilike(f"%{name_part}%"),
-        ]
-        fallback = select(ContextEntry).where(
-            ContextEntry.deleted_at.is_(None),
-            or_(*content_conditions),
+    Returns groups shaped like CrawlItem (category, icon, label, items[]) so the
+    frontend can consume cache hits identically to fresh crawl SSE events.
+    """
+    entries = []
+
+    if domain:
+        # Normalize domain
+        import urllib.parse as _urlparse
+        _parsed = _urlparse.urlparse(domain if domain.startswith("http") else f"https://{domain}")
+        normalized = (_parsed.hostname or domain).removeprefix("www.").lower()
+
+        # Find tenant that owns this domain (authoritative lookup)
+        owner_result = await db.execute(
+            text("SELECT id FROM tenants WHERE domain = :d LIMIT 1"),
+            {"d": normalized},
         )
-        result = await db.execute(fallback)
+        owner_row = owner_result.first()
+        if owner_row:
+            owner_tid = str(owner_row[0])
+            cross_result = await db.execute(
+                text(
+                    "SELECT file_name, content, updated_at, created_at "
+                    "FROM context_entries "
+                    "WHERE tenant_id = :tid AND source = 'company-intel-onboarding' "
+                    "AND deleted_at IS NULL"
+                ),
+                {"tid": owner_tid},
+            )
+            from types import SimpleNamespace
+            entries = [
+                SimpleNamespace(
+                    file_name=r[0], content=r[1],
+                    updated_at=r[2], created_at=r[3],
+                )
+                for r in cross_result.all()
+            ]
+
+    # Fallback: current tenant (RLS-scoped) — for returning users in same session
+    if not entries:
+        base = select(ContextEntry).where(
+            ContextEntry.deleted_at.is_(None),
+            ContextEntry.source == "company-intel-onboarding",
+        )
+        result = await db.execute(base)
         entries = result.scalars().all()
 
     if not entries:
-        return CompanyLookupResponse(exists=False)
+        return OnboardingCacheResponse(exists=False)
 
-    # Aggregate stats
-    entry_count = len(entries)
     last_updated = max(
         (e.updated_at or e.created_at for e in entries),
         default=None,
     )
-    categories = sorted(set(e.file_name for e in entries))
-    # Most common source
-    source_counts: dict[str, int] = {}
+
+    # Build CrawlItem-shaped groups: split content back into items
+    groups: list[OnboardingCacheGroup] = []
+    total_items = 0
     for e in entries:
-        source_counts[e.source] = source_counts.get(e.source, 0) + 1
-    most_common_source = max(source_counts, key=source_counts.get) if source_counts else None  # type: ignore[arg-type]
-    verified_count = sum(1 for e in entries if e.confidence == "verified")
-
-    return CompanyLookupResponse(
-        exists=True,
-        domain=normalized,
-        entry_count=entry_count,
-        last_updated=last_updated.isoformat() if last_updated else None,
-        categories=categories,
-        source=most_common_source,
-        verified_count=verified_count,
-    )
-
-
-# ---------------------------------------------------------------------------
-# GET /context/company/{domain}/entries — all entries for a company
-# ---------------------------------------------------------------------------
-
-
-@router.get("/company/{domain}/entries")
-async def company_entries(
-    domain: str,
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    """Return all context entries for a company, grouped by category."""
-    normalized = _normalize_domain(domain)
-
-    # Primary: metadata company_domain
-    base = select(ContextEntry).where(
-        ContextEntry.deleted_at.is_(None),
-        ContextEntry.metadata_["company_domain"].astext == normalized,
-    )
-    result = await db.execute(base)
-    entries = result.scalars().all()
-
-    # Fallback: content-based matching for legacy entries
-    if not entries:
-        name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
-        fallback = select(ContextEntry).where(
-            ContextEntry.deleted_at.is_(None),
-            or_(
-                ContextEntry.content.ilike(f"%{normalized}%"),
-                ContextEntry.content.ilike(f"%{name_part}%"),
-            ),
+        items = _split_entry_items(e)
+        if not items:
+            continue
+        icon, label = _FILE_DISPLAY.get(
+            e.file_name, ("Building2", e.file_name.replace("-", " ").replace("_", " ").title())
         )
-        result = await db.execute(fallback)
-        entries = result.scalars().all()
+        groups.append(OnboardingCacheGroup(
+            category=e.file_name,
+            icon=icon,
+            label=label,
+            items=items,
+            count=len(items),
+        ))
+        total_items += len(items)
 
-    # Group by file_name (category)
-    grouped: dict[str, list[dict]] = {}
-    for e in entries:
-        cat = e.file_name
-        if cat not in grouped:
-            grouped[cat] = []
-        grouped[cat].append(_entry_to_dict(e))
+    if not groups:
+        return OnboardingCacheResponse(exists=False)
 
-    return {
-        "domain": normalized,
-        "categories": sorted(grouped.keys()),
-        "entry_count": len(entries),
-        "groups": grouped,
-    }
+    return OnboardingCacheResponse(
+        exists=True,
+        entry_count=total_items,
+        last_updated=last_updated.isoformat() if last_updated else None,
+        groups=groups,
+    )
 
 
 # ---------------------------------------------------------------------------
-# POST /context/company/refresh — trigger background re-crawl
+# POST /context/onboarding-cache/refresh — trigger background re-crawl
 # ---------------------------------------------------------------------------
 
 
-@router.post("/company/refresh", response_model=CompanyRefreshResponse)
-async def company_refresh(
-    body: CompanyRefreshRequest,
+@router.post("/onboarding-cache/refresh", response_model=OnboardingRefreshResponse)
+async def onboarding_cache_refresh(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Trigger a background re-crawl for a company domain."""
-    normalized = _normalize_domain(body.domain)
+    """Trigger a background re-crawl using the domain stored on the tenant."""
+    tenant = (
+        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+    ).scalar_one_or_none()
+
+    if not tenant or not tenant.domain:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No domain set for this tenant — run onboarding first",
+        )
 
     run = SkillRun(
         tenant_id=user.tenant_id,
         user_id=user.sub,
         skill_name="company-intel",
-        input_text=f"https://{normalized}",
+        input_text=f"https://{tenant.domain}",
         status="pending",
     )
     db.add(run)
@@ -714,7 +701,7 @@ async def company_refresh(
     await db.refresh(run)
     await db.commit()
 
-    return CompanyRefreshResponse(
+    return OnboardingRefreshResponse(
         run_id=str(run.id),
         message="Refresh started",
     )

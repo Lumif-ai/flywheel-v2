@@ -123,15 +123,17 @@ export function OnboardingPage() {
       {/* Error banner */}
       {error && (
         <div className="mb-6 w-full max-w-xl rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-center">
-          <p className="text-sm text-destructive">{error}</p>
-          <button
-            type="button"
-            onClick={retry}
-            className="mt-2 text-sm font-medium hover:underline"
-            style={{ color: colors.brandCoral }}
-          >
-            Try again
-          </button>
+          <p className="text-sm text-destructive">{error.message}</p>
+          {error.retryable && (
+            <button
+              type="button"
+              onClick={retry}
+              className="mt-2 text-sm font-medium hover:underline"
+              style={{ color: colors.brandCoral }}
+            >
+              Try again
+            </button>
+          )}
         </div>
       )}
 
@@ -155,7 +157,7 @@ export function OnboardingPage() {
               >
                 {cacheResult.last_updated &&
                   (Date.now() - new Date(cacheResult.last_updated).getTime()) / (1000 * 60 * 60 * 24) < 7 ? (
-                  <span>Welcome back — here&apos;s what we know about {cacheResult.domain}</span>
+                  <span>Welcome back — here&apos;s what we already know</span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5">
                     Here&apos;s what we know — refreshing for latest
