@@ -57,6 +57,9 @@
     /* Design language: Calm Precision */
     --page-bg: #F9FAFB;
     --card-bg: #FFFFFF;
+    --skeleton-bg: var(--shimmer-base);
+    --shimmer-base: #f0f0f0;
+    --shimmer-highlight: #e0e0e0;
     --heading-text: #121212;
     --body-text: #374151;
     --secondary-text: #6B7280;
@@ -103,6 +106,11 @@
 }
 
 .dark {
+    --page-bg: #111111;
+    --card-bg: #1a1a1a;
+    --skeleton-bg: var(--shimmer-base);
+    --shimmer-base: #2a2a2a;
+    --shimmer-highlight: #3a3a3a;
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -161,7 +169,7 @@
     animation: fade-slide-up 200ms ease-out forwards;
   }
   .animate-shimmer {
-    background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+    background: linear-gradient(90deg, var(--shimmer-base) 25%, var(--shimmer-highlight) 50%, var(--shimmer-base) 75%);
     background-size: 200% 100%;
     animation: shimmer 1.5s ease-in-out infinite;
   }
@@ -170,4 +178,13 @@
   .stagger-3 { animation-delay: 150ms; }
   .stagger-4 { animation-delay: 200ms; }
   .stagger-5 { animation-delay: 250ms; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
