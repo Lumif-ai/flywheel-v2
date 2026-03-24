@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 2 of 6 (Sync Worker and Voice Profile)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-03-24 — Phase 2, Plan 01 complete (Gmail sync worker)
+Plan: 2 of 2 in current phase
+Status: Phase complete
+Last activity: 2026-03-24 — Phase 2, Plan 02 complete (voice profile extraction)
 
-Progress: [███░░░░░░░] 25%
+Progress: [█████░░░░░] 33%
 
 ## Performance Metrics
 
@@ -28,7 +28,7 @@ Progress: [███░░░░░░░] 25%
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
-| 02-sync-worker-and-voice-profile | 1 | ~3 min | ~3 min |
+| 02-sync-worker-and-voice-profile | 2 | ~11 min | ~5.5 min |
 
 *Updated after each plan completion*
 
@@ -51,6 +51,10 @@ Recent decisions affecting current work:
 - [Phase 2, Plan 01]: historyId captured from get_profile() BEFORE pagination in _full_sync — prevents missed messages during initial sync
 - [Phase 2, Plan 01]: Integration re-loaded inside tenant_session — avoids DetachedInstanceError when crossing session boundaries
 - [Phase 2, Plan 01]: asyncio.wait_for(60s) per integration + gather(return_exceptions=True) — concurrent multi-user polling, never crashes loop
+- [Phase 2, Plan 02]: Double idempotency guard for voice_profile_init — existence check in caller + inner guard in function itself
+- [Phase 2, Plan 02]: Only top-20 substantive bodies sent to Haiku — cost control while preserving recency signal
+- [Phase 2, Plan 02]: Voice init failure is non-fatal — email sync always completes regardless of Haiku call outcome
+- [Phase 2, Plan 02]: Minimum 3 substantive bodies required before profile creation — prevents meaningless profiles
 
 ### Pending Todos
 
@@ -66,5 +70,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 2, Plan 01 complete. Gmail sync worker shipped (gmail_sync.py + main.py). Plan 02 (voice profile) ready.
+Stopped at: Phase 2, Plan 02 complete. Voice profile extraction shipped (voice_profile_init + _is_substantive + _extract_voice_profile in gmail_sync.py). Phase 2 fully complete. Ready for Phase 3 (email scoring) — research needed first.
 Resume file: None
