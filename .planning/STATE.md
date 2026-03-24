@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 5 of 6 (Review API and Frontend)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-03-24 — Phase 5 Plan 02 complete (email inbox UI — virtual ThreadList, Sheet ThreadDetail, DraftReview, /email route)
+Plan: 4 of 4 in current phase (gap closure)
+Status: Phase complete
+Last activity: 2026-03-24 — Phase 5 Plan 04 complete (gap closure: priority filter, thread auto-open, badge colors, auth guard)
 
-Progress: [█████████░] 78%
+Progress: [██████████] 88%
 
 ## Performance Metrics
 
@@ -33,6 +33,7 @@ Progress: [█████████░] 78%
 | 05-review-api-and-frontend | 2 (in progress) | ~9 min | ~4.5 min |
 
 *Updated after each plan completion*
+| Phase 05-review-api-and-frontend P04 | 2 | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,14 @@ Recent decisions affecting current work:
 - [Phase 5, Plan 02]: TIER_ORDER sort before flatItems build — deterministic critical-first ordering, recency within tier
 - [Phase 5, Plan 02]: ThreadDetail reads Zustand store internally — self-contained Sheet, no prop drilling through EmailPage
 - [Phase 5, Plan 02]: flex-1 min-h-0 on ThreadList container — required for useVirtualizer to work inside flex column layout
+- [Phase 5, Plan 03]: Removed next-themes from shadcn-generated sonner.tsx — incompatible dep, replaced with hardcoded light theme + CSS var token mapping
+- [Phase 5, Plan 03]: Toaster mounted outside BrowserRouter (QueryClientProvider level); CriticalEmailAlert inside AppShell — ensures toasts render and useNavigate works
+- [Phase 5, Plan 03]: CriticalEmailAlert calls dismissAlert() immediately after toast() — 30s refetch skips already-alerted threads; Sonner id covers same-render case
+- [Phase 5, Plan 03]: useEmailThreads() in AppShell guarded by !isStandalone — avoids tenant-dependent calls on onboarding/invite routes
+- [Phase 5, Plan 03]: DigestView uses selectThread (Zustand) for row clicks — opens ThreadDetail Sheet without page navigation
+- [Phase 5, Plan 04]: AuthenticatedAlerts wrapper component — correct React pattern for conditionally running hooks; useEmailThreads never fires on standalone routes
+- [Phase 5, Plan 04]: useSearchParams + setSearchParams({}, { replace: true }) for thread auto-open — one-shot open that does not re-trigger on refresh, no history entry added
+- [Phase 5, Plan 04]: IIFE in JSX for msgTier computation — co-locates per-message tier calc with badge render without restructuring MessageRow
 
 ### Pending Todos
 
@@ -99,5 +108,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 5 Plan 02 complete — email inbox UI (virtual ThreadList, ThreadDetail Sheet, DraftReview, /email route). Phase 5 Plan 03 (alerts + digest frontend) is next.
+Stopped at: Phase 5 Plan 04 complete — all gap closure fixes applied; Phase 5 fully complete.
 Resume file: None
