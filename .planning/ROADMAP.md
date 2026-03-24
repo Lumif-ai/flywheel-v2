@@ -133,12 +133,13 @@ Plans:
   4. User receives an in-app alert for a priority-5 email even when the Email page is not open
   5. Thread list with 500+ emails scrolls without jank (virtual scrolling active, no DOM node bloat)
 
-**Plans:** 3 plans
+**Plans:** 4 plans
 
 Plans:
-- [ ] 05-01-PLAN.md — Backend read API: GET threads, GET thread detail, GET digest, POST manual sync + api.ts put method
-- [ ] 05-02-PLAN.md — Email inbox frontend: types, Zustand store, React Query hooks, EmailPage with virtualized ThreadList, ThreadDetail sheet, DraftReview
-- [ ] 05-03-PLAN.md — In-app critical email alerts (Sonner), daily digest view, sidebar nav link
+- [x] 05-01-PLAN.md — Backend read API: GET threads, GET thread detail, GET digest, POST manual sync + api.ts put method ✓
+- [x] 05-02-PLAN.md — Email inbox frontend: types, Zustand store, React Query hooks, EmailPage with virtualized ThreadList, ThreadDetail sheet, DraftReview ✓
+- [x] 05-03-PLAN.md — In-app critical email alerts (Sonner), daily digest view, sidebar nav link ✓
+- [ ] 05-04-PLAN.md — Gap closure: fix priority filter values, wire thread auto-open from alert, dynamic badge colors, guard standalone API calls
 
 ---
 
@@ -173,7 +174,7 @@ Plans:
 | 2. Sync Worker and Voice Profile | 2/2 | ✓ Complete | 2026-03-24 |
 | 3. Email Scorer Skill | 2/2 | ✓ Complete | 2026-03-24 |
 | 4. Email Drafter Skill | 2/2 | ✓ Complete | 2026-03-24 |
-| 5. Review API and Frontend | 0/3 | Not started | - |
+| 5. Review API and Frontend | 3/4 | Gap closure remaining | - |
 | 6. Feedback Flywheel | 0/2 | Not started | - |
 
 ---
