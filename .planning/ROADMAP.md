@@ -62,11 +62,11 @@ Plans:
   4. With 5 simultaneous connected users, sync completes without timeout errors (asyncio.gather batch behavior visible in logs)
   5. Email bodies are fetched on-demand (visible in `gmail_read.py` call logs) and not stored in the `emails` table
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 02-01: email_sync_loop() background worker with historyId incremental sync and 404 full-sync fallback
-- [ ] 02-02: voice_profile_init() with sent-mail filtering and EmailVoiceProfile persistence
+- [ ] 02-01-PLAN.md — email_sync_loop() background worker with historyId incremental sync and 404 full-sync fallback
+- [ ] 02-02-PLAN.md — voice_profile_init() with sent-mail filtering and EmailVoiceProfile persistence
 
 ---
 
