@@ -451,9 +451,9 @@ async def execute_run(run: SkillRun) -> None:
         # Retrieve and decrypt user's BYOK API key
         api_key = await _get_user_api_key(factory, run.user_id)
         if api_key is None:
-            # Fall back to subsidy key for onboarding skills (anonymous users)
+            # Fall back to subsidy key for onboarding skills and background engine skills
             from flywheel.config import settings
-            if run.skill_name in ("company-intel", "meeting-prep") and settings.flywheel_subsidy_api_key:
+            if run.skill_name in ("company-intel", "meeting-prep", "email-scorer") and settings.flywheel_subsidy_api_key:
                 api_key = settings.flywheel_subsidy_api_key
             else:
                 raise ValueError(
@@ -521,7 +521,8 @@ async def execute_run(run: SkillRun) -> None:
             has_engine = bool(skill_meta and skill_meta["engine_module"])
             is_company_intel = run.skill_name == "company-intel"
             is_meeting_prep = run.skill_name == "meeting-prep"
-            if has_engine or is_company_intel or is_meeting_prep:
+            is_email_scorer = run.skill_name == "email-scorer"
+            if has_engine or is_company_intel or is_meeting_prep or is_email_scorer:
                 if is_company_intel:
                     output, token_usage, tool_calls = await _execute_company_intel(
                         api_key=api_key,
@@ -540,6 +541,15 @@ async def execute_run(run: SkillRun) -> None:
                         tenant_id=run.tenant_id,
                         user_id=run.user_id,
                     )
+                elif is_email_scorer:
+                    # Email scorer is primarily called directly from gmail_sync.py
+                    # (bypassing execute_run). This dispatch exists for observability
+                    # and manual re-scoring via the skill execution UI.
+                    # Direct scoring is handled by gmail_sync._score_new_emails().
+                    from flywheel.engines.email_scorer import score_email  # noqa: F401
+                    output = "Email scorer engine registered. Direct scoring is handled by gmail_sync.py."
+                    token_usage = 0
+                    tool_calls = []
                 else:
                     engine_mod = skill_meta["engine_module"] if skill_meta else None
                     raise ValueError(
@@ -1002,10 +1012,26 @@ async def _execute_company_intel(
         ),
     }
 
-    # Normalize domain for all entries so cache lookup works
+    # Normalize domain and save to tenant record (cache lookup uses tenant.domain)
     import urllib.parse as _urlparse
     _parsed = _urlparse.urlparse(url if url.startswith("http") else f"https://{url}")
     company_domain = (_parsed.hostname or url).removeprefix("www.").lower()
+
+    # Persist domain on the tenant so cache-first onboarding can find it
+    try:
+        async with factory() as session:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            from flywheel.db.models import Tenant as _Tenant
+            await session.execute(
+                sa_text("UPDATE tenants SET domain = :d WHERE id = :tid"),
+                {"d": company_domain, "tid": str(tenant_id)},
+            )
+            await session.commit()
+    except Exception as e:
+        logger.warning("Failed to save domain to tenant: %s", e)
 
     files_written = 0
     for filename, (content_lines, detail) in section_map.items():
@@ -1016,7 +1042,7 @@ async def _execute_company_intel(
             "detail": detail,
             "confidence": "medium",
             "content": content_lines,
-            "metadata": {"company_domain": company_domain, "source_url": url},
+            "metadata": {"source_url": url},
         }
 
         try:
