@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router'
+import { FileText } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { DocumentCard } from './DocumentCard'
 import { fetchDocuments, shareDocument } from '../api'
@@ -55,17 +56,17 @@ function groupByDate(docs: DocumentListItem[]): Map<string, DocumentListItem[]> 
 
 function SkeletonCard() {
   return (
-    <div className="bg-white border border-[var(--subtle-border)] rounded-xl shadow-sm p-6">
+    <div className="bg-[var(--card-bg)] border border-[var(--subtle-border)] rounded-xl shadow-sm p-6">
       <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-lg animate-shimmer bg-gray-200" />
+        <div className="w-9 h-9 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
         <div className="flex-1 space-y-2">
-          <div className="h-4 w-3/4 rounded animate-shimmer bg-gray-200" />
-          <div className="h-3 w-1/2 rounded animate-shimmer bg-gray-200" />
+          <div className="h-4 w-3/4 rounded animate-shimmer bg-[var(--skeleton-bg)]" />
+          <div className="h-3 w-1/2 rounded animate-shimmer bg-[var(--skeleton-bg)]" />
         </div>
       </div>
       <div className="flex justify-end gap-2 mt-4">
-        <div className="h-8 w-16 rounded-lg animate-shimmer bg-gray-200" />
-        <div className="h-8 w-16 rounded-lg animate-shimmer bg-gray-200" />
+        <div className="h-8 w-16 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
+        <div className="h-8 w-16 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
       </div>
     </div>
   )
@@ -84,6 +85,7 @@ export function DocumentLibrary() {
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterType>('all')
   const [offset, setOffset] = useState(0)
+  const [shareToast, setShareToast] = useState<string | null>(null)
 
   const loadDocuments = useCallback(
     async (currentFilter: FilterType, currentOffset: number, append = false) => {
@@ -123,8 +125,8 @@ export function DocumentLibrary() {
       const res = await shareDocument(doc.id)
       const url = `${window.location.origin}${res.share_url}`
       await navigator.clipboard.writeText(url)
-      // Simple toast -- replace with proper toast system if available
-      alert(`Share link copied to clipboard:\n${url}`)
+      setShareToast(url)
+      setTimeout(() => setShareToast(null), 3000)
     } catch (err) {
       console.error('Failed to share document:', err)
     }
@@ -145,6 +147,12 @@ export function DocumentLibrary() {
         padding: `${spacing.section} ${spacing.pageDesktop}`,
       }}
     >
+      {shareToast && (
+        <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 px-4 py-2 rounded-xl text-sm font-medium bg-[var(--heading-text)] text-[var(--card-bg)] shadow-lg animate-fade-slide-up">
+          Link copied to clipboard
+        </div>
+      )}
+
       {/* Page title */}
       <h1
         style={{
@@ -195,12 +203,8 @@ export function DocumentLibrary() {
       {/* Empty state */}
       {!loading && documents.length === 0 && (
         <div className="text-center py-16">
-          <p
-            style={{
-              fontSize: typography.body.size,
-              color: colors.secondaryText,
-            }}
-          >
+          <FileText className="mx-auto mb-4 size-12" style={{ color: colors.secondaryText, opacity: 0.4 }} />
+          <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
             No documents yet. Run a skill to create your first briefing.
           </p>
         </div>
@@ -256,7 +260,7 @@ export function DocumentLibrary() {
       {/* Loading more indicator */}
       {loading && documents.length > 0 && (
         <div className="flex justify-center mt-4">
-          <div className="w-6 h-6 border-2 border-gray-200 border-t-[var(--brand-coral)] rounded-full animate-spin" />
+          <div className="w-6 h-6 border-2 border-[var(--subtle-border)] border-t-[var(--brand-coral)] rounded-full animate-spin" />
         </div>
       )}
     </div>

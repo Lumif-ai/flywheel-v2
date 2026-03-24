@@ -4,43 +4,7 @@ import { ArrowLeft, Share2, Download, ChevronDown } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { fetchDocument, shareDocument } from '../api'
 import type { DocumentDetail } from '../api'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getTypeLabel(docType: string): string {
-  switch (docType) {
-    case 'meeting-prep':
-      return 'Meeting Prep'
-    case 'company-intel':
-      return 'Company Intel'
-    default:
-      return docType.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    weekday: 'long',
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return 'Just now'
-  if (mins < 60) return `${mins} min ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return `${days}d ago`
-  return formatDate(iso)
-}
+import { getTypeLabel, formatDate, relativeTime } from '../utils'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -115,10 +79,10 @@ export function DocumentViewer() {
         className="mx-auto w-full"
         style={{ maxWidth: spacing.maxReading, padding: `${spacing.section} ${spacing.pageDesktop}` }}
       >
-        <div className="h-4 w-32 rounded animate-shimmer bg-gray-200 mb-8" />
-        <div className="h-8 w-3/4 rounded animate-shimmer bg-gray-200 mb-4" />
-        <div className="h-4 w-1/4 rounded animate-shimmer bg-gray-200 mb-8" />
-        <div className="h-96 rounded-xl animate-shimmer bg-gray-200" />
+        <div className="h-4 w-32 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-8" />
+        <div className="h-8 w-3/4 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-4" />
+        <div className="h-4 w-1/4 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-8" />
+        <div className="h-96 rounded-xl animate-shimmer bg-[var(--skeleton-bg)]" />
       </div>
     )
   }
@@ -140,6 +104,14 @@ export function DocumentViewer() {
           style={{ color: colors.brandCoral }}
         >
           Back to Documents
+        </button>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="mt-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          style={{ color: colors.brandCoral }}
+        >
+          Try again
         </button>
       </div>
     )
@@ -220,7 +192,7 @@ export function DocumentViewer() {
           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-200 hover:shadow-md"
           style={{
             background: `linear-gradient(135deg, ${colors.brandCoral}, ${colors.brandGradientEnd})`,
-            color: '#fff',
+            color: 'var(--primary-foreground, #fff)',
           }}
         >
           <Share2 size={14} />
@@ -230,6 +202,7 @@ export function DocumentViewer() {
           <button
             type="button"
             disabled
+            aria-label="Export coming soon"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium opacity-50 cursor-not-allowed"
             style={{
               backgroundColor: colors.brandTint,
@@ -247,7 +220,7 @@ export function DocumentViewer() {
       </div>
 
       {/* Content area */}
-      <div className="rounded-xl overflow-hidden border border-[var(--subtle-border)] bg-white">
+      <div className="rounded-xl overflow-hidden border border-[var(--subtle-border)] bg-[var(--card-bg)]">
         <iframe
           ref={iframeRef}
           title={document.title}

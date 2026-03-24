@@ -1,48 +1,9 @@
-import { FileText, Building2, Share2, ChevronRight } from 'lucide-react'
+import { Share2, ChevronRight } from 'lucide-react'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { staggerDelay } from '@/lib/animations'
 import type { DocumentListItem } from '../api'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-const TYPE_ICONS: Record<string, typeof FileText> = {
-  'meeting-prep': FileText,
-  'company-intel': Building2,
-}
-
-function getTypeIcon(docType: string) {
-  return TYPE_ICONS[docType] || FileText
-}
-
-function getTypeLabel(docType: string): string {
-  switch (docType) {
-    case 'meeting-prep':
-      return 'Meeting Prep'
-    case 'company-intel':
-      return 'Company Intel'
-    default:
-      return docType.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  }
-}
-
-function relativeTime(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return 'Just now'
-  if (mins < 60) return `${mins} min ago`
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  const days = Math.floor(hours / 24)
-  if (days === 1) return 'Yesterday'
-  if (days < 7) return `${days}d ago`
-  return new Date(iso).toLocaleDateString('en-US', {
-    month: 'short',
-    day: 'numeric',
-  })
-}
+import { getTypeIcon, getTypeLabel, relativeTime } from '../utils'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -131,7 +92,7 @@ export function DocumentCard({
       >
         <button
           type="button"
-          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-gray-100"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-[var(--brand-tint)]"
           style={{ color: colors.secondaryText }}
           onClick={(e) => {
             e.stopPropagation()
@@ -143,7 +104,7 @@ export function DocumentCard({
         </button>
         <button
           type="button"
-          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-gray-100"
+          className="inline-flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg transition-colors hover:bg-[var(--brand-tint)]"
           style={{ color: colors.brandCoral }}
           onClick={(e) => {
             e.stopPropagation()

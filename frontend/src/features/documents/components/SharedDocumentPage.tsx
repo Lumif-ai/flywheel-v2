@@ -3,29 +3,7 @@ import { useParams } from 'react-router'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { fetchSharedDocument } from '../api'
 import type { DocumentDetail } from '../api'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function getTypeLabel(docType: string): string {
-  switch (docType) {
-    case 'meeting-prep':
-      return 'Meeting Prep'
-    case 'company-intel':
-      return 'Company Intel'
-    default:
-      return docType.replace(/-/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
-  }
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-US', {
-    year: 'numeric',
-    month: 'long',
-    day: 'numeric',
-  })
-}
+import { getTypeLabel, formatDate } from '../utils'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -84,9 +62,9 @@ export function SharedDocumentPage() {
           className="mx-auto w-full"
           style={{ maxWidth: spacing.maxReading }}
         >
-          <div className="h-8 w-3/4 rounded animate-shimmer bg-gray-200 mb-4" />
-          <div className="h-4 w-1/3 rounded animate-shimmer bg-gray-200 mb-8" />
-          <div className="h-96 rounded-xl animate-shimmer bg-gray-200" />
+          <div className="h-8 w-3/4 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-4" />
+          <div className="h-4 w-1/3 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-8" />
+          <div className="h-96 rounded-xl animate-shimmer bg-[var(--skeleton-bg)]" />
         </div>
       </div>
     )
@@ -165,7 +143,7 @@ export function SharedDocumentPage() {
         </div>
 
         {/* Content */}
-        <div className="rounded-xl overflow-hidden border border-[var(--subtle-border)] bg-white shadow-sm">
+        <div className="rounded-xl overflow-hidden border border-[var(--subtle-border)] bg-[var(--card-bg)] shadow-sm">
           <iframe
             ref={iframeRef}
             title={document.title}
