@@ -10,27 +10,8 @@
  * streaming path; Realtime is only for the "closed browser tab" scenario.
  */
 
-import { useEffect } from 'react'
-
-// Supabase client placeholder -- will be configured when VITE_SUPABASE_URL
-// and VITE_SUPABASE_ANON_KEY are available in the environment.
-let supabaseClient: any = null
-
-try {
-  const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-  const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY
-
-  if (supabaseUrl && supabaseKey) {
-    // Dynamic import to avoid bundling supabase-js when not configured
-    import('@supabase/supabase-js').then(({ createClient }) => {
-      supabaseClient = createClient(supabaseUrl, supabaseKey)
-    }).catch(() => {
-      console.debug('Supabase Realtime: @supabase/supabase-js not installed')
-    })
-  }
-} catch {
-  // Environment variables not available -- Realtime disabled
-}
+import { useEffect, useState } from 'react'
+import { getSupabase } from './supabase'
 
 export interface SkillRunUpdate {
   id: string
@@ -52,6 +33,12 @@ export function useSkillRunRealtime(
   userId: string | null,
   onComplete: (run: SkillRunUpdate) => void,
 ): void {
+  const [supabaseClient, setSupabaseClient] = useState<any>(null)
+
+  useEffect(() => {
+    getSupabase().then(setSupabaseClient)
+  }, [])
+
   useEffect(() => {
     if (!userId || !supabaseClient) {
       if (!supabaseClient && userId) {
@@ -82,5 +69,5 @@ export function useSkillRunRealtime(
     return () => {
       supabaseClient.removeChannel(channel)
     }
-  }, [userId, onComplete])
+  }, [userId, supabaseClient, onComplete])
 }

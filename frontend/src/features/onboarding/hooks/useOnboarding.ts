@@ -1,6 +1,8 @@
 import { useState, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
+import { getSupabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/auth'
 import type { SSEEvent } from '@/types/events'
 
@@ -20,7 +22,8 @@ export type OnboardingPhase =
 export interface CrawlItem {
   category: string
   icon: string
-  content: string
+  label: string
+  items: string[]
   count: number
 }
 
@@ -41,8 +44,10 @@ export interface OnboardingState {
   phase: OnboardingPhase
   crawlItems: CrawlItem[]
   crawlTotal: number
+  crawlStatus: string | null
   parsedStreams: ParsedStream[]
   createdStreams: CreatedStream[]
+  briefingHtml: string | null
   error: string | null
   loading: boolean
   sseUrl: string | null
@@ -56,8 +61,10 @@ const initialState: OnboardingState = {
   phase: 'url_input',
   crawlItems: [],
   crawlTotal: 0,
+  crawlStatus: null,
   parsedStreams: [],
   createdStreams: [],
+  briefingHtml: null,
   error: null,
   loading: false,
   sseUrl: null,
@@ -71,24 +78,35 @@ export function useOnboarding() {
   const [state, setState] = useState<OnboardingState>({ ...initialState })
   const stateRef = useRef(state)
   stateRef.current = state
+  const queryClient = useQueryClient()
 
   // ---- SSE handler for crawl events ----
   const handleCrawlEvent = useCallback((event: SSEEvent) => {
     const data = event.data as Record<string, unknown>
 
     switch (event.type) {
+      case 'stage': {
+        // Progress update from backend (crawling, structuring, enriching, etc.)
+        const message = (data.message as string) ?? ''
+        if (message) {
+          setState((s) => ({ ...s, crawlStatus: message }))
+        }
+        break
+      }
       case 'text': {
-        // crawl_item event from backend (mapped through SSE as 'text' type)
+        // Grouped discovery from backend (e.g. "Products" with list of items)
         const item: CrawlItem = {
           category: (data.category as string) ?? 'company_info',
           icon: (data.icon as string) ?? 'Building2',
-          content: (data.content as string) ?? '',
+          label: (data.label as string) ?? '',
+          items: (data.items as string[]) ?? [],
           count: (data.count as number) ?? stateRef.current.crawlItems.length + 1,
         }
         setState((s) => ({
           ...s,
           crawlItems: [...s.crawlItems, item],
-          crawlTotal: item.count,
+          crawlTotal: s.crawlTotal + item.items.length,
+          crawlStatus: null,
         }))
         break
       }
@@ -98,6 +116,7 @@ export function useOnboarding() {
           ...s,
           phase: 'crawl_complete',
           crawlTotal: totalItems,
+          crawlStatus: null,
           sseUrl: null,
         }))
         break
@@ -107,6 +126,7 @@ export function useOnboarding() {
           ...s,
           error: (data.message as string) ?? 'Crawl failed',
           phase: 'url_input',
+          crawlStatus: null,
           sseUrl: null,
         }))
         break
@@ -122,12 +142,9 @@ export function useOnboarding() {
     if (token) return // session already exists
 
     try {
-      const supabaseUrl = (import.meta as any).env?.VITE_SUPABASE_URL
-      const supabaseKey = (import.meta as any).env?.VITE_SUPABASE_ANON_KEY
+      const supabase = await getSupabase()
 
-      if (supabaseUrl && supabaseKey) {
-        const { createClient } = await import('@supabase/supabase-js')
-        const supabase = createClient(supabaseUrl, supabaseKey)
+      if (supabase) {
         const { data, error } = await supabase.auth.signInAnonymously()
         if (error) throw error
         if (data.session?.access_token) {
@@ -164,7 +181,7 @@ export function useOnboarding() {
       const runId = res.run_id
       setState((s) => ({
         ...s,
-        sseUrl: `/api/v1/skills/runs/${runId}/stream`,
+        sseUrl: `/api/v1/onboarding/crawl/${runId}/stream`,
       }))
     } catch (err) {
       setState((s) => ({
@@ -234,6 +251,8 @@ export function useOnboarding() {
           entity_seeds: s.entity_seeds,
         })),
       })
+      // Invalidate sidebar streams cache so new streams appear immediately
+      queryClient.invalidateQueries({ queryKey: ['streams'] })
       setState((s) => ({
         ...s,
         createdStreams: res.created,
@@ -257,9 +276,12 @@ export function useOnboarding() {
     setState((s) => ({ ...s, phase: 'first_briefing' }))
   }, [])
 
-  const goToBriefing = useCallback(() => {
-    // Navigation handled by the page component
-    setState((s) => ({ ...s, phase: 'first_briefing' }))
+  const goToBriefing = useCallback((briefingHtml?: string) => {
+    setState((s) => ({
+      ...s,
+      phase: 'first_briefing',
+      briefingHtml: briefingHtml || s.briefingHtml,
+    }))
   }, [])
 
   const retry = useCallback(() => {

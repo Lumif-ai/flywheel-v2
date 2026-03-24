@@ -34,6 +34,7 @@ const CATEGORY_ICONS: Record<string, LucideIcon> = {
 interface LiveCrawlProps {
   crawlItems: CrawlItem[]
   crawlTotal: number
+  crawlStatus: string | null
   isComplete: boolean
   onContinue: () => void
 }
@@ -42,7 +43,7 @@ interface LiveCrawlProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export function LiveCrawl({ crawlItems, crawlTotal, isComplete, onContinue }: LiveCrawlProps) {
+export function LiveCrawl({ crawlItems, crawlTotal, crawlStatus, isComplete, onContinue }: LiveCrawlProps) {
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -62,9 +63,15 @@ export function LiveCrawl({ crawlItems, crawlTotal, isComplete, onContinue }: Li
               <span className="animate-bounce" style={{ animationDelay: '300ms' }}>.</span>
             </span>
           </h2>
-          <p className="text-3xl font-semibold text-primary tabular-nums">
-            {crawlTotal} items found
-          </p>
+          {crawlTotal > 0 ? (
+            <p className="text-3xl font-semibold text-primary tabular-nums">
+              {crawlTotal} items found
+            </p>
+          ) : crawlStatus ? (
+            <p className="text-sm text-muted-foreground animate-pulse">
+              {crawlStatus}
+            </p>
+          ) : null}
         </div>
       ) : (
         <div className="text-center space-y-3">
@@ -80,21 +87,41 @@ export function LiveCrawl({ crawlItems, crawlTotal, isComplete, onContinue }: Li
         </div>
       )}
 
-      {/* Item list */}
-      <div className="max-h-80 overflow-y-auto space-y-2 rounded-lg border border-border p-4">
-        {crawlItems.map((item, i) => {
-          const IconComponent = CATEGORY_ICONS[item.icon?.toLowerCase() ?? item.category] ?? Building2
+      {/* Grouped category cards */}
+      <div className="max-h-[28rem] overflow-y-auto space-y-3 rounded-lg border border-border p-4">
+        {crawlItems.map((group, i) => {
+          const IconComponent = CATEGORY_ICONS[group.category] ?? Building2
           return (
             <div
               key={i}
-              className="flex items-start gap-3 animate-in fade-in slide-in-from-bottom-2 duration-300"
-              style={{ animationDelay: `${Math.min(i * 50, 500)}ms` }}
+              className="animate-in fade-in slide-in-from-bottom-2 duration-300 rounded-md border border-border/50 bg-muted/30 p-3"
+              style={{ animationDelay: `${Math.min(i * 80, 400)}ms` }}
             >
-              <IconComponent className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <p className="text-sm text-foreground/80">{item.content}</p>
+              <div className="flex items-center gap-2 mb-1.5">
+                <IconComponent className="h-4 w-4 shrink-0 text-primary" />
+                <span className="text-sm font-medium text-foreground">{group.label}</span>
+                <span className="text-xs text-muted-foreground ml-auto">{group.items.length}</span>
+              </div>
+              <div className="flex flex-wrap gap-1.5">
+                {group.items.map((item, j) => (
+                  <span
+                    key={j}
+                    className="inline-block rounded-full bg-background px-2.5 py-0.5 text-xs text-foreground/80 border border-border/50"
+                  >
+                    {item}
+                  </span>
+                ))}
+              </div>
             </div>
           )
         })}
+        {/* Show status while waiting for discoveries */}
+        {crawlItems.length === 0 && crawlStatus && (
+          <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
+            <div className="h-4 w-4 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+            <span className="text-sm">{crawlStatus}</span>
+          </div>
+        )}
         <div ref={bottomRef} />
       </div>
 

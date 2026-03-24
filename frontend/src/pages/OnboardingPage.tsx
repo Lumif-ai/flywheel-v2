@@ -3,13 +3,15 @@ import { useNavigate } from 'react-router'
 import { UrlInput } from '@/features/onboarding/components/UrlInput'
 import { LiveCrawl } from '@/features/onboarding/components/LiveCrawl'
 import { StreamCreator } from '@/features/onboarding/components/StreamCreator'
+import { OnboardingMeetingPrep } from '@/features/onboarding/components/OnboardingMeetingPrep'
 import { useOnboarding } from '@/features/onboarding/hooks/useOnboarding'
+import { Button } from '@/components/ui/button'
 
 // Progress step definitions
 const STEPS = [
   { key: 'crawl', label: 'Discover' },
   { key: 'streams', label: 'Organize' },
-  { key: 'meetings', label: 'Connect' },
+  { key: 'prep', label: 'Prepare' },
   { key: 'briefing', label: 'Brief' },
 ] as const
 
@@ -83,7 +85,9 @@ export function OnboardingPage() {
     phase,
     crawlItems,
     crawlTotal,
+    crawlStatus,
     parsedStreams,
+    briefingHtml,
     error,
     loading,
     startCrawl,
@@ -99,12 +103,7 @@ export function OnboardingPage() {
     retry,
   } = onboarding
 
-  // Navigate to briefing when phase reaches first_briefing
-  useEffect(() => {
-    if (phase === 'first_briefing') {
-      navigate('/')
-    }
-  }, [phase, navigate])
+  // Brief step is now shown inline — no auto-navigate
 
   const currentStep = getStepIndex(phase)
 
@@ -136,6 +135,7 @@ export function OnboardingPage() {
           <LiveCrawl
             crawlItems={crawlItems}
             crawlTotal={crawlTotal}
+            crawlStatus={crawlStatus}
             isComplete={phase === 'crawl_complete'}
             onContinue={proceedToStreams}
           />
@@ -163,26 +163,56 @@ export function OnboardingPage() {
         </div>
       )}
 
-      {/* Step: Meeting Notes (Plan 03 placeholder) */}
+      {/* Step: Meeting Prep — first skill experience */}
       {phase === 'meeting_notes' && (
-        <div className="w-full max-w-xl flex flex-col items-center text-center space-y-4">
-          <h2 className="text-2xl font-bold tracking-tight text-foreground">
-            Add meeting notes
-          </h2>
-          <p className="text-muted-foreground">
-            Paste or upload meeting notes to enrich your workspace intelligence.
-          </p>
-          <p className="text-sm text-muted-foreground italic">
-            Coming in Plan 03
-          </p>
-          <button
-            type="button"
-            onClick={goToBriefing}
-            className="mt-4 inline-flex items-center justify-center rounded-md bg-primary px-6 py-2.5 text-sm font-medium text-primary-foreground hover:bg-primary/90 transition-colors"
-          >
-            Go to briefing
-          </button>
-          <SkipLink onClick={skipToBriefing} />
+        <div className="w-full max-w-2xl">
+          <OnboardingMeetingPrep
+            onComplete={goToBriefing}
+            onSkip={skipToBriefing}
+          />
+        </div>
+      )}
+
+      {/* Step: Brief — show the meeting prep briefing full-width */}
+      {phase === 'first_briefing' && (
+        <div className="w-full max-w-3xl flex flex-col items-center">
+          {briefingHtml ? (
+            <>
+              <div
+                className="w-full rounded-lg border border-border bg-background p-8 overflow-y-auto prose prose-sm dark:prose-invert"
+                style={{ maxHeight: '70vh' }}
+                dangerouslySetInnerHTML={{ __html: briefingHtml }}
+              />
+              <div className="mt-6 text-center space-y-3">
+                <Button
+                  onClick={() => navigate('/')}
+                  size="lg"
+                  className="gap-2 px-8"
+                >
+                  Enter your workspace
+                </Button>
+                <p className="text-xs text-muted-foreground">
+                  This briefing is saved — find it anytime in your workspace
+                </p>
+              </div>
+            </>
+          ) : (
+            <div className="text-center space-y-4">
+              <h2 className="text-2xl font-bold tracking-tight text-foreground">
+                Welcome to your workspace
+              </h2>
+              <p className="text-muted-foreground">
+                Start using skills to build intelligence that compounds over time
+              </p>
+              <Button
+                onClick={() => navigate('/')}
+                size="lg"
+                className="gap-2 px-8"
+              >
+                Enter workspace
+              </Button>
+            </div>
+          )}
         </div>
       )}
     </div>

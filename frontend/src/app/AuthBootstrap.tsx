@@ -1,0 +1,68 @@
+import { useEffect, useState } from 'react'
+import { getSupabase } from '@/lib/supabase'
+import { useAuthStore } from '@/stores/auth'
+
+/**
+ * Ensures an auth session exists before rendering children.
+ * For anonymous users, creates a Supabase anonymous session on app startup
+ * so sidebar/layout API calls have a valid JWT token.
+ */
+export function AuthBootstrap({ children }: { children: React.ReactNode }) {
+  const [ready, setReady] = useState(false)
+  const token = useAuthStore((s) => s.token)
+
+  useEffect(() => {
+    if (token) {
+      setReady(true)
+      return
+    }
+
+    async function ensureSession() {
+      try {
+        const supabase = await getSupabase()
+
+        if (supabase) {
+          // Check for existing session first
+          const { data: { session: existing } } = await supabase.auth.getSession()
+          if (existing?.access_token) {
+            useAuthStore.getState().setToken(existing.access_token)
+            useAuthStore.getState().setUser({
+              id: existing.user?.id ?? '',
+              email: existing.user?.email ?? null,
+              is_anonymous: existing.user?.is_anonymous ?? true,
+            })
+            setReady(true)
+            return
+          }
+
+          // No existing session — create anonymous
+          const { data, error } = await supabase.auth.signInAnonymously()
+          if (error) throw error
+          if (data.session?.access_token) {
+            useAuthStore.getState().setToken(data.session.access_token)
+            useAuthStore.getState().setUser({
+              id: data.user?.id ?? '',
+              email: null,
+              is_anonymous: true,
+            })
+          }
+        }
+      } catch (err) {
+        console.warn('Auth bootstrap failed:', err)
+      }
+      setReady(true)
+    }
+
+    ensureSession()
+  }, [token])
+
+  if (!ready) {
+    return (
+      <div className="flex h-dvh items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-muted-foreground border-t-transparent" />
+      </div>
+    )
+  }
+
+  return <>{children}</>
+}
