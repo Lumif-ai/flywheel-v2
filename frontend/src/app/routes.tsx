@@ -23,6 +23,11 @@ const SharedDocumentPage = lazy(() =>
   import('@/features/documents/components/SharedDocumentPage').then((m) => ({ default: m.SharedDocumentPage }))
 )
 
+// Lazy-loaded email inbox
+const EmailPage = lazy(() =>
+  import('@/features/email/components/EmailPage').then((m) => ({ default: m.EmailPage }))
+)
+
 // Lazy-loaded public pages (infrequently accessed)
 const TermsPage = lazy(() =>
   import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage }))
@@ -38,6 +43,7 @@ export function AppRoutes() {
       <Route path="/" element={<BriefingPage />} />
       <Route path="/streams/:id" element={<StreamDetailPage />} />
       <Route path="/chat" element={<ActPage />} />
+      <Route path="/email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
