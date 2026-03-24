@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 4 of 6 (Email Drafter Skill)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-03-24 — Phase 4 Plan 01 complete (email_drafter engine + SKILL.md)
+Plan: 2 of 2 in current phase
+Status: Phase 4 complete
+Last activity: 2026-03-24 — Phase 4 Plan 02 complete (sync wiring + draft lifecycle API)
 
-Progress: [███████░░░] 58%
+Progress: [████████░░] 66%
 
 ## Performance Metrics
 
@@ -29,7 +29,7 @@ Progress: [███████░░░] 58%
 |-------|-------|-------|----------|
 | 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
 | 02-sync-worker-and-voice-profile | 2 | ~11 min | ~5.5 min |
-| 04-email-drafter-skill | 1 | ~4 min | ~4 min |
+| 04-email-drafter-skill | 2 | ~9 min | ~4.5 min |
 
 *Updated after each plan completion*
 
@@ -72,6 +72,10 @@ Recent decisions affecting current work:
 - [Phase 4, Plan 01]: Voice profile injected into system prompt not user turn — higher constraint weight with Sonnet
 - [Phase 4, Plan 01]: Context assembly reuses EmailScore.context_refs UUIDs — no FTS re-run; deterministic and cheap
 - [Phase 4, Plan 01]: fetch_error stored in context_used JSONB — no schema change; structured error trace for 401/403 fallback
+- [Phase 4, Plan 02]: Draft wired after scoring — ensures EmailScore rows committed before LEFT JOIN IS NULL query
+- [Phase 4, Plan 02]: send first, null body after — approve endpoint nulls draft_body only on confirmed Gmail send success
+- [Phase 4, Plan 02]: user_edits for edits — preserves original draft_body for Phase 6 diff analysis
+- [Phase 4, Plan 02]: get_message_id_header on-demand — no schema change; lightweight metadata call at approval time
 
 ### Pending Todos
 
@@ -86,5 +90,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 4 Plan 01 complete — email_drafter.py engine + SKILL.md created. Plan 04-02 (gmail_sync.py wiring) is next.
+Stopped at: Phase 4 Plan 02 complete — sync wiring + draft lifecycle API. Phase 4 is fully complete. Phase 5 (frontend draft inbox) is next.
 Resume file: None
