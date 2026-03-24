@@ -26,7 +26,7 @@ export function StreamSidebar() {
   if (isLoading) {
     return (
       <SidebarGroup>
-        <SidebarGroupLabel>Work Streams</SidebarGroupLabel>
+        <SidebarGroupLabel className="text-xs uppercase tracking-wider" style={{ fontSize: '13px', color: 'var(--secondary-text)' }}>Focus Areas</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
             {Array.from({ length: 3 }).map((_, i) => (
@@ -43,20 +43,27 @@ export function StreamSidebar() {
   return (
     <>
       <SidebarGroup>
-        <SidebarGroupLabel>Work Streams</SidebarGroupLabel>
+        <SidebarGroupLabel className="text-xs uppercase tracking-wider" style={{ fontSize: '13px', color: 'var(--secondary-text)' }}>Focus Areas</SidebarGroupLabel>
         <SidebarGroupContent>
           <SidebarMenu>
-            {visibleStreams.map((stream) => (
-              <SidebarMenuItem key={stream.id}>
-                <SidebarMenuButton
-                  render={<NavLink to={`/streams/${stream.id}`} />}
-                  tooltip={stream.name}
-                >
-                  <span className="truncate flex-1">{stream.name}</span>
-                  <StreamDensityCard densityScore={stream.density_score} details={stream.density_details} compact />
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-            ))}
+            {visibleStreams.map((stream) => {
+              const density = stream.density_score ?? 0
+              const dotColor = density > 70 ? '#22C55E' : density >= 30 ? '#F59E0B' : '#9CA3AF'
+              return (
+                <SidebarMenuItem key={stream.id}>
+                  <SidebarMenuButton
+                    render={<NavLink to={`/streams/${stream.id}`} />}
+                    tooltip={stream.name}
+                  >
+                    <span
+                      className="shrink-0 rounded-full"
+                      style={{ width: 8, height: 8, backgroundColor: dotColor }}
+                    />
+                    <span className="truncate flex-1">{stream.name}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              )
+            })}
 
             {overflowCount > 0 && (
               <SidebarMenuItem>
@@ -77,7 +84,7 @@ export function StreamSidebar() {
                 tooltip="Create new stream"
               >
                 <Plus className="size-4" />
-                <span>New Stream</span>
+                <span>New Focus Area</span>
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>

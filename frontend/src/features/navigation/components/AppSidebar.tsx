@@ -1,5 +1,5 @@
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings } from 'lucide-react'
+import { Home, Settings, FileText } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import {
@@ -56,6 +56,16 @@ export function AppSidebar() {
                 >
                   <Home className="size-4" />
                   <span>Briefing</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname.startsWith('/documents')}
+                  render={<NavLink to="/documents" />}
+                  tooltip="Documents"
+                >
+                  <FileText className="size-4" />
+                  <span>Documents</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

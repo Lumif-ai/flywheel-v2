@@ -1,117 +1,108 @@
-import { useEffect } from 'react'
+/**
+ * OnboardingPage - 5-moment onboarding orchestrator.
+ *
+ * Moments: arrive -> discover -> align -> experience -> land
+ * No step numbers, no progress bars. Just the current moment,
+ * centered, with generous whitespace. Subtle dot indicator at bottom.
+ */
+
+import { useState, useCallback } from 'react'
 import { useNavigate } from 'react-router'
-import { UrlInput } from '@/features/onboarding/components/UrlInput'
-import { LiveCrawl } from '@/features/onboarding/components/LiveCrawl'
-import { StreamCreator } from '@/features/onboarding/components/StreamCreator'
-import { OnboardingMeetingPrep } from '@/features/onboarding/components/OnboardingMeetingPrep'
 import { useOnboarding } from '@/features/onboarding/hooks/useOnboarding'
-import { Button } from '@/components/ui/button'
+import { MomentArrive } from '@/features/onboarding/components/MomentArrive'
+import { MomentDiscover } from '@/features/onboarding/components/MomentDiscover'
+import { MomentAlign } from '@/features/onboarding/components/MomentAlign'
+import { MomentExperience } from '@/features/onboarding/components/MomentExperience'
+import { MomentLand } from '@/features/onboarding/components/MomentLand'
+import { colors } from '@/lib/design-tokens'
 
-// Progress step definitions
-const STEPS = [
-  { key: 'crawl', label: 'Discover' },
-  { key: 'streams', label: 'Organize' },
-  { key: 'prep', label: 'Prepare' },
-  { key: 'briefing', label: 'Brief' },
-] as const
+// ---------------------------------------------------------------------------
+// Moment type + ordering
+// ---------------------------------------------------------------------------
 
-function getStepIndex(phase: string): number {
-  switch (phase) {
-    case 'url_input':
-    case 'crawling':
-    case 'crawl_complete':
-      return 0
-    case 'stream_input':
-    case 'stream_confirm':
-      return 1
-    case 'meeting_notes':
-      return 2
-    case 'first_briefing':
-      return 3
-    default:
-      return 0
-  }
-}
+type Moment = 'arrive' | 'discover' | 'align' | 'experience' | 'land'
 
-function ProgressDots({ currentStep }: { currentStep: number }) {
+const MOMENTS: Moment[] = ['arrive', 'discover', 'align', 'experience', 'land']
+
+// ---------------------------------------------------------------------------
+// Dot progress indicator
+// ---------------------------------------------------------------------------
+
+function MomentDots({ current }: { current: Moment }) {
+  const currentIndex = MOMENTS.indexOf(current)
+
   return (
-    <div className="flex items-center justify-center gap-3 mb-8">
-      {STEPS.map((step, i) => (
-        <div key={step.key} className="flex items-center gap-3">
-          <div className="flex flex-col items-center gap-1">
-            <div
-              className={`h-2.5 w-2.5 rounded-full transition-colors duration-300 ${
-                i <= currentStep ? 'bg-primary' : 'bg-muted'
-              }`}
-            />
-            <span
-              className={`text-xs ${
-                i <= currentStep ? 'text-foreground' : 'text-muted-foreground'
-              }`}
-            >
-              {step.label}
-            </span>
-          </div>
-          {i < STEPS.length - 1 && (
-            <div
-              className={`h-px w-8 mt-[-14px] ${
-                i < currentStep ? 'bg-primary' : 'bg-muted'
-              }`}
-            />
-          )}
-        </div>
+    <div className="flex items-center justify-center gap-2">
+      {MOMENTS.map((m, i) => (
+        <div
+          key={m}
+          className="h-2 w-2 rounded-full transition-colors duration-300"
+          style={{
+            backgroundColor: i <= currentIndex
+              ? 'var(--brand-coral)'
+              : 'var(--subtle-border)',
+          }}
+        />
       ))}
     </div>
   )
 }
 
-function SkipLink({ onClick, label = 'Skip for now' }: { onClick: () => void; label?: string }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className="mt-6 text-sm text-muted-foreground hover:text-foreground transition-colors"
-    >
-      {label}
-    </button>
-  )
-}
+// ---------------------------------------------------------------------------
+// Page component
+// ---------------------------------------------------------------------------
 
 export function OnboardingPage() {
   const navigate = useNavigate()
   const onboarding = useOnboarding()
+  const [moment, setMoment] = useState<Moment>('arrive')
+  const [briefingHtml, setBriefingHtml] = useState<string | null>(null)
 
   const {
-    phase,
     crawlItems,
     crawlTotal,
     crawlStatus,
-    parsedStreams,
-    briefingHtml,
+    phase: crawlPhase,
     error,
-    loading,
     startCrawl,
-    proceedToStreams,
     parseStreams,
-    updateStream,
-    removeStream,
-    addStream,
     confirmStreams,
-    skipToMeetings,
-    skipToBriefing,
-    goToBriefing,
+    parsedStreams,
     retry,
   } = onboarding
 
-  // Brief step is now shown inline — no auto-navigate
+  // ---- Moment handlers ----
 
-  const currentStep = getStepIndex(phase)
+  const handleArriveComplete = useCallback(
+    (url: string) => {
+      startCrawl(url)
+      setMoment('discover')
+    },
+    [startCrawl],
+  )
+
+  const handleDiscoverComplete = useCallback(() => {
+    setMoment('align')
+  }, [])
+
+  const handleAlignComplete = useCallback(() => {
+    setMoment('experience')
+  }, [])
+
+  const handleExperienceComplete = useCallback((html?: string) => {
+    if (html) setBriefingHtml(html)
+    setMoment('land')
+  }, [])
+
+  const handleLandComplete = useCallback(() => {
+    navigate('/')
+  }, [navigate])
 
   return (
-    <div className="flex min-h-[80vh] flex-col items-center justify-center px-4 py-12">
-      {/* Progress dots (hidden on initial URL input) */}
-      {phase !== 'url_input' && <ProgressDots currentStep={currentStep} />}
-
+    <div
+      className="flex min-h-screen flex-col items-center justify-center px-6"
+      style={{ background: colors.pageBg }}
+    >
       {/* Error banner */}
       {error && (
         <div className="mb-6 w-full max-w-xl rounded-lg border border-destructive/50 bg-destructive/10 p-4 text-center">
@@ -119,102 +110,55 @@ export function OnboardingPage() {
           <button
             type="button"
             onClick={retry}
-            className="mt-2 text-sm font-medium text-primary hover:underline"
+            className="mt-2 text-sm font-medium hover:underline"
+            style={{ color: colors.brandCoral }}
           >
             Try again
           </button>
         </div>
       )}
 
-      {/* Step: URL Input */}
-      {phase === 'url_input' && <UrlInput onSubmit={startCrawl} />}
+      {/* Current moment */}
+      <div className="w-full flex-1 flex items-center justify-center py-12">
+        {moment === 'arrive' && (
+          <MomentArrive onComplete={handleArriveComplete} />
+        )}
 
-      {/* Step: Crawling / Crawl Complete */}
-      {(phase === 'crawling' || phase === 'crawl_complete') && (
-        <div className="w-full max-w-xl flex flex-col items-center">
-          <LiveCrawl
+        {moment === 'discover' && (
+          <MomentDiscover
             crawlItems={crawlItems}
             crawlTotal={crawlTotal}
             crawlStatus={crawlStatus}
-            isComplete={phase === 'crawl_complete'}
-            onContinue={proceedToStreams}
+            isComplete={crawlPhase === 'crawl_complete'}
+            onComplete={handleDiscoverComplete}
           />
-          {phase === 'crawl_complete' && (
-            <SkipLink onClick={skipToMeetings} label="Skip to meetings" />
-          )}
-        </div>
-      )}
+        )}
 
-      {/* Step: Stream Input / Confirm */}
-      {(phase === 'stream_input' || phase === 'stream_confirm') && (
-        <div className="w-full max-w-xl flex flex-col items-center">
-          <StreamCreator
-            phase={phase}
+        {moment === 'align' && (
+          <MomentAlign
+            onComplete={handleAlignComplete}
+            parseStreams={parseStreams}
+            confirmStreams={confirmStreams}
             parsedStreams={parsedStreams}
-            loading={loading}
-            error={error}
-            onParse={parseStreams}
-            onUpdate={updateStream}
-            onRemove={removeStream}
-            onAdd={addStream}
-            onConfirm={confirmStreams}
           />
-          <SkipLink onClick={skipToMeetings} />
-        </div>
-      )}
+        )}
 
-      {/* Step: Meeting Prep — first skill experience */}
-      {phase === 'meeting_notes' && (
-        <div className="w-full max-w-2xl">
-          <OnboardingMeetingPrep
-            onComplete={goToBriefing}
-            onSkip={skipToBriefing}
+        {moment === 'experience' && (
+          <MomentExperience onComplete={handleExperienceComplete} />
+        )}
+
+        {moment === 'land' && (
+          <MomentLand
+            briefingHtml={briefingHtml}
+            onComplete={handleLandComplete}
           />
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Step: Brief — show the meeting prep briefing full-width */}
-      {phase === 'first_briefing' && (
-        <div className="w-full max-w-3xl flex flex-col items-center">
-          {briefingHtml ? (
-            <>
-              <div
-                className="w-full rounded-lg border border-border bg-background p-8 overflow-y-auto prose prose-sm dark:prose-invert"
-                style={{ maxHeight: '70vh' }}
-                dangerouslySetInnerHTML={{ __html: briefingHtml }}
-              />
-              <div className="mt-6 text-center space-y-3">
-                <Button
-                  onClick={() => navigate('/')}
-                  size="lg"
-                  className="gap-2 px-8"
-                >
-                  Enter your workspace
-                </Button>
-                <p className="text-xs text-muted-foreground">
-                  This briefing is saved — find it anytime in your workspace
-                </p>
-              </div>
-            </>
-          ) : (
-            <div className="text-center space-y-4">
-              <h2 className="text-2xl font-bold tracking-tight text-foreground">
-                Welcome to your workspace
-              </h2>
-              <p className="text-muted-foreground">
-                Start using skills to build intelligence that compounds over time
-              </p>
-              <Button
-                onClick={() => navigate('/')}
-                size="lg"
-                className="gap-2 px-8"
-              >
-                Enter workspace
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
+      {/* Subtle dot progress at bottom */}
+      <div className="pb-8">
+        <MomentDots current={moment} />
+      </div>
     </div>
   )
 }
