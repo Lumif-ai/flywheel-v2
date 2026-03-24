@@ -10,24 +10,24 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 1 of 6 (Data Layer and Gmail Foundation)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-03-24 — Roadmap created; 47 requirements mapped across 6 phases
+Plan: 2 of 2 in current phase
+Status: Phase 1 complete — ready for Phase 2
+Last activity: 2026-03-24 — Phase 1 plans 01 and 02 both complete
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 17%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 0
-- Average duration: — min
-- Total execution time: 0 hours
+- Total plans completed: 2
+- Average duration: ~5 min
+- Total execution time: ~0.2 hours
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| - | - | - | - |
+| 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
 
 *Updated after each plan completion*
 
@@ -43,6 +43,10 @@ Recent decisions affecting current work:
 - [Pre-Phase 1]: historyId full-sync fallback required from day one — retrofitting requires state migration
 - [Pre-Phase 1]: Voice profile filter must exclude auto-replies before any extraction — poisoned first draft destroys trust
 - [Pre-Phase 1]: Thread-level display, message-level scoring — highest unhandled score wins per thread
+- [Phase 1, Plan 01]: EmailMessage + EmailThread + ScoredEmail + SentEmailLog ORM models added to models.py
+- [Phase 1, Plan 02]: No include_granted_scopes on gmail-read grant — isolates read credential from send-only gmail
+- [Phase 1, Plan 02]: Pre-allocate history_id=None in pending Integration row — Phase 2 sync worker expects this slot
+- [Phase 1, Plan 02]: Three scopes (readonly+modify+send) on single grant — avoids second OAuth prompt for draft approval
 
 ### Pending Todos
 
@@ -58,5 +62,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: ROADMAP.md and STATE.md created; REQUIREMENTS.md traceability already populated during requirements phase
+Stopped at: Completed 01-02-PLAN.md — gmail_read.py service + /gmail-read OAuth endpoints
 Resume file: None
