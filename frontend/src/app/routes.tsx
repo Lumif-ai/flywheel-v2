@@ -7,6 +7,17 @@ import { SettingsPage } from '@/pages/SettingsPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
 import { InviteAcceptPage } from '@/pages/InviteAcceptPage'
 
+// Lazy-loaded document pages
+const DocumentLibrary = lazy(() =>
+  import('@/features/documents/components/DocumentLibrary').then((m) => ({ default: m.DocumentLibrary }))
+)
+const DocumentViewer = lazy(() =>
+  import('@/features/documents/components/DocumentViewer').then((m) => ({ default: m.DocumentViewer }))
+)
+const SharedDocumentPage = lazy(() =>
+  import('@/features/documents/components/SharedDocumentPage').then((m) => ({ default: m.SharedDocumentPage }))
+)
+
 // Lazy-loaded public pages (infrequently accessed)
 const TermsPage = lazy(() =>
   import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage }))
@@ -25,8 +36,13 @@ export function AppRoutes() {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
+      <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />
+      <Route path="/documents/:id" element={<Suspense fallback={null}><DocumentViewer /></Suspense>} />
       <Route path="/terms" element={<Suspense fallback={null}><TermsPage /></Suspense>} />
       <Route path="/privacy" element={<Suspense fallback={null}><PrivacyPage /></Suspense>} />
+
+      {/* Public share page -- no auth required */}
+      <Route path="/d/:token" element={<Suspense fallback={null}><SharedDocumentPage /></Suspense>} />
 
       {/* Redirects from old routes */}
       <Route path="/hq" element={<Navigate to="/" replace />} />
