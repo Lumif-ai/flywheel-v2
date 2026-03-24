@@ -43,7 +43,7 @@ Recent decisions affecting current work:
 - [Pre-Phase 1]: historyId full-sync fallback required from day one — retrofitting requires state migration
 - [Pre-Phase 1]: Voice profile filter must exclude auto-replies before any extraction — poisoned first draft destroys trust
 - [Pre-Phase 1]: Thread-level display, message-level scoring — highest unhandled score wins per thread
-- [Phase 1, Plan 01]: EmailMessage + EmailThread + ScoredEmail + SentEmailLog ORM models added to models.py
+- [Phase 1, Plan 01]: Email + EmailScore + EmailDraft + EmailVoiceProfile ORM models added to models.py; migration 020_email_models; no body column on emails (PII minimization)
 - [Phase 1, Plan 02]: No include_granted_scopes on gmail-read grant — isolates read credential from send-only gmail
 - [Phase 1, Plan 02]: Pre-allocate history_id=None in pending Integration row — Phase 2 sync worker expects this slot
 - [Phase 1, Plan 02]: Three scopes (readonly+modify+send) on single grant — avoids second OAuth prompt for draft approval
