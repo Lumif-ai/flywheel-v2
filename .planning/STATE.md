@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 4 of 6 (Email Drafter Skill)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-03-24 — Phase 3 complete (2/2 plans, verified 5/5 must-haves)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-03-24 — Phase 4 Plan 01 complete (email_drafter engine + SKILL.md)
 
-Progress: [██████░░░░] 50%
+Progress: [███████░░░] 58%
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 3
+- Total plans completed: 4
 - Average duration: ~4 min
 - Total execution time: ~0.2 hours
 
@@ -29,6 +29,7 @@ Progress: [██████░░░░] 50%
 |-------|-------|-------|----------|
 | 01-data-layer-and-gmail-foundation | 2 | ~10 min | ~5 min |
 | 02-sync-worker-and-voice-profile | 2 | ~11 min | ~5.5 min |
+| 04-email-drafter-skill | 1 | ~4 min | ~4 min |
 
 *Updated after each plan completion*
 
@@ -65,6 +66,12 @@ Recent decisions affecting current work:
 - [Phase 3, Plan 02]: Daily cap default 500/day — prevents Haiku cost runaway during initial full sync
 - [Phase 3, Plan 02]: get_thread_priority() is read-time MAX query, not stored column (SCORE-07)
 - [Phase 3, Plan 02]: email-scorer added to skill_executor subsidy key allowlist — background scoring never has user API key
+- [Phase 4, Plan 01]: Drafter bypasses execute_run() — called directly from sync loop (same pattern as scorer)
+- [Phase 4, Plan 01]: Sonnet for drafting not Haiku — first-draft quality is trust-building; Haiku produces flat prose
+- [Phase 4, Plan 01]: Simple INSERT not on_conflict for EmailDraft — no unique constraint on email_drafts.email_id; caller guards via LEFT JOIN IS NULL
+- [Phase 4, Plan 01]: Voice profile injected into system prompt not user turn — higher constraint weight with Sonnet
+- [Phase 4, Plan 01]: Context assembly reuses EmailScore.context_refs UUIDs — no FTS re-run; deterministic and cheap
+- [Phase 4, Plan 01]: fetch_error stored in context_used JSONB — no schema change; structured error trace for 401/403 fallback
 
 ### Pending Todos
 
@@ -72,12 +79,12 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 4]: Draft context assembly and voice injection format need validation — flag for `/gsd:research-phase` before planning Phase 4
+- [Phase 4, RESOLVED]: Draft context assembly and voice injection format — validated in 04-RESEARCH.md, implemented in 04-01
 - [Pre-Phase 5]: `gmail.readonly` restricted scope verification takes 2-6 weeks — initiate no later than end of Phase 2
 - [Phase 5]: Tailwind v4 + `@tailwindcss/typography` plugin compatibility needs verification at Phase 5 setup
 
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 3 complete, verified, roadmap updated. Phase 4 ready to plan (research flagged as needed).
+Stopped at: Phase 4 Plan 01 complete — email_drafter.py engine + SKILL.md created. Plan 04-02 (gmail_sync.py wiring) is next.
 Resume file: None
