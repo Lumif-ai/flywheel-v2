@@ -3,12 +3,15 @@ import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
 import { BrowserRouter, useLocation } from 'react-router'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
+import { Toaster } from '@/components/ui/sonner'
 import { useMediaQuery } from '@/hooks/useMediaQuery'
 import { AppSidebar } from '@/features/navigation/components/AppSidebar'
 import { MobileNav } from '@/features/navigation/components/MobileNav'
 import { CommandPalette } from '@/features/navigation/components/CommandPalette'
 import { AppRoutes } from '@/app/routes'
 import { AuthBootstrap } from '@/app/AuthBootstrap'
+import { CriticalEmailAlert } from '@/features/email/components/CriticalEmailAlert'
+import { useEmailThreads } from '@/features/email/hooks/useEmailThreads'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -33,6 +36,10 @@ function AppShell() {
   // before the user has been provisioned.
   const isStandalone = STANDALONE_ROUTES.some((r) => location.pathname.startsWith(r))
 
+  // Fetch email threads globally so CriticalEmailAlert fires on any page.
+  // React Query deduplicates this with the same call on EmailPage.
+  const { data: emailData } = useEmailThreads()
+
   if (isStandalone) {
     return (
       <main className="min-h-dvh">
@@ -48,6 +55,7 @@ function AppShell() {
           <AppRoutes />
         </main>
         <MobileNav />
+        {emailData?.threads && <CriticalEmailAlert threads={emailData.threads} />}
       </div>
     )
   }
@@ -60,6 +68,7 @@ function AppShell() {
           <AppRoutes />
         </main>
       </SidebarInset>
+      {emailData?.threads && <CriticalEmailAlert threads={emailData.threads} />}
     </SidebarProvider>
   )
 }
@@ -75,6 +84,7 @@ export function AppLayout() {
           </TooltipProvider>
         </AuthBootstrap>
       </BrowserRouter>
+      <Toaster position="top-right" />
       <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   )

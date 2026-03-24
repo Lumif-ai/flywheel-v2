@@ -67,3 +67,19 @@ export interface ThreadDetailResponse {
 export type FlatItem =
   | { type: 'header'; tier: PriorityTier; label: string }
   | { type: 'thread'; thread: Thread }
+
+// Daily digest types
+export interface DigestThread {
+  thread_id: string
+  subject: string | null
+  sender_email: string
+  category: string | null
+  priority: number | null
+  message_count: number
+}
+
+export interface DigestResponse {
+  date: string
+  threads: DigestThread[]
+  total: number
+}

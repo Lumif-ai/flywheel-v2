@@ -1,5 +1,5 @@
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail } from 'lucide-react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import {
@@ -83,6 +83,16 @@ export function AppSidebar() {
                 >
                   <FileText className="size-4" />
                   <span>Documents</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname.startsWith('/email')}
+                  render={<NavLink to="/email" />}
+                  tooltip="Email"
+                >
+                  <Mail className="size-4" />
+                  <span>Email</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
