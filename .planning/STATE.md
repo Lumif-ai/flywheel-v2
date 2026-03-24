@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
-**Current focus:** Phase 5 — Review API and Frontend
+**Current focus:** Phase 6 — Feedback Flywheel
 
 ## Current Position
 
-Phase: 5 of 6 (Review API and Frontend)
-Plan: 4 of 4 in current phase (gap closure)
-Status: Phase complete
-Last activity: 2026-03-24 — Phase 5 Plan 04 complete (gap closure: priority filter, thread auto-open, badge colors, auth guard)
+Phase: 6 of 6 (Feedback Flywheel)
+Plan: 2 of 4 in current phase (FEED-03 documentation)
+Status: In progress
+Last activity: 2026-03-25 — Phase 6 Plan 02 complete (FEED-03 thread re-scoring documentation)
 
-Progress: [██████████] 88%
+Progress: [██████████] 92%
 
 ## Performance Metrics
 
@@ -94,6 +94,7 @@ Recent decisions affecting current work:
 - [Phase 5, Plan 04]: AuthenticatedAlerts wrapper component — correct React pattern for conditionally running hooks; useEmailThreads never fires on standalone routes
 - [Phase 5, Plan 04]: useSearchParams + setSearchParams({}, { replace: true }) for thread auto-open — one-shot open that does not re-trigger on refresh, no history entry added
 - [Phase 5, Plan 04]: IIFE in JSX for msgTier computation — co-locates per-message tier calc with badge render without restructuring MessageRow
+- [Phase 6, Plan 02]: FEED-03 already satisfied by existing architecture — new messages in existing threads arrive as messagesAdded events and get scored through the existing _score_new_emails path; thread priority auto-refreshes via read-time MAX query (SCORE-07); no new code needed, documentation only
 
 ### Pending Todos
 
@@ -107,6 +108,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-24
-Stopped at: Phase 5 Plan 04 complete — all gap closure fixes applied; Phase 5 fully complete.
+Last session: 2026-03-25
+Stopped at: Phase 6 Plan 02 complete — FEED-03 thread re-scoring documented in gmail_sync.py.
 Resume file: None
