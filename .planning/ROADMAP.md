@@ -18,7 +18,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Data Layer and Gmail Foundation** - DB models, migrations, and separate Gmail read OAuth ✓ (2026-03-24)
 - [x] **Phase 2: Sync Worker and Voice Profile** - Background polling, incremental sync, and voice extraction ✓ (2026-03-24)
-- [ ] **Phase 3: Email Scorer Skill** - Context-powered 5-tier scoring via skill executor
+- [x] **Phase 3: Email Scorer Skill** - Context-powered 5-tier scoring via skill executor ✓ (2026-03-24)
 - [ ] **Phase 4: Email Drafter Skill** - On-demand draft generation with voice profile injection
 - [ ] **Phase 5: Review API and Frontend** - REST endpoints and scored inbox with draft approval UI
 - [ ] **Phase 6: Feedback Flywheel** - Edit-to-learn voice updates, re-scoring on thread activity
@@ -90,8 +90,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — SKILL.md definition + email_scorer.py Python engine (scoring prompt, context lookups, EmailScore upsert)
-- [ ] 03-02-PLAN.md — Sync loop integration: score after upsert, daily cap, thread priority helper, skill_executor dispatch
+- [x] 03-01-PLAN.md — SKILL.md definition + email_scorer.py Python engine (scoring prompt, context lookups, EmailScore upsert) ✓
+- [x] 03-02-PLAN.md — Sync loop integration: score after upsert, daily cap, thread priority helper, skill_executor dispatch ✓
 
 ---
 
@@ -173,7 +173,7 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Data Layer and Gmail Foundation | 2/2 | ✓ Complete | 2026-03-24 |
 | 2. Sync Worker and Voice Profile | 2/2 | ✓ Complete | 2026-03-24 |
-| 3. Email Scorer Skill | 0/2 | Not started | - |
+| 3. Email Scorer Skill | 2/2 | ✓ Complete | 2026-03-24 |
 | 4. Email Drafter Skill | 0/2 | Not started | - |
 | 5. Review API and Frontend | 0/3 | Not started | - |
 | 6. Feedback Flywheel | 0/2 | Not started | - |
