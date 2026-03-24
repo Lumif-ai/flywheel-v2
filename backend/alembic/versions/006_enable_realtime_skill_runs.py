@@ -22,16 +22,24 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """Add skill_runs to the supabase_realtime publication."""
-    try:
-        op.execute("ALTER PUBLICATION supabase_realtime ADD TABLE skill_runs")
-    except Exception:
-        # Publication may not exist in local dev (only on Supabase-hosted Postgres)
-        pass
+    # Use DO block to safely skip when publication doesn't exist (local dev)
+    op.execute("""
+        DO $$
+        BEGIN
+            ALTER PUBLICATION supabase_realtime ADD TABLE skill_runs;
+        EXCEPTION WHEN undefined_object THEN
+            NULL;
+        END $$;
+    """)
 
 
 def downgrade() -> None:
     """Remove skill_runs from the supabase_realtime publication."""
-    try:
-        op.execute("ALTER PUBLICATION supabase_realtime DROP TABLE skill_runs")
-    except Exception:
-        pass
+    op.execute("""
+        DO $$
+        BEGIN
+            ALTER PUBLICATION supabase_realtime DROP TABLE skill_runs;
+        EXCEPTION WHEN undefined_object THEN
+            NULL;
+        END $$;
+    """)

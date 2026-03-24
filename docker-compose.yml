@@ -20,12 +20,12 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     ports:
-      - "8000:8000"
+      - "3101:8000"
     environment:
-      FLYWHEEL_BACKEND: flatfile
+      FLYWHEEL_BACKEND: postgres
       DATABASE_URL: postgresql+asyncpg://flywheel:flywheel@postgres:5432/flywheel
       DEBUG: "true"
-      CORS_ORIGINS: '["http://localhost:5173"]'
+      CORS_ORIGINS: '["http://localhost:3100"]'
     volumes:
       - ./backend/src:/app/src
     depends_on:
@@ -38,7 +38,9 @@ services:
       context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "5173:5173"
+      - "3100:5173"
+    environment:
+      VITE_API_TARGET: "http://backend:8000"
     volumes:
       - ./frontend:/app
       - /app/node_modules
