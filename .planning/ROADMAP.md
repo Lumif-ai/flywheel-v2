@@ -87,11 +87,11 @@ Plans:
   4. Thread-level priority reflects the highest unhandled message score in the thread, not a simple average
   5. Re-syncing a thread when a new message arrives produces an updated EmailScore for that message
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 03-01: email-scorer skill (SKILL.md, SkillDefinition seed, scoring prompt with context tool usage)
-- [ ] 03-02: Scorer integration: sync worker triggers SkillRun, tenant isolation verification, per-tenant daily cap
+- [ ] 03-01-PLAN.md — SKILL.md definition + email_scorer.py Python engine (scoring prompt, context lookups, EmailScore upsert)
+- [ ] 03-02-PLAN.md — Sync loop integration: score after upsert, daily cap, thread priority helper, skill_executor dispatch
 
 ---
 
