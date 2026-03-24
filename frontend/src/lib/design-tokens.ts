@@ -10,8 +10,8 @@ export const spacing = {
 } as const;
 
 export const typography = {
-  pageTitle: { size: '28px', weight: '600', lineHeight: '1.2' },
-  sectionTitle: { size: '18px', weight: '500', lineHeight: '1.4' },
+  pageTitle: { size: '28px', weight: '700', lineHeight: '1.2', letterSpacing: '-0.02em' },
+  sectionTitle: { size: '18px', weight: '600', lineHeight: '1.4' },
   body: { size: '15px', weight: '400', lineHeight: '1.6' },
   caption: { size: '13px', weight: '400', lineHeight: '1.4' },
 } as const;

@@ -1,3 +1,4 @@
+import { useState, useEffect } from 'react'
 import type { KnowledgeHealth } from '@/types/streams'
 
 interface KnowledgeHealthBarProps {
@@ -6,6 +7,13 @@ interface KnowledgeHealthBarProps {
 
 export function KnowledgeHealthBar({ health }: KnowledgeHealthBarProps) {
   const percentage = Math.min(Math.max(health.avg_density, 0), 100)
+  const [animatedWidth, setAnimatedWidth] = useState(0)
+
+  useEffect(() => {
+    // Delay slightly so the transition is visible after mount
+    const timer = setTimeout(() => setAnimatedWidth(percentage), 50)
+    return () => clearTimeout(timer)
+  }, [percentage])
 
   return (
     <div className="space-y-2">
@@ -28,9 +36,9 @@ export function KnowledgeHealthBar({ health }: KnowledgeHealthBarProps) {
         style={{ backgroundColor: 'var(--brand-light)' }}
       >
         <div
-          className="h-full rounded-full transition-all duration-500"
+          className="h-full rounded-full transition-all duration-700 ease-out"
           style={{
-            width: `${percentage}%`,
+            width: `${animatedWidth}%`,
             background: 'linear-gradient(to right, var(--brand-coral), var(--brand-gradient-end))',
           }}
         />

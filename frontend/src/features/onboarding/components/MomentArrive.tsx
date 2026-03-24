@@ -73,6 +73,7 @@ export function MomentArrive({ onComplete }: MomentArriveProps) {
             fontSize: typography.pageTitle.size,
             fontWeight: typography.pageTitle.weight,
             lineHeight: typography.pageTitle.lineHeight,
+            letterSpacing: typography.pageTitle.letterSpacing,
             color: colors.headingText,
             marginBottom: spacing.tight,
           }}

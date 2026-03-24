@@ -15,5 +15,5 @@ export const staggerDelay = (index: number) => `${index * 50}ms`;
 export const animationClasses = {
   fadeSlideUp: 'animate-fade-slide-up',
   shimmer: 'animate-shimmer',
-  cardHover: 'transition-all duration-200 ease-out hover:shadow-md hover:-translate-y-px',
+  cardHover: 'transition-all duration-200 ease-out hover:shadow-md hover:-translate-y-px active:scale-[0.98] active:shadow-sm',
 } as const;

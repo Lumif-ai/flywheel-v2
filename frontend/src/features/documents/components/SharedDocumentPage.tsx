@@ -82,6 +82,7 @@ export function SharedDocumentPage() {
             style={{
               fontSize: typography.pageTitle.size,
               fontWeight: typography.pageTitle.weight,
+              letterSpacing: typography.pageTitle.letterSpacing,
               color: colors.headingText,
               marginBottom: spacing.element,
             }}
@@ -116,6 +117,7 @@ export function SharedDocumentPage() {
             fontSize: typography.pageTitle.size,
             fontWeight: typography.pageTitle.weight,
             lineHeight: typography.pageTitle.lineHeight,
+            letterSpacing: typography.pageTitle.letterSpacing,
             color: colors.headingText,
             marginBottom: spacing.tight,
           }}
