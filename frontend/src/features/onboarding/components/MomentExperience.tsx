@@ -7,7 +7,7 @@
  */
 
 import { useState, useCallback } from 'react'
-import { Linkedin, Calendar, ArrowRight, Loader2 } from 'lucide-react'
+import { Linkedin, Calendar, ArrowRight, Loader2, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
@@ -31,6 +31,7 @@ interface MomentExperienceProps {
 
 export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienceProps) {
   const [linkedinUrl, setLinkedinUrl] = useState('')
+  const [companyName, setCompanyName] = useState('')
   const [agenda, setAgenda] = useState('')
   const [phase, setPhase] = useState<'input' | 'running' | 'done'>('input')
   const [status, setStatus] = useState<string | null>(null)
@@ -96,6 +97,7 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
         linkedin_url: linkedinUrl.trim(),
         agenda: agenda.trim(),
         meeting_type: 'discovery',
+        ...(companyName.trim() && { company_name: companyName.trim() }),
       })
 
       setSseUrl(`/api/v1/onboarding/run/${res.run_id}/stream`)
@@ -177,6 +179,42 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
             }}
             onKeyDown={(e) => e.key === 'Enter' && startPrep()}
           />
+        </div>
+
+        {/* Company name */}
+        <div style={{ marginBottom: spacing.element }}>
+          <label
+            className="flex items-center gap-2 mb-2"
+            style={{
+              fontSize: typography.caption.size,
+              fontWeight: '500',
+              color: colors.headingText,
+            }}
+          >
+            <Building2 className="h-4 w-4" style={{ color: colors.secondaryText }} />
+            Company name
+            <span style={{ fontWeight: '400', color: colors.secondaryText }}>(optional)</span>
+          </label>
+          <input
+            type="text"
+            value={companyName}
+            onChange={(e) => setCompanyName(e.target.value)}
+            placeholder="e.g., Acme Corp"
+            className="w-full rounded-lg border px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-primary/20 focus:border-primary"
+            style={{
+              background: colors.cardBg,
+              borderColor: colors.subtleBorder,
+            }}
+          />
+          <p
+            className="mt-1"
+            style={{
+              fontSize: '12px',
+              color: colors.secondaryText,
+            }}
+          >
+            Helps find the right person for common names
+          </p>
         </div>
 
         {/* Agenda */}
