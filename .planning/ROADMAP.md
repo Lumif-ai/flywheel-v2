@@ -39,11 +39,11 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. `gmail_read.py` can list message headers, fetch body on-demand, and fetch sent messages without touching `google_gmail.py`
   4. No email content appears in any application log at any level (verifiable by triggering a parse error and inspecting output)
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 01-01: DB models and Alembic migration (emails, email_scores, email_drafts, email_voice_profiles with RLS)
-- [ ] 01-02: gmail_read.py service and separate gmail-read OAuth flow
+- [ ] 01-01-PLAN.md — DB models and Alembic migration (emails, email_scores, email_drafts, email_voice_profiles with RLS)
+- [ ] 01-02-PLAN.md — gmail_read.py service and separate gmail-read OAuth flow
 
 ---
 
