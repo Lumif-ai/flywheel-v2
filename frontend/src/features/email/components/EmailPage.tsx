@@ -1,8 +1,10 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { RefreshCw } from 'lucide-react'
+import { useSearchParams } from 'react-router'
 import { colors, typography, spacing } from '@/lib/design-tokens'
 import { useEmailThreads } from '../hooks/useEmailThreads'
 import { useManualSync } from '../hooks/useManualSync'
+import { useEmailStore } from '../store/emailStore'
 import { ThreadList } from './ThreadList'
 import { ThreadDetail } from './ThreadDetail'
 import { DigestView } from './DigestView'
@@ -11,9 +13,9 @@ type ViewMode = 'inbox' | 'digest'
 
 const PRIORITY_FILTERS = [
   { label: 'All', value: undefined },
-  { label: 'Critical+', value: 90 },
-  { label: 'High+', value: 70 },
-  { label: 'Medium+', value: 50 },
+  { label: 'Critical+', value: 5 },
+  { label: 'High+', value: 4 },
+  { label: 'Medium+', value: 3 },
 ] as const
 
 export function EmailPage() {
@@ -23,6 +25,18 @@ export function EmailPage() {
     priorityMin != null ? { priority_min: priorityMin } : undefined,
   )
   const syncMutation = useManualSync()
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectThread = useEmailStore((s) => s.selectThread)
+
+  // Auto-open thread detail when navigated to /email?thread=<id>
+  // (e.g. from CriticalEmailAlert View button)
+  useEffect(() => {
+    const threadId = searchParams.get('thread')
+    if (threadId) {
+      selectThread(threadId)
+      setSearchParams({}, { replace: true })
+    }
+  }, [searchParams, selectThread, setSearchParams])
 
   return (
     <div

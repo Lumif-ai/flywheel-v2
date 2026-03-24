@@ -27,6 +27,14 @@ const queryClient = new QueryClient({
 // Routes that render as standalone pages (no sidebar, no tenant-dependent fetches)
 const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy']
 
+// Only rendered inside the authenticated shell so useEmailThreads never fires
+// on standalone routes (which have no auth context and would return 401).
+// React Query deduplicates this call with the same query on EmailPage.
+function AuthenticatedAlerts() {
+  const { data: emailData } = useEmailThreads()
+  return emailData?.threads ? <CriticalEmailAlert threads={emailData.threads} /> : null
+}
+
 function AppShell() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const location = useLocation()
@@ -35,10 +43,6 @@ function AppShell() {
   // This prevents tenant-dependent API calls (streams, tenants) from firing
   // before the user has been provisioned.
   const isStandalone = STANDALONE_ROUTES.some((r) => location.pathname.startsWith(r))
-
-  // Fetch email threads globally so CriticalEmailAlert fires on any page.
-  // React Query deduplicates this with the same call on EmailPage.
-  const { data: emailData } = useEmailThreads()
 
   if (isStandalone) {
     return (
@@ -55,7 +59,7 @@ function AppShell() {
           <AppRoutes />
         </main>
         <MobileNav />
-        {emailData?.threads && <CriticalEmailAlert threads={emailData.threads} />}
+        <AuthenticatedAlerts />
       </div>
     )
   }
@@ -68,7 +72,7 @@ function AppShell() {
           <AppRoutes />
         </main>
       </SidebarInset>
-      {emailData?.threads && <CriticalEmailAlert threads={emailData.threads} />}
+      <AuthenticatedAlerts />
     </SidebarProvider>
   )
 }

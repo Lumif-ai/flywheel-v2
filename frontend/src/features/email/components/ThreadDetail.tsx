@@ -21,6 +21,13 @@ const TIER_COLORS: Record<PriorityTier, string> = {
   unscored: '#9CA3AF',
 }
 
+function priorityToTier(priority: number): PriorityTier {
+  if (priority >= 5) return 'critical'
+  if (priority >= 4) return 'high'
+  if (priority >= 3) return 'medium'
+  return 'low'
+}
+
 function formatRelativeTime(dateStr: string): string {
   const now = Date.now()
   const then = new Date(dateStr).getTime()
@@ -81,16 +88,21 @@ function MessageRow({ message, isLatest }: { message: Message; isLatest: boolean
           style={{ backgroundColor: 'rgba(0,0,0,0.02)', border: '1px solid var(--subtle-border)' }}
         >
           <div className="flex items-center gap-2 flex-wrap">
-            {/* Priority badge */}
-            <span
-              className="rounded-full px-2 py-0.5 text-xs font-medium"
-              style={{
-                color: TIER_COLORS.critical,
-                backgroundColor: `${TIER_COLORS.critical}1A`,
-              }}
-            >
-              P{message.score.priority}
-            </span>
+            {/* Priority badge — color mapped to tier (red=critical, orange=high, amber=medium, gray=low) */}
+            {(() => {
+              const msgTier = priorityToTier(message.score.priority)
+              return (
+                <span
+                  className="rounded-full px-2 py-0.5 text-xs font-medium"
+                  style={{
+                    color: TIER_COLORS[msgTier],
+                    backgroundColor: `${TIER_COLORS[msgTier]}1A`,
+                  }}
+                >
+                  P{message.score.priority}
+                </span>
+              )
+            })()}
             {/* Category */}
             <span
               className="rounded-full px-2 py-0.5 text-xs font-medium"
