@@ -26,7 +26,7 @@ import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import text as sa_text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
@@ -621,6 +621,44 @@ async def execute_run(run: SkillRun) -> None:
                 )
             )
             await session.commit()
+
+        # Create document artifact
+        if rendered_html:
+            try:
+                from flywheel.services.document_storage import (
+                    upload_document, _generate_title, _extract_document_metadata
+                )
+                from flywheel.db.models import Document
+                doc_metadata = _extract_document_metadata(
+                    run.skill_name, run.input_text, output
+                )
+                doc_title = _generate_title(
+                    run.skill_name, run.input_text, doc_metadata
+                )
+                doc_id = str(uuid4())
+                storage_path = await upload_document(
+                    tenant_id=str(run.tenant_id),
+                    document_type=run.skill_name,
+                    document_id=doc_id,
+                    content=rendered_html.encode("utf-8"),
+                )
+                async with factory() as session:
+                    doc = Document(
+                        id=doc_id,
+                        tenant_id=run.tenant_id,
+                        user_id=run.user_id,
+                        title=doc_title,
+                        document_type=run.skill_name,
+                        storage_path=storage_path,
+                        file_size_bytes=len(rendered_html.encode("utf-8")),
+                        skill_run_id=run.id,
+                        metadata_=doc_metadata,
+                    )
+                    session.add(doc)
+                    await session.commit()
+                logger.info("Document created for run %s: %s", run.id, doc_title)
+            except Exception as doc_err:
+                logger.warning("Document creation failed for run %s: %s", run.id, doc_err)
 
         # Build attribution from context entries (post-completion, per Pitfall 4)
         try:
