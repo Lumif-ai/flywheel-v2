@@ -1,6 +1,6 @@
 """Context CRUD endpoints: file listing, entry read/write/update/delete, search, batch.
 
-8 endpoints:
+10 endpoints:
 - GET /context/files              -- list context files from catalog
 - GET /context/files/{name}/entries -- paginated entries with search/filter
 - GET /context/files/{name}/stats -- entry count, last updated, unique sources
@@ -9,22 +9,26 @@
 - PATCH /context/entries/{entry_id} -- update entry content/confidence
 - DELETE /context/entries/{entry_id} -- soft-delete entry
 - GET /context/search             -- cross-file full-text search
+- GET /context/company            -- cache-first company lookup by domain
+- POST /context/company/refresh   -- trigger background re-crawl for a company
 """
 
 from __future__ import annotations
 
 import datetime
+import urllib.parse
+from typing import Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select, text, update
+from sqlalchemy import func, or_, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import ContextCatalog, ContextEntry
+from flywheel.db.models import ContextCatalog, ContextEntry, SkillRun
 
 router = APIRouter(prefix="/context", tags=["context"])
 
@@ -58,6 +62,25 @@ class BatchEntriesRequest(BaseModel):
 class UpdateEntryRequest(BaseModel):
     content: str | None = None
     confidence: str | None = None
+
+
+class CompanyLookupResponse(BaseModel):
+    exists: bool
+    domain: str | None = None
+    entry_count: int = 0
+    last_updated: str | None = None
+    categories: list[str] = []
+    source: str | None = None
+    verified_count: int = 0
+
+
+class CompanyRefreshRequest(BaseModel):
+    domain: str
+
+
+class CompanyRefreshResponse(BaseModel):
+    run_id: str
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -523,4 +546,113 @@ async def search_entries(
 
     return _paginated_response(
         [_entry_to_dict(e) for e in entries], total, offset, limit
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helpers — domain normalization
+# ---------------------------------------------------------------------------
+
+
+def _normalize_domain(raw: str) -> str:
+    """Normalize a domain string: strip scheme, www., trailing slashes, lowercase."""
+    raw = raw.strip().lower()
+    # If it looks like a full URL, extract hostname
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urllib.parse.urlparse(raw)
+        raw = parsed.hostname or raw
+    # Strip www. prefix
+    if raw.startswith("www."):
+        raw = raw[4:]
+    # Strip trailing slashes
+    raw = raw.rstrip("/")
+    return raw
+
+
+# ---------------------------------------------------------------------------
+# GET /context/company — cache-first company lookup
+# ---------------------------------------------------------------------------
+
+_ONBOARDING_SOURCES = ("onboarding", "company-intel", "meeting-prep", "account-research")
+
+
+@router.get("/company", response_model=CompanyLookupResponse)
+async def company_lookup(
+    domain: str = Query(..., min_length=1),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Cache-first company lookup: check if we already have intelligence for a domain."""
+    normalized = _normalize_domain(domain)
+
+    # Build query: source matches known onboarding sources OR file_name/content contains domain
+    base = select(ContextEntry).where(
+        ContextEntry.deleted_at.is_(None),
+        or_(
+            ContextEntry.source.in_(_ONBOARDING_SOURCES),
+            ContextEntry.file_name.ilike(f"%{normalized}%"),
+            ContextEntry.content.ilike(f"%{normalized}%"),
+        ),
+    )
+
+    result = await db.execute(base)
+    entries = result.scalars().all()
+
+    if not entries:
+        return CompanyLookupResponse(exists=False)
+
+    # Aggregate stats
+    entry_count = len(entries)
+    last_updated = max(
+        (e.updated_at or e.created_at for e in entries),
+        default=None,
+    )
+    categories = sorted(set(e.file_name for e in entries))
+    # Most common source
+    source_counts: dict[str, int] = {}
+    for e in entries:
+        source_counts[e.source] = source_counts.get(e.source, 0) + 1
+    most_common_source = max(source_counts, key=source_counts.get) if source_counts else None  # type: ignore[arg-type]
+    verified_count = sum(1 for e in entries if e.confidence == "verified")
+
+    return CompanyLookupResponse(
+        exists=True,
+        domain=normalized,
+        entry_count=entry_count,
+        last_updated=last_updated.isoformat() if last_updated else None,
+        categories=categories,
+        source=most_common_source,
+        verified_count=verified_count,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /context/company/refresh — trigger background re-crawl
+# ---------------------------------------------------------------------------
+
+
+@router.post("/company/refresh", response_model=CompanyRefreshResponse)
+async def company_refresh(
+    body: CompanyRefreshRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Trigger a background re-crawl for a company domain."""
+    normalized = _normalize_domain(body.domain)
+
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name="company-intel",
+        input_text=f"https://{normalized}",
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    await db.commit()
+
+    return CompanyRefreshResponse(
+        run_id=str(run.id),
+        message="Refresh started",
     )
