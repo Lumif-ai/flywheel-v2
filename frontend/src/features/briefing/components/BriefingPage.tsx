@@ -12,9 +12,27 @@ import { BrandedCard } from '@/components/ui/branded-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
-import { InboxIcon, FileText, Building2, Clock } from 'lucide-react'
+import { FileText, Building2, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
 import { spacing, typography, colors } from '@/lib/design-tokens'
+
+function EmptyWorkspaceIllustration() {
+  return (
+    <svg width="120" height="80" viewBox="0 0 120 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Three connected circles representing knowledge nodes */}
+      <line x1="30" y1="40" x2="60" y2="25" stroke="var(--subtle-border)" strokeWidth="2" />
+      <line x1="60" y1="25" x2="90" y2="40" stroke="var(--subtle-border)" strokeWidth="2" />
+      <line x1="30" y1="40" x2="90" y2="40" stroke="var(--subtle-border)" strokeWidth="2" strokeDasharray="4 4" />
+      <circle cx="30" cy="40" r="12" fill="var(--brand-tint)" stroke="var(--brand-coral)" strokeWidth="1.5" />
+      <circle cx="60" cy="25" r="10" fill="var(--brand-tint)" stroke="var(--brand-coral)" strokeWidth="1.5" opacity="0.7" />
+      <circle cx="90" cy="40" r="14" fill="var(--brand-tint)" stroke="var(--brand-coral)" strokeWidth="1.5" />
+      {/* Small dots for detail */}
+      <circle cx="30" cy="40" r="3" fill="var(--brand-coral)" />
+      <circle cx="60" cy="25" r="2.5" fill="var(--brand-coral)" opacity="0.7" />
+      <circle cx="90" cy="40" r="3.5" fill="var(--brand-coral)" />
+    </svg>
+  )
+}
 
 interface RecentDocument {
   id: string
@@ -262,23 +280,25 @@ export function BriefingPage() {
                   ))}
                 </div>
               ) : recentDocs === null ? (
-                <div className="flex items-center gap-3 py-4">
-                  <FileText
-                    className="size-5 shrink-0"
-                    style={{ color: colors.secondaryText }}
-                  />
-                  <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-                    Documents coming soon
+                <div className="flex flex-col items-center gap-2 py-6">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.3 }} />
+                    <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.2 }} />
+                    <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.15 }} />
+                  </div>
+                  <p style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
+                    Your briefings and research will appear here
                   </p>
                 </div>
               ) : recentDocs.length === 0 ? (
-                <div className="flex items-center gap-3 py-4">
-                  <FileText
-                    className="size-5 shrink-0"
-                    style={{ color: colors.secondaryText }}
-                  />
-                  <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-                    No documents yet. They'll appear here as you use Flywheel.
+                <div className="flex flex-col items-center gap-2 py-6">
+                  <div className="flex items-center gap-1.5">
+                    <div className="h-1.5 w-8 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.3 }} />
+                    <div className="h-1.5 w-12 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.2 }} />
+                    <div className="h-1.5 w-6 rounded-full" style={{ backgroundColor: 'var(--brand-coral)', opacity: 0.15 }} />
+                  </div>
+                  <p style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
+                    Your briefings and research will appear here
                   </p>
                 </div>
               ) : (
@@ -378,16 +398,20 @@ export function BriefingPage() {
               </div>
             </div>
           ) : !isLoading && streams.length === 0 ? (
-            <div className="flex flex-col items-center justify-center py-16 text-center">
-              <InboxIcon className="mb-4 h-12 w-12 text-muted-foreground/50" />
+            <div
+              className="flex flex-col items-center justify-center text-center"
+              style={{ backgroundColor: 'rgba(233,77,53,0.02)', borderRadius: '16px', padding: '48px 24px' }}
+            >
+              <EmptyWorkspaceIllustration />
               <h2
+                className="mt-5"
                 style={{
                   fontSize: typography.sectionTitle.size,
                   fontWeight: typography.sectionTitle.weight,
                   color: colors.headingText,
                 }}
               >
-                Your workspace is ready
+                Build your knowledge graph
               </h2>
               <p
                 className="mt-1 max-w-sm"
@@ -396,15 +420,18 @@ export function BriefingPage() {
                   color: colors.secondaryText,
                 }}
               >
-                Start by creating a focus area to organize your knowledge around
-                the projects and accounts that matter most.
+                Create a focus area for each project, account, or initiative
+                you're working on. Flywheel compounds everything you learn.
               </p>
               <Link
                 to="/streams/new"
-                className="mt-4 text-sm no-underline hover:underline"
-                style={{ color: 'var(--brand-coral)' }}
+                className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium no-underline transition-all duration-200 hover:shadow-md hover:-translate-y-px"
+                style={{
+                  background: `linear-gradient(135deg, var(--brand-coral), var(--brand-gradient-end))`,
+                  color: '#fff',
+                }}
               >
-                Create a focus area
+                Create your first focus area
               </Link>
             </div>
           ) : null}

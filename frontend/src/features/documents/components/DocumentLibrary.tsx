@@ -1,6 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
 import { useNavigate } from 'react-router'
-import { FileText } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { DocumentCard } from './DocumentCard'
 import { fetchDocuments, shareDocument } from '../api'
@@ -69,6 +68,27 @@ function SkeletonCard() {
         <div className="h-8 w-16 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
       </div>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Empty state illustration
+// ---------------------------------------------------------------------------
+
+function EmptyDocumentsIllustration() {
+  return (
+    <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
+      {/* Stacked document pages */}
+      <rect x="18" y="12" width="44" height="56" rx="4" fill="var(--card-bg)" stroke="var(--subtle-border)" strokeWidth="1.5" />
+      <rect x="14" y="16" width="44" height="56" rx="4" fill="var(--card-bg)" stroke="var(--subtle-border)" strokeWidth="1.5" />
+      <rect x="10" y="20" width="44" height="56" rx="4" fill="var(--card-bg)" stroke="var(--brand-coral)" strokeWidth="1.5" opacity="0.9" />
+      {/* Content lines on front page */}
+      <rect x="18" y="30" width="24" height="2" rx="1" fill="var(--brand-coral)" opacity="0.4" />
+      <rect x="18" y="36" width="28" height="2" rx="1" fill="var(--subtle-border)" />
+      <rect x="18" y="42" width="20" height="2" rx="1" fill="var(--subtle-border)" />
+      <rect x="18" y="48" width="26" height="2" rx="1" fill="var(--subtle-border)" />
+      <rect x="18" y="56" width="16" height="2" rx="1" fill="var(--brand-coral)" opacity="0.3" />
+    </svg>
   )
 }
 
@@ -204,9 +224,14 @@ export function DocumentLibrary() {
       {/* Empty state */}
       {!loading && documents.length === 0 && (
         <div className="text-center py-16 rounded-xl" style={{ backgroundColor: 'rgba(233,77,53,0.03)' }}>
-          <FileText className="mx-auto mb-4 size-12" style={{ color: colors.secondaryText, opacity: 0.4 }} />
+          <div className="flex justify-center mb-4">
+            <EmptyDocumentsIllustration />
+          </div>
           <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-            No documents yet. Run a skill to create your first briefing.
+            Your briefings and research will live here
+          </p>
+          <p className="mt-1" style={{ fontSize: typography.caption.size, color: colors.secondaryText, opacity: 0.7 }}>
+            Created automatically when you run skills
           </p>
         </div>
       )}
