@@ -20,7 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Sync Worker and Voice Profile** - Background polling, incremental sync, and voice extraction ✓ (2026-03-24)
 - [x] **Phase 3: Email Scorer Skill** - Context-powered 5-tier scoring via skill executor ✓ (2026-03-24)
 - [x] **Phase 4: Email Drafter Skill** - On-demand draft generation with voice profile injection ✓ (2026-03-24)
-- [ ] **Phase 5: Review API and Frontend** - REST endpoints and scored inbox with draft approval UI
+- [x] **Phase 5: Review API and Frontend** - REST endpoints and scored inbox with draft approval UI ✓ (2026-03-25)
 - [ ] **Phase 6: Feedback Flywheel** - Edit-to-learn voice updates, re-scoring on thread activity
 
 ## Phase Details
@@ -139,7 +139,7 @@ Plans:
 - [x] 05-01-PLAN.md — Backend read API: GET threads, GET thread detail, GET digest, POST manual sync + api.ts put method ✓
 - [x] 05-02-PLAN.md — Email inbox frontend: types, Zustand store, React Query hooks, EmailPage with virtualized ThreadList, ThreadDetail sheet, DraftReview ✓
 - [x] 05-03-PLAN.md — In-app critical email alerts (Sonner), daily digest view, sidebar nav link ✓
-- [ ] 05-04-PLAN.md — Gap closure: fix priority filter values, wire thread auto-open from alert, dynamic badge colors, guard standalone API calls
+- [x] 05-04-PLAN.md — Gap closure: fix priority filter values, wire thread auto-open from alert, dynamic badge colors, guard standalone API calls ✓
 
 ---
 
@@ -156,11 +156,11 @@ Plans:
   2. When a new message arrives in an existing thread, that thread's priority score updates to reflect the latest message (not locked to original score)
   3. After dismissing several drafts for a sender category, subsequent emails from similar senders score lower (observable over 10+ interactions)
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 06-01: Edit-to-learn: diff analysis on user_edits, voice profile update (debounced), FEED-01 dismiss signal integration
-- [ ] 06-02: Re-scoring trigger on thread update (FEED-03 / SCORE-08 wiring)
+- [ ] 06-01-PLAN.md — Voice updater engine (diff analysis + Haiku profile merge), dismiss tracker engine, approve endpoint wiring, scorer dismiss injection
+- [ ] 06-02-PLAN.md — Thread re-scoring verification (FEED-03 docs), config wiring for dismiss parameters
 
 ---
 
@@ -174,7 +174,7 @@ Plans:
 | 2. Sync Worker and Voice Profile | 2/2 | ✓ Complete | 2026-03-24 |
 | 3. Email Scorer Skill | 2/2 | ✓ Complete | 2026-03-24 |
 | 4. Email Drafter Skill | 2/2 | ✓ Complete | 2026-03-24 |
-| 5. Review API and Frontend | 3/4 | Gap closure remaining | - |
+| 5. Review API and Frontend | 4/4 | ✓ Complete | 2026-03-25 |
 | 6. Feedback Flywheel | 0/2 | Not started | - |
 
 ---
