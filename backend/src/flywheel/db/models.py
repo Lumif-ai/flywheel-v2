@@ -889,3 +889,162 @@ class Document(Base):
     deleted_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )
+
+
+# ---------------------------------------------------------------------------
+# EMAIL COPILOT TABLES (tenant-scoped, RLS enforced)
+# ---------------------------------------------------------------------------
+
+
+class Email(Base):
+    """Synced Gmail message metadata. No body stored — fetched on-demand."""
+
+    __tablename__ = "emails"
+    __table_args__ = (
+        Index("idx_emails_tenant_received", "tenant_id", text("received_at DESC")),
+        Index("idx_emails_tenant_user", "tenant_id", "user_id"),
+        Index("idx_emails_thread", "tenant_id", "gmail_thread_id"),
+        UniqueConstraint(
+            "tenant_id", "gmail_message_id", name="uq_email_tenant_message"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    gmail_message_id: Mapped[str] = mapped_column(Text, nullable=False)
+    gmail_thread_id: Mapped[str] = mapped_column(Text, nullable=False)
+    sender_email: Mapped[str] = mapped_column(Text, nullable=False)
+    sender_name: Mapped[str | None] = mapped_column(Text)
+    subject: Mapped[str | None] = mapped_column(Text)
+    snippet: Mapped[str | None] = mapped_column(Text)
+    received_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    labels: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    is_read: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+    is_replied: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false")
+    )
+    synced_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class EmailScore(Base):
+    """AI-generated priority score and category for a synced email."""
+
+    __tablename__ = "email_scores"
+    __table_args__ = (
+        Index("idx_email_scores_tenant_priority", "tenant_id", text("priority DESC")),
+        UniqueConstraint("email_id", name="uq_email_score_email"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    email_id: Mapped[UUID] = mapped_column(
+        ForeignKey("emails.id"), nullable=False
+    )
+    priority: Mapped[int] = mapped_column(Integer, nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_action: Mapped[str | None] = mapped_column(Text)
+    reasoning: Mapped[str | None] = mapped_column(Text)
+    context_refs: Mapped[list] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    sender_entity_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("context_entities.id"), nullable=True
+    )
+    scored_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class EmailDraft(Base):
+    """AI-generated draft reply for a synced email. Body nulled after send."""
+
+    __tablename__ = "email_drafts"
+    __table_args__ = (
+        Index("idx_email_drafts_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    email_id: Mapped[UUID] = mapped_column(
+        ForeignKey("emails.id"), nullable=False
+    )
+    draft_body: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default="pending")
+    context_used: Mapped[list] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    user_edits: Mapped[str | None] = mapped_column(Text)
+    visible_after: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class EmailVoiceProfile(Base):
+    """Learned writing voice profile for a user within a tenant."""
+
+    __tablename__ = "email_voice_profiles"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "user_id", name="uq_voice_profile_tenant_user"
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("users.id"), nullable=False
+    )
+    tone: Mapped[str | None] = mapped_column(Text)
+    avg_length: Mapped[int | None] = mapped_column(Integer)
+    sign_off: Mapped[str | None] = mapped_column(Text)
+    phrases: Mapped[list] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+    samples_analyzed: Mapped[int] = mapped_column(
+        Integer, server_default=text("0")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
