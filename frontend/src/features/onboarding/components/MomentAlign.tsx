@@ -1,19 +1,16 @@
 /**
  * MomentAlign - Third onboarding moment.
  *
- * One question, free text. User describes what's top of mind.
- * Parses input into focus areas and auto-creates them via the
- * existing streams/parse API. Shows confirmation with stagger.
- * Auto-advances after 1.5 seconds.
+ * Shows 3 skills-backed priority option cards for multi-select.
+ * No free text input. Users select priorities, click Continue,
+ * and focus areas are created from selected options.
  */
 
-import { useState, useCallback, useEffect, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
-import { Button } from '@/components/ui/button'
-import { Textarea } from '@/components/ui/textarea'
+import { useState, useCallback } from 'react'
+import { CheckCircle2, Loader2 } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { animationClasses, staggerDelay } from '@/lib/animations'
-import type { ParsedStream } from '../hooks/useOnboarding'
+import type { PriorityOption } from '../hooks/useOnboarding'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -21,9 +18,88 @@ import type { ParsedStream } from '../hooks/useOnboarding'
 
 interface MomentAlignProps {
   onComplete: () => void
-  parseStreams: (input: string) => Promise<void>
-  confirmStreams: () => Promise<void>
-  parsedStreams: ParsedStream[]
+  selectedPriorities: string[]
+  onTogglePriority: (id: string) => void
+  onConfirmPriorities: () => Promise<void>
+  priorityOptions: PriorityOption[]
+}
+
+// ---------------------------------------------------------------------------
+// Priority Card
+// ---------------------------------------------------------------------------
+
+function PriorityCard({
+  option,
+  selected,
+  index,
+  onToggle,
+}: {
+  option: PriorityOption
+  selected: boolean
+  index: number
+  onToggle: () => void
+}) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onToggle}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle() } }}
+      className={`${animationClasses.fadeSlideUp} relative rounded-lg p-5 cursor-pointer transition-all duration-200`}
+      style={{
+        animationDelay: staggerDelay(index),
+        animationFillMode: 'both',
+        background: selected ? colors.brandTint : colors.cardBg,
+        border: `1px solid ${selected ? 'transparent' : colors.subtleBorder}`,
+        borderLeft: selected ? `3px solid ${colors.brandCoral}` : `1px solid ${colors.subtleBorder}`,
+        boxShadow: selected ? '0 1px 4px rgba(0,0,0,0.06)' : 'none',
+      }}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1">
+          <h3
+            style={{
+              fontSize: '18px',
+              fontWeight: '600',
+              color: colors.headingText,
+              marginBottom: '4px',
+            }}
+          >
+            {option.label}
+          </h3>
+          <p
+            style={{
+              fontSize: typography.body.size,
+              color: colors.secondaryText,
+              lineHeight: typography.body.lineHeight,
+              marginBottom: '8px',
+            }}
+          >
+            {option.subLabel}
+          </p>
+          <span
+            className="inline-flex items-center rounded-full px-2.5 py-0.5"
+            style={{
+              fontSize: typography.caption.size,
+              fontWeight: '500',
+              background: colors.brandTint,
+              color: colors.brandCoral,
+            }}
+          >
+            {option.capabilityCount} capabilities
+          </span>
+        </div>
+
+        {/* Check icon */}
+        {selected && (
+          <CheckCircle2
+            className="h-5 w-5 shrink-0 mt-0.5"
+            style={{ color: colors.brandCoral }}
+          />
+        )}
+      </div>
+    </div>
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -32,131 +108,25 @@ interface MomentAlignProps {
 
 export function MomentAlign({
   onComplete,
-  parseStreams,
-  confirmStreams,
-  parsedStreams,
+  selectedPriorities,
+  onTogglePriority,
+  onConfirmPriorities,
+  priorityOptions,
 }: MomentAlignProps) {
-  const [value, setValue] = useState('')
-  const [phase, setPhase] = useState<'input' | 'parsing' | 'confirming' | 'done'>('input')
-  const [createdNames, setCreatedNames] = useState<string[]>([])
-  const [error, setError] = useState<string | null>(null)
-  const autoAdvanceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [confirming, setConfirming] = useState(false)
 
-  // When parsedStreams arrive (from parseStreams call), auto-confirm them
-  useEffect(() => {
-    if (phase === 'parsing' && parsedStreams.length > 0) {
-      setPhase('confirming')
-      setCreatedNames(parsedStreams.map((s) => s.name))
-      // Auto-confirm the streams
-      confirmStreams()
-        .then(() => {
-          setPhase('done')
-        })
-        .catch((err) => {
-          setError(err instanceof Error ? err.message : 'Failed to create focus areas')
-          setPhase('input')
-        })
-    }
-  }, [parsedStreams, phase, confirmStreams])
-
-  // Auto-advance 1.5s after done
-  useEffect(() => {
-    if (phase === 'done') {
-      autoAdvanceRef.current = setTimeout(() => {
-        onComplete()
-      }, 3000)
-    }
-    return () => {
-      if (autoAdvanceRef.current) clearTimeout(autoAdvanceRef.current)
-    }
-  }, [phase, onComplete])
-
-  const handleSubmit = useCallback(async () => {
-    if (!value.trim()) return
-    setPhase('parsing')
-    setError(null)
+  const handleConfirm = useCallback(async () => {
+    setConfirming(true)
     try {
-      await parseStreams(value.trim())
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to parse focus areas')
-      setPhase('input')
+      await onConfirmPriorities()
+      onComplete()
+    } catch {
+      setConfirming(false)
     }
-  }, [value, parseStreams])
+  }, [onConfirmPriorities, onComplete])
 
-  // ---- Input phase ----
-  if (phase === 'input' || phase === 'parsing') {
-    return (
-      <div
-        className={animationClasses.fadeSlideUp}
-        style={{
-          maxWidth: spacing.maxReading,
-          width: '100%',
-          margin: '0 auto',
-          textAlign: 'center',
-        }}
-      >
-        <div style={{ marginBottom: spacing.section }}>
-          <h1
-            style={{
-              fontSize: typography.pageTitle.size,
-              fontWeight: typography.pageTitle.weight,
-              lineHeight: typography.pageTitle.lineHeight,
-              color: colors.headingText,
-              marginBottom: spacing.tight,
-            }}
-          >
-            What's top of mind for your team right now?
-          </h1>
-          <p
-            style={{
-              fontSize: typography.body.size,
-              color: colors.secondaryText,
-            }}
-          >
-            We'll organize your workspace around your priorities
-          </p>
-        </div>
+  const selectedCount = selectedPriorities.length
 
-        <Textarea
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          placeholder="Hiring engineers and closing Series A..."
-          rows={4}
-          className="resize-none text-base mb-4"
-          disabled={phase === 'parsing'}
-        />
-
-        {error && (
-          <p className="text-sm mb-3" style={{ color: colors.error }}>
-            {error}
-          </p>
-        )}
-
-        <Button
-          onClick={handleSubmit}
-          disabled={phase === 'parsing' || !value.trim()}
-          size="lg"
-          className="gap-2 px-8"
-          style={{
-            background: `linear-gradient(135deg, ${colors.brandCoral}, ${colors.brandGradientEnd})`,
-            border: 'none',
-            color: 'white',
-          }}
-        >
-          {phase === 'parsing' ? (
-            <>
-              <Loader2 className="h-4 w-4 animate-spin" />
-              Creating focus areas...
-            </>
-          ) : (
-            'Continue'
-          )}
-        </Button>
-      </div>
-    )
-  }
-
-  // ---- Confirming / Done phase — show created focus areas ----
   return (
     <div
       className={animationClasses.fadeSlideUp}
@@ -164,46 +134,70 @@ export function MomentAlign({
         maxWidth: spacing.maxReading,
         width: '100%',
         margin: '0 auto',
-        textAlign: 'center',
       }}
     >
-      <h1
-        style={{
-          fontSize: typography.pageTitle.size,
-          fontWeight: typography.pageTitle.weight,
-          lineHeight: typography.pageTitle.lineHeight,
-          color: colors.headingText,
-          marginBottom: spacing.section,
-        }}
-      >
-        {phase === 'confirming' ? 'Setting up your focus areas...' : 'Focus areas created'}
-      </h1>
+      {/* Header */}
+      <div style={{ textAlign: 'center', marginBottom: spacing.section }}>
+        <h1
+          style={{
+            fontSize: typography.pageTitle.size,
+            fontWeight: typography.pageTitle.weight,
+            lineHeight: typography.pageTitle.lineHeight,
+            color: colors.headingText,
+            marginBottom: spacing.tight,
+          }}
+        >
+          What matters most right now?
+        </h1>
+        <p
+          style={{
+            fontSize: typography.body.size,
+            color: colors.secondaryText,
+          }}
+        >
+          Select your priorities. We'll configure your workspace around them.
+        </p>
+      </div>
 
-      <div className="flex flex-wrap justify-center gap-3">
-        {createdNames.map((name, i) => (
-          <span
-            key={name}
-            className={`${animationClasses.fadeSlideUp} inline-flex items-center rounded-full px-4 py-2`}
-            style={{
-              animationDelay: staggerDelay(i),
-              animationFillMode: 'both',
-              fontSize: typography.body.size,
-              fontWeight: '500',
-              background: colors.brandTint,
-              color: colors.headingText,
-              border: `1px solid ${colors.subtleBorder}`,
-            }}
-          >
-            {name}
-          </span>
+      {/* Priority cards */}
+      <div className="space-y-3" style={{ marginBottom: spacing.element }}>
+        {priorityOptions.map((option, i) => (
+          <PriorityCard
+            key={option.id}
+            option={option}
+            selected={selectedPriorities.includes(option.id)}
+            index={i}
+            onToggle={() => onTogglePriority(option.id)}
+          />
         ))}
       </div>
 
-      {phase === 'confirming' && (
-        <div className="mt-6 flex justify-center">
-          <Loader2 className="h-5 w-5 animate-spin" style={{ color: colors.brandCoral }} />
-        </div>
-      )}
+      {/* Continue CTA */}
+      <div style={{ textAlign: 'center' }}>
+        <button
+          type="button"
+          onClick={handleConfirm}
+          disabled={selectedCount === 0 || confirming}
+          className="w-full rounded-lg py-3 px-6 text-white font-semibold transition-all hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
+          style={{
+            background: `linear-gradient(135deg, ${colors.brandCoral}, ${colors.brandGradientEnd})`,
+            fontSize: typography.body.size,
+            border: 'none',
+            cursor: selectedCount === 0 || confirming ? 'not-allowed' : 'pointer',
+          }}
+        >
+          {confirming ? (
+            <span className="inline-flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Creating focus areas...
+            </span>
+          ) : selectedCount > 1 ? (
+            `Continue with ${selectedCount} priorities`
+          ) : (
+            'Continue'
+          )}
+        </button>
+      </div>
     </div>
   )
 }
