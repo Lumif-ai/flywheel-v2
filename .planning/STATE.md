@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-24)
 ## Current Position
 
 Phase: 3 of 6 (Email Scorer Skill)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-03-24 — Phase 3 Plan 01 complete (email-scorer skill + scoring engine)
+Plan: 2 of 2 in current phase
+Status: Phase 3 complete
+Last activity: 2026-03-24 — Phase 3 Plan 02 complete (gmail sync scoring integration)
 
-Progress: [█████░░░░░] 38%
+Progress: [██████░░░░] 50%
 
 ## Performance Metrics
 
@@ -60,6 +60,11 @@ Recent decisions affecting current work:
 - [Phase 3, Plan 01]: Hallucination filtering on context_refs — LLM-returned IDs validated against pre-fetched sets before storage
 - [Phase 3, Plan 01]: Non-fatal scoring — exceptions log only email.id (no PII), return None, sync always completes
 - [Phase 3, Plan 01]: Caller-commits pattern — scoring engine does not call db.commit(), consistent with Phase 2 pattern
+- [Phase 3, Plan 02]: Score-after-commit pattern — _score_new_emails() called only after upsert db.commit() so scoring failure never loses emails
+- [Phase 3, Plan 02]: upsert_email() returns UUID via .returning(Email.id) — avoids extra SELECT round-trip for scoring
+- [Phase 3, Plan 02]: Daily cap default 500/day — prevents Haiku cost runaway during initial full sync
+- [Phase 3, Plan 02]: get_thread_priority() is read-time MAX query, not stored column (SCORE-07)
+- [Phase 3, Plan 02]: email-scorer added to skill_executor subsidy key allowlist — background scoring never has user API key
 
 ### Pending Todos
 
@@ -74,5 +79,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-24
-Stopped at: Phase 3 Plan 01 complete (email-scorer SKILL.md + email_scorer.py engine). Ready for Plan 02 (gmail sync integration).
+Stopped at: Phase 3 Plan 02 complete (gmail sync scoring integration). Phase 3 fully complete. Ready for Phase 4 (Email Drafting Engine) — research recommended before planning.
 Resume file: None
