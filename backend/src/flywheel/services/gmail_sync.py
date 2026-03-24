@@ -32,7 +32,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.config import settings
-from flywheel.db.models import Email, EmailScore, EmailVoiceProfile, Integration
+from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile, Integration
+from flywheel.engines.email_drafter import draft_email
 from flywheel.engines.email_scorer import score_email
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
@@ -274,6 +275,85 @@ async def _score_new_emails(
     return scored_count
 
 
+async def _draft_important_emails(
+    db: AsyncSession,
+    tenant_id: UUID,
+    integration: Integration,
+    email_ids: list[UUID],
+) -> int:
+    """Draft replies for scored emails with priority >= 3 and suggested_action=draft_reply.
+
+    Queries EmailScore rows for the given email_ids, filters for draftable criteria,
+    skips emails that already have an EmailDraft row (LEFT JOIN IS NULL guard),
+    calls draft_email() per match. Returns count of drafts created.
+
+    Non-fatal: individual draft failures are logged but never block the sync loop.
+
+    Args:
+        db: Tenant-scoped async session (RLS enforced).
+        tenant_id: Tenant UUID.
+        integration: gmail-read Integration row (passed to draft_email for credential access).
+        email_ids: List of Email UUIDs from the current sync batch (already scored).
+
+    Returns:
+        Number of draft rows successfully created.
+    """
+    if not email_ids:
+        return 0
+
+    # Query emails that need drafting: scored >= 3 with draft_reply action, no existing draft
+    from sqlalchemy.orm import aliased
+
+    EmailDraftAlias = aliased(EmailDraft)
+
+    result = await db.execute(
+        select(Email, EmailScore)
+        .join(EmailScore, EmailScore.email_id == Email.id)
+        .outerjoin(EmailDraftAlias, EmailDraftAlias.email_id == Email.id)
+        .where(
+            and_(
+                Email.id.in_(email_ids),
+                Email.tenant_id == tenant_id,
+                EmailScore.priority >= 3,
+                EmailScore.suggested_action == "draft_reply",
+                EmailDraftAlias.id.is_(None),
+            )
+        )
+    )
+    rows = result.all()
+
+    draft_count = 0
+    for email_row, score_row in rows:
+        try:
+            draft = await draft_email(db, tenant_id, email_row, score_row, integration)
+            if draft is None:
+                logger.warning(
+                    "draft_email returned None for email_id=%s tenant_id=%s",
+                    email_row.id,
+                    tenant_id,
+                )
+            else:
+                draft_count += 1
+        except Exception:
+            logger.exception(
+                "Unexpected error drafting email_id=%s tenant_id=%s",
+                email_row.id,
+                tenant_id,
+            )
+            # Non-fatal: continue drafting remaining emails
+
+    # Single commit for the entire batch (caller-commits pattern)
+    await db.commit()
+
+    logger.info(
+        "Drafted %d/%d qualifying emails for tenant %s",
+        draft_count,
+        len(rows),
+        tenant_id,
+    )
+    return draft_count
+
+
 async def get_thread_priority(
     db: AsyncSession,
     tenant_id: UUID,
@@ -394,6 +474,16 @@ async def _full_sync(
             )
             # Non-fatal — sync is already committed, scoring failure doesn't lose emails
 
+        # Draft important emails AFTER scoring — draft failure cannot lose synced/scored emails
+        try:
+            drafted = await _draft_important_emails(
+                db, integration.tenant_id, integration, new_email_ids
+            )
+            logger.info("Drafted %d emails for integration %s", drafted, integration.id)
+        except Exception:
+            logger.exception("Drafting failed for integration %s", integration.id)
+            # Non-fatal — sync and scoring already committed
+
     return count
 
 
@@ -498,6 +588,16 @@ async def sync_gmail(
                 "Scoring failed for integration %s", integration.id
             )
             # Non-fatal — sync is already committed, scoring failure doesn't lose emails
+
+        # Draft important emails AFTER scoring — draft failure cannot lose synced/scored emails
+        try:
+            drafted = await _draft_important_emails(
+                db, integration.tenant_id, integration, new_email_ids
+            )
+            logger.info("Drafted %d emails for integration %s", drafted, integration.id)
+        except Exception:
+            logger.exception("Drafting failed for integration %s", integration.id)
+            # Non-fatal — sync and scoring already committed
 
     return count
 

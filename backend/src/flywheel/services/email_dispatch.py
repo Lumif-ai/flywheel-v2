@@ -42,11 +42,11 @@ async def send_email_as_user(
     Returns:
         Dict with provider used and message_id (if available).
     """
-    # Look for a connected email integration (Gmail or Outlook)
+    # Look for a connected email integration (Gmail, Gmail-Read, or Outlook)
     result = await db.execute(
         select(Integration).where(
             Integration.tenant_id == tenant_id,
-            Integration.provider.in_(["gmail", "outlook"]),
+            Integration.provider.in_(["gmail", "gmail-read", "outlook"]),
             Integration.status == "connected",
         )
     )
@@ -63,6 +63,38 @@ async def send_email_as_user(
                 to, subject, message_id,
             )
             return {"provider": "gmail", "message_id": message_id}
+
+        elif integration.provider == "gmail-read":
+            from flywheel.services.gmail_read import (
+                get_valid_credentials as get_gmail_read_creds,
+            )
+            import asyncio as _asyncio
+            import base64 as _b64
+            from email.mime.text import MIMEText as _MIMEText
+
+            # For gmail-read, use the gmail_read module's credential handling.
+            # Note: send_email_as_user is for general dispatch. Draft approval
+            # uses the dedicated approve endpoint in api/email.py instead.
+            # This route is a safety net if dispatch is called with a gmail-read integration.
+            creds = await get_gmail_read_creds(integration)
+
+            def _send_raw():
+                from googleapiclient.discovery import build as _gbuild
+                service = _gbuild("gmail", "v1", credentials=creds)
+                msg = _MIMEText(body_html, "html")
+                msg["To"] = to
+                msg["Subject"] = subject
+                raw = _b64.urlsafe_b64encode(msg.as_bytes()).decode()
+                return service.users().messages().send(userId="me", body={"raw": raw}).execute()
+
+            result_msg = await _asyncio.to_thread(_send_raw)
+            message_id = result_msg.get("id")
+            await db.commit()
+            logger.info(
+                "email_sent_as_user provider=gmail-read to=%s subject=%s msg_id=%s",
+                to, subject, message_id,
+            )
+            return {"provider": "gmail-read", "message_id": message_id}
 
         elif integration.provider == "outlook":
             from flywheel.services.microsoft_outlook import send_email_outlook

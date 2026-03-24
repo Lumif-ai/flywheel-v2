@@ -436,6 +436,87 @@ async def get_history(creds: Credentials, start_history_id: str) -> dict:
     return await asyncio.to_thread(_get)
 
 
+async def send_reply(
+    creds: Credentials,
+    to: str,
+    subject: str,
+    body_text: str,
+    thread_id: str,
+    in_reply_to: str,
+) -> str:
+    """Send a threaded reply via Gmail API. Returns sent message ID.
+
+    Constructs MIME with In-Reply-To and References headers to keep the
+    reply inside the original Gmail thread (not orphaned as a new thread).
+
+    Args:
+        creds: Valid Gmail OAuth2 credentials (must have gmail.send scope).
+        to: Recipient email address.
+        subject: Email subject (will be prefixed with "Re: " if not already).
+        body_text: Plain text reply body.
+        thread_id: Gmail thread ID to attach the reply to.
+        in_reply_to: Original email's Message-ID header value.
+
+    Returns:
+        Gmail message ID of the sent reply.
+    """
+    from email.mime.text import MIMEText
+
+    def _send():
+        service = build("gmail", "v1", credentials=creds)
+        msg = MIMEText(body_text, "plain")
+        msg["To"] = to
+        msg["Subject"] = subject if subject.startswith("Re:") else f"Re: {subject}"
+        msg["In-Reply-To"] = in_reply_to
+        msg["References"] = in_reply_to
+        raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+        result = (
+            service.users()
+            .messages()
+            .send(userId="me", body={"raw": raw, "threadId": thread_id})
+            .execute()
+        )
+        logger.debug("send_reply thread_id=%s", thread_id)
+        return result["id"]
+
+    return await asyncio.to_thread(_send)
+
+
+async def get_message_id_header(creds: Credentials, message_id: str) -> str | None:
+    """Fetch the Message-ID header for a Gmail message (for reply threading).
+
+    Used at draft approval time to construct In-Reply-To header.
+    Lightweight call -- metadata format with single header.
+
+    Args:
+        creds: Valid Gmail OAuth2 credentials.
+        message_id: Gmail message ID.
+
+    Returns:
+        Message-ID header value string, or None if not found.
+    """
+    def _get():
+        service = build("gmail", "v1", credentials=creds)
+        result = (
+            service.users()
+            .messages()
+            .get(
+                userId="me",
+                id=message_id,
+                format="metadata",
+                metadataHeaders=["Message-ID"],
+            )
+            .execute()
+        )
+        headers = result.get("payload", {}).get("headers", [])
+        for h in headers:
+            if h.get("name", "").lower() == "message-id":
+                return h["value"]
+        return None
+
+    return await asyncio.to_thread(_get)
+
+
 async def get_profile(creds: Credentials) -> dict:
     """Fetch the authenticated user's Gmail profile.
 
