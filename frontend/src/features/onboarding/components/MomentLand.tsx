@@ -33,7 +33,7 @@ export function MomentLand({ briefingHtml, onComplete }: MomentLandProps) {
         margin: '0 auto',
       }}
     >
-      {/* Header */}
+      {/* Header — adapts based on whether a briefing was generated */}
       <div style={{ textAlign: 'center', marginBottom: spacing.section }}>
         <h1
           style={{
@@ -44,8 +44,13 @@ export function MomentLand({ briefingHtml, onComplete }: MomentLandProps) {
             marginBottom: spacing.tight,
           }}
         >
-          Your first briefing is ready
+          {briefingHtml ? 'Your first briefing is ready' : 'Your workspace is ready'}
         </h1>
+        {!briefingHtml && (
+          <p style={{ fontSize: typography.body.size, color: colors.secondaryText, margin: 0 }}>
+            Your company profile and next steps are waiting.
+          </p>
+        )}
       </div>
 
       {/* Briefing content */}
@@ -60,19 +65,7 @@ export function MomentLand({ briefingHtml, onComplete }: MomentLandProps) {
           }}
           dangerouslySetInnerHTML={{ __html: briefingHtml }}
         />
-      ) : (
-        <div
-          className="rounded-lg border text-center py-12"
-          style={{
-            borderColor: colors.subtleBorder,
-            background: colors.brandTint,
-          }}
-        >
-          <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-            Your briefing has been saved to your workspace
-          </p>
-        </div>
-      )}
+      ) : null}
 
       {/* Message + CTA */}
       <div style={{ textAlign: 'center', marginTop: spacing.section }}>
