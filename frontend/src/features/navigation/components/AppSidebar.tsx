@@ -79,7 +79,7 @@ export function AppSidebar() {
         </SidebarGroup>
       </SidebarContent>
 
-      <SidebarFooter className="p-4">
+      <SidebarFooter className="p-4" style={{ borderTop: '1px solid var(--subtle-border)' }}>
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -95,11 +95,11 @@ export function AppSidebar() {
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             <Avatar className="h-7 w-7">
-              <AvatarFallback className="text-xs bg-muted">U</AvatarFallback>
+              <AvatarFallback className="text-xs" style={{ backgroundColor: 'var(--brand-tint)', color: 'var(--brand-coral)' }}>U</AvatarFallback>
             </Avatar>
             <span className="text-sm text-muted-foreground">User</span>
           </div>
-          <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border border-border bg-muted px-1.5 font-mono text-[10px] font-medium text-muted-foreground sm:inline-flex">
+          <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border border-border px-1.5 font-mono text-[10px] font-medium sm:inline-flex" style={{ backgroundColor: 'var(--brand-tint)', color: 'var(--secondary-text)' }}>
             <span className="text-xs">&#8984;</span>K
           </kbd>
         </div>

@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router'
+import { NavLink, useLocation } from 'react-router'
 import { Plus, Archive } from 'lucide-react'
 import {
   SidebarGroup,
@@ -12,9 +12,24 @@ import {
 import { useStreams } from '@/features/briefing/hooks/useStreams'
 import { StreamDensityCard } from './DensityIndicator'
 
+const streamItemStyle = {
+  active: {
+    borderLeft: '2px solid var(--brand-coral)',
+    backgroundColor: 'rgba(233,77,53,0.06)',
+    borderRadius: '0 6px 6px 0',
+    transition: 'all 150ms ease-out',
+  },
+  inactive: {
+    borderLeft: '2px solid transparent',
+    borderRadius: '0 6px 6px 0',
+    transition: 'all 150ms ease-out',
+  },
+} as const
+
 const MAX_VISIBLE = 7
 
 export function StreamSidebar() {
+  const location = useLocation()
   const { data, isLoading } = useStreams()
 
   const streams = data?.items ?? []
@@ -54,9 +69,15 @@ export function StreamSidebar() {
             {visibleStreams.map((stream) => {
               const density = stream.density_score ?? 0
               const dotColor = density > 70 ? '#22C55E' : density >= 30 ? '#F59E0B' : '#9CA3AF'
+              const isActive = location.pathname === `/streams/${stream.id}`
               return (
-                <SidebarMenuItem key={stream.id}>
+                <SidebarMenuItem
+                  key={stream.id}
+                  style={isActive ? streamItemStyle.active : streamItemStyle.inactive}
+                  className={isActive ? '' : 'hover:bg-[rgba(233,77,53,0.03)]'}
+                >
                   <SidebarMenuButton
+                    isActive={isActive}
                     render={<NavLink to={`/streams/${stream.id}`} />}
                     tooltip={stream.name}
                   >
