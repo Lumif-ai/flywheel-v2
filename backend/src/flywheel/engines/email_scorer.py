@@ -42,6 +42,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.config import settings
 from flywheel.db.models import ContextEntry, ContextEntity, Email, EmailScore
+from flywheel.engines.email_dismiss_tracker import get_dismiss_signal
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -257,6 +258,7 @@ def _build_score_prompt(
     email: Email,
     sender_entity: "ContextEntity | None",
     context_entries: list,
+    dismiss_signal: str = "",
 ) -> tuple[str, str]:
     """Build (system_prompt, user_message) for the Haiku scoring call.
 
@@ -331,7 +333,7 @@ CONTEXT AVAILABLE:
 {entity_block}
 
 {entries_block}
-
+{dismiss_signal}
 EMAIL TO SCORE:
 From: {email.sender_name or ""} <{email.sender_email}>
 Subject: {email.subject or "(no subject)"}
@@ -514,9 +516,18 @@ async def score_email(
         # Step 2: FTS search on subject
         context_entries = await _search_context_entries(db, tenant_id, email.subject)
 
+        # Step 2b: Dismiss signal lookup (non-fatal — returns "" on error)
+        dismiss_block = await get_dismiss_signal(
+            db,
+            tenant_id,
+            email.sender_email,
+            days=settings.dismiss_lookback_days,
+            threshold=settings.dismiss_threshold,
+        )
+
         # Step 3: Build prompt
         system_prompt, user_message = _build_score_prompt(
-            email, sender_entity, context_entries
+            email, sender_entity, context_entries, dismiss_signal=dismiss_block
         )
 
         # Collect valid IDs for hallucination filtering

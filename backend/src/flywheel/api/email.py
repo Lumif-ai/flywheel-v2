@@ -27,6 +27,7 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Email, EmailDraft, EmailScore, Integration
 from flywheel.db.session import get_session_factory, tenant_session
+from flywheel.engines import email_voice_updater
 from flywheel.services.gmail_read import (
     get_message_id_header,
     get_valid_credentials,
@@ -421,6 +422,43 @@ async def trigger_sync(
 
 
 # ---------------------------------------------------------------------------
+# Voice update background helper
+# ---------------------------------------------------------------------------
+
+
+async def _run_voice_update(
+    tenant_id: UUID,
+    user_id: UUID,
+    original_body: str,
+    edited_body: str,
+) -> None:
+    """Background: update voice profile from a single draft edit diff.
+
+    Opens a new tenant session (same pattern as _run_sync above). Non-fatal —
+    the approve endpoint already succeeded before this task fires.
+
+    Args:
+        tenant_id: Tenant UUID (passed as value, not ORM ref).
+        user_id: User UUID (passed as value, not ORM ref).
+        original_body: AI-generated draft_body captured before null.
+        edited_body: User's user_edits captured before null.
+    """
+    factory = get_session_factory()
+    async with tenant_session(factory, str(tenant_id), str(user_id)) as db:
+        try:
+            await email_voice_updater.update_from_edit(
+                db, tenant_id, user_id, original_body, edited_body
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception(
+                "voice update failed for tenant_id=%s user_id=%s",
+                tenant_id,
+                user_id,
+            )
+            # Non-fatal — approve was already successful
+
+
+# ---------------------------------------------------------------------------
 # GET /email/digest
 # ---------------------------------------------------------------------------
 
@@ -487,6 +525,7 @@ async def get_digest(
 @router.post("/drafts/{draft_id}/approve", response_model=DraftResponse)
 async def approve_draft(
     draft_id: UUID,
+    background_tasks: BackgroundTasks,
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> DraftResponse:
@@ -579,11 +618,26 @@ async def approve_draft(
             detail=f"Gmail send failed: {exc}",
         ) from exc
 
+    # Capture diff strings BEFORE null — ORM object expires after commit
+    original_body = draft.draft_body
+    edited_body = draft.user_edits
+    has_edit = edited_body is not None and edited_body != original_body
+
     # Success: null body (PII), set status, update timestamp
     draft.draft_body = None
     draft.status = "sent"
     draft.updated_at = datetime.now(timezone.utc)
     await db.commit()
+
+    # Fire voice update in background only when user actually edited the draft
+    if has_edit and original_body is not None:
+        background_tasks.add_task(
+            _run_voice_update,
+            tenant_id=user.tenant_id,
+            user_id=user.id,
+            original_body=original_body,
+            edited_body=edited_body,
+        )
 
     logger.info("Draft approved and sent: draft_id=%s", draft_id)
     return DraftResponse(
