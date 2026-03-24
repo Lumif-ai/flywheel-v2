@@ -526,14 +526,9 @@ export function useOnboarding() {
           )
           if (!res.items || res.items.length === 0) continue
 
-          // ONLY use entries that mention this company — match domain or company name
-          const domainLower = domain.toLowerCase()
-          const namePart = domainLower.includes('.') ? domainLower.split('.')[0] : domainLower
-          const relevant = res.items.filter(e => {
-            const c = e.content.toLowerCase()
-            return c.includes(domainLower) || c.includes(namePart)
-          })
-          if (relevant.length === 0) continue
+          // The backend company lookup already validated these categories belong
+          // to the queried company (via co-creation window). Use all entries.
+          const relevant = res.items
 
           const cat = fileName.replace('.md', '').replace('company-', '')
           // Use detail field (short) when available, otherwise extract first line from content

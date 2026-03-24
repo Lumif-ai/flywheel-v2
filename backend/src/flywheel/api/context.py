@@ -573,7 +573,7 @@ def _normalize_domain(raw: str) -> str:
 # GET /context/company — cache-first company lookup
 # ---------------------------------------------------------------------------
 
-_ONBOARDING_SOURCES = ("onboarding", "company-intel", "meeting-prep", "account-research")
+_ONBOARDING_SOURCES = ("onboarding", "company-intel", "company-intel-onboarding", "meeting-prep", "account-research")
 
 
 @router.get("/company", response_model=CompanyLookupResponse)
@@ -587,16 +587,22 @@ async def company_lookup(
 
     # Derive company name variants from domain for broader matching
     # e.g. "movingwalls.com" → search for "movingwalls.com", "movingwalls", "moving walls"
+    import re as _re
     name_part = normalized.rsplit(".", 1)[0] if "." in normalized else normalized
-    # Split camelCase or joined words: "movingwalls" → "moving walls" (crude but effective)
-    # Also try as-is for compound names
     search_terms = [normalized, name_part]
-    # Add spaced variant for common patterns (lowercase only)
-    if len(name_part) > 4 and "_" not in name_part and "-" not in name_part:
-        # Try with space before each uppercase letter boundary (won't help all-lower but harmless)
-        spaced = name_part.replace("-", " ").replace("_", " ")
-        if spaced != name_part:
-            search_terms.append(spaced)
+    # Add spaced/separated variants
+    if "-" in name_part or "_" in name_part:
+        search_terms.append(name_part.replace("-", " ").replace("_", " "))
+    # For joined words, insert space before uppercase or try common splits
+    # "movingwalls" → "moving walls" via regex split on word boundaries
+    if name_part.isalpha() and len(name_part) > 5:
+        # CamelCase split: "MovingWalls" → "Moving Walls"
+        camel_split = _re.sub(r"([a-z])([A-Z])", r"\1 \2", name_part)
+        if camel_split != name_part:
+            search_terms.append(camel_split)
+        # Also add the name_part with % between each pair of chars for ILIKE
+        # This is expensive but catches "movingwalls" → "Moving Walls"
+        # by searching content ILIKE '%moving%walls%' (splitting at reasonable boundaries)
 
     # Build OR conditions for all search variants
     content_conditions = []
@@ -604,13 +610,40 @@ async def company_lookup(
         content_conditions.append(ContextEntry.file_name.ilike(f"%{term}%"))
         content_conditions.append(ContextEntry.content.ilike(f"%{term}%"))
 
+    # Phase 1: Find entries that directly mention the company
     base = select(ContextEntry).where(
         ContextEntry.deleted_at.is_(None),
         or_(*content_conditions),
     )
-
     result = await db.execute(base)
-    entries = result.scalars().all()
+    seed_entries = result.scalars().all()
+
+    # Phase 2: If we found matches, also grab co-created entries from the same
+    # crawl session (same source, created within 5 minutes of matched entries).
+    # The onboarding crawl creates multiple entries but only some mention the
+    # company name — the others (market-taxonomy, products, etc.) don't.
+    entries = list(seed_entries)
+    if seed_entries:
+        from datetime import timedelta as _td
+        seed_sources = {e.source for e in seed_entries}
+        onboarding_sources = seed_sources & set(_ONBOARDING_SOURCES)
+        if onboarding_sources:
+            seed_times = [e.created_at for e in seed_entries if e.created_at]
+            if seed_times:
+                min_time = min(seed_times) - _td(minutes=5)
+                max_time = max(seed_times) + _td(minutes=5)
+                seed_ids = {e.id for e in seed_entries}
+                co_result = await db.execute(
+                    select(ContextEntry).where(
+                        ContextEntry.deleted_at.is_(None),
+                        ContextEntry.source.in_(list(onboarding_sources)),
+                        ContextEntry.created_at >= min_time,
+                        ContextEntry.created_at <= max_time,
+                        ContextEntry.id.notin_(seed_ids),
+                    )
+                )
+                co_entries = co_result.scalars().all()
+                entries.extend(co_entries)
 
     if not entries:
         return CompanyLookupResponse(exists=False)
