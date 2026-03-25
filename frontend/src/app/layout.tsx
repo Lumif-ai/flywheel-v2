@@ -25,7 +25,7 @@ const queryClient = new QueryClient({
 })
 
 // Routes that render as standalone pages (no sidebar, no tenant-dependent fetches)
-const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy']
+const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy', '/briefing']
 
 // Only rendered inside the authenticated shell so useEmailThreads never fires
 // on standalone routes (which have no auth context and would return 401).

@@ -1,6 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router'
 import { BriefingPage } from '@/features/briefing/components/BriefingPage'
+import { BriefingFullViewer } from '@/features/briefing/components/BriefingFullViewer'
 import { StreamDetailPage } from '@/features/streams/components/StreamDetailPage'
 import { ActPage } from '@/pages/ActPage'
 import { SettingsPage } from '@/pages/SettingsPage'
@@ -45,6 +46,7 @@ export function AppRoutes() {
       <Route path="/chat" element={<ActPage />} />
       <Route path="/email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />
       <Route path="/settings" element={<SettingsPage />} />
+      <Route path="/briefing/:runId" element={<BriefingFullViewer />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
       <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />

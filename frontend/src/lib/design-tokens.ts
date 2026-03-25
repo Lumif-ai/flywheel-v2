@@ -7,6 +7,7 @@ export const spacing = {
   pageDesktop: '48px', // page horizontal padding desktop
   maxReading: '720px', // max content width for reading
   maxGrid: '1120px',  // max content width for grid layouts
+  maxBriefing: '960px', // max content width for briefing viewer
 } as const;
 
 export const typography = {
