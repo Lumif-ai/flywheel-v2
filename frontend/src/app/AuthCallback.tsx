@@ -98,6 +98,22 @@ export function AuthCallback() {
           if (!session.provider_token) {
             console.info('AuthCallback: provider_token not available after linkIdentity — integrations skipped')
           }
+
+          // Claim orphaned anonymous data if linkIdentity failed and a new user was created
+          const prevAnonId = localStorage.getItem('flywheel-prev-anon-id')
+          if (prevAnonId && prevAnonId !== session.user.id) {
+            try {
+              await api.post('/onboarding/claim-anonymous-data', {
+                previous_anonymous_id: prevAnonId,
+              })
+              console.log('[AuthCallback] Claimed anonymous data from:', prevAnonId)
+            } catch (err) {
+              // Non-fatal: user just won't have their anonymous data
+              console.warn('[AuthCallback] claim-anonymous-data failed:', err)
+            } finally {
+              localStorage.removeItem('flywheel-prev-anon-id')
+            }
+          }
         }
 
         // Resume pending action if stored

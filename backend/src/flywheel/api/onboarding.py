@@ -1,9 +1,10 @@
 """Onboarding endpoints: promotion, subsidy, crawl SSE, stream parsing, and meeting ingest.
 
 Endpoints:
-- POST /onboarding/promote          -- promote anonymous user to full account
-- POST /onboarding/promote-oauth    -- promote via OAuth (identity + integrations in one step)
-- GET  /onboarding/subsidy-status   -- remaining anonymous runs
+- POST /onboarding/promote              -- promote anonymous user to full account
+- POST /onboarding/promote-oauth        -- promote via OAuth (identity + integrations in one step)
+- POST /onboarding/claim-anonymous-data -- migrate orphaned anonymous data to new user
+- GET  /onboarding/subsidy-status       -- remaining anonymous runs
 - POST /onboarding/crawl            -- start company crawl, stream SSE with categorized items
 - POST /onboarding/parse-streams    -- parse natural language into work streams (anonymous OK)
 - POST /onboarding/create-streams   -- batch-create streams with entity seeds (tenant required)
@@ -22,7 +23,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
@@ -31,12 +32,14 @@ from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import (
     Company,
     ContextEntry,
+    Document,
     Integration,
     OnboardingSession,
     Profile,
     SkillRun,
     Tenant,
     UserTenant,
+    WorkStream,
 )
 from flywheel.db.session import get_session_factory
 
@@ -136,7 +139,7 @@ class PromoteRequest(BaseModel):
 
 class PromoteOAuthRequest(BaseModel):
     provider: Literal["google", "microsoft"]
-    provider_token: str
+    provider_token: str = ""  # May be empty if linkIdentity doesn't return it
     provider_refresh_token: str | None = None
     email: str
 
@@ -181,6 +184,10 @@ class MeetingNote(BaseModel):
     content: str = Field(..., min_length=1)
     source: str = "paste"
     title: str | None = None
+
+
+class ClaimAnonymousDataRequest(BaseModel):
+    previous_anonymous_id: str
 
 
 class IngestMeetingsRequest(BaseModel):
@@ -348,19 +355,15 @@ async def promote_oauth(
     user: TokenPayload = Depends(get_current_user),
     db: AsyncSession = Depends(get_db_unscoped),
 ):
-    """Promote anonymous user via OAuth -- creates identity + calendar/email integrations.
+    """Promote user via OAuth -- creates tenant + calendar/email integrations.
 
-    Reuses the same tenant/company/profile logic as the email-based promote
-    endpoint, then additionally creates Integration rows from the OAuth tokens
-    so calendar + email are connected from day one.
+    After Supabase OAuth, the user is already non-anonymous (Supabase handles
+    the identity promotion). This endpoint creates the tenant/company/profile
+    records and stores OAuth tokens as Integration rows.
+
+    Safe to call multiple times -- skips creation if tenant/profile already exist.
     """
-    if not user.is_anonymous:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Already authenticated",
-        )
-
-    # --- 1. Reuse existing promote logic: domain -> company -> tenant -> profile -> user_tenant ---
+    # --- 1. Create tenant/company/profile if not already set up ---
 
     email_domain = body.email.split("@")[1].lower().removeprefix("www.") if "@" in body.email else None
 
@@ -452,7 +455,11 @@ async def promote_oauth(
                 metadata_=entry.get("metadata") or {},
             ))
 
-    # --- 2. Create Integration rows for calendar + email ---
+    # --- 2. Create Integration rows for calendar + email (only if provider_token available) ---
+    if not body.provider_token:
+        logger.info("No provider_token for user=%s — skipping integration creation", user.sub)
+        await db.commit()
+        return PromoteResponse(tenant_id=str(tenant.id), message="Account promoted (integrations skipped)")
 
     try:
         from flywheel.auth.encryption import encrypt_api_key
@@ -558,6 +565,118 @@ async def promote_oauth(
         tenant_id=str(tenant.id),
         message="Account promoted with integrations",
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /onboarding/claim-anonymous-data (authenticated, non-anonymous only)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/claim-anonymous-data")
+async def claim_anonymous_data(
+    body: ClaimAnonymousDataRequest,
+    user: TokenPayload = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """Claim orphaned anonymous data after OAuth creates a new user.
+
+    When linkIdentity fails and signInWithOAuth creates a new Supabase user,
+    the old anonymous user's data is orphaned. This endpoint atomically
+    migrates all tenant-scoped data from the old anonymous tenant to the
+    caller's tenant, then cleans up the old tenant/profile/user_tenants rows.
+
+    Security: Only anonymous tenants named "Anonymous Workspace" with no
+    other linked users can be claimed.
+    """
+    # 1. Must be authenticated (non-anonymous)
+    if user.is_anonymous:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Must be authenticated",
+        )
+
+    old_tenant_id = body.previous_anonymous_id
+
+    # 2. Find the old anonymous tenant
+    old_tenant = (
+        await db.execute(
+            select(Tenant).where(Tenant.id == old_tenant_id)
+        )
+    ).scalar_one_or_none()
+
+    if not old_tenant or old_tenant.name != "Anonymous Workspace":
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No claimable anonymous data found",
+        )
+
+    # 3. Safety: ensure no other real users are linked to this tenant
+    other_users = (
+        await db.execute(
+            select(UserTenant).where(
+                UserTenant.tenant_id == old_tenant.id,
+                UserTenant.user_id != old_tenant_id,
+            )
+        )
+    ).scalars().all()
+
+    if other_users:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Tenant has other users",
+        )
+
+    new_tenant_id = user.tenant_id
+    new_user_id = user.sub
+
+    if not new_tenant_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Caller has no tenant",
+        )
+
+    # 4. Atomically migrate all tenant-scoped data
+    # Models with tenant_id only:
+    for model in (ContextEntry, WorkStream):
+        await db.execute(
+            update(model)
+            .where(model.tenant_id == old_tenant.id)
+            .values(tenant_id=new_tenant_id)
+        )
+
+    # Models with tenant_id + user_id:
+    for model in (SkillRun, Document):
+        await db.execute(
+            update(model)
+            .where(model.tenant_id == old_tenant.id)
+            .values(tenant_id=new_tenant_id, user_id=new_user_id)
+        )
+
+    # OnboardingSession has user_id but no tenant_id FK in some cases --
+    # migrate by user_id (old anonymous user ID -> new user ID)
+    await db.execute(
+        update(OnboardingSession)
+        .where(OnboardingSession.tenant_id == old_tenant.id)
+        .values(tenant_id=new_tenant_id, user_id=new_user_id)
+    )
+
+    # 5. Cleanup: remove old tenant's user links, profile, and tenant
+    await db.execute(
+        delete(UserTenant).where(UserTenant.tenant_id == old_tenant.id)
+    )
+    await db.execute(
+        delete(Profile).where(Profile.id == old_tenant_id)
+    )
+    await db.execute(
+        delete(Tenant).where(Tenant.id == old_tenant.id)
+    )
+
+    await db.commit()
+
+    return {
+        "message": "Anonymous data claimed",
+        "migrated_tenant": str(old_tenant.id),
+    }
 
 
 # ---------------------------------------------------------------------------
