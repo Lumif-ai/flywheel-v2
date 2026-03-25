@@ -7,7 +7,7 @@
  */
 
 import { useState } from 'react'
-import { getSupabase } from '@/lib/supabase'
+import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { colors, typography } from '@/lib/design-tokens'
 
@@ -18,27 +18,15 @@ interface SignupGateProps {
 
 export function SignupGate({ pendingAction }: SignupGateProps) {
   const [loading, setLoading] = useState<'google' | 'microsoft' | null>(null)
+  const { signInWithProvider } = useOAuthSignIn()
 
   const handleGoogleSignup = async () => {
     setLoading('google')
     try {
-      // Store intended action so we can resume after OAuth redirect
       if (pendingAction) {
         localStorage.setItem('pendingAction', JSON.stringify(pendingAction))
       }
-
-      const supabase = await getSupabase()
-      if (!supabase) return
-
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          scopes:
-            'https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/gmail.readonly',
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      })
+      await signInWithProvider('google')
     } catch (err) {
       console.error('Google OAuth error:', err)
       setLoading(null)
@@ -51,19 +39,7 @@ export function SignupGate({ pendingAction }: SignupGateProps) {
       if (pendingAction) {
         localStorage.setItem('pendingAction', JSON.stringify(pendingAction))
       }
-
-      const supabase = await getSupabase()
-      if (!supabase) return
-
-      // Supabase uses 'azure' for Microsoft. Space-separated Graph API permission names.
-      await supabase.auth.signInWithOAuth({
-        provider: 'azure',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          scopes: 'Calendars.Read Mail.Read Mail.Send',
-          queryParams: { prompt: 'consent' },
-        },
-      })
+      await signInWithProvider('azure')
     } catch (err) {
       console.error('Microsoft OAuth error:', err)
       setLoading(null)

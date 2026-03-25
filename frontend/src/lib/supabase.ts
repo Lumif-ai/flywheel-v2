@@ -27,7 +27,12 @@ export function getSupabase(): Promise<SupabaseClient | null> {
       if (!supabaseUrl || !supabaseKey) return null
 
       const { createClient } = await import('@supabase/supabase-js')
-      client = createClient(supabaseUrl, supabaseKey)
+      client = createClient(supabaseUrl, supabaseKey, {
+        auth: {
+          persistSession: true,
+          storageKey: 'flywheel-auth',
+        },
+      })
       return client
     } catch {
       return null

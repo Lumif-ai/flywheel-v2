@@ -29,6 +29,8 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
             id: session.user?.id ?? '',
             email: session.user?.email ?? null,
             is_anonymous: session.user?.is_anonymous ?? false,
+            display_name: session.user?.user_metadata?.full_name ?? session.user?.user_metadata?.name ?? null,
+            avatar_url: session.user?.user_metadata?.avatar_url ?? null,
           })
         } else if (event === 'TOKEN_REFRESHED' && session) {
           useAuthStore.getState().setToken(session.access_token)
@@ -66,12 +68,19 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
               id: existing.user?.id ?? '',
               email: existing.user?.email ?? null,
               is_anonymous: existing.user?.is_anonymous ?? true,
+              display_name: existing.user?.user_metadata?.full_name ?? existing.user?.user_metadata?.name ?? null,
+              avatar_url: existing.user?.user_metadata?.avatar_url ?? null,
             })
             setReady(true)
             return
           }
 
           // No existing session -- create anonymous
+          const previousAnonId = sessionStorage.getItem('flywheel-anon-id')
+          if (previousAnonId) {
+            console.warn('[AuthBootstrap] Previous anonymous session detected but lost. Previous ID:', previousAnonId)
+          }
+
           const { data, error } = await supabase.auth.signInAnonymously()
           if (error) throw error
           if (data.session?.access_token) {
@@ -80,7 +89,13 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
               id: data.user?.id ?? '',
               email: null,
               is_anonymous: true,
+              display_name: null,
+              avatar_url: null,
             })
+            // Store anonymous user ID for refresh resilience diagnostics
+            if (data.user?.id) {
+              sessionStorage.setItem('flywheel-anon-id', data.user.id)
+            }
           }
         }
       } catch (err) {

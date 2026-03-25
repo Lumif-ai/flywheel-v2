@@ -3,7 +3,7 @@ import { Send, Lock } from 'lucide-react'
 import { useChatStore } from '@/features/chat/store'
 import { ChatMessage } from '@/features/chat/components/ChatMessage'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
-import { getSupabase } from '@/lib/supabase'
+import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
 import { colors, typography } from '@/lib/design-tokens'
 
 const SUGGESTED_QUESTIONS = [
@@ -31,6 +31,7 @@ export function BriefingChatPanel({ runId }: BriefingChatPanelProps) {
   const inputRef = useRef<HTMLTextAreaElement>(null)
 
   const { state: lifecycleState } = useLifecycleState()
+  const { signInWithProvider } = useOAuthSignIn()
 
   const messages = useChatStore((s) => s.messages)
   const streamStatus = useChatStore((s) => s.streamState.status)
@@ -64,42 +65,23 @@ export function BriefingChatPanel({ runId }: BriefingChatPanelProps) {
     setOauthLoading('google')
     try {
       localStorage.setItem('pendingAction', JSON.stringify({ type: 'chat', payload: { runId } }))
-      const supabase = await getSupabase()
-      if (!supabase) return
-      await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          scopes:
-            'https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/gmail.readonly',
-          queryParams: { access_type: 'offline', prompt: 'consent' },
-        },
-      })
+      await signInWithProvider('google')
     } catch (err) {
       console.error('Google OAuth error:', err)
       setOauthLoading(null)
     }
-  }, [runId])
+  }, [runId, signInWithProvider])
 
   const handleMicrosoftSignup = useCallback(async () => {
     setOauthLoading('microsoft')
     try {
       localStorage.setItem('pendingAction', JSON.stringify({ type: 'chat', payload: { runId } }))
-      const supabase = await getSupabase()
-      if (!supabase) return
-      await supabase.auth.signInWithOAuth({
-        provider: 'azure',
-        options: {
-          redirectTo: `${window.location.origin}/auth/callback`,
-          scopes: 'Calendars.Read Mail.Read Mail.Send',
-          queryParams: { prompt: 'consent' },
-        },
-      })
+      await signInWithProvider('azure')
     } catch (err) {
       console.error('Microsoft OAuth error:', err)
       setOauthLoading(null)
     }
-  }, [runId])
+  }, [runId, signInWithProvider])
 
   const handleSubmit = useCallback(() => {
     const trimmed = input.trim()
