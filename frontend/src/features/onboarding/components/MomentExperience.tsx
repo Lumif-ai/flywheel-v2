@@ -6,7 +6,7 @@
  * Shows briefing building section by section with progressive reveal.
  */
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useRef } from 'react'
 import { Linkedin, Calendar, ArrowRight, Loader2, Building2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
@@ -20,7 +20,7 @@ import type { SSEEvent } from '@/types/events'
 // ---------------------------------------------------------------------------
 
 interface MomentExperienceProps {
-  onComplete: (briefingHtml?: string) => void
+  onComplete: (briefingHtml?: string, runId?: string) => void
   onSkip: () => void
   onBack: () => void
 }
@@ -39,6 +39,7 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
   const [outputText, setOutputText] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [sseUrl, setSseUrl] = useState<string | null>(null)
+  const runIdRef = useRef<string | null>(null)
 
   // SSE handler for meeting prep events
   const handleEvent = useCallback(
@@ -66,9 +67,9 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
           setPhase('done')
           setSseUrl(null)
           setStatus(null)
-          // Auto-advance with the briefing HTML
+          // Auto-advance with the briefing HTML and run ID
           const briefing = html || output || undefined
-          setTimeout(() => onComplete(briefing), 500)
+          setTimeout(() => onComplete(briefing, runIdRef.current ?? undefined), 500)
           break
         }
         case 'error':
@@ -100,6 +101,7 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
         ...(companyName.trim() && { company_name: companyName.trim() }),
       })
 
+      runIdRef.current = res.run_id
       setSseUrl(`/api/v1/onboarding/run/${res.run_id}/stream`)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start meeting prep')

@@ -1,4 +1,5 @@
 import { useMemo, useState, useEffect } from 'react'
+import { useNavigate } from 'react-router'
 import { useBriefing } from '../hooks/useBriefing'
 import { useStreams } from '../hooks/useStreams'
 import { BriefingCard } from './BriefingCard'
@@ -6,14 +7,13 @@ import { PersonalGapCard } from './PersonalGapCard'
 import { NudgeCard } from './NudgeCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
-import { FirstVisitHero } from './FirstVisitHero'
 import { NextActionCta } from './NextActionCta'
-import { SoftSignupCard, isSignupCardDismissed } from '@/features/onboarding/components/SoftSignupCard'
 import { StreamDensityCard } from '@/features/streams/components/DensityIndicator'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
+import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { FileText, Building2, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
 import { spacing, typography, colors } from '@/lib/design-tokens'
@@ -66,21 +66,18 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 export function BriefingPage() {
+  const navigate = useNavigate()
   const { data, isLoading, error } = useBriefing()
   const { data: streamsData } = useStreams()
   const user = useAuthStore(state => state.user)
+  const { state: lifecycleState } = useLifecycleState()
 
   const [recentDocs, setRecentDocs] = useState<RecentDocument[] | null>(null)
   const [docsLoading, setDocsLoading] = useState(true)
 
   const streams = streamsData?.items ?? []
 
-  const isAnonymous = useMemo(() => {
-    if (!user) return true
-    return (user as Record<string, unknown>).is_anonymous === true
-  }, [user])
-
-  const showSignupCard = isAnonymous && !isSignupCardDismissed()
+  const isFirstVisitLifecycle = lifecycleState === 'S1' || lifecycleState === 'S2'
 
   // Fetch recent documents with graceful fallback
   useEffect(() => {
@@ -115,7 +112,18 @@ export function BriefingPage() {
     return ''
   }, [user])
 
-  const isFirstVisit = !isLoading && (data?.is_first_visit ?? false)
+  const isFirstVisit = isFirstVisitLifecycle && !isLoading
+
+  // Redirect unonboarded users to onboarding
+  // No onboarding intel + no streams = user hasn't set up their company
+  const hasNoData = !isLoading && data && !data.is_first_visit
+    && (data.knowledge_health?.total_entries ?? 0) === 0
+    && streams.length === 0
+  useEffect(() => {
+    if (hasNoData) {
+      navigate('/onboarding', { replace: true })
+    }
+  }, [hasNoData, navigate])
 
   if (error) {
     return (
@@ -145,60 +153,159 @@ export function BriefingPage() {
               Show hero content (briefing or intel summary) + next action CTA.
               Suppress conversion CTAs, empty sections, and health metrics.
           ----------------------------------------------------------------- */}
-          {isFirstVisit && data?.first_visit ? (
+          {isFirstVisit ? (
             <div style={{ maxWidth: '720px', margin: '0 auto', width: '100%' }}>
               {/* Greeting */}
-              {isLoading ? (
-                <div className="space-y-2" style={{ marginBottom: spacing.section }}>
-                  <Skeleton className="h-8 w-64" />
-                  <Skeleton className="h-4 w-40" />
-                </div>
-              ) : (
+              <div style={{ marginBottom: spacing.section }}>
+                <h1
+                  style={{
+                    fontSize: typography.pageTitle.size,
+                    fontWeight: typography.pageTitle.weight,
+                    lineHeight: typography.pageTitle.lineHeight,
+                    letterSpacing: typography.pageTitle.letterSpacing,
+                    color: colors.headingText,
+                    marginBottom: '4px',
+                  }}
+                >
+                  Welcome to your workspace{userName ? `, ${userName}` : ''}.
+                </h1>
+                <p style={{ fontSize: typography.body.size, color: colors.secondaryText, margin: 0 }}>
+                  Your first briefing is in your Library. Every meeting makes your workspace smarter.
+                </p>
+              </div>
+
+              {/* Library section -- shows onboarding briefing as clickable item */}
+              <div style={{ marginBottom: spacing.section }}>
+                <h2
+                  style={{
+                    fontSize: typography.sectionTitle.size,
+                    fontWeight: typography.sectionTitle.weight,
+                    lineHeight: typography.sectionTitle.lineHeight,
+                    color: colors.headingText,
+                    marginBottom: spacing.element,
+                  }}
+                >
+                  Library
+                  {recentDocs && recentDocs.length > 0 && (
+                    <span
+                      style={{
+                        fontSize: typography.caption.size,
+                        fontWeight: '400',
+                        color: colors.secondaryText,
+                        marginLeft: '8px',
+                      }}
+                    >
+                      ({recentDocs.length} {recentDocs.length === 1 ? 'item' : 'items'})
+                    </span>
+                  )}
+                </h2>
+                <BrandedCard hoverable={false}>
+                  {docsLoading ? (
+                    <div className="space-y-3">
+                      {Array.from({ length: 2 }).map((_, i) => (
+                        <Skeleton key={i} className="h-6 w-full" />
+                      ))}
+                    </div>
+                  ) : recentDocs && recentDocs.length > 0 ? (
+                    <div className="divide-y" style={{ borderColor: colors.subtleBorder }}>
+                      {recentDocs.map((doc) => (
+                        <Link
+                          key={doc.id}
+                          to={`/documents/${doc.id}`}
+                          className="flex items-center gap-3 py-3 first:pt-0 last:pb-0 no-underline hover:opacity-80 transition-opacity"
+                        >
+                          {doc.doc_type === 'company_intel' ? (
+                            <Building2 className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
+                          ) : (
+                            <FileText className="size-4 shrink-0" style={{ color: colors.brandCoral }} />
+                          )}
+                          <span
+                            className="truncate flex-1"
+                            style={{
+                              fontSize: typography.body.size,
+                              color: colors.headingText,
+                            }}
+                          >
+                            {doc.title}
+                          </span>
+                          <span
+                            className="shrink-0 flex items-center gap-1"
+                            style={{
+                              fontSize: typography.caption.size,
+                              color: colors.secondaryText,
+                            }}
+                          >
+                            <Clock className="size-3" />
+                            {formatRelativeTime(doc.created_at)}
+                          </span>
+                        </Link>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: typography.body.size, color: colors.secondaryText, margin: 0 }}>
+                      Your briefings and research will appear here.
+                    </p>
+                  )}
+                  <div className="mt-3 pt-3 border-t" style={{ borderColor: colors.subtleBorder }}>
+                    <Link
+                      to="/documents"
+                      className="text-sm no-underline hover:underline"
+                      style={{ color: 'var(--brand-coral)' }}
+                    >
+                      View all in Library &rarr;
+                    </Link>
+                  </div>
+                </BrandedCard>
+              </div>
+
+              {/* Focus areas if available */}
+              {streams.length > 0 && (
                 <div style={{ marginBottom: spacing.section }}>
-                  <h1
+                  <h2
                     style={{
-                      fontSize: typography.pageTitle.size,
-                      fontWeight: typography.pageTitle.weight,
-                      lineHeight: typography.pageTitle.lineHeight,
-                      letterSpacing: typography.pageTitle.letterSpacing,
+                      fontSize: typography.sectionTitle.size,
+                      fontWeight: typography.sectionTitle.weight,
+                      lineHeight: typography.sectionTitle.lineHeight,
                       color: colors.headingText,
-                      marginBottom: '4px',
+                      marginBottom: spacing.element,
                     }}
                   >
-                    Welcome to your workspace{userName ? `, ${userName}` : ''}.
-                  </h1>
-                  <p style={{ fontSize: typography.body.size, color: colors.secondaryText, margin: 0 }}>
-                    Here&apos;s what we built together during setup.
-                  </p>
+                    Your Focus Areas
+                  </h2>
+                  <div className="grid gap-4 md:grid-cols-2">
+                    {streams.filter(s => !s.is_archived).map((stream) => (
+                      <Link key={stream.id} to={`/streams/${stream.id}`} className="block no-underline">
+                        <BrandedCard variant="info">
+                          <p
+                            className="truncate"
+                            style={{
+                              fontSize: typography.body.size,
+                              fontWeight: '500',
+                              color: colors.headingText,
+                              margin: 0,
+                            }}
+                          >
+                            {stream.name}
+                          </p>
+                        </BrandedCard>
+                      </Link>
+                    ))}
+                  </div>
                 </div>
               )}
 
-              {/* Hero content */}
-              <div style={{ marginBottom: spacing.section }}>
-                <FirstVisitHero
-                  briefingHtml={data.first_visit.briefing_html}
-                  intelSummary={data.first_visit.intel_summary}
-                  companyName={userName}
-                />
-              </div>
-
-              {/* Next action CTA */}
-              <div style={{ marginBottom: spacing.section }}>
-                <NextActionCta primaryPriority={data.first_visit.primary_priority} />
-              </div>
+              {/* Next action CTA if available */}
+              {data?.first_visit?.primary_priority && (
+                <div style={{ marginBottom: spacing.section }}>
+                  <NextActionCta primaryPriority={data.first_visit.primary_priority} />
+                </div>
+              )}
             </div>
           ) : (
             /* ----------------------------------------------------------------
                NORMAL DASHBOARD LAYOUT (returning users)
             ----------------------------------------------------------------- */
             <>
-              {/* Soft signup card for anonymous users */}
-              {showSignupCard && (
-                <div style={{ marginBottom: spacing.section }}>
-                  <SoftSignupCard />
-                </div>
-              )}
-
               {/* Greeting Section */}
               {isLoading ? (
                 <div className="space-y-2" style={{ marginBottom: spacing.section }}>
@@ -498,7 +605,9 @@ export function BriefingPage() {
 
       {/* Global Chat Input - pinned at bottom */}
       <div className="border-t bg-background p-4">
-        <GlobalChatInput />
+        <GlobalChatInput
+          placeholder={isFirstVisit ? 'What would you like to research next?' : undefined}
+        />
       </div>
     </div>
   )

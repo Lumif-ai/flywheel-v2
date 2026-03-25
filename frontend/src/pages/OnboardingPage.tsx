@@ -58,6 +58,7 @@ export function OnboardingPage() {
   const onboarding = useOnboarding()
   const [moment, setMoment] = useState<Moment>('arrive')
   const [briefingHtml, setBriefingHtml] = useState<string | null>(null)
+  const [completedRunId, setCompletedRunId] = useState<string | null>(null)
 
   const {
     crawlItems,
@@ -102,8 +103,9 @@ export function OnboardingPage() {
     setMoment('experience')
   }, [])
 
-  const handleExperienceComplete = useCallback((html?: string) => {
+  const handleExperienceComplete = useCallback((html?: string, runId?: string) => {
     if (html) setBriefingHtml(html)
+    if (runId) setCompletedRunId(runId)
     setMoment('land')
   }, [])
 
@@ -112,8 +114,12 @@ export function OnboardingPage() {
   }, [])
 
   const handleLandComplete = useCallback(() => {
-    navigate('/')
-  }, [navigate])
+    if (completedRunId) {
+      navigate(`/briefing/${completedRunId}`)
+    } else {
+      navigate('/')
+    }
+  }, [navigate, completedRunId])
 
   return (
     <div

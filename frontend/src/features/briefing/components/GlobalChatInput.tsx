@@ -3,7 +3,11 @@ import { useNavigate } from 'react-router'
 import { SendIcon } from 'lucide-react'
 import { useChatStore } from '@/features/chat/store'
 
-export function GlobalChatInput() {
+interface GlobalChatInputProps {
+  placeholder?: string
+}
+
+export function GlobalChatInput({ placeholder = 'Ask Flywheel anything...' }: GlobalChatInputProps) {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
   const sendMessage = useChatStore((s) => s.sendMessage)
@@ -29,7 +33,7 @@ export function GlobalChatInput() {
         type="text"
         value={value}
         onChange={(e) => setValue(e.target.value)}
-        placeholder="Ask Flywheel anything..."
+        placeholder={placeholder}
         className="flex-1 rounded-lg border border-input bg-background px-4 py-2.5 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
       />
       <button
