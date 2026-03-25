@@ -1,0 +1,140 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="trail-coral" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#E94D35" stop-opacity="0" />
+      <stop offset="100%" stop-color="#E94D35" stop-opacity="0.8" />
+    </linearGradient>
+    <linearGradient id="trail-orange" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#F97316" stop-opacity="0" />
+      <stop offset="100%" stop-color="#F97316" stop-opacity="0.7" />
+    </linearGradient>
+    <linearGradient id="trail-light" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#FB923C" stop-opacity="0" />
+      <stop offset="100%" stop-color="#FB923C" stop-opacity="0.6" />
+    </linearGradient>
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur in="SourceGraphic" stdDeviation="0.96" result="blur" />
+      <feMerge>
+        <feMergeNode in="blur" />
+        <feMergeNode in="SourceGraphic" />
+      </feMerge>
+    </filter>
+  </defs>
+
+  <style>
+    /* === Orbit: full 360 rotation === */
+    @keyframes fw-orbit {
+      from { transform: rotate(0deg); }
+      to   { transform: rotate(360deg); }
+    }
+
+    /* === Trail arc grows and shrinks with speed === */
+    @keyframes fw-trail-grow {
+      0%   { stroke-dashoffset: 110.8; opacity: 0.2; }
+      50%  { stroke-dashoffset: 84.3;  opacity: 0.6; }
+      100% { stroke-dashoffset: 110.8; opacity: 0.2; }
+    }
+
+    /* === Spawn particle: pop, drift, fade === */
+    @keyframes fw-spawn {
+      0%   { opacity: 0; transform: scale(0) translate(0, 0); }
+      15%  { opacity: 0.8; transform: scale(1) translate(0, 0); }
+      80%  { opacity: 0.4; transform: scale(0.6) translate(3.8px, -3.8px); }
+      100% { opacity: 0; transform: scale(0) translate(5.8px, -5.8px); }
+    }
+
+    /* === Center breathing pulse === */
+    @keyframes fw-center-pulse {
+      0%, 100% { opacity: 0.15; r: 1.6px; }
+      50%      { opacity: 0.35; r: 2.9px; }
+    }
+
+    /* --- Dot 1: coral, lead dot --- */
+    .fw-orbit-1 {
+      transform-origin: 32px 32px;
+      animation: fw-orbit 3s cubic-bezier(0.2, 0, 0.4, 1) infinite;
+    }
+    .fw-trail-1 {
+      transform-origin: 32px 32px;
+      animation:
+        fw-orbit 3s cubic-bezier(0.2, 0, 0.4, 1) infinite,
+        fw-trail-grow 3s cubic-bezier(0.2, 0, 0.4, 1) infinite;
+    }
+
+    /* --- Dot 2: orange, offset phase --- */
+    .fw-orbit-2 {
+      transform-origin: 32px 32px;
+      animation: fw-orbit 3.4s cubic-bezier(0.25, 0, 0.35, 1) infinite;
+      animation-delay: -0.8s;
+    }
+    .fw-trail-2 {
+      transform-origin: 32px 32px;
+      animation:
+        fw-orbit 3.4s cubic-bezier(0.25, 0, 0.35, 1) infinite,
+        fw-trail-grow 3.4s cubic-bezier(0.25, 0, 0.35, 1) infinite;
+      animation-delay: -0.8s;
+    }
+
+    /* --- Dot 3: light orange, most offset --- */
+    .fw-orbit-3 {
+      transform-origin: 32px 32px;
+      animation: fw-orbit 3.8s cubic-bezier(0.15, 0, 0.45, 1) infinite;
+      animation-delay: -1.6s;
+    }
+    .fw-trail-3 {
+      transform-origin: 32px 32px;
+      animation:
+        fw-orbit 3.8s cubic-bezier(0.15, 0, 0.45, 1) infinite,
+        fw-trail-grow 3.8s cubic-bezier(0.15, 0, 0.45, 1) infinite;
+      animation-delay: -1.6s;
+    }
+
+    /* --- Spawn particle --- */
+    .fw-spawn {
+      transform-origin: center;
+      animation: fw-spawn 3s ease-out infinite;
+      animation-delay: -1.2s;
+    }
+
+    /* --- Center glow --- */
+    .fw-center {
+      animation: fw-center-pulse 3s ease-in-out infinite;
+    }
+  </style>
+
+  <!-- Center breathing dot -->
+  <circle cx="32" cy="32" r="1.9" fill="#E94D35" class="fw-center" />
+
+  <!-- Trail arcs (dashed circle strokes that rotate with dots) -->
+  <!-- r=19.2 => circumference = 2*pi*19.2 = 120.6 -->
+  <circle cx="32" cy="32" r="19.2" fill="none"
+    stroke="url(#trail-coral)" stroke-width="6.3" stroke-linecap="round"
+    stroke-dasharray="120.6" stroke-dashoffset="102.5"
+    class="fw-trail-1" filter="url(#glow)" />
+
+  <circle cx="32" cy="32" r="19.2" fill="none"
+    stroke="url(#trail-orange)" stroke-width="4.9" stroke-linecap="round"
+    stroke-dasharray="120.6" stroke-dashoffset="106.1"
+    class="fw-trail-2" />
+
+  <circle cx="32" cy="32" r="19.2" fill="none"
+    stroke="url(#trail-light)" stroke-width="3.9" stroke-linecap="round"
+    stroke-dasharray="120.6" stroke-dashoffset="108.5"
+    class="fw-trail-3" />
+
+  <!-- Dot 1: coral (largest) -->
+  <circle cx="32" cy="12.8" r="3.52" fill="#E94D35"
+    class="fw-orbit-1" filter="url(#glow)" />
+
+  <!-- Dot 2: orange -->
+  <circle cx="32" cy="12.8" r="2.82" fill="#F97316"
+    class="fw-orbit-2" />
+
+  <!-- Dot 3: light orange (smallest) -->
+  <circle cx="32" cy="12.8" r="2.29" fill="#FB923C"
+    class="fw-orbit-3" />
+
+  <!-- Spawn particle -->
+  <circle cx="45.4" cy="18.6" r="1.41" fill="#E94D35"
+    class="fw-spawn" />
+</svg>

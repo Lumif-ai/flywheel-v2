@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" fill="none">
+  <defs>
+    <linearGradient id="fw-grad" x1="8" y1="40" x2="40" y2="8" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#E94D35"/>
+      <stop offset="100%" stop-color="#F97316"/>
+    </linearGradient>
+  </defs>
+  <!-- Inner arc: tightest, thinnest, most offset — the seed of momentum -->
+  <path d="M 29.94 18.67 A 8 8 0 1 1 18.67 19.66" stroke="url(#fw-grad)" stroke-width="2.2" stroke-linecap="round" fill="none"/>
+  <!-- Middle arc: growing mass, slightly less offset -->
+  <path d="M 34.79 18.40 A 12 12 0 1 1 18.40 14.01" stroke="url(#fw-grad)" stroke-width="3.5" stroke-linecap="round" fill="none" opacity="0.85"/>
+  <!-- Outer arc: full momentum, thickest, centered — the compounding result -->
+  <path d="M 39.76 21.22 A 16 16 0 1 1 21.22 8.24" stroke="url(#fw-grad)" stroke-width="5" stroke-linecap="round" fill="none" opacity="0.70"/>
+</svg>
