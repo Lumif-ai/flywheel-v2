@@ -118,21 +118,40 @@ def _get_tier_message(tier: int) -> str | None:
 
 
 async def _get_available_skills_db(db: AsyncSession, tenant_id: UUID) -> list[dict[str, Any]]:
-    """Query skill_definitions joined with tenant_skills for a tenant.
+    """Query available skills for a tenant.
 
-    Returns only skills where both skill_definitions.enabled AND
-    tenant_skills.enabled are True, ordered by name ASC.
+    Uses tenant_skills as an override/restriction table:
+    - If tenant has tenant_skills rows: return only skills where both
+      skill_definitions.enabled AND tenant_skills.enabled are True.
+    - If tenant has NO tenant_skills rows: return all enabled skill_definitions.
+      This is the default for new tenants — all skills available until
+      explicitly restricted via tenant_skills.
     """
-    stmt = (
-        select(SkillDefinition)
-        .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
-        .where(
-            TenantSkill.tenant_id == tenant_id,
-            TenantSkill.enabled == True,  # noqa: E712
-            SkillDefinition.enabled == True,  # noqa: E712
-        )
-        .order_by(SkillDefinition.name.asc())
+    # Check if tenant has any tenant_skills overrides
+    has_overrides = await db.execute(
+        select(TenantSkill.skill_id)
+        .where(TenantSkill.tenant_id == tenant_id)
+        .limit(1)
     )
+    if has_overrides.scalar_one_or_none() is not None:
+        # Tenant has explicit skill assignments — use them
+        stmt = (
+            select(SkillDefinition)
+            .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+            .where(
+                TenantSkill.tenant_id == tenant_id,
+                TenantSkill.enabled == True,  # noqa: E712
+                SkillDefinition.enabled == True,  # noqa: E712
+            )
+            .order_by(SkillDefinition.name.asc())
+        )
+    else:
+        # No overrides — all enabled skills available (default for new tenants)
+        stmt = (
+            select(SkillDefinition)
+            .where(SkillDefinition.enabled == True)  # noqa: E712
+            .order_by(SkillDefinition.name.asc())
+        )
     result = await db.execute(stmt)
     rows = result.scalars().all()
     return [
@@ -203,17 +222,32 @@ async def start_run(
     await check_anonymous_run_limit(user.sub, user.is_anonymous, db)
     await check_concurrent_run_limit(user.sub, db)
 
-    # Validate skill exists in DB and is enabled for this tenant
-    skill_check = await db.execute(
-        select(SkillDefinition.id)
-        .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
-        .where(
-            SkillDefinition.name == body.skill_name,
-            SkillDefinition.enabled == True,  # noqa: E712
-            TenantSkill.tenant_id == user.tenant_id,
-            TenantSkill.enabled == True,  # noqa: E712
-        )
+    # Validate skill exists in DB and is enabled for this tenant.
+    # If tenant has tenant_skills overrides, check those; otherwise allow all enabled skills.
+    has_overrides = await db.execute(
+        select(TenantSkill.skill_id)
+        .where(TenantSkill.tenant_id == user.tenant_id)
+        .limit(1)
     )
+    if has_overrides.scalar_one_or_none() is not None:
+        skill_check = await db.execute(
+            select(SkillDefinition.id)
+            .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+            .where(
+                SkillDefinition.name == body.skill_name,
+                SkillDefinition.enabled == True,  # noqa: E712
+                TenantSkill.tenant_id == user.tenant_id,
+                TenantSkill.enabled == True,  # noqa: E712
+            )
+        )
+    else:
+        skill_check = await db.execute(
+            select(SkillDefinition.id)
+            .where(
+                SkillDefinition.name == body.skill_name,
+                SkillDefinition.enabled == True,  # noqa: E712
+            )
+        )
     if skill_check.scalar_one_or_none() is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
