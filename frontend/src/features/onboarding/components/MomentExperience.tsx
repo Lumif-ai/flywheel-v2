@@ -7,7 +7,8 @@
  */
 
 import { useState, useCallback, useRef } from 'react'
-import { Linkedin, Calendar, ArrowRight, Loader2, Building2 } from 'lucide-react'
+import { Linkedin, Calendar, ArrowRight, Building2 } from 'lucide-react'
+import { FlywheelWheel } from '@/components/ui/FlywheelWheel'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
@@ -295,10 +296,9 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
       }}
     >
       <div style={{ marginBottom: spacing.section }}>
-        <Loader2
-          className="h-8 w-8 animate-spin mx-auto mb-4"
-          style={{ color: colors.brandCoral }}
-        />
+        <div className="mx-auto mb-4" style={{ width: 64, height: 64 }}>
+          <FlywheelWheel size={64} />
+        </div>
         <h1
           style={{
             fontSize: typography.pageTitle.size,

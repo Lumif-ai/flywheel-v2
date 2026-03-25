@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
-import { ArrowLeft, X, Sparkles } from 'lucide-react'
+import { ArrowLeft, X } from 'lucide-react'
 import { api } from '@/lib/api'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
@@ -162,7 +162,7 @@ export function BriefingFullViewer() {
               gap: '8px',
             }}
           >
-            <Sparkles style={{ width: 20, height: 20, color: 'var(--brand-coral)' }} />
+            <img src="/flywheel-icon.svg" alt="Flywheel" style={{ width: 22, height: 22 }} />
             <span
               style={{
                 fontSize: '16px',

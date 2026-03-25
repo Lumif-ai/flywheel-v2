@@ -42,8 +42,8 @@ export function TenantSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-muted transition-colors outline-none">
-        <div className="flex h-7 w-7 items-center justify-center rounded-md bg-primary text-primary-foreground font-bold text-xs shrink-0">
-          {activeTenant?.name?.charAt(0)?.toUpperCase() ?? 'F'}
+        <div className="flex h-7 w-7 items-center justify-center shrink-0">
+          <img src="/flywheel-icon.svg" alt="Flywheel" className="h-6 w-6" />
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-sm font-semibold text-foreground truncate block">

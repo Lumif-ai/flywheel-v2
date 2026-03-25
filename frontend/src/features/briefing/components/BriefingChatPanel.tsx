@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback, type KeyboardEvent } from 'react'
-import { Send, Sparkles, Lock } from 'lucide-react'
+import { Send, Lock } from 'lucide-react'
 import { useChatStore } from '@/features/chat/store'
 import { ChatMessage } from '@/features/chat/components/ChatMessage'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
@@ -169,7 +169,7 @@ export function BriefingChatPanel({ runId }: BriefingChatPanelProps) {
           flexShrink: 0,
         }}
       >
-        <Sparkles style={{ width: 16, height: 16, color: 'var(--brand-coral)' }} />
+        <img src="/flywheel-icon.svg" alt="" style={{ width: 16, height: 16 }} />
         <span
           style={{
             fontSize: typography.body.size,
