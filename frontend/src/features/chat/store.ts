@@ -14,10 +14,12 @@ interface ChatState {
   streamState: StreamState
   activeRunId: string | null
   streamId: string | null
+  briefingId: string | null
 
   addMessage: (msg: ChatMessage) => void
   setActiveRunId: (id: string | null) => void
   setStreamId: (id: string | null) => void
+  setBriefingId: (id: string | null) => void
   setStreamStatus: (status: StreamState['status']) => void
   appendChunk: (content: string) => void
   setStreamOutput: (html: string) => void
@@ -31,6 +33,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   streamState: { ...initialStreamState },
   activeRunId: null,
   streamId: null,
+  briefingId: null,
 
   addMessage: (msg) =>
     set((s) => ({ messages: [...s.messages, msg] })),
@@ -38,6 +41,8 @@ export const useChatStore = create<ChatState>((set, get) => ({
   setActiveRunId: (id) => set({ activeRunId: id }),
 
   setStreamId: (id) => set({ streamId: id }),
+
+  setBriefingId: (id) => set({ briefingId: id }),
 
   setStreamStatus: (status) =>
     set((s) => ({ streamState: { ...s.streamState, status } })),
@@ -118,7 +123,12 @@ export const useChatStore = create<ChatState>((set, get) => ({
         message?: string
         response?: string
         candidates?: string[]
-      }>('/chat', { message: content, history, stream_id: get().streamId })
+      }>('/chat', {
+        message: content,
+        history,
+        stream_id: get().streamId,
+        briefing_id: get().briefingId,
+      })
 
       if (res.action === 'execute') {
         setActiveRunId(res.run_id!)

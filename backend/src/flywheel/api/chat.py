@@ -33,6 +33,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list[dict] | None = None  # [{role: "user"|"assistant", content: str}]
     stream_id: str | None = None
+    briefing_id: str | None = None  # When set, injects briefing content as LLM context
 
 
 class ChatResponse(BaseModel):
@@ -71,6 +72,13 @@ async def chat(
 
         stream_context = await load_stream_context(body.stream_id, user.tenant_id, db)
 
+    # Resolve briefing context if briefing_id provided
+    briefing_context: str | None = None
+    if body.briefing_id:
+        from flywheel.services.briefing_context import load_briefing_context
+
+        briefing_context = await load_briefing_context(body.briefing_id, db)
+
     # Classify intent via Haiku
     from flywheel.services.chat_orchestrator import classify_intent
 
@@ -80,6 +88,7 @@ async def chat(
         available_skills,
         history=body.history,
         stream_context=stream_context,
+        briefing_context=briefing_context,
     )
 
     action = intent.get("action", "none")

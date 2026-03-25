@@ -55,6 +55,7 @@ async def classify_intent(
     available_skills: list[dict],
     history: list[dict] | None = None,
     stream_context: str | None = None,
+    briefing_context: str | None = None,
 ) -> dict:
     """Classify user intent using Haiku (fast, cheap: ~$0.005/call).
 
@@ -68,6 +69,8 @@ async def classify_intent(
             Only the last 5 messages are included for context.
         stream_context: Optional work stream context string from stream_id resolution.
             Prepended to the system prompt to improve routing decisions.
+        briefing_context: Optional briefing content string from briefing_id resolution.
+            Injected into the system prompt so the LLM can answer questions about the briefing.
 
     Returns:
         Dict with 'action' key ('execute', 'clarify', 'conversational', or 'none')
@@ -92,6 +95,15 @@ async def classify_intent(
         skills_json=skills_json,
         stream_context_block=stream_context_block,
     )
+
+    # Inject briefing context when user is reading a specific briefing
+    if briefing_context:
+        system_prompt += (
+            "\n\nThe user is currently reading a briefing. "
+            "When they ask questions, answer based on this briefing content. "
+            "Prefer 'conversational' action for questions about the briefing.\n\n"
+            f"Briefing content:\n{briefing_context}"
+        )
 
     # Build messages list: include recent history for multi-turn context
     messages: list[dict] = []

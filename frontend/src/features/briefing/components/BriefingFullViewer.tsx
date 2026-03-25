@@ -1,10 +1,11 @@
-import { useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, X, MessageCircle, Sparkles } from 'lucide-react'
 import { api } from '@/lib/api'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
+import { BriefingChatPanel } from './BriefingChatPanel'
 
 interface SkillRunDetail {
   id: string
@@ -25,13 +26,36 @@ interface SkillRunDetail {
  * - Context-aware back button top-right
  * - Stat line at end of content
  * - Post-briefing CTA for S1 (first visit) users
- * - Chat toggle placeholder (Plan 06 wires the real panel)
+ * - Chat side panel (slides in from right, content reflows)
  */
 export function BriefingFullViewer() {
   const { runId } = useParams<{ runId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
   const { state: lifecycleState } = useLifecycleState()
+  const [chatOpen, setChatOpen] = useState(false)
+  const [hintVisible, setHintVisible] = useState(true)
+
+  const toggleChat = useCallback(() => setChatOpen((prev) => !prev), [])
+
+  // Keyboard shortcut: Cmd+/ to toggle chat panel
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+        e.preventDefault()
+        toggleChat()
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [toggleChat])
+
+  // S1 hint: fade after 5 seconds
+  useEffect(() => {
+    if (lifecycleState !== 'S1') return
+    const timer = setTimeout(() => setHintVisible(false), 5000)
+    return () => clearTimeout(timer)
+  }, [lifecycleState])
 
   const { data: run, isLoading, error } = useQuery({
     queryKey: ['briefing-run', runId],
@@ -114,7 +138,17 @@ export function BriefingFullViewer() {
         minHeight: '100dvh',
         background: colors.pageBg,
         display: 'flex',
+        flexDirection: 'row',
+      }}
+    >
+    {/* Main content area */}
+    <div
+      style={{
+        flex: 1,
+        minWidth: 0,
+        display: 'flex',
         flexDirection: 'column',
+        transition: 'flex 0.3s ease',
       }}
     >
       {/* --- Top Bar --- */}
@@ -343,41 +377,74 @@ export function BriefingFullViewer() {
         </div>
       </div>
 
-      {/* --- Chat Toggle Placeholder --- */}
-      <button
-        onClick={() => console.log('Chat panel will be wired in Plan 06')}
-        style={{
-          position: 'fixed',
-          bottom: '24px',
-          right: '24px',
-          width: '48px',
-          height: '48px',
-          borderRadius: '50%',
-          border: 'none',
-          background: `linear-gradient(135deg, var(--brand-coral), var(--brand-gradient-end))`,
-          color: '#fff',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          cursor: 'pointer',
-          boxShadow: '0 4px 16px rgba(233,77,53,0.3)',
-          transition: 'transform 0.15s, box-shadow 0.15s',
-          zIndex: 40,
-        }}
-        onMouseEnter={(e) => {
-          const el = e.currentTarget as HTMLElement
-          el.style.transform = 'scale(1.08)'
-          el.style.boxShadow = '0 6px 20px rgba(233,77,53,0.4)'
-        }}
-        onMouseLeave={(e) => {
-          const el = e.currentTarget as HTMLElement
-          el.style.transform = 'scale(1)'
-          el.style.boxShadow = '0 4px 16px rgba(233,77,53,0.3)'
-        }}
-        aria-label="Open chat"
-      >
-        <MessageCircle style={{ width: 22, height: 22 }} />
-      </button>
+      {/* --- Chat Toggle Button --- */}
+      {!chatOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            bottom: '24px',
+            right: '24px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '10px',
+            zIndex: 40,
+          }}
+        >
+          {/* S1 hint text */}
+          {lifecycleState === 'S1' && hintVisible && (
+            <span
+              style={{
+                fontSize: typography.caption.size,
+                color: colors.secondaryText,
+                background: '#fff',
+                padding: '6px 12px',
+                borderRadius: '8px',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+                transition: 'opacity 0.5s ease',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              Ask about this briefing
+            </span>
+          )}
+          <button
+            onClick={toggleChat}
+            style={{
+              width: '48px',
+              height: '48px',
+              borderRadius: '50%',
+              border: 'none',
+              background: `linear-gradient(135deg, var(--brand-coral), var(--brand-gradient-end))`,
+              color: '#fff',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              boxShadow: '0 4px 16px rgba(233,77,53,0.3)',
+              transition: 'transform 0.15s, box-shadow 0.15s',
+            }}
+            onMouseEnter={(e) => {
+              const el = e.currentTarget as HTMLElement
+              el.style.transform = 'scale(1.08)'
+              el.style.boxShadow = '0 6px 20px rgba(233,77,53,0.4)'
+            }}
+            onMouseLeave={(e) => {
+              const el = e.currentTarget as HTMLElement
+              el.style.transform = 'scale(1)'
+              el.style.boxShadow = '0 4px 16px rgba(233,77,53,0.3)'
+            }}
+            aria-label="Open chat"
+          >
+            <MessageCircle style={{ width: 22, height: 22 }} />
+          </button>
+        </div>
+      )}
+    </div>
+
+    {/* --- Chat Side Panel --- */}
+    {chatOpen && runId && (
+      <BriefingChatPanel runId={runId} onClose={() => setChatOpen(false)} />
+    )}
     </div>
   )
 }
