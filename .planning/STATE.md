@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
-**Current focus:** Milestone complete — all 6 phases done
+**Current focus:** Phase 49 complete — living company profile
 
 ## Current Position
 
-Phase: 6 of 6 (Feedback Flywheel)
+Phase: 49 (Living Company Profile)
 Plan: 2 of 2 in current phase
-Status: Milestone complete
-Last activity: 2026-03-25 — Phase 6 complete (voice updater, dismiss tracker, FEED-03 docs)
+Status: Phase complete
+Last activity: 2026-03-25 — Phase 49 complete (useProfileCrawl hook, inline crawl + document analyze UI)
 
 Progress: [██████████] 100%
 
@@ -102,6 +102,9 @@ Recent decisions affecting current work:
 - [Phase 48, Plan 03]: Only "Anonymous Workspace" tenants claimable — name check prevents arbitrary tenant takeover via spoofed IDs
 - [Phase 48, Plan 03]: Claim failure is non-fatal in AuthCallback — user gets new account without prior data rather than being blocked
 - [Phase 48, Plan 03]: Cross-tenant migration uses get_db_unscoped — operations span tenant boundaries for atomic data claim
+- [Phase 49, Plan 01]: analyze-document uses subsidy API key — system operation like onboarding crawl
+- [Phase 49, Plan 02]: useProfileCrawl is a focused subset of useOnboarding — no cache checking, merge mode, or edit mode
+- [Phase 49, Plan 02]: URL input uses inline normalizeUrl/isValidUrl rather than importing UrlInput component (onboarding-specific copy)
 
 ### Pending Todos
 
@@ -116,5 +119,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-25
-Stopped at: Completed 48-03-PLAN.md — claim-anonymous-data endpoint and AuthCallback wiring
+Stopped at: Completed 49-02-PLAN.md — useProfileCrawl hook and inline crawl + document analyze UI
 Resume file: None
