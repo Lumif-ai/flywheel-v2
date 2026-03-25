@@ -171,7 +171,7 @@ export function BriefingFullViewer() {
                 letterSpacing: '-0.01em',
               }}
             >
-              Lumif.ai
+              Flywheel
             </span>
           </a>
 
