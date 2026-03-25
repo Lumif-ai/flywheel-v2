@@ -5,11 +5,14 @@ Endpoints:
 - PATCH /profile/category/{entry_id} -- Update a category entry's full content
 - POST /profile/category     -- Add a new category entry
 - POST /profile/upload       -- Link an uploaded file to the company profile
+- POST /profile/analyze-document -- Analyze an uploaded file and write context entries
 """
 
 from __future__ import annotations
 
+import asyncio
 import datetime
+import logging
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -61,6 +64,10 @@ class CreateCategoryRequest(BaseModel):
 
 
 class LinkFileRequest(BaseModel):
+    file_id: str
+
+
+class AnalyzeDocumentRequest(BaseModel):
     file_id: str
 
 
@@ -291,3 +298,129 @@ async def link_profile_upload(
         "file_id": str(uploaded.id),
         "filename": uploaded.filename,
     }
+
+
+# ---------------------------------------------------------------------------
+# POST /profile/analyze-document
+# ---------------------------------------------------------------------------
+
+logger = logging.getLogger(__name__)
+
+
+@router.post("/analyze-document")
+async def analyze_document(
+    body: AnalyzeDocumentRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Analyze an uploaded file's extracted text and write company intelligence entries.
+
+    Fetches the UploadedFile by file_id, runs structure_intelligence on its
+    extracted_text, and writes the resulting intelligence as context entries
+    using the same data path as the onboarding crawl.
+    """
+    from flywheel.config import settings
+    from flywheel.db.session import get_session_factory
+    from flywheel.engines.company_intel import (
+        _build_list_content,
+        _build_positioning_content,
+        structure_intelligence,
+    )
+    from flywheel.storage import append_entry as async_append_entry
+    from sqlalchemy import text as sa_text
+
+    # Validate API key
+    api_key = settings.flywheel_subsidy_api_key
+    if not api_key:
+        raise HTTPException(
+            status_code=500,
+            detail="API key not configured",
+        )
+
+    # Fetch the uploaded file record
+    try:
+        file_uuid = UUID(body.file_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid file_id format")
+
+    uploaded = (
+        await db.execute(
+            select(UploadedFile).where(UploadedFile.id == file_uuid)
+        )
+    ).scalar_one_or_none()
+
+    if uploaded is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    extracted_text = uploaded.extracted_text
+    if not extracted_text or not extracted_text.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="No text could be extracted from this file",
+        )
+
+    # Run structure_intelligence in a thread (it's sync and calls Anthropic)
+    intelligence = await asyncio.to_thread(
+        structure_intelligence, extracted_text, "document-upload", api_key=api_key
+    )
+
+    if not intelligence.get("structured"):
+        raise HTTPException(
+            status_code=422,
+            detail="Could not structure intelligence from document text",
+        )
+
+    # Build section map (same as _execute_company_intel in skill_executor)
+    section_map = {
+        "positioning.md": _build_positioning_content(intelligence),
+        "icp-profiles.md": _build_list_content(
+            intelligence.get("target_customers", []), "target-customer-profiles"
+        ),
+        "competitive-intel.md": _build_list_content(
+            intelligence.get("competitors", []), "competitive-landscape"
+        ),
+        "product-modules.md": _build_list_content(
+            intelligence.get("products", []), "product-inventory"
+        ),
+        "market-taxonomy.md": _build_list_content(
+            intelligence.get("industries", []), "industry-verticals"
+        ),
+    }
+
+    source = "company-intel-onboarding"
+    factory = get_session_factory()
+    categories_written = 0
+
+    for filename, (content_lines, detail) in section_map.items():
+        if not content_lines:
+            continue
+
+        entry = {
+            "detail": detail,
+            "confidence": "medium",
+            "content": content_lines,
+            "metadata": {"source_url": "document-upload"},
+        }
+
+        try:
+            async with factory() as session:
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(user.tenant_id)},
+                )
+                await session.execute(
+                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                    {"uid": str(user.sub)},
+                )
+                await async_append_entry(
+                    session=session,
+                    file=filename.replace(".md", ""),
+                    entry=entry,
+                    source=source,
+                )
+                await session.commit()
+            categories_written += 1
+        except Exception as e:
+            logger.error("Context write failed for %s: %s", filename, e)
+
+    return {"success": True, "categories_written": categories_written}
