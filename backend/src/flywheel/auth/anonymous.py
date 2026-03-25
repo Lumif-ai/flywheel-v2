@@ -1,7 +1,7 @@
 """Auto-provision anonymous Supabase users into application tables.
 
 When a user authenticates via Supabase anonymous sign-in, they exist in
-Supabase Auth but NOT in our users/tenants/user_tenants tables. This module
+Supabase Auth but NOT in our profiles/tenants/user_tenants tables. This module
 creates those rows on first API call so every endpoint "just works" for
 anonymous users without per-endpoint FK workarounds.
 
@@ -21,7 +21,7 @@ from sqlalchemy import select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.db.models import Tenant, User, UserTenant
+from flywheel.db.models import Profile, Tenant, UserTenant
 from flywheel.db.session import get_session_factory
 
 logger = logging.getLogger(__name__)
@@ -31,7 +31,7 @@ _provisioned: set[UUID] = set()
 
 
 async def ensure_provisioned(user_id: UUID, is_anonymous: bool) -> UUID | None:
-    """Ensure User + Tenant + UserTenant rows exist for an anonymous user.
+    """Ensure Profile + Tenant + UserTenant rows exist for an anonymous user.
 
     Returns the tenant_id if provisioned, None if user is not anonymous.
     Idempotent — uses INSERT ON CONFLICT DO NOTHING so concurrent requests
@@ -56,8 +56,8 @@ async def ensure_provisioned(user_id: UUID, is_anonymous: bool) -> UUID | None:
         )
 
         await session.execute(
-            pg_insert(User)
-            .values(id=user_id, email=None, is_anonymous=True)
+            pg_insert(Profile)
+            .values(id=user_id)
             .on_conflict_do_nothing(index_elements=["id"])
         )
 

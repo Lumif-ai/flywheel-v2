@@ -31,9 +31,9 @@ from flywheel.db.models import (
     Company,
     ContextEntry,
     OnboardingSession,
+    Profile,
     SkillRun,
     Tenant,
-    User,
     UserTenant,
 )
 from flywheel.db.session import get_session_factory
@@ -251,17 +251,14 @@ async def promote(
             db.add(tenant)
             await db.flush()
 
-    # 4. Create or update user row
-    existing_user = (
-        await db.execute(select(User).where(User.id == user.sub))
+    # 4. Create profile row if it doesn't exist (email lives in auth.users, not profiles)
+    existing_profile = (
+        await db.execute(select(Profile).where(Profile.id == user.sub))
     ).scalar_one_or_none()
 
-    if existing_user is None:
-        new_user = User(id=user.sub, email=body.email)
-        db.add(new_user)
-        await db.flush()
-    else:
-        existing_user.email = body.email
+    if existing_profile is None:
+        new_profile = Profile(id=user.sub)
+        db.add(new_profile)
         await db.flush()
 
     # 5. Create user_tenants link (skip if already exists for this tenant)

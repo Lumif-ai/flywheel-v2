@@ -28,7 +28,7 @@ from flywheel.auth.encryption import encrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.auth.supabase_client import get_supabase_admin
 from flywheel.config import settings
-from flywheel.db.models import Tenant, User, UserTenant
+from flywheel.db.models import Profile, Tenant, UserTenant
 from flywheel.middleware.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -176,24 +176,24 @@ async def me(
     db: AsyncSession = Depends(get_db_unscoped),
 ):
     """Return current user profile. Auto-creates user + tenant on first login."""
-    row = (await db.execute(select(User).where(User.id == user.sub))).scalar_one_or_none()
+    row = (await db.execute(select(Profile).where(Profile.id == user.sub))).scalar_one_or_none()
 
     if row is None and user.email:
-        # First login after magic link -- create user + tenant + user_tenants
+        # First login after magic link -- create profile + tenant + user_tenants
         domain = user.email.split("@")[1] if "@" in user.email else "Personal"
         tenant = Tenant(name=domain)
         db.add(tenant)
         await db.flush()
 
-        new_user = User(id=user.sub, email=user.email)
-        db.add(new_user)
+        new_profile = Profile(id=user.sub)
+        db.add(new_profile)
         await db.flush()
 
         ut = UserTenant(user_id=user.sub, tenant_id=tenant.id, role="admin", active=True)
         db.add(ut)
         await db.commit()
-        await db.refresh(new_user)
-        row = new_user
+        await db.refresh(new_profile)
+        row = new_profile
 
         # Build active_tenant from what we just created
         active_tenant = {"id": str(tenant.id), "name": tenant.name, "role": "admin"}
@@ -229,7 +229,7 @@ async def me(
 
     return UserProfile(
         user_id=str(row.id),
-        email=row.email,
+        email=user.email,  # email from JWT, not DB profile
         name=row.name,
         is_anonymous=user.is_anonymous,
         has_api_key=row.api_key_encrypted is not None,
@@ -249,7 +249,7 @@ async def get_api_key_status(
 ):
     """Check whether the authenticated user has a stored API key."""
     result = await db.execute(
-        select(User.api_key_encrypted).where(User.id == user.sub)
+        select(Profile.api_key_encrypted).where(Profile.id == user.sub)
     )
     encrypted = result.scalar_one_or_none()
     return {"has_api_key": encrypted is not None}
@@ -298,7 +298,7 @@ async def store_api_key(
 
     encrypted = encrypt_api_key(body.api_key)
     await db.execute(
-        update(User).where(User.id == user.sub).values(api_key_encrypted=encrypted)
+        update(Profile).where(Profile.id == user.sub).values(api_key_encrypted=encrypted)
     )
     await db.commit()
 
@@ -317,7 +317,7 @@ async def delete_api_key(
 ):
     """Remove stored API key."""
     await db.execute(
-        update(User).where(User.id == user.sub).values(api_key_encrypted=None)
+        update(Profile).where(Profile.id == user.sub).values(api_key_encrypted=None)
     )
     await db.commit()
 

@@ -44,7 +44,7 @@ async def _cleanup_stale_anonymous_users():
     from supabase import create_client
 
     from flywheel.db.engine import get_engine
-    from flywheel.db.models import User, UserTenant
+    from flywheel.db.models import Profile, UserTenant
     from sqlalchemy import delete as sql_delete, select
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -60,28 +60,18 @@ async def _cleanup_stale_anonymous_users():
     deleted_count = 0
 
     async with AsyncSession(engine) as db:
-        # Find local users who are still anonymous.
-        # Note: User.id IS the Supabase Auth UID (set during anonymous provisioning),
-        # so no separate supabase_uid column is needed.
-        if hasattr(User, "is_anonymous"):
-            result = await db.execute(
-                select(User.id)
-                .where(User.is_anonymous == True)  # noqa: E712
-                .where(User.created_at < cutoff)
-            )
-        else:
-            # Fallback: users with no email
-            result = await db.execute(
-                select(User.id)
-                .where(User.email.is_(None))
-                .where(User.created_at < cutoff)
-            )
+        # After refactor: Profile has no email/is_anonymous columns.
+        # All stale profiles are candidates; Supabase delete is idempotent.
+        result = await db.execute(
+            select(Profile.id)
+            .where(Profile.created_at < cutoff)
+        )
 
         stale_users = result.all()
 
     for row in stale_users:
         user_id = row[0]
-        auth_uid = str(user_id)  # User.id IS the Supabase Auth UID
+        auth_uid = str(user_id)  # Profile.id IS the Supabase Auth UID
         try:
             # Delete from Supabase Auth (synchronous SDK call)
             await asyncio.to_thread(
@@ -94,7 +84,7 @@ async def _cleanup_stale_anonymous_users():
                     sql_delete(UserTenant).where(UserTenant.user_id == user_id)
                 )
                 await db.execute(
-                    sql_delete(User).where(User.id == user_id)
+                    sql_delete(Profile).where(Profile.id == user_id)
                 )
                 await db.commit()
             deleted_count += 1

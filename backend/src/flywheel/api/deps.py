@@ -30,7 +30,7 @@ async def get_current_user(
 ) -> TokenPayload:
     """Extract and validate the JWT from the Authorization header.
 
-    For anonymous Supabase users, auto-provisions User + Tenant + UserTenant
+    For anonymous Supabase users, auto-provisions Profile + Tenant + UserTenant
     rows on first API call so downstream endpoints don't hit FK violations.
     """
     if cred is None:

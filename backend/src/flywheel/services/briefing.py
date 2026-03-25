@@ -19,9 +19,9 @@ from flywheel.db.models import (
     ContextEntity,
     ContextEntityEntry,
     ContextEntry,
+    Profile,
     SkillRun,
     SuggestionDismissal,
-    User,
     WorkItem,
     WorkStream,
     WorkStreamEntity,
@@ -102,20 +102,37 @@ async def assemble_briefing(
 async def _build_first_visit_data(session: AsyncSession) -> tuple[bool, dict | None]:
     """Detect first-visit state and assemble first-visit payload.
 
-    First visit = tenant has 2 or fewer completed skill runs (onboarding runs only).
+    First visit = tenant has onboarding intel AND no completed skill runs
+    beyond the onboarding sources (company-intel, meeting-prep).
     Returns (is_first_visit, first_visit_data_dict | None).
     """
     try:
-        # Count completed skill runs
-        run_count_result = await session.execute(
+        # Check if onboarding intel exists
+        intel_count_result = await session.execute(
             select(func.count()).select_from(
-                select(SkillRun).where(
-                    SkillRun.status == "completed",
+                select(ContextEntry).where(
+                    ContextEntry.source == "company-intel-onboarding",
+                    ContextEntry.deleted_at.is_(None),
                 ).subquery()
             )
         )
-        completed_runs = run_count_result.scalar() or 0
-        is_first_visit = completed_runs <= 2  # onboarding runs only
+        has_onboarding_intel = (intel_count_result.scalar() or 0) > 0
+
+        if not has_onboarding_intel:
+            return False, None
+
+        # Count completed skill runs that are NOT from onboarding
+        _onboarding_skills = ("company-intel", "meeting-prep")
+        non_onboarding_result = await session.execute(
+            select(func.count()).select_from(
+                select(SkillRun).where(
+                    SkillRun.status == "completed",
+                    SkillRun.skill_name.notin_(_onboarding_skills),
+                ).subquery()
+            )
+        )
+        non_onboarding_runs = non_onboarding_result.scalar() or 0
+        is_first_visit = non_onboarding_runs == 0
 
         if not is_first_visit:
             return False, None
@@ -183,8 +200,8 @@ async def _build_first_visit_data(session: AsyncSession) -> tuple[bool, dict | N
         }
         return True, first_visit_data
 
-    except Exception:
-        logger.warning("First-visit data assembly failed", exc_info=True)
+    except Exception as exc:
+        logger.error("First-visit data assembly FAILED: %s", exc, exc_info=True)
         return False, None
 
 
@@ -209,7 +226,7 @@ async def _build_greeting(
 
     # Try to append user name
     try:
-        stmt = select(User.name).where(User.id == user_id)
+        stmt = select(Profile.name).where(Profile.id == user_id)
         result = await session.execute(stmt)
         name = result.scalar_one_or_none()
         if name:
@@ -525,12 +542,12 @@ async def _build_personal_gap_cards(
     """Build cards showing team context gaps for the current user.
 
     Only shown for users who have completed team onboarding (joined_streams
-    exists in User.settings). Compares team entry counts per stream against
+    exists in Profile.settings). Compares team entry counts per stream against
     the user's own contributions.
     """
     # Check if user has joined_streams in settings
     try:
-        user_stmt = select(User.settings).where(User.id == user_id)
+        user_stmt = select(Profile.settings).where(Profile.id == user_id)
         user_result = await session.execute(user_stmt)
         settings = user_result.scalar_one_or_none()
         if not settings or not settings.get("joined_streams"):

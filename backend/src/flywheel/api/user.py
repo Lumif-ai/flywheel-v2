@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_current_user, get_db_unscoped
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import SkillRun, Tenant, User, UserTenant
+from flywheel.db.models import Profile, SkillRun, Tenant, UserTenant
 
 logger = logging.getLogger(__name__)
 
@@ -199,17 +199,17 @@ async def delete_account(
         .values(status="cancelled")
     )
 
-    # b. Set deleting_at flag in user.settings
-    user_row = (
-        await db.execute(select(User).where(User.id == user.sub))
+    # b. Set deleting_at flag in profile.settings
+    profile_row = (
+        await db.execute(select(Profile).where(Profile.id == user.sub))
     ).scalar_one_or_none()
 
-    if user_row is not None:
-        new_settings = dict(user_row.settings or {})
+    if profile_row is not None:
+        new_settings = dict(profile_row.settings or {})
         new_settings["deleting_at"] = now.isoformat()
         new_settings["deletion_scheduled"] = deletion_date.isoformat()
         await db.execute(
-            update(User).where(User.id == user.sub).values(
+            update(Profile).where(Profile.id == user.sub).values(
                 settings=new_settings,
                 api_key_encrypted=None,  # d. Wipe API key
             )

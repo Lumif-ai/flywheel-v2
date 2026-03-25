@@ -19,9 +19,9 @@ from sqlalchemy import select
 
 from flywheel.db.models import (
     ContextEntry,
+    Profile,
     SuggestionDismissal,
     Tenant,
-    User,
     WorkItem,
     WorkStream,
 )
@@ -167,7 +167,12 @@ async def get_briefing(
     (meetings > suggestions > stale context), knowledge health
     metrics from work stream density, and nudge placeholder.
     """
+    import logging
+    _log = logging.getLogger("flywheel.briefing.debug")
+    _log.warning("BRIEFING DEBUG: tenant=%s user=%s", user.tenant_id, user.sub)
     result = await assemble_briefing(db, user.sub, user.tenant_id)
+    _log.warning("BRIEFING DEBUG: is_first_visit=%s, first_visit=%s",
+                 result.get("is_first_visit"), "present" if result.get("first_visit") else "None")
     return result
 
 
@@ -402,7 +407,7 @@ async def trigger_research(
 
     # Check if user has BYOK API key
     user_result = await db.execute(
-        select(User.api_key_encrypted).where(User.id == user.sub)
+        select(Profile.api_key_encrypted).where(Profile.id == user.sub)
     )
     api_key = user_result.scalar_one_or_none()
 

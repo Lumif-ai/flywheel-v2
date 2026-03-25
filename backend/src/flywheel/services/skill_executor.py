@@ -32,7 +32,7 @@ from sqlalchemy import text as sa_text, update
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
 from flywheel.db.models import (
-    ContextEntry, Focus, SkillDefinition, SkillRun, Tenant, User, UserFocus,
+    ContextEntry, Focus, Profile, SkillDefinition, SkillRun, Tenant, UserFocus,
 )
 from flywheel.db.session import get_session_factory
 from sqlalchemy import select
@@ -2171,7 +2171,7 @@ async def _get_user_api_key(
 
     async with factory() as session:
         result = await session.execute(
-            select(User.api_key_encrypted).where(User.id == user_id)
+            select(Profile.api_key_encrypted).where(Profile.id == user_id)
         )
         encrypted = result.scalar_one_or_none()
 

@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_db_unscoped, require_admin
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import SkillRun, Tenant, User, UserTenant
+from flywheel.db.models import Profile, SkillRun, Tenant, UserTenant
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -34,28 +34,11 @@ async def admin_dashboard(
 
     # Total counts
     tenant_count = await db.scalar(select(func.count()).select_from(Tenant)) or 0
-    user_count = await db.scalar(select(func.count()).select_from(User)) or 0
+    user_count = await db.scalar(select(func.count()).select_from(Profile)) or 0
 
-    # Anonymous users (is_anonymous flag on User model, or users with no email)
-    # User model currently has email as NOT NULL, so is_anonymous field check
-    if hasattr(User, "is_anonymous"):
-        anonymous_count = (
-            await db.scalar(
-                select(func.count())
-                .select_from(User)
-                .where(User.is_anonymous == True)  # noqa: E712
-            )
-            or 0
-        )
-    else:
-        anonymous_count = (
-            await db.scalar(
-                select(func.count())
-                .select_from(User)
-                .where(User.email.is_(None))
-            )
-            or 0
-        )
+    # TODO: query auth.users via Supabase Admin API for anonymous user stats
+    # Profile table no longer has email or is_anonymous columns.
+    anonymous_count = 0
 
     # Skill runs in last 30 days
     skill_runs_30d = (
@@ -67,29 +50,10 @@ async def admin_dashboard(
         or 0
     )
 
-    # Onboarding funnel — counts users by auth provider
-    # Anonymous users use Supabase anonymous auth; promoted users have email set
-    total_anonymous_ever = (
-        await db.scalar(
-            select(func.count())
-            .select_from(User)
-            .where(User.email.is_(None))
-        )
-        or 0
-    )
-    # Count anonymous users who have at least one skill run
-    anonymous_with_runs = (
-        await db.scalar(
-            select(func.count(func.distinct(SkillRun.user_id)))
-            .select_from(SkillRun)
-            .join(User, User.id == SkillRun.user_id)
-            .where(User.email.is_(None))
-        )
-        or 0
-    )
-    # Promoted = users who originally had no email but now have one
-    # Approximation: users with email who have skill runs predating their email being set
-    # TODO: add promoted_at timestamp column for accurate tracking
+    # TODO: query auth.users via Supabase Admin API for anonymous user stats
+    # Profile table no longer has email or is_anonymous columns.
+    total_anonymous_ever = 0
+    anonymous_with_runs = 0
     promoted_users = 0
 
     onboarding_funnel = {

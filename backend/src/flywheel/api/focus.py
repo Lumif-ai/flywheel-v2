@@ -25,7 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Focus, User, UserFocus
+from flywheel.db.models import Focus, Profile, UserFocus
 
 router = APIRouter(prefix="/focuses", tags=["focuses"])
 
@@ -175,17 +175,17 @@ async def get_focus(
     if focus is None:
         raise HTTPException(status_code=404, detail="Focus not found")
 
-    # Get members with user info
+    # Get members with profile info
     members_stmt = (
-        select(UserFocus, User)
-        .join(User, UserFocus.user_id == User.id)
+        select(UserFocus, Profile)
+        .join(Profile, UserFocus.user_id == Profile.id)
         .where(UserFocus.focus_id == focus_id)
     )
     members_result = await db.execute(members_stmt)
     members = [
         {
             "user_id": str(uf.user_id),
-            "email": u.email,
+            "email": None,  # TODO: email lives in auth.users, fetch via Supabase Admin API if needed
             "active": uf.active,
             "joined_at": uf.joined_at.isoformat() if uf.joined_at else None,
         }
@@ -404,20 +404,20 @@ async def list_members(
 ):
     """List members of a focus with user details."""
     members_stmt = (
-        select(UserFocus, User)
-        .join(User, UserFocus.user_id == User.id)
+        select(UserFocus, Profile)
+        .join(Profile, UserFocus.user_id == Profile.id)
         .where(UserFocus.focus_id == focus_id)
     )
     result = await db.execute(members_stmt)
     members = [
         {
             "user_id": str(uf.user_id),
-            "email": u.email,
-            "name": u.name,
+            "email": None,  # TODO: email lives in auth.users, fetch via Supabase Admin API if needed
+            "name": p.name,
             "active": uf.active,
             "joined_at": uf.joined_at.isoformat() if uf.joined_at else None,
         }
-        for uf, u in result.all()
+        for uf, p in result.all()
     ]
 
     return {"items": members}

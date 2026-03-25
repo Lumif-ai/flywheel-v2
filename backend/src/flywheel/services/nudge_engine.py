@@ -22,8 +22,8 @@ from flywheel.db.models import (
     ContextEntity,
     Integration,
     NudgeInteraction,
+    Profile,
     SuggestionDismissal,
-    User,
     WorkStream,
     WorkStreamEntity,
 )
@@ -64,7 +64,7 @@ async def select_nudge(
     today_midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
 
     # 1. Compute account age
-    user_stmt = select(User.created_at).where(User.id == user_id)
+    user_stmt = select(Profile.created_at).where(Profile.id == user_id)
     user_result = await session.execute(user_stmt)
     user_created = user_result.scalar_one_or_none()
     if user_created is None:

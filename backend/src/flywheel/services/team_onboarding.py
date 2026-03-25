@@ -17,7 +17,7 @@ from flywheel.db.models import (
     ContextEntity,
     ContextEntityEntry,
     ContextEntry,
-    User,
+    Profile,
     WorkStream,
     WorkStreamEntity,
 )
@@ -124,7 +124,7 @@ async def join_streams(
     """Join streams by storing selected stream IDs in user settings.
 
     Verifies each stream belongs to the tenant, then stores the
-    stream IDs under User.settings["joined_streams"].
+    stream IDs under Profile.settings["joined_streams"].
 
     Returns list of joined stream names.
     """
@@ -148,7 +148,7 @@ async def join_streams(
         joined_names.append(stream.name)
 
     # Store joined stream IDs in user settings
-    user_stmt = select(User).where(User.id == user_id)
+    user_stmt = select(Profile).where(Profile.id == user_id)
     user_result = await session.execute(user_stmt)
     user = user_result.scalar_one_or_none()
 

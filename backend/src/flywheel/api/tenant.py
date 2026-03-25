@@ -38,9 +38,9 @@ from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import (
     ContextEntry,
     Invite,
+    Profile,
     SkillRun,
     Tenant,
-    User,
     UserTenant,
     WorkItem,
 )
@@ -338,39 +338,9 @@ async def invite_member(
     if existing_invite is not None:
         raise HTTPException(status_code=409, detail="Invite already sent")
 
-    # Check if invited user already has an account -- add directly
-    existing_user = (
-        await db.execute(select(User).where(User.email == body.email))
-    ).scalar_one_or_none()
-
-    if existing_user is not None:
-        # Check if already a member
-        already_member = (
-            await db.execute(
-                select(UserTenant).where(
-                    UserTenant.user_id == existing_user.id,
-                    UserTenant.tenant_id == user.tenant_id,
-                )
-            )
-        ).scalar_one_or_none()
-
-        if already_member is None:
-            # Add directly as a member
-            ut = UserTenant(
-                user_id=existing_user.id,
-                tenant_id=user.tenant_id,
-                role=body.role,
-                active=False,
-            )
-            db.add(ut)
-            await db.commit()
-
-            return InviteResponse(
-                invite_id="direct-add",
-                email=body.email,
-                expires_at=None,
-                invite_token=None,
-            )
+    # TODO: Profile table has no email column. To check if an invited user
+    # already has an account, query auth.users via Supabase Admin API.
+    # For now, always create an invite token (dedup skipped).
 
     # Generate token, store hash
     token = secrets.token_urlsafe(32)
@@ -480,17 +450,17 @@ async def list_members(
     """List tenant members and pending invites."""
     # Active members
     members_result = await db.execute(
-        select(UserTenant, User)
-        .join(User, User.id == UserTenant.user_id)
+        select(UserTenant, Profile)
+        .join(Profile, Profile.id == UserTenant.user_id)
         .where(UserTenant.tenant_id == user.tenant_id)
     )
     members = []
-    for ut, u in members_result.all():
+    for ut, p in members_result.all():
         members.append(
             MemberItem(
-                user_id=str(u.id),
-                email=u.email,
-                name=u.name,
+                user_id=str(p.id),
+                email=None,  # TODO: email lives in auth.users, fetch via Supabase Admin API if needed
+                name=p.name,
                 role=ut.role,
                 joined_at=ut.joined_at.isoformat() if ut.joined_at else None,
                 status="active",
