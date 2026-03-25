@@ -5,9 +5,11 @@ import { useChatStore } from '@/features/chat/store'
 
 interface GlobalChatInputProps {
   placeholder?: string
+  /** Optional gate: return false to prevent submission (e.g., for signup gate). */
+  onBeforeSubmit?: (input: string) => boolean
 }
 
-export function GlobalChatInput({ placeholder = 'Ask Flywheel anything...' }: GlobalChatInputProps) {
+export function GlobalChatInput({ placeholder = 'Ask Flywheel anything...', onBeforeSubmit }: GlobalChatInputProps) {
   const [value, setValue] = useState('')
   const navigate = useNavigate()
   const sendMessage = useChatStore((s) => s.sendMessage)
@@ -21,6 +23,9 @@ export function GlobalChatInput({ placeholder = 'Ask Flywheel anything...' }: Gl
     e.preventDefault()
     const trimmed = value.trim()
     if (!trimmed) return
+
+    // Allow caller to gate the submission (e.g., for signup gate)
+    if (onBeforeSubmit && !onBeforeSubmit(trimmed)) return
 
     setValue('')
     await sendMessage(trimmed)

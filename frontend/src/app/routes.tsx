@@ -7,6 +7,7 @@ import { ActPage } from '@/pages/ActPage'
 import { SettingsPage } from '@/pages/SettingsPage'
 import { OnboardingPage } from '@/pages/OnboardingPage'
 import { InviteAcceptPage } from '@/pages/InviteAcceptPage'
+import { AuthCallback } from '@/app/AuthCallback'
 
 // Lazy-loaded profile page
 const CompanyProfilePage = lazy(() =>
@@ -48,6 +49,7 @@ export function AppRoutes() {
       <Route path="/settings" element={<SettingsPage />} />
       <Route path="/briefing/:runId" element={<BriefingFullViewer />} />
       <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
       <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />
       <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />

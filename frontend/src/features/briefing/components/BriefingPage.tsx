@@ -1,4 +1,4 @@
-import { useMemo, useState, useEffect } from 'react'
+import { useMemo, useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router'
 import { useBriefing } from '../hooks/useBriefing'
 import { useStreams } from '../hooks/useStreams'
@@ -8,6 +8,7 @@ import { NudgeCard } from './NudgeCard'
 import { KnowledgeHealthBar } from './KnowledgeHealthBar'
 import { GlobalChatInput } from './GlobalChatInput'
 import { NextActionCta } from './NextActionCta'
+import { SignupGate } from './SignupGate'
 import { StreamDensityCard } from '@/features/streams/components/DensityIndicator'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -70,10 +71,30 @@ export function BriefingPage() {
   const { data, isLoading, error } = useBriefing()
   const { data: streamsData } = useStreams()
   const user = useAuthStore(state => state.user)
-  const { state: lifecycleState } = useLifecycleState()
+  const { state: lifecycleState, isAnonymous, runCount } = useLifecycleState()
 
   const [recentDocs, setRecentDocs] = useState<RecentDocument[] | null>(null)
   const [docsLoading, setDocsLoading] = useState(true)
+
+  // SignupGate state: shown when anonymous user tries a second action
+  const [showSignupGate, setShowSignupGate] = useState(false)
+  const [pendingAction, setPendingAction] = useState<{ type: string; payload?: unknown } | null>(null)
+
+  // Gate check: anonymous user with at least 1 completed run should be gated on next action
+  const shouldGateActions = isAnonymous && runCount >= 1
+
+  /** Wrap action attempts -- if user should be gated, show SignupGate instead of executing */
+  const gateAction = useCallback(
+    (action: { type: string; payload?: unknown }) => {
+      if (shouldGateActions) {
+        setPendingAction(action)
+        setShowSignupGate(true)
+        return true // action was gated
+      }
+      return false // action was not gated, caller should proceed
+    },
+    [shouldGateActions],
+  )
 
   const streams = streamsData?.items ?? []
 
@@ -603,10 +624,21 @@ export function BriefingPage() {
         </div>
       </div>
 
+      {/* SignupGate -- shown inline when anonymous user tries a second action */}
+      {showSignupGate && (
+        <div style={{ padding: '0 16px 16px' }}>
+          <SignupGate pendingAction={pendingAction ?? undefined} />
+        </div>
+      )}
+
       {/* Global Chat Input - pinned at bottom */}
       <div className="border-t bg-background p-4">
         <GlobalChatInput
           placeholder={isFirstVisit ? 'What would you like to research next?' : undefined}
+          onBeforeSubmit={shouldGateActions ? (input) => {
+            const gated = gateAction({ type: 'chat', payload: { input } })
+            return !gated // return false to prevent submission if gated
+          } : undefined}
         />
       </div>
     </div>

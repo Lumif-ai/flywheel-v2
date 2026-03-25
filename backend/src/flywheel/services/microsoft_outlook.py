@@ -21,8 +21,9 @@ from flywheel.config import settings
 
 logger = logging.getLogger(__name__)
 
-# Delegated permission -- send mail as the signed-in user
-SCOPES = ["Mail.Send"]
+# Delegated permissions -- send mail, read mail, and read calendar as the signed-in user.
+# Ensure Supabase Azure provider config includes these scopes in the dashboard.
+SCOPES = ["Mail.Send", "Calendars.Read", "Mail.Read"]
 
 # MSAL authority for multi-tenant support
 AUTHORITY = "https://login.microsoftonline.com/common"

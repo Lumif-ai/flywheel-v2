@@ -6,10 +6,46 @@ import { useAuthStore } from '@/stores/auth'
  * Ensures an auth session exists before rendering children.
  * For anonymous users, creates a Supabase anonymous session on app startup
  * so sidebar/layout API calls have a valid JWT token.
+ *
+ * Also listens for auth state changes (e.g., after OAuth callback) to keep
+ * the auth store in sync with Supabase.
  */
 export function AuthBootstrap({ children }: { children: React.ReactNode }) {
   const [ready, setReady] = useState(false)
   const token = useAuthStore((s) => s.token)
+
+  // Listen for Supabase auth state changes (OAuth callback, token refresh, etc.)
+  useEffect(() => {
+    let subscription: { unsubscribe: () => void } | null = null
+
+    async function setupListener() {
+      const supabase = await getSupabase()
+      if (!supabase) return
+
+      const { data } = supabase.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_IN' && session) {
+          useAuthStore.getState().setToken(session.access_token)
+          useAuthStore.getState().setUser({
+            id: session.user?.id ?? '',
+            email: session.user?.email ?? null,
+            is_anonymous: session.user?.is_anonymous ?? false,
+          })
+        } else if (event === 'TOKEN_REFRESHED' && session) {
+          useAuthStore.getState().setToken(session.access_token)
+        } else if (event === 'SIGNED_OUT') {
+          useAuthStore.getState().logout()
+        }
+      })
+
+      subscription = data.subscription
+    }
+
+    setupListener()
+
+    return () => {
+      subscription?.unsubscribe()
+    }
+  }, [])
 
   useEffect(() => {
     if (token) {
@@ -35,7 +71,7 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
             return
           }
 
-          // No existing session — create anonymous
+          // No existing session -- create anonymous
           const { data, error } = await supabase.auth.signInAnonymously()
           if (error) throw error
           if (data.session?.access_token) {

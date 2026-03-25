@@ -2,6 +2,7 @@
 
 Endpoints:
 - POST /onboarding/promote          -- promote anonymous user to full account
+- POST /onboarding/promote-oauth    -- promote via OAuth (identity + integrations in one step)
 - GET  /onboarding/subsidy-status   -- remaining anonymous runs
 - POST /onboarding/crawl            -- start company crawl, stream SSE with categorized items
 - POST /onboarding/parse-streams    -- parse natural language into work streams (anonymous OK)
@@ -15,10 +16,10 @@ import asyncio
 import json
 import logging
 import re
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -30,6 +31,7 @@ from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import (
     Company,
     ContextEntry,
+    Integration,
     OnboardingSession,
     Profile,
     SkillRun,
@@ -129,6 +131,13 @@ def _detect_confidence(category: str, content: str) -> str:
 
 
 class PromoteRequest(BaseModel):
+    email: str
+
+
+class PromoteOAuthRequest(BaseModel):
+    provider: Literal["google", "microsoft"]
+    provider_token: str
+    provider_refresh_token: str | None = None
     email: str
 
 
@@ -324,6 +333,230 @@ async def promote(
     return PromoteResponse(
         tenant_id=str(tenant.id),
         message="Account promoted",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /onboarding/promote-oauth (authenticated, anonymous only)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/promote-oauth", response_model=PromoteResponse)
+async def promote_oauth(
+    body: PromoteOAuthRequest,
+    background_tasks: BackgroundTasks,
+    user: TokenPayload = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """Promote anonymous user via OAuth -- creates identity + calendar/email integrations.
+
+    Reuses the same tenant/company/profile logic as the email-based promote
+    endpoint, then additionally creates Integration rows from the OAuth tokens
+    so calendar + email are connected from day one.
+    """
+    if not user.is_anonymous:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Already authenticated",
+        )
+
+    # --- 1. Reuse existing promote logic: domain -> company -> tenant -> profile -> user_tenant ---
+
+    email_domain = body.email.split("@")[1].lower().removeprefix("www.") if "@" in body.email else None
+
+    company = None
+    if email_domain:
+        company = (
+            await db.execute(select(Company).where(Company.domain == email_domain))
+        ).scalar_one_or_none()
+        if not company:
+            company = Company(domain=email_domain, name=email_domain)
+            db.add(company)
+            await db.flush()
+
+    tenant = None
+    if company:
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.company_id == company.id))
+        ).scalar_one_or_none()
+
+    if not tenant:
+        anon_tenant = None
+        anon_tenant_id = user.tenant_id or user.sub
+        if anon_tenant_id:
+            anon_tenant = (
+                await db.execute(select(Tenant).where(Tenant.id == anon_tenant_id))
+            ).scalar_one_or_none()
+
+        if anon_tenant:
+            anon_tenant.company_id = company.id if company else None
+            anon_tenant.name = (company.name if company else None) or email_domain or "Personal"
+            tenant = anon_tenant
+        else:
+            tenant = Tenant(
+                name=email_domain or "Personal",
+                company_id=company.id if company else None,
+            )
+            db.add(tenant)
+            await db.flush()
+
+    existing_profile = (
+        await db.execute(select(Profile).where(Profile.id == user.sub))
+    ).scalar_one_or_none()
+    if existing_profile is None:
+        db.add(Profile(id=user.sub))
+        await db.flush()
+
+    existing_ut = (
+        await db.execute(
+            select(UserTenant).where(
+                UserTenant.user_id == user.sub,
+                UserTenant.tenant_id == tenant.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if existing_ut is None:
+        db.add(UserTenant(user_id=user.sub, tenant_id=tenant.id, role="admin", active=True))
+
+    # Copy onboarding session data (same as email-based promote)
+    onboarding_rows = (
+        await db.execute(
+            select(OnboardingSession).where(OnboardingSession.user_id == user.sub)
+        )
+    ).scalars().all()
+
+    for session_row in onboarding_rows:
+        data = session_row.data or {}
+        for entry in data.get("context_entries", []):
+            file_name = entry.get("file_name", "onboarding.md")
+            source = entry.get("source", "onboarding")
+            dup = (
+                await db.execute(
+                    select(ContextEntry.id).where(
+                        ContextEntry.tenant_id == tenant.id,
+                        ContextEntry.file_name == file_name,
+                        ContextEntry.source == source,
+                    )
+                )
+            ).scalar_one_or_none()
+            if dup is not None:
+                continue
+            db.add(ContextEntry(
+                tenant_id=tenant.id,
+                user_id=user.sub,
+                file_name=file_name,
+                source=source,
+                detail=entry.get("detail"),
+                content=entry.get("content", ""),
+                confidence=entry.get("confidence", "medium"),
+                metadata_=entry.get("metadata") or {},
+            ))
+
+    # --- 2. Create Integration rows for calendar + email ---
+
+    try:
+        from flywheel.auth.encryption import encrypt_api_key
+
+        # Encrypt the refresh token (needed for long-lived API access)
+        encrypted_creds = None
+        if body.provider_refresh_token:
+            import json as _json
+            import time as _time
+            creds_data = {
+                "access_token": body.provider_token,
+                "refresh_token": body.provider_refresh_token,
+                "token_type": "Bearer",
+                "expires_at": _time.time() + 3600,
+            }
+            encrypted_creds = encrypt_api_key(_json.dumps(creds_data))
+
+        if body.provider == "google":
+            # Google uses separate providers for calendar and email
+            for provider_name in ("google-calendar", "gmail-read"):
+                existing_integ = (
+                    await db.execute(
+                        select(Integration).where(
+                            Integration.tenant_id == tenant.id,
+                            Integration.provider == provider_name,
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if existing_integ:
+                    existing_integ.status = "connected"
+                    if encrypted_creds:
+                        existing_integ.credentials_encrypted = encrypted_creds
+                else:
+                    db.add(Integration(
+                        tenant_id=tenant.id,
+                        user_id=user.sub,
+                        provider=provider_name,
+                        status="connected",
+                        credentials_encrypted=encrypted_creds,
+                    ))
+
+        elif body.provider == "microsoft":
+            # Microsoft uses unified Graph API -- single integration for calendar + email
+            existing_integ = (
+                await db.execute(
+                    select(Integration).where(
+                        Integration.tenant_id == tenant.id,
+                        Integration.provider == "microsoft-outlook",
+                    )
+                )
+            ).scalar_one_or_none()
+
+            if existing_integ:
+                existing_integ.status = "connected"
+                if encrypted_creds:
+                    existing_integ.credentials_encrypted = encrypted_creds
+            else:
+                db.add(Integration(
+                    tenant_id=tenant.id,
+                    user_id=user.sub,
+                    provider="microsoft-outlook",
+                    status="connected",
+                    credentials_encrypted=encrypted_creds,
+                ))
+
+    except Exception:
+        # Integration creation failed -- don't block the promote.
+        # User can reconnect from Settings later.
+        logger.exception("Failed to create integrations during OAuth promote for user=%s", user.sub)
+
+    await db.commit()
+
+    # --- 3. Trigger initial calendar sync in background ---
+
+    async def _trigger_calendar_sync():
+        try:
+            from flywheel.services.calendar_sync import sync_calendar
+
+            factory = get_session_factory()
+            async with factory() as sync_db:
+                # Find the calendar integration we just created
+                provider_name = "google-calendar" if body.provider == "google" else "microsoft-outlook"
+                cal_integ = (
+                    await sync_db.execute(
+                        select(Integration).where(
+                            Integration.tenant_id == tenant.id,
+                            Integration.provider == provider_name,
+                            Integration.status == "connected",
+                        )
+                    )
+                ).scalar_one_or_none()
+
+                if cal_integ:
+                    await sync_calendar(sync_db, cal_integ)
+                    await sync_db.commit()
+        except Exception:
+            logger.exception("Background calendar sync failed after OAuth promote for tenant=%s", tenant.id)
+
+    background_tasks.add_task(_trigger_calendar_sync)
+
+    return PromoteResponse(
+        tenant_id=str(tenant.id),
+        message="Account promoted with integrations",
     )
 
 
