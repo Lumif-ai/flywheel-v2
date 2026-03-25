@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
-**Current focus:** Phase 6 — Feedback Flywheel
+**Current focus:** Milestone complete — all 6 phases done
 
 ## Current Position
 
 Phase: 6 of 6 (Feedback Flywheel)
-Plan: 2 of 4 in current phase (FEED-03 documentation)
-Status: In progress
-Last activity: 2026-03-25 — Phase 6 Plan 02 complete (FEED-03 thread re-scoring documentation)
+Plan: 2 of 2 in current phase
+Status: Milestone complete
+Last activity: 2026-03-25 — Phase 6 complete (voice updater, dismiss tracker, FEED-03 docs)
 
-Progress: [██████████] 92%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -99,6 +99,9 @@ Recent decisions affecting current work:
 - [Phase 6, Plan 01]: Diff captured as strings before null in approve_draft — ORM object expires after commit; background task receives string values not ORM refs
 - [Phase 6, Plan 01]: dismiss_signal injected before EMAIL TO SCORE block in scorer user_message — visible to Haiku scoring rubric
 - [Phase 6, Plan 02]: FEED-03 already satisfied by existing architecture — new messages in existing threads arrive as messagesAdded events and get scored through the existing _score_new_emails path; thread priority auto-refreshes via read-time MAX query (SCORE-07); no new code needed, documentation only
+- [Phase 48, Plan 03]: Only "Anonymous Workspace" tenants claimable — name check prevents arbitrary tenant takeover via spoofed IDs
+- [Phase 48, Plan 03]: Claim failure is non-fatal in AuthCallback — user gets new account without prior data rather than being blocked
+- [Phase 48, Plan 03]: Cross-tenant migration uses get_db_unscoped — operations span tenant boundaries for atomic data claim
 
 ### Pending Todos
 
@@ -113,5 +116,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-25
-Stopped at: Phase 6 Plan 01 complete — voice updater engine, dismiss tracker, config settings, approve_draft wiring, scorer dismiss signal injection.
+Stopped at: Completed 48-03-PLAN.md — claim-anonymous-data endpoint and AuthCallback wiring
 Resume file: None
