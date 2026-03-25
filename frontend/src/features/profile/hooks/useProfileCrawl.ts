@@ -1,0 +1,135 @@
+import { useState, useCallback, useRef } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
+import { api } from '@/lib/api'
+import { useSSE } from '@/lib/sse'
+import type { CrawlItem } from '@/features/onboarding/hooks/useOnboarding'
+
+// ---------------------------------------------------------------------------
+// Types
+// ---------------------------------------------------------------------------
+
+type ProfileCrawlPhase = 'idle' | 'crawling' | 'complete' | 'error'
+
+interface ProfileCrawlError {
+  message: string
+  retryable: boolean
+}
+
+// ---------------------------------------------------------------------------
+// Hook
+// ---------------------------------------------------------------------------
+
+export function useProfileCrawl() {
+  const [phase, setPhase] = useState<ProfileCrawlPhase>('idle')
+  const [crawlItems, setCrawlItems] = useState<CrawlItem[]>([])
+  const [crawlTotal, setCrawlTotal] = useState(0)
+  const [crawlStatus, setCrawlStatus] = useState<string | null>(null)
+  const [error, setError] = useState<ProfileCrawlError | null>(null)
+  const [sseUrl, setSseUrl] = useState<string | null>(null)
+
+  const queryClient = useQueryClient()
+  const crawlItemsRef = useRef(crawlItems)
+  crawlItemsRef.current = crawlItems
+
+  // ---- SSE handler ----
+  const handleEvent = useCallback(
+    (event: { type: string; data: Record<string, unknown> }) => {
+      switch (event.type) {
+        case 'stage': {
+          const message = (event.data.message as string) ?? ''
+          if (message) setCrawlStatus(message)
+          break
+        }
+        case 'text': {
+          const item: CrawlItem = {
+            category: (event.data.category as string) ?? 'company_info',
+            icon: (event.data.icon as string) ?? 'Building2',
+            label: (event.data.label as string) ?? '',
+            items: (event.data.items as string[]) ?? [],
+            count:
+              (event.data.count as number) ??
+              crawlItemsRef.current.length + 1,
+          }
+          setCrawlItems((prev) => [...prev, item])
+          setCrawlTotal((prev) => prev + item.items.length)
+          setCrawlStatus(null)
+          break
+        }
+        case 'done': {
+          setPhase('complete')
+          setCrawlStatus(null)
+          setSseUrl(null)
+          queryClient.invalidateQueries({ queryKey: ['company-profile'] })
+          break
+        }
+        case 'crawl_error': {
+          const errorMsg =
+            (event.data.error as string) ?? 'Crawl analysis failed'
+          const retryable = (event.data.retryable as boolean) ?? false
+          setPhase('error')
+          setError({ message: errorMsg, retryable })
+          setCrawlStatus(null)
+          setSseUrl(null)
+          break
+        }
+        case 'error': {
+          setPhase('error')
+          setError({
+            message:
+              (event.data.message as string) ?? 'Connection lost',
+            retryable: true,
+          })
+          setCrawlStatus(null)
+          setSseUrl(null)
+          break
+        }
+      }
+    },
+    [queryClient],
+  )
+
+  useSSE(sseUrl, handleEvent)
+
+  // ---- Actions ----
+
+  const startCrawl = useCallback(async (url: string) => {
+    setPhase('crawling')
+    setCrawlItems([])
+    setCrawlTotal(0)
+    setCrawlStatus(null)
+    setError(null)
+
+    try {
+      const res = await api.post<{ run_id: string }>('/onboarding/crawl', {
+        url,
+      })
+      setSseUrl(`/api/v1/onboarding/crawl/${res.run_id}/stream`)
+    } catch (err) {
+      setPhase('error')
+      setError({
+        message:
+          err instanceof Error ? err.message : 'Failed to start crawl',
+        retryable: true,
+      })
+    }
+  }, [])
+
+  const retry = useCallback(() => {
+    setPhase('idle')
+    setCrawlItems([])
+    setCrawlTotal(0)
+    setCrawlStatus(null)
+    setError(null)
+    setSseUrl(null)
+  }, [])
+
+  return {
+    phase,
+    crawlItems,
+    crawlTotal,
+    crawlStatus,
+    error,
+    startCrawl,
+    retry,
+  }
+}
