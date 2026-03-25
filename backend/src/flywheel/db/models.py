@@ -1,7 +1,7 @@
 """SQLAlchemy 2.0 ORM models for all 16 Flywheel tables.
 
 Schema matches V2-PRODUCT-SPEC.md. Tables are divided into:
-- System tables (tenants, users) -- NOT tenant-scoped, no RLS
+- System tables (tenants, profiles) -- NOT tenant-scoped, no RLS
 - Tenant-scoped tables (9 tables) -- all have tenant_id FK, RLS enforced
 - Focus tables (2 tables) -- focus/lens scoping for context
 - Context graph tables (3 tables) -- entity graph layer on top of context_entries
@@ -67,15 +67,13 @@ class Tenant(Base):
     company: Mapped["Company | None"] = relationship(lazy="selectin")
 
 
-class User(Base):
-    __tablename__ = "users"
+class Profile(Base):
+    __tablename__ = "profiles"
 
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=text("gen_random_uuid()")
     )
-    email: Mapped[str | None] = mapped_column(Text, unique=True, nullable=True)
     name: Mapped[str | None] = mapped_column(Text)
-    is_anonymous: Mapped[bool] = mapped_column(default=False, server_default=text("false"))
     api_key_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     settings: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     created_at: Mapped[datetime.datetime] = mapped_column(
@@ -122,7 +120,7 @@ class UserTenant(Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), primary_key=True
+        ForeignKey("profiles.id"), primary_key=True
     )
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id"), primary_key=True
@@ -140,7 +138,7 @@ class OnboardingSession(Base):
     id: Mapped[UUID] = mapped_column(
         primary_key=True, server_default=text("gen_random_uuid()")
     )
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     tenant_id: Mapped[UUID | None] = mapped_column(ForeignKey("tenants.id"))
     type: Mapped[str] = mapped_column(Text, server_default="anonymous")
     data: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
@@ -163,7 +161,7 @@ class Invite(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     invited_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     email: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, server_default="member")
@@ -199,7 +197,7 @@ class ContextEntry(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     file_name: Mapped[str] = mapped_column(Text, nullable=False)
     visibility: Mapped[str] = mapped_column(Text, server_default="team")
@@ -299,7 +297,7 @@ class SkillRun(Base):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id"), nullable=False
     )
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     skill_name: Mapped[str] = mapped_column(Text, nullable=False)
     input_text: Mapped[str | None] = mapped_column(Text)
     output: Mapped[str | None] = mapped_column(Text)
@@ -358,7 +356,7 @@ class UploadedFile(Base):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id"), nullable=False
     )
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     filename: Mapped[str] = mapped_column(Text, nullable=False)
     mimetype: Mapped[str] = mapped_column(Text, nullable=False)
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -379,7 +377,7 @@ class Integration(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default="connected")
@@ -413,7 +411,7 @@ class WorkItem(Base):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id"), nullable=False
     )
-    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("users.id"))
+    user_id: Mapped[UUID | None] = mapped_column(ForeignKey("profiles.id"))
     type: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     status: Mapped[str] = mapped_column(Text, server_default="upcoming")
@@ -455,7 +453,7 @@ class Focus(Base):
         TIMESTAMP(timezone=True)
     )
     created_by: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
@@ -478,7 +476,7 @@ class UserFocus(Base):
     )
 
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), primary_key=True
+        ForeignKey("profiles.id"), primary_key=True
     )
     focus_id: Mapped[UUID] = mapped_column(
         ForeignKey("focuses.id"), primary_key=True
@@ -513,7 +511,7 @@ class SuggestionDismissal(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     suggestion_type: Mapped[str] = mapped_column(Text, nullable=False)
     suggestion_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -638,7 +636,7 @@ class WorkStream(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     parent_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("work_streams.id", ondelete="CASCADE")
@@ -728,7 +726,7 @@ class NudgeInteraction(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     nudge_type: Mapped[str] = mapped_column(Text, nullable=False)
     nudge_key: Mapped[str] = mapped_column(Text, nullable=False)
@@ -752,7 +750,7 @@ class MeetingClassification(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     work_item_id: Mapped[UUID] = mapped_column(
         ForeignKey("work_items.id", ondelete="CASCADE"), nullable=False
@@ -891,7 +889,7 @@ class Document(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     document_type: Mapped[str] = mapped_column(Text, nullable=False)
@@ -943,7 +941,7 @@ class Email(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     gmail_message_id: Mapped[str] = mapped_column(Text, nullable=False)
     gmail_thread_id: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1058,7 +1056,7 @@ class EmailVoiceProfile(Base):
         ForeignKey("tenants.id"), nullable=False
     )
     user_id: Mapped[UUID] = mapped_column(
-        ForeignKey("users.id"), nullable=False
+        ForeignKey("profiles.id"), nullable=False
     )
     tone: Mapped[str | None] = mapped_column(Text)
     avg_length: Mapped[int | None] = mapped_column(Integer)
