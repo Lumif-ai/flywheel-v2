@@ -152,7 +152,7 @@ export function BriefingChatPanel({ runId }: BriefingChatPanelProps) {
         flexDirection: 'column',
         background: 'rgba(248,248,248,1)',
         borderLeft: `1px solid ${colors.subtleBorder}`,
-        height: '100dvh',
+        height: 'calc(100dvh - 56px)',
         position: 'sticky',
         top: 0,
       }}

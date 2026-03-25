@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-import { ReactQueryDevtools } from '@tanstack/react-query-devtools'
+// DevTools removed — was showing coconut tree bubble in production
 import { BrowserRouter, useLocation } from 'react-router'
 import { SidebarProvider, SidebarInset } from '@/components/ui/sidebar'
 import { TooltipProvider } from '@/components/ui/tooltip'
@@ -89,7 +89,6 @@ export function AppLayout() {
         </AuthBootstrap>
       </BrowserRouter>
       <Toaster position="top-right" />
-      <ReactQueryDevtools initialIsOpen={false} />
     </QueryClientProvider>
   )
 }
