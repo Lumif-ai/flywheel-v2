@@ -1,7 +1,6 @@
 import { NavLink, useLocation, Link } from 'react-router'
 import { Home, Settings, FileText, Building2, Lock, Mail } from 'lucide-react'
-import { useQuery } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import {
   Sidebar,
   SidebarContent,
@@ -20,12 +19,10 @@ import { StreamSidebar } from '@/features/streams/components/StreamSidebar'
 export function AppSidebar() {
   const location = useLocation()
 
-  const { data: keyStatus } = useQuery({
-    queryKey: ['api-key-status'],
-    queryFn: () => api.get<{ has_api_key: boolean }>('/auth/api-key'),
-  })
+  const { state, hasApiKey } = useLifecycleState()
 
-  const hasApiKey = keyStatus?.has_api_key ?? true
+  // Show API key banner only for S4 (power threshold) and S5 (power user without key -- impossible but safe)
+  const showApiKeyBanner = !hasApiKey && (state === 'S4' || state === 'S5')
 
   return (
     <Sidebar>
@@ -34,7 +31,7 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {!hasApiKey && (
+        {showApiKeyBanner && (
           <div className="mx-3 mb-2">
             <Link
               to="/settings"
@@ -47,7 +44,7 @@ export function AppSidebar() {
               }}
             >
               <Lock className="size-3 shrink-0" />
-              <span>API key needed for AI features</span>
+              <span>Add your API key for unlimited research</span>
             </Link>
           </div>
         )}

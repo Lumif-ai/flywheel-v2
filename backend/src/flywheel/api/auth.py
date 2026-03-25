@@ -1,4 +1,4 @@
-"""Auth endpoints: magic link, anonymous sign-in, token refresh, user profile, BYOK API key.
+"""Auth endpoints: magic link, anonymous sign-in, token refresh, user profile, BYOK API key, lifecycle.
 
 Public endpoints (no auth):
 - POST /auth/magic-link  -- send magic link email via Supabase
@@ -7,6 +7,7 @@ Public endpoints (no auth):
 
 Authenticated endpoints:
 - GET  /auth/me           -- user profile with has_api_key flag
+- GET  /auth/lifecycle    -- user lifecycle state (S1-S5) with signals
 - POST /auth/api-key      -- validate + encrypt + store BYOK key
 - DELETE /auth/api-key    -- remove stored key
 """
@@ -20,7 +21,7 @@ import re
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_current_user, get_db_unscoped, require_tenant
@@ -28,7 +29,7 @@ from flywheel.auth.encryption import encrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.auth.supabase_client import get_supabase_admin
 from flywheel.config import settings
-from flywheel.db.models import Profile, Tenant, UserTenant
+from flywheel.db.models import ContextEntry, Integration, Profile, SkillRun, Tenant, UserTenant
 from flywheel.middleware.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
@@ -62,6 +63,42 @@ class UserProfile(BaseModel):
     is_anonymous: bool
     has_api_key: bool
     active_tenant: dict | None = None  # { id, name, role }
+
+
+class LifecycleResponse(BaseModel):
+    state: str  # S1 | S2 | S3 | S4 | S5
+    is_anonymous: bool
+    has_api_key: bool
+    run_count: int
+    run_limit: int = 3
+    has_calendar: bool
+    has_email: bool
+    is_first_visit: bool
+
+
+# ---------------------------------------------------------------------------
+# Lifecycle state computation
+# ---------------------------------------------------------------------------
+
+_ONBOARDING_SKILLS = ("company-intel", "meeting-prep")
+
+
+def compute_lifecycle_state(
+    is_anonymous: bool, has_api_key: bool, run_count: int
+) -> str:
+    """Determine user lifecycle state (S1-S5) from signals.
+
+    S1 = First Magic (anonymous, <= 1 run)
+    S2 = Signup Moment (anonymous, > 1 run -- approaching gate)
+    S3 = Exploring (authenticated, < 3 runs, no API key)
+    S4 = Power Threshold (authenticated, >= 3 runs, no API key)
+    S5 = Power User (authenticated, has API key)
+    """
+    if is_anonymous:
+        return "S1" if run_count <= 1 else "S2"
+    if has_api_key:
+        return "S5"
+    return "S3" if run_count < 3 else "S4"
 
 
 # ---------------------------------------------------------------------------
@@ -234,6 +271,105 @@ async def me(
         is_anonymous=user.is_anonymous,
         has_api_key=row.api_key_encrypted is not None,
         active_tenant=active_tenant,
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /auth/lifecycle (authenticated -- user lifecycle state)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/lifecycle", response_model=LifecycleResponse)
+async def lifecycle(
+    user: TokenPayload = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """Return the user's lifecycle state (S1-S5) with supporting signals.
+
+    Works for both anonymous and authenticated users. Uses lifetime run count
+    (total completed skill runs ever). Monthly reset may be added later via
+    billing_period_start on the Tenant model.
+    """
+    # --- has_api_key ---
+    profile_row = (
+        await db.execute(
+            select(Profile.api_key_encrypted).where(Profile.id == user.sub)
+        )
+    ).scalar_one_or_none()
+    has_api_key = profile_row is not None
+
+    # --- run_count (lifetime completed runs for tenant) ---
+    run_count = 0
+    if user.tenant_id is not None:
+        run_count_result = await db.execute(
+            select(func.count()).select_from(SkillRun).where(
+                SkillRun.tenant_id == user.tenant_id,
+                SkillRun.status == "completed",
+            )
+        )
+        run_count = run_count_result.scalar_one()
+
+    # --- has_calendar / has_email ---
+    has_calendar = False
+    has_email = False
+    if user.tenant_id is not None:
+        cal_result = await db.execute(
+            select(Integration.id).where(
+                Integration.tenant_id == user.tenant_id,
+                Integration.provider.in_(("google-calendar",)),
+                Integration.status == "connected",
+            ).limit(1)
+        )
+        has_calendar = cal_result.scalar_one_or_none() is not None
+
+        email_result = await db.execute(
+            select(Integration.id).where(
+                Integration.tenant_id == user.tenant_id,
+                Integration.provider.in_(("gmail-read", "microsoft-outlook")),
+                Integration.status == "connected",
+            ).limit(1)
+        )
+        has_email = email_result.scalar_one_or_none() is not None
+
+    # --- is_first_visit (reuses briefing.py heuristic) ---
+    # First visit = has onboarding intel AND no completed non-onboarding skill runs
+    is_first_visit = False
+    if user.tenant_id is not None:
+        intel_count_result = await db.execute(
+            select(func.count()).select_from(
+                select(ContextEntry).where(
+                    ContextEntry.tenant_id == user.tenant_id,
+                    ContextEntry.source == "company-intel-onboarding",
+                    ContextEntry.deleted_at.is_(None),
+                ).subquery()
+            )
+        )
+        has_onboarding_intel = (intel_count_result.scalar() or 0) > 0
+
+        if has_onboarding_intel:
+            non_onboarding_result = await db.execute(
+                select(func.count()).select_from(
+                    select(SkillRun).where(
+                        SkillRun.tenant_id == user.tenant_id,
+                        SkillRun.status == "completed",
+                        SkillRun.skill_name.notin_(_ONBOARDING_SKILLS),
+                    ).subquery()
+                )
+            )
+            non_onboarding_runs = non_onboarding_result.scalar() or 0
+            is_first_visit = non_onboarding_runs == 0
+
+    state = compute_lifecycle_state(user.is_anonymous, has_api_key, run_count)
+
+    return LifecycleResponse(
+        state=state,
+        is_anonymous=user.is_anonymous,
+        has_api_key=has_api_key,
+        run_count=run_count,
+        run_limit=3,
+        has_calendar=has_calendar,
+        has_email=has_email,
+        is_first_visit=is_first_visit,
     )
 
 
