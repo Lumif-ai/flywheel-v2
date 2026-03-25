@@ -1,12 +1,14 @@
 """Nudge engine -- priority-ranked daily nudge selection.
 
 Selects at most one nudge per day for a user, ranked by priority:
+0. Calendar meeting prep (upcoming meetings without briefings -- highest value)
 1. Integration connect (Calendar day 2, Gmail day 5, Slack day 7)
 2. Knowledge gap (streams with lowest density)
 3. Context enrichment (entities with lowest mention count)
 
 Cadence: daily for first 14 days, weekly after (or after all integrations connected).
 Dismissed nudges do not resurface for 7 days (via SuggestionDismissal).
+Calendar meeting prep nudges stop per type after 2 dismissals.
 """
 
 from __future__ import annotations
@@ -20,10 +22,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.db.models import (
     ContextEntity,
+    Document,
     Integration,
     NudgeInteraction,
     Profile,
     SuggestionDismissal,
+    WorkItem,
     WorkStream,
     WorkStreamEntity,
 )
@@ -45,6 +49,8 @@ DAILY_CADENCE_DAYS = 14
 WEEKLY_CADENCE_INTERVAL = 7
 GAP_NUDGE_COOLDOWN_DAYS = 3
 ENRICHMENT_NUDGE_COOLDOWN_DAYS = 5
+MEETING_PREP_LOOKAHEAD_DAYS = 7
+MEETING_PREP_MAX_DISMISSALS = 2
 
 
 # ---------------------------------------------------------------------------
@@ -113,6 +119,17 @@ async def select_nudge(
     if today_result.scalar_one() > 0:
         return None
 
+    # Priority 0: Calendar meeting prep nudges (highest value)
+    nudge = await _select_calendar_meeting_prep_nudge(
+        session, tenant_id, user_id, now
+    )
+    if nudge:
+        await record_nudge_action(
+            session, tenant_id, user_id,
+            nudge["type"], nudge["key"], "shown",
+        )
+        return nudge
+
     # Priority 1: Integration connect nudges
     nudge = await _select_integration_nudge(
         session, user_id, tenant_id, account_age_days, now
@@ -143,6 +160,202 @@ async def select_nudge(
         return nudge
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Priority 0: Calendar meeting prep nudges
+# ---------------------------------------------------------------------------
+
+
+async def _select_calendar_meeting_prep_nudge(
+    session: AsyncSession, tenant_id: UUID, user_id: UUID, now: datetime.datetime
+) -> dict | None:
+    """Select a calendar meeting prep nudge for the nearest unprepped meeting.
+
+    Checks if the user has a connected calendar integration and upcoming
+    meetings (within 7 days) that lack an existing briefing document.
+    Returns at most one nudge (the soonest unprepped meeting).
+
+    Stops showing calendar_meeting_prep nudges after 2 total dismissals.
+    """
+    # Check if calendar integration exists and is connected
+    cal_stmt = select(func.count()).select_from(Integration).where(
+        and_(
+            Integration.tenant_id == tenant_id,
+            Integration.user_id == user_id,
+            Integration.provider.in_(["google-calendar", "microsoft-outlook"]),
+            Integration.status == "connected",
+        )
+    )
+    cal_result = await session.execute(cal_stmt)
+    if cal_result.scalar_one() == 0:
+        return None
+
+    # Check if user has dismissed calendar_meeting_prep >= 2 times total
+    dismiss_count_stmt = select(func.count()).select_from(NudgeInteraction).where(
+        and_(
+            NudgeInteraction.tenant_id == tenant_id,
+            NudgeInteraction.user_id == user_id,
+            NudgeInteraction.nudge_type == "calendar_meeting_prep",
+            NudgeInteraction.action == "dismissed",
+        )
+    )
+    dismiss_result = await session.execute(dismiss_count_stmt)
+    if dismiss_result.scalar_one() >= MEETING_PREP_MAX_DISMISSALS:
+        return None
+
+    # Query upcoming meetings within 7 days
+    window_end = now + datetime.timedelta(days=MEETING_PREP_LOOKAHEAD_DAYS)
+    meetings_stmt = (
+        select(WorkItem)
+        .where(
+            and_(
+                WorkItem.tenant_id == tenant_id,
+                WorkItem.type == "meeting",
+                WorkItem.status == "upcoming",
+                WorkItem.scheduled_at >= now,
+                WorkItem.scheduled_at <= window_end,
+            )
+        )
+        .order_by(WorkItem.scheduled_at.asc())
+        .limit(5)
+    )
+    meetings_result = await session.execute(meetings_stmt)
+    meetings = meetings_result.scalars().all()
+
+    if not meetings:
+        return None
+
+    # Check active dismissals for specific meeting nudge keys
+    dismiss_keys_stmt = select(SuggestionDismissal.suggestion_key).where(
+        and_(
+            SuggestionDismissal.tenant_id == tenant_id,
+            SuggestionDismissal.user_id == user_id,
+            SuggestionDismissal.suggestion_type == "nudge",
+            SuggestionDismissal.expires_at > now,
+        )
+    )
+    dismiss_keys_result = await session.execute(dismiss_keys_stmt)
+    dismissed_keys = {row[0] for row in dismiss_keys_result.all()}
+
+    # Get existing documents to check which meetings already have briefings
+    doc_titles_stmt = select(Document.title).where(
+        and_(
+            Document.tenant_id == tenant_id,
+            Document.document_type.in_(["company_intel", "meeting_prep", "briefing"]),
+        )
+    )
+    doc_result = await session.execute(doc_titles_stmt)
+    existing_doc_titles = {row[0].lower() for row in doc_result.all()}
+
+    for meeting in meetings:
+        nudge_key = f"meeting_prep:{meeting.id}"
+        if nudge_key in dismissed_keys:
+            continue
+
+        # Only suggest prep for meetings with external attendees
+        meeting_data = meeting.data or {}
+        if not meeting_data.get("has_external_attendees", False):
+            continue
+
+        # Extract attendee info from meeting metadata
+        attendees = meeting_data.get("attendees", [])
+        attendee_name, company_name = _extract_meeting_contact(
+            attendees, meeting.title
+        )
+
+        # Check if a briefing already exists for this company/contact
+        if company_name and company_name.lower() in existing_doc_titles:
+            continue
+
+        # Format the day reference
+        day_label = _format_meeting_day(meeting.scheduled_at, now)
+
+        # Build nudge copy per concept brief template
+        if attendee_name and company_name:
+            body = (
+                f"You're meeting {attendee_name} from {company_name} "
+                f"on {day_label}. Want a briefing?"
+            )
+        elif company_name:
+            body = (
+                f"You have a meeting with {company_name} "
+                f"on {day_label}. Want a briefing?"
+            )
+        else:
+            body = (
+                f"You have \"{meeting.title}\" "
+                f"on {day_label}. Want a briefing?"
+            )
+
+        return {
+            "type": "calendar_meeting_prep",
+            "key": nudge_key,
+            "title": "Meeting prep available",
+            "body": body,
+            "action_type": "meeting_prep",
+            "action_payload": {
+                "meeting_id": str(meeting.id),
+                "company_name": company_name or meeting.title,
+                "attendee_name": attendee_name,
+                "scheduled_at": meeting.scheduled_at.isoformat()
+                if meeting.scheduled_at
+                else None,
+            },
+        }
+
+    return None
+
+
+def _extract_meeting_contact(
+    attendees: list[str], title: str
+) -> tuple[str | None, str | None]:
+    """Extract the primary external attendee name and company from meeting data.
+
+    Attempts to derive company name from email domain of external attendees.
+    Falls back to meeting title for company name extraction.
+    """
+    company_name: str | None = None
+    attendee_name: str | None = None
+
+    for email in attendees:
+        if not isinstance(email, str) or "@" not in email:
+            continue
+        local, domain = email.rsplit("@", 1)
+        # Skip common personal/free email domains
+        if domain.lower() in {
+            "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
+            "icloud.com", "protonmail.com", "aol.com", "mail.com",
+        }:
+            # Use local part as attendee name if no better option
+            if attendee_name is None:
+                attendee_name = local.replace(".", " ").title()
+            continue
+
+        # Corporate domain -- extract company name
+        company_name = domain.split(".")[0].title()
+        attendee_name = local.replace(".", " ").title()
+        break
+
+    return attendee_name, company_name
+
+
+def _format_meeting_day(
+    scheduled_at: datetime.datetime | None, now: datetime.datetime
+) -> str:
+    """Format a meeting's scheduled time as a human-friendly day reference."""
+    if scheduled_at is None:
+        return "soon"
+
+    delta = (scheduled_at.date() - now.date()).days
+    if delta == 0:
+        return "today"
+    elif delta == 1:
+        return "tomorrow"
+    elif delta < 7:
+        return scheduled_at.strftime("%A")  # e.g. "Thursday"
+    else:
+        return scheduled_at.strftime("%B %d")  # e.g. "March 28"
 
 
 # ---------------------------------------------------------------------------

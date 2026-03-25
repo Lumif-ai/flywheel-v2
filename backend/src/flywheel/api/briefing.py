@@ -90,7 +90,7 @@ class KnowledgeHealth(BaseModel):
 
 
 class NudgeResponse(BaseModel):
-    type: str  # "integration_connect" | "knowledge_gap" | "context_enrichment"
+    type: str  # "calendar_meeting_prep" | "integration_connect" | "knowledge_gap" | "context_enrichment"
     key: str
     title: str
     body: str
@@ -102,6 +102,9 @@ class NudgeResponse(BaseModel):
     entity_id: str | None = None
     entity_name: str | None = None
     has_research_action: bool = False
+    # Calendar meeting prep fields
+    action_type: str | None = None
+    action_payload: dict | None = None
 
 
 class FirstVisitData(BaseModel):

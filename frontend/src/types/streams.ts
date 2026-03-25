@@ -94,7 +94,7 @@ export interface KnowledgeHealth {
 }
 
 export interface NudgeResponse {
-  type: 'integration_connect' | 'knowledge_gap' | 'context_enrichment'
+  type: 'calendar_meeting_prep' | 'integration_connect' | 'knowledge_gap' | 'context_enrichment'
   key: string
   title: string
   body: string
@@ -106,6 +106,14 @@ export interface NudgeResponse {
   entity_id?: string
   entity_name?: string
   has_research_action?: boolean
+  // Calendar meeting prep fields
+  action_type?: string
+  action_payload?: {
+    meeting_id: string
+    company_name: string
+    attendee_name?: string
+    scheduled_at?: string
+  }
 }
 
 export interface FirstVisitData {

@@ -16,6 +16,7 @@ import {
   useNudgeSubmit,
   useNudgeResearch,
 } from '../hooks/useBriefing'
+import { CalendarNudge } from './CalendarNudge'
 
 interface NudgeCardProps {
   nudge: NudgeResponse
@@ -42,6 +43,20 @@ export function NudgeCard({ nudge }: NudgeCardProps) {
   }
 
   switch (nudge.type) {
+    case 'calendar_meeting_prep':
+      return (
+        <CalendarNudge
+          attendeeName={nudge.action_payload?.attendee_name}
+          companyName={nudge.action_payload?.company_name ?? 'your meeting'}
+          meetingDay={nudge.action_payload?.scheduled_at
+            ? new Date(nudge.action_payload.scheduled_at).toLocaleDateString('en-US', { weekday: 'long' })
+            : 'soon'}
+          meetingId={nudge.action_payload?.meeting_id ?? ''}
+          nudgeKey={nudge.key}
+          body={nudge.body}
+          onDismiss={handleDismiss}
+        />
+      )
     case 'integration_connect':
       return (
         <IntegrationConnectNudge nudge={nudge} onDismiss={handleDismiss} />
