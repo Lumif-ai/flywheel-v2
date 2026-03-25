@@ -1,13 +1,14 @@
 /**
- * AuthCallback -- Handles the OAuth redirect from Supabase.
+ * AuthCallback -- Handles the OAuth redirect from Supabase after linkIdentity().
  *
- * Supabase automatically exchanges the code from the URL hash/params.
- * This component shows a loading spinner while that happens, then:
- * 1. Extracts provider_token + provider_refresh_token from the session
- * 2. Calls POST /onboarding/promote-oauth to create tenant + integrations
- * 3. If provider_token is unavailable, falls back to two-step OAuth
- * 4. Resumes any pending action stored in localStorage
- * 5. Redirects to /
+ * linkIdentity() preserves the anonymous user's ID, so all existing data
+ * (briefings, company intel, context entries) stays linked. This callback:
+ * 1. Waits for Supabase to exchange the code and refresh the session
+ * 2. Updates the auth store with the new (non-anonymous) session
+ * 3. Calls POST /onboarding/promote-oauth to set up company/tenant + integrations
+ * 4. If provider_token is missing (documented linkIdentity limitation), skips
+ *    integration creation -- user can connect calendar/email later
+ * 5. Resumes any pending action and redirects to /
  */
 
 import { useEffect, useRef } from 'react'
@@ -45,11 +46,14 @@ export function AuthCallback() {
         }
 
         // Update auth store with the new session
+        // After linkIdentity, user.id is the SAME as the anonymous user's id
         useAuthStore.getState().setToken(session.access_token)
         useAuthStore.getState().setUser({
           id: session.user?.id ?? '',
           email: session.user?.email ?? null,
           is_anonymous: session.user?.is_anonymous ?? false,
+          display_name: session.user?.user_metadata?.full_name ?? session.user?.user_metadata?.name ?? null,
+          avatar_url: session.user?.user_metadata?.avatar_url ?? null,
         })
 
         // Determine the OAuth provider
@@ -57,12 +61,13 @@ export function AuthCallback() {
         const providerNormalized =
           provider === 'azure' ? 'microsoft' : provider === 'google' ? 'google' : null
 
-        if (providerNormalized && session.provider_token) {
-          // Primary path: provider_token available -- single-step promote with integrations
+        if (providerNormalized) {
+          // Call promote-oauth to set up company/domain on the existing tenant
+          // and create Integration rows if provider_token is available
           try {
             await api.post('/onboarding/promote-oauth', {
               provider: providerNormalized,
-              provider_token: session.provider_token,
+              provider_token: session.provider_token ?? '',
               provider_refresh_token: session.provider_refresh_token ?? null,
               email: session.user?.email ?? '',
             })
@@ -70,24 +75,28 @@ export function AuthCallback() {
             // If promote-oauth fails (e.g., user already promoted), log and continue
             console.warn('promote-oauth failed, user may already be promoted:', err)
           }
-        } else if (session.user?.email) {
-          // Fallback: Supabase session did not include provider_token.
-          // Using two-step OAuth: identity via Supabase, data access via Integration OAuth.
+
+          // Re-fetch user to get potentially updated metadata
+          // (workaround for Supabase linkIdentity metadata gap -- supabase/auth#1708)
           try {
-            await api.post('/onboarding/promote', { email: session.user.email })
-          } catch (err) {
-            console.warn('promote fallback failed:', err)
+            const { data: { user: freshUser } } = await supabase.auth.getUser()
+            if (freshUser) {
+              useAuthStore.getState().setUser({
+                id: freshUser.id,
+                email: freshUser.email ?? null,
+                is_anonymous: false,
+                display_name: freshUser.user_metadata?.full_name ?? freshUser.user_metadata?.name ?? null,
+                avatar_url: freshUser.user_metadata?.avatar_url ?? null,
+              })
+            }
+          } catch {
+            // Non-critical: metadata update failed, user still has session data
           }
 
-          // Redirect to Integration OAuth for the same provider to get data access tokens
-          if (providerNormalized === 'google') {
-            // Existing Integration OAuth endpoint for Google Calendar
-            window.location.href = '/api/v1/integrations/google-calendar/authorize'
-            return
-          } else if (providerNormalized === 'microsoft') {
-            // Existing Integration OAuth endpoint for Microsoft Outlook
-            window.location.href = '/api/v1/integrations/microsoft-outlook/authorize'
-            return
+          // If provider_token was missing (linkIdentity limitation),
+          // integrations weren't created. User can connect later from Settings.
+          if (!session.provider_token) {
+            console.info('AuthCallback: provider_token not available after linkIdentity — integrations skipped')
           }
         }
 
@@ -95,8 +104,6 @@ export function AuthCallback() {
         const pendingRaw = localStorage.getItem('pendingAction')
         if (pendingRaw) {
           localStorage.removeItem('pendingAction')
-          // The pending action will be handled by the page that loads after redirect
-          // Store it back briefly for the destination page to pick up
           sessionStorage.setItem('resumeAction', pendingRaw)
         }
 

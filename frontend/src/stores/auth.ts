@@ -4,6 +4,8 @@ interface User {
   id: string
   email: string | null
   is_anonymous: boolean
+  display_name: string | null
+  avatar_url: string | null
 }
 
 interface AuthState {

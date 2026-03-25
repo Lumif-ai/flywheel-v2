@@ -1,5 +1,4 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { useNavigate } from 'react-router'
 import { useBriefing } from '../hooks/useBriefing'
 import { useStreams } from '../hooks/useStreams'
 import { BriefingCard } from './BriefingCard'
@@ -67,7 +66,6 @@ function formatRelativeTime(dateStr: string): string {
 }
 
 export function BriefingPage() {
-  const navigate = useNavigate()
   const { data, isLoading, error } = useBriefing()
   const { data: streamsData } = useStreams()
   const user = useAuthStore(state => state.user)
@@ -135,16 +133,11 @@ export function BriefingPage() {
 
   const isFirstVisit = isFirstVisitLifecycle && !isLoading
 
-  // Redirect unonboarded users to onboarding
-  // No onboarding intel + no streams = user hasn't set up their company
+  // Detect empty workspace: no intel + no streams for returning users
+  // Instead of redirecting, we show inline CTAs to start onboarding
   const hasNoData = !isLoading && data && !data.is_first_visit
     && (data.knowledge_health?.total_entries ?? 0) === 0
     && streams.length === 0
-  useEffect(() => {
-    if (hasNoData) {
-      navigate('/onboarding', { replace: true })
-    }
-  }, [hasNoData, navigate])
 
   if (error) {
     return (
@@ -152,6 +145,60 @@ export function BriefingPage() {
         <p className="text-sm text-destructive">
           Failed to load briefing. Please try again later.
         </p>
+      </div>
+    )
+  }
+
+  // Empty workspace: user has no data but is NOT a first-visit user.
+  // Show inline CTAs instead of force-redirecting to /onboarding.
+  if (hasNoData) {
+    return (
+      <div className="flex h-full flex-col">
+        <div
+          className="flex-1 overflow-y-auto page-enter"
+          style={{ padding: spacing.pageDesktop, background: colors.pageBg }}
+        >
+          <div
+            className="mx-auto flex flex-col items-center justify-center text-center"
+            style={{ maxWidth: spacing.maxGrid, paddingTop: '80px' }}
+          >
+            <EmptyWorkspaceIllustration />
+            <h2
+              className="mt-5"
+              style={{
+                fontSize: typography.sectionTitle.size,
+                fontWeight: typography.sectionTitle.weight,
+                color: colors.headingText,
+              }}
+            >
+              Your workspace is ready
+            </h2>
+            <p
+              className="mt-1 max-w-sm"
+              style={{
+                fontSize: typography.body.size,
+                color: colors.secondaryText,
+              }}
+            >
+              Start by setting up your company intelligence
+            </p>
+            <Link
+              to="/onboarding"
+              className="mt-5 inline-flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-medium no-underline transition-all duration-200 hover:shadow-md hover:-translate-y-px"
+              style={{
+                background: 'linear-gradient(135deg, var(--brand-coral), var(--brand-gradient-end))',
+                color: '#fff',
+              }}
+            >
+              Set up company intelligence
+            </Link>
+          </div>
+        </div>
+
+        {/* Global Chat Input - pinned at bottom */}
+        <div className="border-t bg-background p-4">
+          <GlobalChatInput />
+        </div>
       </div>
     )
   }
