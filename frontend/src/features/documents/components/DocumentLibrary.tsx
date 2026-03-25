@@ -180,7 +180,7 @@ export function DocumentLibrary() {
           marginBottom: spacing.card,
         }}
       >
-        Documents
+        Library
       </h1>
 
       {/* Filter bar */}
@@ -224,10 +224,10 @@ export function DocumentLibrary() {
             <EmptyDocumentsIllustration />
           </div>
           <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-            Your briefings and research will live here
+            Your intelligence library grows with every skill you run
           </p>
           <p className="mt-1" style={{ fontSize: typography.caption.size, color: colors.secondaryText, opacity: 0.7 }}>
-            Created automatically when you run skills
+            Briefings, research, and analysis — all saved here
           </p>
         </div>
       )}

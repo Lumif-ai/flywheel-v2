@@ -79,10 +79,10 @@ export function AppSidebar() {
                 <SidebarMenuButton
                   isActive={location.pathname.startsWith('/documents')}
                   render={<NavLink to="/documents" />}
-                  tooltip="Documents"
+                  tooltip="Library"
                 >
                   <FileText className="size-4" />
-                  <span>Documents</span>
+                  <span>Library</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

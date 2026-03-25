@@ -56,6 +56,9 @@ export function AppRoutes() {
       {/* Public share page -- no auth required */}
       <Route path="/d/:token" element={<Suspense fallback={null}><SharedDocumentPage /></Suspense>} />
 
+      {/* Library alias */}
+      <Route path="/library" element={<Navigate to="/documents" replace />} />
+
       {/* Redirects from old routes */}
       <Route path="/hq" element={<Navigate to="/" replace />} />
       <Route path="/prep" element={<Navigate to="/" replace />} />
