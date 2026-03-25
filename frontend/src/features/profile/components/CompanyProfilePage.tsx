@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react'
-import { Link } from 'react-router'
+import { useQueryClient } from '@tanstack/react-query'
 import {
   Building2,
   Package,
@@ -8,11 +8,12 @@ import {
   Edit3,
   Check,
   X,
-  Plus,
   Upload,
   FileText,
   Globe,
   Clock,
+  AlertCircle,
+  RefreshCw,
 } from 'lucide-react'
 import { colors, spacing, typography } from '@/lib/design-tokens'
 import {
@@ -22,7 +23,29 @@ import {
   useLinkProfileFile,
   type ProfileGroup,
 } from '../hooks/useCompanyProfile'
+import { useProfileCrawl } from '../hooks/useProfileCrawl'
+import { LiveCrawl } from '@/features/onboarding/components/LiveCrawl'
 import { api } from '@/lib/api'
+
+// ---------------------------------------------------------------------------
+// URL helpers (inlined from UrlInput)
+// ---------------------------------------------------------------------------
+
+function normalizeUrl(input: string): string {
+  const trimmed = input.trim()
+  if (!trimmed) return ''
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  return `https://${trimmed}`
+}
+
+function isValidUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url)
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:'
+  } catch {
+    return false
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Icon map: file_name -> lucide icon component
@@ -346,6 +369,239 @@ function UploadedFilesSection({ uploadedFiles, onLink, linking }: UploadedFileSe
 }
 
 // ---------------------------------------------------------------------------
+// Empty state: URL crawl panel
+// ---------------------------------------------------------------------------
+
+interface CrawlPanelProps {
+  defaultUrl: string
+}
+
+function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
+  const crawl = useProfileCrawl()
+  const [url, setUrl] = useState(defaultUrl)
+  const [urlError, setUrlError] = useState<string | null>(null)
+
+  const handleAnalyze = () => {
+    const normalized = normalizeUrl(url)
+    if (!normalized) return
+    if (!isValidUrl(normalized)) {
+      setUrlError('Please enter a valid URL')
+      return
+    }
+    setUrlError(null)
+    crawl.startCrawl(normalized)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') handleAnalyze()
+  }
+
+  if (crawl.phase === 'crawling' || crawl.phase === 'complete') {
+    return (
+      <div
+        className="rounded-xl border shadow-sm overflow-hidden p-6"
+        style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
+      >
+        <LiveCrawl
+          crawlItems={crawl.crawlItems}
+          crawlTotal={crawl.crawlTotal}
+          crawlStatus={crawl.crawlStatus}
+          isComplete={crawl.phase === 'complete'}
+          onContinue={() => {}}
+        />
+      </div>
+    )
+  }
+
+  if (crawl.phase === 'error') {
+    return (
+      <div
+        className="rounded-xl border shadow-sm overflow-hidden p-8 text-center"
+        style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
+      >
+        <AlertCircle
+          className="size-10 mx-auto mb-3"
+          style={{ color: '#EF4444' }}
+        />
+        <p className="text-sm mb-4" style={{ color: colors.bodyText }}>
+          {crawl.error?.message ?? 'Something went wrong'}
+        </p>
+        {crawl.error?.retryable && (
+          <button
+            onClick={crawl.retry}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium text-white"
+            style={{ backgroundColor: colors.brandCoral }}
+          >
+            <RefreshCw className="size-3.5" />
+            Try again
+          </button>
+        )}
+      </div>
+    )
+  }
+
+  // idle
+  return (
+    <div
+      className="rounded-xl border shadow-sm overflow-hidden p-8"
+      style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
+    >
+      <div className="max-w-lg mx-auto text-center">
+        <Globe
+          className="size-10 mx-auto mb-4"
+          style={{ color: colors.brandCoral, opacity: 0.8 }}
+        />
+        <h2
+          className="font-semibold mb-2"
+          style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
+        >
+          Populate your company profile
+        </h2>
+        <p className="text-sm mb-6" style={{ color: colors.secondaryText }}>
+          Enter your company website to automatically discover positioning, products, competitors, and more.
+        </p>
+        <div className="flex gap-2">
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => {
+              setUrl(e.target.value)
+              setUrlError(null)
+            }}
+            onKeyDown={handleKeyDown}
+            placeholder="https://yourcompany.com"
+            className="flex-1 rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
+            style={{
+              borderColor: urlError ? '#EF4444' : colors.subtleBorder,
+              color: colors.bodyText,
+              backgroundColor: colors.pageBg,
+              // @ts-expect-error CSS variable
+              '--tw-ring-color': colors.brandCoral,
+            }}
+          />
+          <button
+            onClick={handleAnalyze}
+            disabled={!url.trim()}
+            className="px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-opacity disabled:opacity-50"
+            style={{ backgroundColor: colors.brandCoral }}
+          >
+            Analyze
+          </button>
+        </div>
+        {urlError && (
+          <p className="text-xs mt-2 text-left" style={{ color: '#EF4444' }}>
+            {urlError}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Empty state: Document upload + analyze panel
+// ---------------------------------------------------------------------------
+
+function DocumentAnalyzePanel() {
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const [analyzing, setAnalyzing] = useState(false)
+  const [analyzeError, setAnalyzeError] = useState<string | null>(null)
+  const queryClient = useQueryClient()
+  const linkFile = useLinkProfileFile()
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setAnalyzing(true)
+    setAnalyzeError(null)
+    try {
+      // 1. Upload file
+      const formData = new FormData()
+      formData.append('file', file)
+      const { token } = await import('@/stores/auth').then((m) => ({
+        token: m.useAuthStore.getState().token,
+      }))
+      const uploadRes = await fetch('/api/v1/files/upload', {
+        method: 'POST',
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        body: formData,
+      })
+      if (!uploadRes.ok) throw new Error('Upload failed')
+      const uploadData = (await uploadRes.json()) as { id: string }
+      const fileId = uploadData.id
+
+      // 2. Link file to profile
+      await linkFile.mutateAsync(fileId)
+
+      // 3. Trigger analysis
+      await api.post('/profile/analyze-document', { file_id: fileId })
+
+      // 4. Refresh profile data
+      queryClient.invalidateQueries({ queryKey: ['company-profile'] })
+    } catch (err) {
+      console.error('Document analyze failed:', err)
+      setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed')
+    } finally {
+      setAnalyzing(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  return (
+    <div
+      className="rounded-xl border shadow-sm overflow-hidden p-8"
+      style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
+    >
+      <div className="max-w-lg mx-auto text-center">
+        <FileText
+          className="size-10 mx-auto mb-4"
+          style={{ color: colors.brandCoral, opacity: 0.8 }}
+        />
+        <h2
+          className="font-semibold mb-2"
+          style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
+        >
+          Or upload a company document
+        </h2>
+        <p className="text-sm mb-6" style={{ color: colors.secondaryText }}>
+          Upload a PDF, Word doc, or text file containing company information.
+        </p>
+        <button
+          onClick={() => fileInputRef.current?.click()}
+          disabled={analyzing}
+          className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium text-white transition-opacity disabled:opacity-60"
+          style={{ backgroundColor: colors.brandCoral }}
+        >
+          {analyzing ? (
+            <>
+              <span className="inline-block w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              Analyzing document...
+            </>
+          ) : (
+            <>
+              <Upload className="size-4" />
+              Upload &amp; Analyze
+            </>
+          )}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          className="hidden"
+          accept=".pdf,.doc,.docx,.txt,.md"
+          onChange={handleFileChange}
+        />
+        {analyzeError && (
+          <p className="text-xs mt-3" style={{ color: '#EF4444' }}>
+            {analyzeError}
+          </p>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
@@ -399,6 +655,8 @@ export function CompanyProfilePage() {
         year: 'numeric',
       })
     : null
+
+  const defaultCrawlUrl = profile.domain ? `https://${profile.domain}` : ''
 
   return (
     <div
@@ -515,34 +773,32 @@ export function CompanyProfilePage() {
           </div>
         )}
 
-        {/* Empty state */}
+        {/* Empty state: inline crawl + document analyze */}
         {!hasGroups ? (
-          <div
-            className="rounded-xl border p-12 text-center"
-            style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
-          >
-            <Building2
-              className="size-12 mx-auto mb-4"
-              style={{ color: colors.secondaryText, opacity: 0.4 }}
-            />
-            <h2
-              className="font-semibold mb-2"
-              style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
-            >
-              No company intel yet
-            </h2>
-            <p className="text-sm mb-6" style={{ color: colors.secondaryText }}>
-              Run onboarding to automatically populate your company profile with positioning,
-              products, competitive intel, and more.
-            </p>
-            <Link
-              to="/onboarding"
-              className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-medium text-white"
-              style={{ backgroundColor: colors.brandCoral }}
-            >
-              <Plus className="size-4" />
-              Run onboarding
-            </Link>
+          <div className="space-y-4">
+            {/* URL crawl panel */}
+            <CrawlPanel defaultUrl={defaultCrawlUrl} />
+
+            {/* Divider */}
+            <div className="flex items-center gap-4 px-4">
+              <div className="flex-1 h-px" style={{ backgroundColor: colors.subtleBorder }} />
+              <span className="text-xs font-medium" style={{ color: colors.secondaryText }}>
+                or
+              </span>
+              <div className="flex-1 h-px" style={{ backgroundColor: colors.subtleBorder }} />
+            </div>
+
+            {/* Document upload + analyze panel */}
+            <DocumentAnalyzePanel />
+
+            {/* Show linked files if any exist */}
+            {profile.uploaded_files.length > 0 && (
+              <UploadedFilesSection
+                uploadedFiles={profile.uploaded_files}
+                onLink={(fileId) => linkFile.mutate(fileId)}
+                linking={linkFile.isPending}
+              />
+            )}
           </div>
         ) : (
           <div className="space-y-4">
