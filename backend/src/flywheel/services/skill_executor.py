@@ -57,8 +57,8 @@ async def preload_tenant_context(
     """Load key context files for a tenant to inject into LLM prompts.
 
     Returns a formatted string with sections for each context file, or empty
-    string if nothing is found. Used by skill execution AND chat orchestration
-    so every LLM interaction is grounded in the tenant's stored knowledge.
+    string if nothing is found. Uses a SINGLE query for all files to avoid
+    N+1 round-trips to the database.
     """
     from flywheel.db.models import ContextEntry as _CE
     from sqlalchemy import select as _sel
@@ -68,31 +68,35 @@ async def preload_tenant_context(
         "product-modules", "market-taxonomy", "leadership",
         "company-details", "tech-stack",
     ]
-    ctx_parts: list[str] = []
-    for cf in ctx_files:
-        try:
-            async with factory() as _s:
-                await _s.execute(
-                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                    {"tid": str(tenant_id)},
+    try:
+        async with factory() as _s:
+            await _s.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            rows = (await _s.execute(
+                _sel(_CE.file_name, _CE.content).where(
+                    _CE.tenant_id == tenant_id,
+                    _CE.file_name.in_(ctx_files),
+                    _CE.deleted_at.is_(None),
                 )
-                _rows = (await _s.execute(
-                    _sel(_CE.content).where(
-                        _CE.tenant_id == tenant_id,
-                        _CE.file_name == cf,
-                        _CE.deleted_at.is_(None),
-                    ).limit(5)
-                )).scalars().all()
-                if _rows:
-                    ctx_parts.append(
-                        f"### {cf}\n"
-                        + "\n".join(
-                            r[:500] if isinstance(r, str) else str(r)[:500]
-                            for r in _rows
-                        )
-                    )
-        except Exception:
-            continue
+            )).all()
+    except Exception:
+        return ""
+
+    # Group by file_name
+    by_file: dict[str, list[str]] = {}
+    for file_name, content in rows:
+        if content:
+            by_file.setdefault(file_name, []).append(
+                content[:500] if isinstance(content, str) else str(content)[:500]
+            )
+
+    ctx_parts = [
+        f"### {fn}\n" + "\n".join(entries)
+        for fn in ctx_files
+        if (entries := by_file.get(fn))
+    ]
     return "\n\n".join(ctx_parts) if ctx_parts else ""
 
 
