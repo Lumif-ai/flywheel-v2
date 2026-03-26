@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 ## Current Position
 
 Phase: 52 of 53 (Backend APIs)
-Plan: 2 of N in current phase
-Status: Plan 52-02 complete
-Last activity: 2026-03-26 — 52-02 complete: outreach API with AUTO-01 graduation and pipeline view
+Plan: 2 of 3 in current phase (52-01 and 52-02 complete)
+Status: In progress
+Last activity: 2026-03-26 — 52-01 complete: Accounts and Contacts REST API — 8 endpoints (950950b); 52-02 complete: outreach API with AUTO-01 graduation and pipeline view (9df1119)
 
 Progress: [███░░░░░░░] 30% (v2.0 milestone)
 
@@ -23,6 +23,7 @@ Progress: [███░░░░░░░] 30% (v2.0 milestone)
 - Phase 50, Plan 01: 2 min (1 task, 1 file)
 - Phase 50, Plan 02: 6 min (2 tasks, 4 files)
 - Phase 51, Plan 01: 7 min (2 tasks, 4 files)
+- Phase 52, Plan 01: 2 min (2 tasks, 2 files)
 - Phase 52, Plan 02: 2 min (2 tasks, 2 files)
 
 **Previous milestone (v1.0 Email Copilot):**
@@ -51,6 +52,9 @@ Recent decisions affecting current work:
 - [51-01]: In-memory dedup before DB calls reduces round trips on re-runs
 - [Phase 52-backend-apis]: No-prefix router pattern for outreach endpoints spanning two URL groups
 - [Phase 52-backend-apis]: _graduate_account() shared helper for consistent auto/manual graduation logic
+- [52-01]: Correlated subquery for contact_count in account list query — avoids left join complexity when counting subquery already scoped
+- [52-01]: 3-source timeline (outreach, context_entries, uploaded_files) merged in Python — simpler than UNION ALL with mismatched column shapes
+- [52-01]: next_action_due accepted as ISO string in UpdateAccountRequest to simplify frontend integration
 
 ### Pending Todos
 
@@ -63,5 +67,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-26
-Stopped at: Completed 52-02-PLAN.md — outreach API with AUTO-01 graduation and pipeline view (9df1119)
+Stopped at: Completed 52-01-PLAN.md — Accounts and Contacts REST API 8 endpoints (950950b)
 Resume file: None
