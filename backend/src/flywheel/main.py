@@ -41,6 +41,8 @@ from flywheel.api.team_onboarding import router as team_onboarding_router
 from flywheel.api.tenant import router as tenant_router
 from flywheel.api.user import router as user_router
 from flywheel.api.work_items import router as work_items_router
+from flywheel.api.outreach import router as outreach_router
+from flywheel.api.accounts import router as accounts_router
 from flywheel.config import settings
 from flywheel.middleware.rate_limit import limiter
 
@@ -166,6 +168,7 @@ def create_app() -> FastAPI:
     app.include_router(team_onboarding_router, prefix="/api/v1")
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(agent_ws_router, prefix="/api/v1")
+    app.include_router(outreach_router, prefix="/api/v1")
 
     return app
 
