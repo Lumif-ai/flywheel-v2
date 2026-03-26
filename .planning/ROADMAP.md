@@ -1,29 +1,14 @@
-# Roadmap: Flywheel V2 — Email Copilot
+# Roadmap: Flywheel V2
 
-## Overview
+## Milestones
 
-The email copilot adds Gmail read sync, context-powered email scoring, voice-learned draft generation, and a review UI on top of Flywheel V2's existing infrastructure. Six phases build strictly in dependency order: data layer and OAuth foundation first, then sync worker and voice extraction, then the scorer skill, then the drafter skill, then the API and frontend, and finally the feedback flywheel. Nothing ships to users until Phase 5; the first five phases create the invisible machinery that makes Phase 5 feel intelligent from day one.
-
-## Milestone: v1.0 — Email Copilot
-
-**Milestone Goal:** Ship a dogfooding-ready email copilot that syncs Gmail, scores emails using context store intelligence, drafts replies in the user's voice, and provides a review UI for approval before any email is sent.
+- ✅ **v1.0 Email Copilot** — Phases 1–6 + patches 48, 49, 49.1 (shipped 2026-03-25)
+- 🚧 **v2.0 AI-Native CRM** — Phases 50–53 (in progress)
 
 ## Phases
 
-**Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
-
-Decimal phases appear between their surrounding integers in numeric order.
-
-- [x] **Phase 1: Data Layer and Gmail Foundation** - DB models, migrations, and separate Gmail read OAuth ✓ (2026-03-24)
-- [x] **Phase 2: Sync Worker and Voice Profile** - Background polling, incremental sync, and voice extraction ✓ (2026-03-24)
-- [x] **Phase 3: Email Scorer Skill** - Context-powered 5-tier scoring via skill executor ✓ (2026-03-24)
-- [x] **Phase 4: Email Drafter Skill** - On-demand draft generation with voice profile injection ✓ (2026-03-24)
-- [x] **Phase 5: Review API and Frontend** - REST endpoints and scored inbox with draft approval UI ✓ (2026-03-25)
-- [ ] **Phase 6: Feedback Flywheel** - Edit-to-learn voice updates, re-scoring on thread activity
-
-## Phase Details
+<details>
+<summary>✅ v1.0 Email Copilot (Phases 1–6, 48–49.1) — SHIPPED 2026-03-25</summary>
 
 ### Phase 1: Data Layer and Gmail Foundation
 
@@ -77,8 +62,6 @@ Plans:
 **Depends on:** Phase 2
 
 **Requirements:** SCORE-01, SCORE-02, SCORE-03, SCORE-04, SCORE-05, SCORE-06, SCORE-07, SCORE-08, SCORE-09
-
-**Research flag:** Needs `/gsd:research-phase` during planning. LLM prompt engineering for multi-signal scoring (sender entity weight vs. urgency keywords vs. thread staleness) is the highest-risk open design question.
 
 **Success Criteria** (what must be TRUE):
   1. After sync, each email has an EmailScore row with priority 1-5, a category, a suggested action, and a non-empty reasoning string
@@ -159,24 +142,167 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md — Voice updater engine (diff analysis + Haiku profile merge), dismiss tracker engine, approve endpoint wiring, scorer dismiss injection
-- [ ] 06-02-PLAN.md — Thread re-scoring verification (FEED-03 docs), config wiring for dismiss parameters
+- [x] 06-01-PLAN.md — Voice updater engine (diff analysis + Haiku profile merge), dismiss tracker engine, approve endpoint wiring, scorer dismiss injection ✓
+- [x] 06-02-PLAN.md — Thread re-scoring verification (FEED-03 docs), config wiring for dismiss parameters ✓
+
+---
+
+### Phase 48: Auth Foundation and Session Resilience (INSERTED)
+
+**Goal:** Auth is solid — tenant resolution works, sessions survive refresh, and no user hits a silent 401 loop.
+
+**Depends on:** Phase 6
+
+**Plans:** 1 plan
+
+Plans:
+- [x] 48-01-PLAN.md ✓
+
+---
+
+### Phase 49: Living Company Profile (INSERTED)
+
+**Goal:** The Company Profile document is auto-generated and stays current — no manual effort to maintain the anchor context document.
+
+**Depends on:** Phase 48
+
+**Plans:** 1 plan
+
+Plans:
+- [x] 49-01-PLAN.md ✓
+
+---
+
+### Phase 49.1: Web Research Enrichment on Document Upload (INSERTED)
+
+**Goal:** When a document is uploaded, the system auto-enriches related company context with fresh web intelligence.
+
+**Depends on:** Phase 49
+
+**Plans:** 1 plan
+
+Plans:
+- [x] 49.1-01-PLAN.md ✓
+
+</details>
+
+---
+
+### 🚧 v2.0 AI-Native CRM (In Progress)
+
+**Milestone Goal:** Founders never lose track of an account again — a single screen with all contacts, timeline, commitments, intel, and next actions, all auto-populated from skill runs.
+
+---
+
+#### Phase 50: Data Model and Utilities
+
+**Goal:** The CRM schema exists in the database and the normalization utility is available — the foundation that the seed CLI, APIs, and automation all depend on.
+
+**Depends on:** Phase 49.1
+
+**Requirements:** DATA-01, DATA-02, UTIL-01
+
+**Success Criteria** (what must be TRUE):
+  1. Running `alembic upgrade head` creates `accounts`, `account_contacts`, and `outreach_activities` tables with RLS policies, and adds `account_id` column to `context_entries` — verifiable via `psql \d accounts`
+  2. Account, AccountContact, OutreachActivity ORM models can be imported and used in a Python shell session without errors; relationships navigate correctly (account.contacts, account.outreach_activities)
+  3. `normalize_company_name("Acme Corp., Inc.")` returns the same value as `normalize_company_name("acme corp")` — collision-free deduplication demonstrable with a handful of known edge cases
+
+**Plans:** 2 plans
+
+Plans:
+- [x] 50-01-PLAN.md — Alembic migration (accounts, account_contacts, outreach_activities tables, RLS policies, indexes, account_id FK on context_entries) ✓
+- [x] 50-02-PLAN.md — ORM models (Account, AccountContact, OutreachActivity, ContextEntry update) and normalize_company_name utility ✓
+
+---
+
+#### Phase 51: Seed CLI
+
+**Goal:** The CRM tables are populated with real data from the GTM stack files — developers and the product owner can open the Accounts page and see actual companies from day one.
+
+**Depends on:** Phase 50
+
+**Requirements:** DATA-03
+
+**Success Criteria** (what must be TRUE):
+  1. Running `flywheel db seed-crm` completes without errors and populates Account, AccountContact, and OutreachActivity rows drawn from gtm-leads-master.xlsx, outreach-tracker.csv, scored CSVs, and pipeline-runs.json
+  2. Running `flywheel db seed-crm` a second time produces no duplicate rows — idempotency is verifiable by comparing row counts before and after the second run
+  3. Two company names that differ only by suffix or casing (e.g., "Stripe Inc." and "stripe") resolve to the same Account row (deduplication via normalization utility)
+
+**Plans:** TBD
+
+Plans:
+- [ ] 51-01-PLAN.md — seed-crm CLI command with file parsing, normalization, deduplication, and idempotent upsert for all three tables
+
+---
+
+#### Phase 52: Backend APIs
+
+**Goal:** Every CRM data surface has a REST API — accounts, contacts, outreach, timeline, pipeline, pulse, and graduation automation all respond correctly before any frontend is built.
+
+**Depends on:** Phase 51
+
+**Requirements:** API-01, API-02, API-03, API-04, API-05, AUTO-01
+
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/v1/accounts/` returns paginated, filterable, searchable, sortable results; `GET /api/v1/accounts/{id}` returns full detail including contacts list and recent timeline entries
+  2. `GET /api/v1/accounts/{id}/timeline` returns a chronological feed that interleaves outreach activities, context entries, and documents — each item carries a `type` discriminator field
+  3. `GET /api/v1/pulse/` returns a prioritized signal list with at least `reply_received`, `followup_overdue`, and `bump_suggested` signal types populated from seeded data
+  4. `GET /api/v1/pipeline/` returns only prospect-stage accounts sorted by fit score; `POST /api/v1/accounts/{id}/graduate` advances the account to engaged and logs a context entry
+  5. When an outreach activity is updated to `status="replied"`, the parent account status automatically changes to `engaged` — observable by fetching the account before and after the PATCH
+
+**Plans:** TBD
+
+Plans:
+- [ ] 52-01-PLAN.md — Accounts and Contacts REST API (list, detail, create, update, graduate endpoint, contacts CRUD)
+- [ ] 52-02-PLAN.md — Outreach Activities REST API, Pipeline endpoint, graduation automation (AUTO-01)
+- [ ] 52-03-PLAN.md — Account Timeline API (unified chronological feed with type discriminator) and Pulse Signals API
+
+---
+
+#### Phase 53: Frontend
+
+**Goal:** The product is usable — founders can open Accounts, drill into a company, work the Pipeline, and see Pulse signals on their Briefing page without leaving the browser.
+
+**Depends on:** Phase 52
+
+**Requirements:** UI-01, UI-02, UI-03, UI-04, PULSE-01
+
+**Success Criteria** (what must be TRUE):
+  1. User navigates to `/accounts` via the sidebar and sees a table of companies with name, status badge, fit score/tier, contact count, last interaction, and next action due — filter, search, sort, and pagination all work
+  2. User clicks an account row and lands on `/accounts/{id}` showing the company header, contacts panel on the left, chronological timeline in the center, intel sidebar on the right, and an action bar with Prep/Research/Follow-up buttons
+  3. User navigates to `/pipeline` and sees only prospect-stage accounts sorted by fit score with outreach status, days since last action, and a Graduate button — clicking Graduate advances the account and removes it from the Pipeline view
+  4. Accounts and Pipeline links appear in the sidebar between Library and Email with Building2 and TrendingUp icons respectively; active route highlights correctly
+  5. When the Briefing page is open with Revenue focus active, the top 5 Pulse signals appear as clickable cards that navigate to the relevant account
+
+**Plans:** TBD
+
+Plans:
+- [ ] 53-01-PLAN.md — Accounts list page (/accounts) with table, filters, search, sort, pagination, and React Query integration
+- [ ] 53-02-PLAN.md — Account detail page (/accounts/{id}) with contacts panel, timeline feed, intel sidebar, commitments, and action bar
+- [ ] 53-03-PLAN.md — Pipeline page (/pipeline), sidebar navigation links (UI-04), and Pulse feed component on Briefing page (PULSE-01)
 
 ---
 
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Data Layer and Gmail Foundation | 2/2 | ✓ Complete | 2026-03-24 |
-| 2. Sync Worker and Voice Profile | 2/2 | ✓ Complete | 2026-03-24 |
-| 3. Email Scorer Skill | 2/2 | ✓ Complete | 2026-03-24 |
-| 4. Email Drafter Skill | 2/2 | ✓ Complete | 2026-03-24 |
-| 5. Review API and Frontend | 4/4 | ✓ Complete | 2026-03-25 |
-| 6. Feedback Flywheel | 0/2 | Not started | - |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Data Layer and Gmail Foundation | v1.0 | 2/2 | ✓ Complete | 2026-03-24 |
+| 2. Sync Worker and Voice Profile | v1.0 | 2/2 | ✓ Complete | 2026-03-24 |
+| 3. Email Scorer Skill | v1.0 | 2/2 | ✓ Complete | 2026-03-24 |
+| 4. Email Drafter Skill | v1.0 | 2/2 | ✓ Complete | 2026-03-24 |
+| 5. Review API and Frontend | v1.0 | 4/4 | ✓ Complete | 2026-03-25 |
+| 6. Feedback Flywheel | v1.0 | 2/2 | ✓ Complete | 2026-03-25 |
+| 48. Auth Foundation and Session Resilience | v1.0 | 1/1 | ✓ Complete | — |
+| 49. Living Company Profile | v1.0 | 1/1 | ✓ Complete | — |
+| 49.1. Web Research Enrichment on Document Upload | v1.0 | 1/1 | ✓ Complete | — |
+| 50. Data Model and Utilities | v2.0 | 2/2 | ✓ Complete | 2026-03-26 |
+| 51. Seed CLI | v2.0 | 0/1 | Not started | — |
+| 52. Backend APIs | v2.0 | 0/3 | Not started | — |
+| 53. Frontend | v2.0 | 0/3 | Not started | — |
 
 ---
 *Roadmap created: 2026-03-24*
-*Milestone: v1.0 Email Copilot*
+*v2.0 milestone added: 2026-03-26*

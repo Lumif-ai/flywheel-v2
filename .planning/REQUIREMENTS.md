@@ -1,182 +1,93 @@
-# Requirements: Flywheel V2 — Email Copilot
+# Requirements: Flywheel V2 — AI-Native CRM
 
-**Defined:** 2026-03-24
-**Core Value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
+**Defined:** 2026-03-26
+**Core Value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
 
-## v1 Requirements
+## v2.0 Requirements
 
-Requirements for initial release. Each maps to roadmap phases.
+Requirements for the AI-Native CRM milestone. Each maps to roadmap phases.
 
-### Gmail Integration
+### Data Model & Migration
 
-- [ ] **GMAIL-01**: System can initiate OAuth flow with gmail.readonly + gmail.modify + gmail.send scopes (separate from existing send-only integration)
-- [ ] **GMAIL-02**: System stores Gmail read credentials as a separate Integration row (does not modify existing gmail send integration)
-- [ ] **GMAIL-03**: System polls Gmail every 5 minutes via background worker for new messages using incremental sync (historyId)
-- [ ] **GMAIL-04**: System falls back to full sync when historyId expires or returns 404
-- [ ] **GMAIL-05**: System imports user's last 200 sent emails and filters to ~100 substantive (>3 sentences) for voice profile extraction
-- [ ] **GMAIL-06**: System groups synced emails by Gmail thread_id for thread-level display
-- [ ] **GMAIL-07**: System fetches full email body on-demand via Gmail API when user opens thread or drafting is triggered (no permanent body storage)
-- [ ] **GMAIL-08**: System handles concurrent polling for multiple users with asyncio.gather and per-integration timeouts
+- [x] **DATA-01**: Alembic migration creates `accounts`, `account_contacts`, and `outreach_activities` tables with RLS policies, indexes, and `account_id` column on `context_entries`
+- [x] **DATA-02**: ORM models for Account, AccountContact, and OutreachActivity with all columns, relationships, and ContextEntry updated with optional account_id FK
+- [ ] **DATA-03**: Seed CLI `flywheel db seed-crm` populates CRM tables from existing GTM stack files (gtm-leads-master.xlsx, outreach-tracker.csv, scored CSVs, pipeline-runs.json) — idempotent, deduplicating, with company name normalization
 
-### Email Scoring
+### Backend API
 
-- [ ] **SCORE-01**: System scores each email message on a 1-5 priority scale (5=critical, 1=noise)
-- [ ] **SCORE-02**: System cross-references sender email against context_entities (people, companies) to inform scoring
-- [ ] **SCORE-03**: System cross-references email subject/snippet against context_entries via full-text search to detect topic relevance
-- [ ] **SCORE-04**: System classifies emails into categories (meeting_followup, deal_related, action_required, informational, marketing, personal)
-- [ ] **SCORE-05**: System routes scored emails to suggested actions (notify, draft_reply, file, archive) based on priority
-- [ ] **SCORE-06**: System provides scoring reasoning and context references for each score (transparency)
-- [ ] **SCORE-07**: System displays thread-level priority as the highest unhandled message score in the thread
-- [ ] **SCORE-08**: System re-scores threads when new messages arrive
-- [ ] **SCORE-09**: System biases toward aggressive escalation over conservative suppression (false negative is 1000x worse than false positive)
+- [ ] **API-01**: Accounts REST API — `GET /api/v1/accounts/` (paginated, filterable, searchable, sortable), `GET /api/v1/accounts/{id}` (full detail with contacts, timeline, intel), `POST /api/v1/accounts/`, `PATCH /api/v1/accounts/{id}`, `POST /api/v1/accounts/{id}/graduate`
+- [ ] **API-02**: Account Contacts REST API — `GET /api/v1/accounts/{id}/contacts`, `POST /api/v1/accounts/{id}/contacts`, `PATCH /api/v1/accounts/{id}/contacts/{cid}`, `DELETE /api/v1/accounts/{id}/contacts/{cid}`
+- [ ] **API-03**: Outreach Activities REST API — `GET /api/v1/accounts/{id}/outreach`, `POST /api/v1/accounts/{id}/outreach`, `PATCH /api/v1/outreach/{id}`, `GET /api/v1/pipeline/` (cross-account pipeline view with stage filter)
+- [ ] **API-04**: Account Timeline API — `GET /api/v1/accounts/{id}/timeline` unified chronological feed combining outreach, context entries, and documents with type discriminator, pagination
+- [ ] **API-05**: Pulse Signals API — `GET /api/v1/pulse/` returns prioritized signal feed (reply_received, followup_overdue, bump_suggested, new_companies_scored)
 
-### Voice Learning
+### Frontend: Accounts
 
-- [ ] **VOICE-01**: System extracts voice profile from substantive sent emails (tone, avg length, sign-off, characteristic phrases)
-- [ ] **VOICE-02**: System filters out auto-replies, OOO messages, and calendar acceptances before voice profile extraction
-- [ ] **VOICE-03**: System stores voice profile per user (EmailVoiceProfile model)
-- [ ] **VOICE-04**: System updates voice profile when user edits drafts before sending (learns from corrections)
+- [ ] **UI-01**: Accounts list page at `/accounts` — table with name, status badge, fit score/tier, contacts count, last interaction, next action due; filter by status/focus, search, sort, pagination
+- [ ] **UI-02**: Account detail page at `/accounts/{id}` — header with company info, left panel contacts, center timeline feed, right panel intel sidebar, bottom commitments, action bar (Prep/Research/Follow-up)
 
-### Draft Generation
+### Frontend: Pipeline
 
-- [ ] **DRAFT-01**: System generates draft replies for emails scored as important (priority 3-4) using assembled context + voice profile
-- [ ] **DRAFT-02**: System fetches email body on-demand from Gmail API for draft generation (not from stored data)
-- [ ] **DRAFT-03**: System assembles relevant context from context store (meeting notes, company intel, entity relationships) for each draft
-- [ ] **DRAFT-04**: System applies voice profile (tone, length, sign-off, phrases) to generated drafts
-- [ ] **DRAFT-05**: System stores drafts with configurable visibility delay (draft_visibility_delay_days: 0 for internal, tunable for external)
-- [ ] **DRAFT-06**: User can approve a draft to send it (one-tap send via existing email dispatch)
-- [ ] **DRAFT-07**: User can edit a draft before approving (edits feed back to voice learning)
-- [ ] **DRAFT-08**: User can dismiss a draft (dismissal feeds back to scoring refinement)
+- [ ] **UI-03**: Pipeline page at `/pipeline` — table of prospect accounts sorted by fit score, with outreach status, days since last action, draft preview; filter by fit tier/outreach status, graduate action button
 
-### Review UI
+### Frontend: Navigation
 
-- [ ] **UI-01**: User can view scored email threads in a prioritized list (grouped by priority tier)
-- [ ] **UI-02**: User can view thread detail with individual message scores, reasoning, and context references
-- [ ] **UI-03**: User can approve, edit, or dismiss draft replies from the thread detail view
-- [ ] **UI-04**: User receives in-app alert for critical emails (priority 5)
-- [ ] **UI-05**: User can view daily digest of low-priority emails that were auto-filed/archived
-- [ ] **UI-06**: Thread list uses virtual scrolling for performance at scale
+- [ ] **UI-04**: Sidebar navigation — Accounts (Building2 icon) and Pipeline (TrendingUp icon) added between Library and Email, with active state highlighting
 
-### Data Model
+### Pulse & Automation
 
-- [ ] **DATA-01**: Email model stores Gmail pointer (message_id, thread_id, sender, subject, received_at, labels) — no body storage
-- [ ] **DATA-02**: EmailScore model stores priority, category, suggested_action, reasoning, context_refs, sender_entity_id
-- [ ] **DATA-03**: EmailDraft model stores draft_body, status, context_used, user_edits, visible_after
-- [ ] **DATA-04**: EmailVoiceProfile model stores tone, avg_length, sign_off, phrases, samples_analyzed
-- [ ] **DATA-05**: All models are tenant-isolated via RLS (consistent with existing architecture)
-- [ ] **DATA-06**: Alembic migration creates all new tables with proper indexes and constraints
+- [ ] **PULSE-01**: Pulse feed component on Briefing page — shows top 5 signals from Pulse API when Revenue focus is active, clickable cards linking to accounts
+- [ ] **AUTO-01**: Account graduation automation — when outreach status updated to 'replied', auto-promote prospect account to 'engaged' and log context entry
+- [x] **UTIL-01**: Company name normalization utility — `normalize_company_name()` function stripping suffixes, "The " prefix, collapsing whitespace, lowercasing for comparison
 
-### Feedback Loop
+## Future Requirements
 
-- [ ] **FEED-01**: System refines scoring based on user approve/dismiss patterns over time
-- [ ] **FEED-02**: System updates voice profile from user edits to drafts (diff analysis)
-- [ ] **FEED-03**: System re-scores threads when new messages arrive in existing threads
+Deferred beyond v2.0.
 
-### API
-
-- [ ] **API-01**: GET endpoint to list scored email threads (with pagination, filtering by priority)
-- [ ] **API-02**: GET endpoint to get thread detail (messages, scores, drafts, context refs)
-- [ ] **API-03**: POST endpoint to approve a draft (triggers send via email dispatch)
-- [ ] **API-04**: POST endpoint to dismiss a draft
-- [ ] **API-05**: PUT endpoint to edit a draft before approval
-- [ ] **API-06**: GET endpoint to get daily digest summary
-- [ ] **API-07**: POST endpoint to trigger manual Gmail sync
-
-## v2 Requirements
-
-Deferred to future release. Tracked but not in current roadmap.
-
-### Notifications
-
-- **NOTIF-01**: User receives Slack DM for critical emails
-- **NOTIF-02**: User can configure notification preferences (which priority levels trigger alerts)
-
-### CLI
-
-- **CLI-01**: User can check email status from terminal (flywheel email status)
-- **CLI-02**: User can approve/dismiss drafts from terminal (flywheel email approve <id>)
-
-### Advanced
-
-- **ADV-01**: User can manage multiple Gmail accounts
-- **ADV-02**: System uses Gmail push notifications (Pub/Sub) instead of polling for real-time sync
-- **ADV-03**: Morning briefing mode (conversational summary instead of thread list)
-- **ADV-04**: System can auto-unsubscribe from marketing emails on user confirmation
+- **STAGE-01**: Custom pipeline stages (currently fixed: scored → sent → awaiting → replied → graduated)
+- **CAL-01**: Calendar integration for auto-detecting meetings with accounts
+- **NOTIF-01**: Slack/email notification delivery for Pulse signals
+- **MOBILE-01**: Mobile-optimized views
+- **KANBAN-01**: Kanban drag-and-drop for Pipeline
+- **BULK-01**: Bulk outreach sending from Pipeline UI
+- **DEDUP-01**: Account merge/dedup UI
 
 ## Out of Scope
 
 | Feature | Reason |
 |---------|--------|
-| Auto-send / YOLO mode | Trust must be earned first; all replies are drafts for review in v1 |
-| Morning briefing UX | Long-term vision requiring proven trust and usage patterns |
-| Email body permanent storage | Privacy risk; extract context, fetch on-demand |
-| Gmail push notifications (Pub/Sub) | Premature optimization; polling is sufficient for MVP; requires GCP infrastructure |
-| Multi-account Gmail | Single account sufficient for dogfooding; adds OAuth complexity |
-| Outlook/Microsoft email support | Gmail-first; Outlook can follow same patterns later |
-| Auto-unsubscribe actions | Suggest only, don't act — too risky for v1 |
-| Claude Code skill version | Platform feature is architecturally superior (always-on, direct DB, rich UI) |
+| General-purpose CRM (deals, forecasting, custom stages) | This is a view into intelligence, not a traditional CRM |
+| Email sending from UI | Outreach happens through Claude Code skills |
+| Passive email inbox capture | Only skill-generated outreach tracked |
+| Manual data entry forms | Accounts/contacts/outreach created by skills and seed commands |
+| Standalone contact view | Company-first architecture — contacts belong to accounts |
+| Calendar integration | Meeting signals come from skill runs, not Google Calendar sync |
 
 ## Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-01 | Phase 1 | Pending |
-| DATA-02 | Phase 1 | Pending |
-| DATA-03 | Phase 1 | Pending |
-| DATA-04 | Phase 1 | Pending |
-| DATA-05 | Phase 1 | Pending |
-| DATA-06 | Phase 1 | Pending |
-| GMAIL-01 | Phase 1 | Pending |
-| GMAIL-02 | Phase 1 | Pending |
-| GMAIL-03 | Phase 2 | Pending |
-| GMAIL-04 | Phase 2 | Pending |
-| GMAIL-05 | Phase 2 | Pending |
-| GMAIL-06 | Phase 2 | Pending |
-| GMAIL-07 | Phase 2 | Pending |
-| GMAIL-08 | Phase 2 | Pending |
-| VOICE-01 | Phase 2 | Pending |
-| VOICE-02 | Phase 2 | Pending |
-| VOICE-03 | Phase 2 | Pending |
-| SCORE-01 | Phase 3 | Pending |
-| SCORE-02 | Phase 3 | Pending |
-| SCORE-03 | Phase 3 | Pending |
-| SCORE-04 | Phase 3 | Pending |
-| SCORE-05 | Phase 3 | Pending |
-| SCORE-06 | Phase 3 | Pending |
-| SCORE-07 | Phase 3 | Pending |
-| SCORE-08 | Phase 3 | Pending |
-| SCORE-09 | Phase 3 | Pending |
-| DRAFT-01 | Phase 4 | Pending |
-| DRAFT-02 | Phase 4 | Pending |
-| DRAFT-03 | Phase 4 | Pending |
-| DRAFT-04 | Phase 4 | Pending |
-| DRAFT-05 | Phase 4 | Pending |
-| DRAFT-06 | Phase 4 | Pending |
-| DRAFT-07 | Phase 4 | Pending |
-| DRAFT-08 | Phase 4 | Pending |
-| API-01 | Phase 5 | Pending |
-| API-02 | Phase 5 | Pending |
-| API-03 | Phase 5 | Pending |
-| API-04 | Phase 5 | Pending |
-| API-05 | Phase 5 | Pending |
-| API-06 | Phase 5 | Pending |
-| API-07 | Phase 5 | Pending |
-| UI-01 | Phase 5 | Pending |
-| UI-02 | Phase 5 | Pending |
-| UI-03 | Phase 5 | Pending |
-| UI-04 | Phase 5 | Pending |
-| UI-05 | Phase 5 | Pending |
-| UI-06 | Phase 5 | Pending |
-| VOICE-04 | Phase 6 | Pending |
-| FEED-01 | Phase 6 | Pending |
-| FEED-02 | Phase 6 | Pending |
-| FEED-03 | Phase 6 | Pending |
+| DATA-01 | Phase 50 | ✓ Done |
+| DATA-02 | Phase 50 | ✓ Done |
+| UTIL-01 | Phase 50 | ✓ Done |
+| DATA-03 | Phase 51 | Pending |
+| API-01 | Phase 52 | Pending |
+| API-02 | Phase 52 | Pending |
+| API-03 | Phase 52 | Pending |
+| API-04 | Phase 52 | Pending |
+| API-05 | Phase 52 | Pending |
+| AUTO-01 | Phase 52 | Pending |
+| UI-01 | Phase 53 | Pending |
+| UI-02 | Phase 53 | Pending |
+| UI-03 | Phase 53 | Pending |
+| UI-04 | Phase 53 | Pending |
+| PULSE-01 | Phase 53 | Pending |
 
 **Coverage:**
-- v1 requirements: 47 total
-- Mapped to phases: 47
+- v2.0 requirements: 15 total
+- Mapped to phases: 15
 - Unmapped: 0 ✓
 
 ---
-*Requirements defined: 2026-03-24*
-*Last updated: 2026-03-24 after initial definition*
+*Requirements defined: 2026-03-26*
+*Last updated: 2026-03-26 — traceability mapped after roadmap creation*
