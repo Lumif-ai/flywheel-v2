@@ -5,23 +5,24 @@
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.0 — Phase 50: Data Model and Utilities
+**Current focus:** Milestone v2.0 — Phase 51: Seed CLI
 
 ## Current Position
 
-Phase: 50 of 53 (Data Model and Utilities)
-Plan: 2 of 2 in current phase
+Phase: 51 of 53 (Seed CLI)
+Plan: 1 of 1 in current phase
 Status: Phase complete
-Last activity: 2026-03-26 — 50-02 complete: CRM ORM models + normalize_company_name utility
+Last activity: 2026-03-26 — 51-01 complete: seed_crm CLI seeded 206 accounts, 235 contacts, 81 activities
 
-Progress: [██░░░░░░░░] 20% (v2.0 milestone)
+Progress: [███░░░░░░░] 30% (v2.0 milestone)
 
 ## Performance Metrics
 
 **Velocity (v2.0):**
-- Total plans completed: 2 (this milestone)
+- Total plans completed: 3 (this milestone)
 - Phase 50, Plan 01: 2 min (1 task, 1 file)
 - Phase 50, Plan 02: 6 min (2 tasks, 4 files)
+- Phase 51, Plan 01: 7 min (2 tasks, 4 files)
 
 **Previous milestone (v1.0 Email Copilot):**
 - Phases: 6 core + 3 patches (48, 49, 49.1)
@@ -44,6 +45,9 @@ Recent decisions affecting current work:
 - [50-01]: context_entries.account_id is nullable FK with SET NULL — retrospective linking without hard requirement
 - [50-02]: Two-phase suffix stripping in normalize_company_name — single pass before period removal, loop only after period removal to avoid over-stripping brand names like "Boston Consulting"
 - [50-02]: _bare_suffixes check gated on period removal — "The Company" → "company" (no periods, check skipped), "Inc." → "" (period removed, check applied)
+- [51-01]: SELECT-then-INSERT for contacts/activities (no unique constraint) instead of ON CONFLICT
+- [51-01]: openpyxl added as explicit project dependency — was system-installed but absent from pyproject.toml
+- [51-01]: In-memory dedup before DB calls reduces round trips on re-runs
 
 ### Pending Todos
 
@@ -56,5 +60,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-26
-Stopped at: Completed 50-02-PLAN.md — CRM ORM models + normalize_company_name utility (85b0df9)
+Stopped at: Completed 51-01-PLAN.md — seed_crm CLI seeded 206 accounts, 235 contacts, 81 activities (b196626)
 Resume file: None
