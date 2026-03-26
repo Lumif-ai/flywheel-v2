@@ -11,10 +11,10 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 
 Phase: 52 of 53 (Backend APIs)
 Plan: 3 of 3 in current phase (52-01, 52-02, and 52-03 complete — phase done)
-Status: In progress
+Status: Phase complete
 Last activity: 2026-03-27 — 52-03 complete: Timeline and Pulse Signals API — GET /accounts/{id}/timeline and GET /pulse/ (f320df2)
 
-Progress: [███░░░░░░░] 30% (v2.0 milestone)
+Progress: [████████░░] 75% (v2.0 milestone)
 
 ## Performance Metrics
 

@@ -253,9 +253,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 52-01-PLAN.md — Accounts and Contacts REST API (list, detail, create, update, graduate endpoint, contacts CRUD)
-- [ ] 52-02-PLAN.md — Outreach Activities REST API, Pipeline endpoint, graduation automation (AUTO-01)
-- [ ] 52-03-PLAN.md — Account Timeline API (unified chronological feed with type discriminator) and Pulse Signals API
+- [x] 52-01-PLAN.md — Accounts and Contacts REST API (list, detail, create, update, graduate endpoint, contacts CRUD) ✓
+- [x] 52-02-PLAN.md — Outreach Activities REST API, Pipeline endpoint, graduation automation (AUTO-01) ✓
+- [x] 52-03-PLAN.md — Account Timeline API (unified chronological feed with type discriminator) and Pulse Signals API ✓
 
 ---
 
@@ -300,7 +300,7 @@ Plans:
 | 49.1. Web Research Enrichment on Document Upload | v1.0 | 1/1 | ✓ Complete | — |
 | 50. Data Model and Utilities | v2.0 | 2/2 | ✓ Complete | 2026-03-26 |
 | 51. Seed CLI | v2.0 | 1/1 | ✓ Complete | 2026-03-27 |
-| 52. Backend APIs | v2.0 | 0/3 | Not started | — |
+| 52. Backend APIs | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 | 53. Frontend | v2.0 | 0/3 | Not started | — |
 
 ---

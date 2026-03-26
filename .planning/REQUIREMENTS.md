@@ -11,15 +11,15 @@ Requirements for the AI-Native CRM milestone. Each maps to roadmap phases.
 
 - [x] **DATA-01**: Alembic migration creates `accounts`, `account_contacts`, and `outreach_activities` tables with RLS policies, indexes, and `account_id` column on `context_entries`
 - [x] **DATA-02**: ORM models for Account, AccountContact, and OutreachActivity with all columns, relationships, and ContextEntry updated with optional account_id FK
-- [ ] **DATA-03**: Seed CLI `flywheel db seed-crm` populates CRM tables from existing GTM stack files (gtm-leads-master.xlsx, outreach-tracker.csv, scored CSVs, pipeline-runs.json) — idempotent, deduplicating, with company name normalization
+- [ ] **DATA-03**: Seed CLI `python -m flywheel.seed_crm` populates CRM tables from existing GTM stack files (gtm-leads-master.xlsx, outreach-tracker.csv, scored CSVs, pipeline-runs.json) — idempotent, deduplicating, with company name normalization
 
 ### Backend API
 
-- [ ] **API-01**: Accounts REST API — `GET /api/v1/accounts/` (paginated, filterable, searchable, sortable), `GET /api/v1/accounts/{id}` (full detail with contacts, timeline, intel), `POST /api/v1/accounts/`, `PATCH /api/v1/accounts/{id}`, `POST /api/v1/accounts/{id}/graduate`
-- [ ] **API-02**: Account Contacts REST API — `GET /api/v1/accounts/{id}/contacts`, `POST /api/v1/accounts/{id}/contacts`, `PATCH /api/v1/accounts/{id}/contacts/{cid}`, `DELETE /api/v1/accounts/{id}/contacts/{cid}`
-- [ ] **API-03**: Outreach Activities REST API — `GET /api/v1/accounts/{id}/outreach`, `POST /api/v1/accounts/{id}/outreach`, `PATCH /api/v1/outreach/{id}`, `GET /api/v1/pipeline/` (cross-account pipeline view with stage filter)
-- [ ] **API-04**: Account Timeline API — `GET /api/v1/accounts/{id}/timeline` unified chronological feed combining outreach, context entries, and documents with type discriminator, pagination
-- [ ] **API-05**: Pulse Signals API — `GET /api/v1/pulse/` returns prioritized signal feed (reply_received, followup_overdue, bump_suggested, new_companies_scored)
+- [x] **API-01**: Accounts REST API — `GET /api/v1/accounts/` (paginated, filterable, searchable, sortable), `GET /api/v1/accounts/{id}` (full detail with contacts, timeline, intel), `POST /api/v1/accounts/`, `PATCH /api/v1/accounts/{id}`, `POST /api/v1/accounts/{id}/graduate`
+- [x] **API-02**: Account Contacts REST API — `GET /api/v1/accounts/{id}/contacts`, `POST /api/v1/accounts/{id}/contacts`, `PATCH /api/v1/accounts/{id}/contacts/{cid}`, `DELETE /api/v1/accounts/{id}/contacts/{cid}`
+- [x] **API-03**: Outreach Activities REST API — `GET /api/v1/accounts/{id}/outreach`, `POST /api/v1/accounts/{id}/outreach`, `PATCH /api/v1/outreach/{id}`, `GET /api/v1/pipeline/` (cross-account pipeline view with stage filter)
+- [x] **API-04**: Account Timeline API — `GET /api/v1/accounts/{id}/timeline` unified chronological feed combining outreach, context entries, and documents with type discriminator, pagination
+- [x] **API-05**: Pulse Signals API — `GET /api/v1/pulse/` returns prioritized signal feed (reply_received, followup_overdue, bump_suggested, new_companies_scored)
 
 ### Frontend: Accounts
 
@@ -37,7 +37,7 @@ Requirements for the AI-Native CRM milestone. Each maps to roadmap phases.
 ### Pulse & Automation
 
 - [ ] **PULSE-01**: Pulse feed component on Briefing page — shows top 5 signals from Pulse API when Revenue focus is active, clickable cards linking to accounts
-- [ ] **AUTO-01**: Account graduation automation — when outreach status updated to 'replied', auto-promote prospect account to 'engaged' and log context entry
+- [x] **AUTO-01**: Account graduation automation — when outreach status updated to 'replied', auto-promote prospect account to 'engaged' and log context entry
 - [x] **UTIL-01**: Company name normalization utility — `normalize_company_name()` function stripping suffixes, "The " prefix, collapsing whitespace, lowercasing for comparison
 
 ## Future Requirements
@@ -71,12 +71,12 @@ Deferred beyond v2.0.
 | DATA-02 | Phase 50 | ✓ Done |
 | UTIL-01 | Phase 50 | ✓ Done |
 | DATA-03 | Phase 51 | Pending |
-| API-01 | Phase 52 | Pending |
-| API-02 | Phase 52 | Pending |
-| API-03 | Phase 52 | Pending |
-| API-04 | Phase 52 | Pending |
-| API-05 | Phase 52 | Pending |
-| AUTO-01 | Phase 52 | Pending |
+| API-01 | Phase 52 | ✓ Done |
+| API-02 | Phase 52 | ✓ Done |
+| API-03 | Phase 52 | ✓ Done |
+| API-04 | Phase 52 | ✓ Done |
+| API-05 | Phase 52 | ✓ Done |
+| AUTO-01 | Phase 52 | ✓ Done |
 | UI-01 | Phase 53 | Pending |
 | UI-02 | Phase 53 | Pending |
 | UI-03 | Phase 53 | Pending |
