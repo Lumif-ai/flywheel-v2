@@ -224,14 +224,14 @@ Plans:
 **Requirements:** DATA-03
 
 **Success Criteria** (what must be TRUE):
-  1. Running `flywheel db seed-crm` completes without errors and populates Account, AccountContact, and OutreachActivity rows drawn from gtm-leads-master.xlsx, outreach-tracker.csv, scored CSVs, and pipeline-runs.json
-  2. Running `flywheel db seed-crm` a second time produces no duplicate rows — idempotency is verifiable by comparing row counts before and after the second run
+  1. Running `python -m flywheel.seed_crm --tenant-id <uuid>` completes without errors and populates Account, AccountContact, and OutreachActivity rows drawn from gtm-leads-master.xlsx, outreach-tracker.csv, scored CSVs, and pipeline-runs.json
+  2. Running the seed command a second time produces no duplicate rows — idempotency is verifiable by comparing row counts before and after the second run
   3. Two company names that differ only by suffix or casing (e.g., "Stripe Inc." and "stripe") resolve to the same Account row (deduplication via normalization utility)
 
-**Plans:** TBD
+**Plans:** 1 plan
 
 Plans:
-- [ ] 51-01-PLAN.md — seed-crm CLI command with file parsing, normalization, deduplication, and idempotent upsert for all three tables
+- [x] 51-01-PLAN.md — seed-crm CLI command with file parsing, normalization, deduplication, and idempotent upsert for all three tables ✓
 
 ---
 
@@ -250,7 +250,7 @@ Plans:
   4. `GET /api/v1/pipeline/` returns only prospect-stage accounts sorted by fit score; `POST /api/v1/accounts/{id}/graduate` advances the account to engaged and logs a context entry
   5. When an outreach activity is updated to `status="replied"`, the parent account status automatically changes to `engaged` — observable by fetching the account before and after the PATCH
 
-**Plans:** TBD
+**Plans:** 3 plans
 
 Plans:
 - [ ] 52-01-PLAN.md — Accounts and Contacts REST API (list, detail, create, update, graduate endpoint, contacts CRUD)
@@ -274,7 +274,7 @@ Plans:
   4. Accounts and Pipeline links appear in the sidebar between Library and Email with Building2 and TrendingUp icons respectively; active route highlights correctly
   5. When the Briefing page is open with Revenue focus active, the top 5 Pulse signals appear as clickable cards that navigate to the relevant account
 
-**Plans:** TBD
+**Plans:** 3 plans
 
 Plans:
 - [ ] 53-01-PLAN.md — Accounts list page (/accounts) with table, filters, search, sort, pagination, and React Query integration
@@ -299,7 +299,7 @@ Plans:
 | 49. Living Company Profile | v1.0 | 1/1 | ✓ Complete | — |
 | 49.1. Web Research Enrichment on Document Upload | v1.0 | 1/1 | ✓ Complete | — |
 | 50. Data Model and Utilities | v2.0 | 2/2 | ✓ Complete | 2026-03-26 |
-| 51. Seed CLI | v2.0 | 0/1 | Not started | — |
+| 51. Seed CLI | v2.0 | 1/1 | ✓ Complete | 2026-03-27 |
 | 52. Backend APIs | v2.0 | 0/3 | Not started | — |
 | 53. Frontend | v2.0 | 0/3 | Not started | — |
 
