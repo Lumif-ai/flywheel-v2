@@ -30,12 +30,23 @@ const EmailPage = lazy(() =>
   import('@/features/email/components/EmailPage').then((m) => ({ default: m.EmailPage }))
 )
 
+// Lazy-loaded accounts pages
+const AccountsPage = lazy(() =>
+  import('@/features/accounts/components/AccountsPage').then((m) => ({ default: m.AccountsPage }))
+)
+const AccountDetailPage = lazy(() =>
+  import('@/features/accounts/components/AccountDetailPage').then((m) => ({ default: m.AccountDetailPage }))
+)
+
 // Lazy-loaded public pages (infrequently accessed)
 const TermsPage = lazy(() =>
   import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage }))
 )
 const PrivacyPage = lazy(() =>
   import('@/pages/PrivacyPage').then((m) => ({ default: m.PrivacyPage }))
+)
+const SpinnerPreview = lazy(() =>
+  import('@/pages/SpinnerPreview').then((m) => ({ default: m.SpinnerPreview }))
 )
 
 export function AppRoutes() {
@@ -52,6 +63,8 @@ export function AppRoutes() {
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
       <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />
+      <Route path="/accounts" element={<Suspense fallback={null}><AccountsPage /></Suspense>} />
+      <Route path="/accounts/:id" element={<Suspense fallback={null}><AccountDetailPage /></Suspense>} />
       <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />
       <Route path="/documents/:id" element={<Suspense fallback={null}><DocumentViewer /></Suspense>} />
       <Route path="/terms" element={<Suspense fallback={null}><TermsPage /></Suspense>} />
@@ -59,6 +72,9 @@ export function AppRoutes() {
 
       {/* Public share page -- no auth required */}
       <Route path="/d/:token" element={<Suspense fallback={null}><SharedDocumentPage /></Suspense>} />
+
+      {/* Dev preview */}
+      <Route path="/dev/spinners" element={<Suspense fallback={null}><SpinnerPreview /></Suspense>} />
 
       {/* Library alias */}
       <Route path="/library" element={<Navigate to="/documents" replace />} />
