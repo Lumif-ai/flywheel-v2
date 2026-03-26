@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-26)
 ## Current Position
 
 Phase: 52 of 53 (Backend APIs)
-Plan: 2 of 3 in current phase (52-01 and 52-02 complete)
+Plan: 3 of 3 in current phase (52-01, 52-02, and 52-03 complete — phase done)
 Status: In progress
-Last activity: 2026-03-26 — 52-01 complete: Accounts and Contacts REST API — 8 endpoints (950950b); 52-02 complete: outreach API with AUTO-01 graduation and pipeline view (9df1119)
+Last activity: 2026-03-27 — 52-03 complete: Timeline and Pulse Signals API — GET /accounts/{id}/timeline and GET /pulse/ (f320df2)
 
 Progress: [███░░░░░░░] 30% (v2.0 milestone)
 
@@ -25,6 +25,7 @@ Progress: [███░░░░░░░] 30% (v2.0 milestone)
 - Phase 51, Plan 01: 7 min (2 tasks, 4 files)
 - Phase 52, Plan 01: 2 min (2 tasks, 2 files)
 - Phase 52, Plan 02: 2 min (2 tasks, 2 files)
+- Phase 52, Plan 03: 2 min (2 tasks, 2 files)
 
 **Previous milestone (v1.0 Email Copilot):**
 - Phases: 6 core + 3 patches (48, 49, 49.1)
@@ -55,6 +56,9 @@ Recent decisions affecting current work:
 - [52-01]: Correlated subquery for contact_count in account list query — avoids left join complexity when counting subquery already scoped
 - [52-01]: 3-source timeline (outreach, context_entries, uploaded_files) merged in Python — simpler than UNION ALL with mismatched column shapes
 - [52-01]: next_action_due accepted as ISO string in UpdateAccountRequest to simplify frontend integration
+- [52-03]: Timeline v1 includes outreach + context entries only; UploadedFile has no account_id FK so documents deferred
+- [52-03]: Pulse bump_suggested uses two-subquery approach (max sent_at + replied accounts) with outerjoin to find zero-reply stale prospects
+- [52-03]: Timeline router declared without prefix — each path is self-contained to avoid collision with /accounts/ prefix router
 
 ### Pending Todos
 
@@ -66,6 +70,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-26
-Stopped at: Completed 52-01-PLAN.md — Accounts and Contacts REST API 8 endpoints (950950b)
+Last session: 2026-03-27
+Stopped at: Completed 52-03-PLAN.md — Timeline and Pulse Signals API (f320df2) — Phase 52 all plans done
 Resume file: None
