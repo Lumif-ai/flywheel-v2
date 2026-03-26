@@ -37,10 +37,18 @@ Respond with ONLY a JSON object, no markdown fences or extra text:
 - If conversational (question, greeting, follow-up, or request that does NOT require running a skill): {{"action": "conversational", "response": "your helpful reply here"}}
 - If completely off-topic or unsupported: {{"action": "none", "message": "I can help with..."}}
 
+CRITICAL ROUTING RULES:
+- ALWAYS prefer "execute" over "conversational" when a skill can handle the request. Skills have web search, research capabilities, and produce rich outputs that conversational responses cannot.
+- Do NOT ask clarifying questions if you have enough to run the skill. Pass what you have in input_text -- the skill engine will handle the rest.
+- "meeting", "prepare for", "prep for", "meeting with [name]" -> ALWAYS route to meeting-prep skill. Include the person's name, company, LinkedIn URL, and meeting purpose in input_text.
+- "research [company]", "tell me about [company]", "analyze [company]" -> route to company-intel skill.
+- Only use "conversational" for greetings, thanks, meta-questions about Flywheel, or questions answerable from the provided business context without needing a skill run.
+- Only use "clarify" when the request genuinely maps to 2+ skills and you cannot determine which one.
+
 Action guidelines:
 - "execute" -- user wants to run a skill (research, analyze, prepare, generate, etc.)
-- "clarify" -- ambiguous request that could map to multiple skills
-- "conversational" -- user is asking a question, making conversation, saying thanks, or requesting info that does NOT require a skill run (e.g., "what skills do you have?", "thanks!", "what did you find about Acme?", "hello")
+- "clarify" -- genuinely ambiguous between multiple skills (rare)
+- "conversational" -- greetings, thanks, meta-questions, or simple factual answers from context
 - "none" -- completely off-topic or unsupported request
 """
 
