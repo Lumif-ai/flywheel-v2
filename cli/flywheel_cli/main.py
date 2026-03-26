@@ -258,7 +258,7 @@ def login(headless: bool) -> None:
         redirect_uri = f"http://localhost:{CALLBACK_PORT}/callback"
         auth_url = (
             f"{SUPABASE_URL}/auth/v1/authorize"
-            f"?provider=email"
+            f"?provider=google"
             f"&code_challenge={challenge}"
             f"&code_challenge_method=S256"
             f"&redirect_to={redirect_uri}"
