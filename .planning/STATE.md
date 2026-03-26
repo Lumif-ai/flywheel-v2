@@ -27,6 +27,7 @@ Progress: [██████████] 100% (v2.0 milestone)
 - Phase 52, Plan 02: 2 min (2 tasks, 2 files)
 - Phase 52, Plan 03: 2 min (2 tasks, 2 files)
 - Phase 53, Plan 01: 2 min (2 tasks, 6 files)
+- Phase 53, Plan 02: 3 min (2 tasks, 9 files)
 - Phase 53, Plan 03: 4 min (2 tasks, 11 files)
 
 **Previous milestone (v1.0 Email Copilot):**
@@ -64,6 +65,9 @@ Recent decisions affecting current work:
 - [53-01]: Simple HTML table with Tailwind — no table library needed for accounts list
 - [53-01]: 300ms debounce on search to balance responsiveness with API call reduction
 - [53-01]: Feature directory pattern: types/, hooks/, components/, api.ts at root
+- [53-02]: Initial-then-paginate pattern for timeline — show embedded recent_timeline first, switch to paginated hook on load-more
+- [53-02]: Known intel keys get human-readable labels, unknown keys rendered as generic key-value pairs
+- [53-02]: ActionBar buttons show toast stubs — actual skill integration deferred to future phase
 - [53-03]: PipelineParams cast to Record<string,unknown> for api.get compatibility
 - [53-03]: PulseSignals self-contained component (fetches own data) rather than prop-driven
 - [53-03]: Conditional Briefing sections gated on activeFocus name matching (revenue)
@@ -79,5 +83,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Completed 53-03-PLAN.md — Pipeline page, Pulse signals, sidebar nav (b4ce798) — Phase 53 plan 03 done
+Stopped at: Completed 53-02-PLAN.md — Account detail page with contacts, timeline, intel, action bar (7d1896e)
 Resume file: None
