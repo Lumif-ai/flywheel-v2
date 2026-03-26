@@ -1233,28 +1233,74 @@ async def _execute_meeting_prep(
         "data": {"stage": "parsing", "message": "Preparing research..."},
     })
 
-    # Extract fields from formatted input
+    # Extract fields from formatted input (structured: "LinkedIn: ...\nAgenda: ...")
     linkedin_url = ""
     agenda = ""
     meeting_type = "discovery"
     company_name = ""
 
-    for line in input_text.strip().split("\n"):
-        if line.startswith("LinkedIn:"):
-            linkedin_url = line.split(":", 1)[1].strip()
-        elif line.startswith("Agenda:"):
-            agenda = line.split(":", 1)[1].strip()
-        elif line.startswith("Type:"):
-            meeting_type = line.split(":", 1)[1].strip()
-        elif line.startswith("Company:"):
-            company_name = line.split(":", 1)[1].strip()
+    # Check if input is structured (has "LinkedIn:" prefix lines)
+    has_structured = any(
+        line.strip().startswith(("LinkedIn:", "Agenda:", "Type:", "Company:"))
+        for line in input_text.strip().split("\n")
+    )
+
+    if has_structured:
+        for line in input_text.strip().split("\n"):
+            if line.startswith("LinkedIn:"):
+                linkedin_url = line.split(":", 1)[1].strip()
+            elif line.startswith("Agenda:"):
+                agenda = line.split(":", 1)[1].strip()
+            elif line.startswith("Type:"):
+                meeting_type = line.split(":", 1)[1].strip()
+            elif line.startswith("Company:"):
+                company_name = line.split(":", 1)[1].strip()
+    else:
+        # Free-form input from chat classifier — extract what we can
+        # LinkedIn URL
+        url_match = re.search(r"https?://(?:www\.)?linkedin\.com/in/[^\s,)]+", input_text)
+        if url_match:
+            linkedin_url = url_match.group(0)
+
+        # Company name — look for common patterns
+        company_match = re.search(
+            r"(?:at|from|with|company[:\s]+|works?\s+(?:at|for)\s+)([A-Z][A-Za-z0-9 &.'-]+)",
+            input_text,
+        )
+        if company_match:
+            company_name = company_match.group(1).strip().rstrip(".")
+
+        # Meeting type keywords
+        text_lower = input_text.lower()
+        if "advisor" in text_lower or "advisory" in text_lower:
+            meeting_type = "advisory"
+        elif "investor" in text_lower or "fundrais" in text_lower:
+            meeting_type = "investor"
+        elif "partner" in text_lower:
+            meeting_type = "partnership"
+        elif "follow" in text_lower and "up" in text_lower:
+            meeting_type = "follow-up"
+
+        # Agenda — use the full input as context
+        agenda = input_text
 
     # Extract person name from LinkedIn URL slug (e.g. /in/cheok-yen-kwan -> Cheok Yen Kwan)
     person_name = "the contact"
     slug_match = re.search(r"/in/([^/?]+)", linkedin_url)
     if slug_match:
         slug = slug_match.group(1)
+        # Remove trailing numbers from slug (e.g. chris-kennedy-1214458 -> chris-kennedy)
+        slug = re.sub(r"-\d+$", "", slug)
         person_name = slug.replace("-", " ").title()
+
+    # Fallback: extract name from free-form text patterns
+    if person_name == "the contact":
+        name_match = re.search(
+            r"(?:meeting with|prep(?:are)?\s+for|meet(?:ing)?\s+)\s+([A-Z][a-z]+ [A-Z][a-z]+(?:\s[A-Z][a-z]+)?)",
+            input_text,
+        )
+        if name_match:
+            person_name = name_match.group(1).strip()
 
     logger.info(
         "Meeting prep: person=%s, url=%s, agenda=%s, type=%s, company=%s",
