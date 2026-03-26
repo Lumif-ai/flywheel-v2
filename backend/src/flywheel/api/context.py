@@ -549,6 +549,30 @@ async def search_entries(
 
 
 # ---------------------------------------------------------------------------
+# Shared helpers (used by profile.py and other modules)
+# ---------------------------------------------------------------------------
+
+_FILE_DISPLAY: dict[str, tuple[str, str]] = {
+    "positioning": ("Building2", "Positioning"),
+    "product-modules": ("Package", "Product Modules"),
+    "icp-profiles": ("UserCheck", "Icp Profiles"),
+    "competitive-intel": ("Swords", "Competitive Intel"),
+    "market-taxonomy": ("TrendingUp", "Market Taxonomy"),
+    "leadership": ("Users", "Leadership"),
+    "company-details": ("Info", "Company Details"),
+    "tech-stack": ("Cpu", "Tech Stack"),
+}
+
+
+def _split_entry_items(entry) -> list[str]:
+    """Split a context entry's content back into individual display items."""
+    content = (getattr(entry, "content", "") or "").strip()
+    if not content:
+        return []
+    return [line.strip() for line in content.split("\n") if line.strip()]
+
+
+# ---------------------------------------------------------------------------
 # GET /context/onboarding-cache — shared companies table lookup
 # ---------------------------------------------------------------------------
 
