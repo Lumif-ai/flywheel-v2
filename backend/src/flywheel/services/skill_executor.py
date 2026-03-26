@@ -50,6 +50,52 @@ AGENT_SKIP_MARKERS = ["AGENT_NOT_CONNECTED", "AGENT_TIMEOUT"]
 # must set it before calling execute_skill and restore it after.
 _env_lock = threading.Lock()
 
+async def preload_tenant_context(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_id: UUID,
+) -> str:
+    """Load key context files for a tenant to inject into LLM prompts.
+
+    Returns a formatted string with sections for each context file, or empty
+    string if nothing is found. Used by skill execution AND chat orchestration
+    so every LLM interaction is grounded in the tenant's stored knowledge.
+    """
+    from flywheel.db.models import ContextEntry as _CE
+    from sqlalchemy import select as _sel
+
+    ctx_files = [
+        "positioning", "icp-profiles", "competitive-intel",
+        "product-modules", "market-taxonomy", "leadership",
+        "company-details", "tech-stack",
+    ]
+    ctx_parts: list[str] = []
+    for cf in ctx_files:
+        try:
+            async with factory() as _s:
+                await _s.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                _rows = (await _s.execute(
+                    _sel(_CE.content).where(
+                        _CE.tenant_id == tenant_id,
+                        _CE.file_name == cf,
+                        _CE.deleted_at.is_(None),
+                    ).limit(5)
+                )).scalars().all()
+                if _rows:
+                    ctx_parts.append(
+                        f"### {cf}\n"
+                        + "\n".join(
+                            r[:500] if isinstance(r, str) else str(r)[:500]
+                            for r in _rows
+                        )
+                    )
+        except Exception:
+            continue
+    return "\n\n".join(ctx_parts) if ctx_parts else ""
+
+
 async def _load_skill_from_db(
     factory: async_sessionmaker[AsyncSession],
     skill_name: str,
@@ -1480,37 +1526,7 @@ async def _execute_meeting_prep(
     })
 
     # Pre-load tenant context asynchronously (before entering sync thread)
-    _tenant_context_preloaded = ""
-    try:
-        ctx_files = ["positioning", "icp-profiles", "competitive-intel",
-                     "product-modules", "market-taxonomy"]
-        ctx_parts = []
-        for cf in ctx_files:
-            try:
-                async with factory() as _s:
-                    await _s.execute(
-                        sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                        {"tid": str(tenant_id)},
-                    )
-                    from sqlalchemy import select as _sel
-                    from flywheel.db.models import ContextEntry as _CE
-                    _rows = (await _s.execute(
-                        _sel(_CE.content).where(
-                            _CE.tenant_id == tenant_id,
-                            _CE.file_name == cf,
-                            _CE.deleted_at.is_(None),
-                        ).limit(5)
-                    )).scalars().all()
-                    if _rows:
-                        ctx_parts.append(f"### {cf}\n" + "\n".join(
-                            r[:500] if isinstance(r, str) else str(r)[:500] for r in _rows
-                        ))
-            except Exception:
-                continue
-        if ctx_parts:
-            _tenant_context_preloaded = "\n\n".join(ctx_parts)
-    except Exception:
-        pass
+    _tenant_context_preloaded = await preload_tenant_context(factory, tenant_id)
 
     def _generate_briefing() -> tuple[str, dict]:
         """Generate HTML briefing using the meeting-prep SKILL.md prompt.
@@ -1999,6 +2015,17 @@ async def _execute_with_tools(
 
         spec = convert_skill(skill_name)
         system_prompt = spec.system_prompt
+
+    # Inject tenant context into system prompt so every skill is grounded
+    # in the tenant's stored knowledge (positioning, ICPs, competitors, etc.)
+    tenant_context = await preload_tenant_context(factory, context.tenant_id)
+    if tenant_context:
+        system_prompt += (
+            "\n\n## Your Company's Business Context\n\n"
+            "Use this context to inform your responses. Do NOT ask the user for "
+            "information that is already provided here.\n\n"
+            + tenant_context
+        )
 
     # Snapshot tool definitions for version safety
     # When agent is not connected, exclude browser tools so Claude never

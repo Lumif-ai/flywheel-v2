@@ -56,6 +56,7 @@ async def classify_intent(
     history: list[dict] | None = None,
     stream_context: str | None = None,
     briefing_context: str | None = None,
+    tenant_context: str | None = None,
 ) -> dict:
     """Classify user intent using Haiku (fast, cheap: ~$0.005/call).
 
@@ -95,6 +96,17 @@ async def classify_intent(
         skills_json=skills_json,
         stream_context_block=stream_context_block,
     )
+
+    # Inject tenant business context so the classifier (and conversational
+    # responses) are grounded in what the platform already knows about the user's
+    # company. This is the core Flywheel value: every interaction is informed.
+    if tenant_context:
+        system_prompt += (
+            "\n\nThe user's company context (from their knowledge store):\n"
+            + tenant_context
+            + "\n\nUse this context when generating conversational responses. "
+            "Do NOT ask the user for information already provided above."
+        )
 
     # Inject briefing context when user is reading a specific briefing
     if briefing_context:

@@ -79,6 +79,16 @@ async def chat(
 
         briefing_context = await load_briefing_context(body.briefing_id, db)
 
+    # Load tenant business context so every LLM interaction is informed
+    from flywheel.db.session import get_session_factory
+    from flywheel.services.skill_executor import preload_tenant_context
+
+    tenant_context: str | None = None
+    if user.tenant_id:
+        tenant_context = await preload_tenant_context(
+            get_session_factory(), user.tenant_id
+        ) or None
+
     # Classify intent via Haiku
     from flywheel.services.chat_orchestrator import classify_intent
 
@@ -89,6 +99,7 @@ async def chat(
         history=body.history,
         stream_context=stream_context,
         briefing_context=briefing_context,
+        tenant_context=tenant_context,
     )
 
     action = intent.get("action", "none")
