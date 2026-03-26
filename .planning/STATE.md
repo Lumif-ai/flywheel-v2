@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-24)
 
 **Core value:** Use accumulated work knowledge to eliminate the cognitive load of email triage and response
-**Current focus:** Phase 49 complete — living company profile
+**Current focus:** Phase 49.1 complete — web research enrichment on document upload
 
 ## Current Position
 
-Phase: 49 (Living Company Profile)
+Phase: 49.1 (Web Research Enrichment on Document Upload)
 Plan: 2 of 2 in current phase
 Status: Phase complete
-Last activity: 2026-03-25 — Phase 49 complete (useProfileCrawl hook, inline crawl + document analyze UI)
+Last activity: 2026-03-26 — Phase 49.1 complete (backend enrichment + frontend polling/banner UI)
 
 Progress: [██████████] 100%
 
@@ -105,6 +105,8 @@ Recent decisions affecting current work:
 - [Phase 49, Plan 01]: analyze-document uses subsidy API key — system operation like onboarding crawl
 - [Phase 49, Plan 02]: useProfileCrawl is a focused subset of useOnboarding — no cache checking, merge mode, or edit mode
 - [Phase 49, Plan 02]: URL input uses inline normalizeUrl/isValidUrl rather than importing UrlInput component (onboarding-specific copy)
+- [Phase 49.1, Plan 02]: EnrichmentBanner placed outside hasGroups conditional — renders in both empty and populated states
+- [Phase 49.1, Plan 02]: Query-driven refetchInterval using query.state.data?.enrichment_status — no separate state tracking needed
 
 ### Pending Todos
 
@@ -118,6 +120,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-25
-Stopped at: Completed 49-02-PLAN.md — useProfileCrawl hook and inline crawl + document analyze UI
+Last session: 2026-03-26
+Stopped at: Completed 49.1-02-PLAN.md — frontend enrichment polling and banner UI
 Resume file: None
