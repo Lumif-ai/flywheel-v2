@@ -5,14 +5,14 @@
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.0 — Phase 51: Seed CLI
+**Current focus:** Milestone v2.0 — Phase 52: Backend APIs
 
 ## Current Position
 
-Phase: 51 of 53 (Seed CLI)
-Plan: 1 of 1 in current phase
-Status: Phase complete
-Last activity: 2026-03-26 — 51-01 complete: seed_crm CLI seeded 206 accounts, 235 contacts, 81 activities
+Phase: 52 of 53 (Backend APIs)
+Plan: 2 of N in current phase
+Status: Plan 52-02 complete
+Last activity: 2026-03-26 — 52-02 complete: outreach API with AUTO-01 graduation and pipeline view
 
 Progress: [███░░░░░░░] 30% (v2.0 milestone)
 
@@ -23,6 +23,7 @@ Progress: [███░░░░░░░] 30% (v2.0 milestone)
 - Phase 50, Plan 01: 2 min (1 task, 1 file)
 - Phase 50, Plan 02: 6 min (2 tasks, 4 files)
 - Phase 51, Plan 01: 7 min (2 tasks, 4 files)
+- Phase 52, Plan 02: 2 min (2 tasks, 2 files)
 
 **Previous milestone (v1.0 Email Copilot):**
 - Phases: 6 core + 3 patches (48, 49, 49.1)
@@ -48,6 +49,8 @@ Recent decisions affecting current work:
 - [51-01]: SELECT-then-INSERT for contacts/activities (no unique constraint) instead of ON CONFLICT
 - [51-01]: openpyxl added as explicit project dependency — was system-installed but absent from pyproject.toml
 - [51-01]: In-memory dedup before DB calls reduces round trips on re-runs
+- [Phase 52-backend-apis]: No-prefix router pattern for outreach endpoints spanning two URL groups
+- [Phase 52-backend-apis]: _graduate_account() shared helper for consistent auto/manual graduation logic
 
 ### Pending Todos
 
@@ -60,5 +63,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-26
-Stopped at: Completed 51-01-PLAN.md — seed_crm CLI seeded 206 accounts, 235 contacts, 81 activities (b196626)
+Stopped at: Completed 52-02-PLAN.md — outreach API with AUTO-01 graduation and pipeline view (9df1119)
 Resume file: None
