@@ -18,13 +18,14 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Document
+from flywheel.db.models import Document, SkillRun
 from flywheel.services.document_storage import get_document_url
 
 router = APIRouter(prefix="/documents", tags=["documents"])
@@ -159,17 +160,21 @@ async def get_shared_document(
 
 
 # ---------------------------------------------------------------------------
-# GET /documents/{document_id} -- Single document detail + signed URL
+# GET /documents/{document_id}/content -- Serve HTML from skill_runs
 # ---------------------------------------------------------------------------
 
 
-@router.get("/{document_id}")
-async def get_document(
+@router.get("/{document_id}/content", response_class=HTMLResponse)
+async def get_document_content(
     document_id: UUID,
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
-) -> DocumentDetail:
-    """Return document metadata plus a signed content URL."""
+) -> HTMLResponse:
+    """Serve document HTML content from the linked skill run.
+
+    Primary content source: skill_runs.rendered_html (via skill_run_id FK).
+    Fallback: Supabase Storage (if storage_path exists — legacy docs).
+    """
     result = await db.execute(
         select(Document).where(
             Document.id == document_id,
@@ -183,7 +188,69 @@ async def get_document(
             detail="Document not found",
         )
 
-    content_url = await get_document_url(doc.storage_path)
+    # Primary: serve from linked skill run
+    if doc.skill_run_id:
+        run_result = await db.execute(
+            select(SkillRun.rendered_html).where(SkillRun.id == doc.skill_run_id)
+        )
+        html = run_result.scalar_one_or_none()
+        if html:
+            return HTMLResponse(content=html)
+
+    # Fallback: legacy docs with storage_path
+    if doc.storage_path:
+        import httpx
+        try:
+            signed_url = await get_document_url(doc.storage_path)
+            async with httpx.AsyncClient(timeout=10) as client:
+                resp = await client.get(signed_url)
+                resp.raise_for_status()
+                return HTMLResponse(content=resp.text)
+        except Exception:
+            pass
+
+    raise HTTPException(
+        status_code=status.HTTP_404_NOT_FOUND,
+        detail="Document content not available",
+    )
+
+
+# ---------------------------------------------------------------------------
+# GET /documents/{document_id} -- Single document detail
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{document_id}")
+async def get_document(
+    document_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> DocumentDetail:
+    """Return document metadata plus content URL.
+
+    Points to /documents/{id}/content for HTML serving.
+    Falls back to signed Storage URL for legacy docs.
+    """
+    result = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.deleted_at.is_(None),
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    # New docs: content served from /documents/{id}/content
+    # Legacy docs with storage_path: use signed URL
+    if doc.storage_path:
+        content_url = await get_document_url(doc.storage_path)
+    else:
+        content_url = f"/api/v1/documents/{doc.id}/content"
+
     item = _doc_to_list_item(doc)
     return DocumentDetail(
         **item.model_dump(),

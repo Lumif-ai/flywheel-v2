@@ -682,11 +682,12 @@ async def execute_run(run: SkillRun) -> None:
             )
             await session.commit()
 
-        # Create document artifact
+        # Create document artifact — DB insert only, no external storage dependency.
+        # Content is served from skill_runs.rendered_html via GET /documents/{id}/content.
         if rendered_html:
             try:
                 from flywheel.services.document_storage import (
-                    upload_document, _generate_title, _extract_document_metadata
+                    _generate_title, _extract_document_metadata
                 )
                 from flywheel.db.models import Document
                 doc_metadata = _extract_document_metadata(
@@ -696,12 +697,6 @@ async def execute_run(run: SkillRun) -> None:
                     run.skill_name, run.input_text, doc_metadata
                 )
                 doc_id = str(uuid4())
-                storage_path = await upload_document(
-                    tenant_id=str(run.tenant_id),
-                    document_type=run.skill_name,
-                    document_id=doc_id,
-                    content=rendered_html.encode("utf-8"),
-                )
                 async with factory() as session:
                     doc = Document(
                         id=doc_id,
@@ -709,7 +704,7 @@ async def execute_run(run: SkillRun) -> None:
                         user_id=run.user_id,
                         title=doc_title,
                         document_type=run.skill_name,
-                        storage_path=storage_path,
+                        storage_path=None,
                         file_size_bytes=len(rendered_html.encode("utf-8")),
                         skill_run_id=run.id,
                         metadata_=doc_metadata,

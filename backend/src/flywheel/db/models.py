@@ -362,6 +362,9 @@ class UploadedFile(Base):
     size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
     extracted_text: Mapped[str | None] = mapped_column(Text)
     storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    metadata_: Mapped[dict | None] = mapped_column(
+        "metadata", JSONB, nullable=True, server_default=text("'{}'::jsonb")
+    )
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
@@ -896,7 +899,7 @@ class Document(Base):
     mime_type: Mapped[str] = mapped_column(
         Text, nullable=False, server_default="text/html"
     )
-    storage_path: Mapped[str] = mapped_column(Text, nullable=False)
+    storage_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     file_size_bytes: Mapped[int | None] = mapped_column(Integer)
     skill_run_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("skill_runs.id", ondelete="SET NULL")
