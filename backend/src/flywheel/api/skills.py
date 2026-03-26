@@ -21,13 +21,14 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
 from flywheel.api.deps import get_tenant_db, require_tenant
-from flywheel.auth.jwt import TokenPayload
+from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import ContextEntry, SkillDefinition, SkillRun, TenantSkill, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit
@@ -298,14 +299,30 @@ async def start_run(
 @router.get("/runs/{run_id}/stream")
 async def stream_run(
     run_id: UUID,
-    user: TokenPayload = Depends(require_tenant),
+    token: str | None = None,
+    cred: HTTPAuthorizationCredentials | None = Depends(HTTPBearer(auto_error=False)),
 ) -> EventSourceResponse:
     """SSE event stream with late-connect replay.
+
+    Accepts JWT via Authorization header OR ?token= query param
+    (EventSource API cannot send custom headers).
 
     CRITICAL: Does NOT use get_tenant_db -- SSE streams are long-lived
     and would hold a DB connection. Instead creates short-lived sessions
     per poll iteration.
     """
+    jwt_token = cred.credentials if cred else token
+    if not jwt_token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    user = decode_jwt(jwt_token)
+    if user.tenant_id is None:
+        # Try resolving tenant for authenticated users
+        from flywheel.api.deps import _resolve_tenant_for_user
+        tenant_id = await _resolve_tenant_for_user(user.sub)
+        if tenant_id:
+            user.app_metadata["tenant_id"] = str(tenant_id)
+        else:
+            raise HTTPException(status_code=403, detail="No active tenant")
 
     async def event_generator():
         factory = get_session_factory()
