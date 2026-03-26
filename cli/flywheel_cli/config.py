@@ -17,11 +17,21 @@ CREDENTIALS_FILE = FLYWHEEL_DIR / "credentials.json"
 # API and Supabase URLs
 # ---------------------------------------------------------------------------
 
-API_URL = os.environ.get("FLYWHEEL_API_URL", "http://localhost:8000")
+# Production defaults — safe to embed (anon key is public, same as frontend bundle)
+_DEFAULT_API_URL = "http://localhost:8000"
+_DEFAULT_SUPABASE_URL = "https://qudaxjkjzhjqxrmapggi.supabase.co"
+_DEFAULT_SUPABASE_ANON_KEY = (
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
+    "eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InF1ZGF4amtqemhqcXhybWFwZ2dpIiwi"
+    "cm9sZSI6ImFub24iLCJpYXQiOjE3NzQyMzI2OTUsImV4cCI6MjA4OTgwODY5NX0."
+    "O9s-bK56Kb5UyBuoyFNMZf1Pnegk55lnXe_EQxfhHY0"
+)
 
-SUPABASE_URL = os.environ.get("FLYWHEEL_SUPABASE_URL", "")
+API_URL = os.environ.get("FLYWHEEL_API_URL", _DEFAULT_API_URL)
 
-SUPABASE_ANON_KEY = os.environ.get("FLYWHEEL_SUPABASE_ANON_KEY", "")
+SUPABASE_URL = os.environ.get("FLYWHEEL_SUPABASE_URL", _DEFAULT_SUPABASE_URL)
+
+SUPABASE_ANON_KEY = os.environ.get("FLYWHEEL_SUPABASE_ANON_KEY", _DEFAULT_SUPABASE_ANON_KEY)
 
 # ---------------------------------------------------------------------------
 # PKCE callback
