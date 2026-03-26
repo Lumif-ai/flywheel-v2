@@ -169,6 +169,7 @@ def create_app() -> FastAPI:
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(agent_ws_router, prefix="/api/v1")
     app.include_router(outreach_router, prefix="/api/v1")
+    app.include_router(accounts_router, prefix="/api/v1")
 
     return app
 
