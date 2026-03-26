@@ -14,6 +14,7 @@ import {
   Clock,
   AlertCircle,
   RefreshCw,
+  Loader2,
 } from 'lucide-react'
 import { colors, spacing, typography } from '@/lib/design-tokens'
 import {
@@ -21,7 +22,9 @@ import {
   useUpdateCategory,
   useCreateCategory,
   useLinkProfileFile,
+  useRetryEnrichment,
   type ProfileGroup,
+  type ProfileUploadedFile,
 } from '../hooks/useCompanyProfile'
 import { useProfileCrawl } from '../hooks/useProfileCrawl'
 import { LiveCrawl } from '@/features/onboarding/components/LiveCrawl'
@@ -534,10 +537,18 @@ function DocumentAnalyzePanel() {
       await linkFile.mutateAsync(fileId)
 
       // 3. Trigger analysis
-      await api.post('/profile/analyze-document', { file_id: fileId })
+      const result = await api.post<{ success: boolean; categories_written: number }>(
+        '/profile/analyze-document',
+        { file_id: fileId },
+      )
+      console.log('analyze-document result:', result)
 
-      // 4. Refresh profile data
-      queryClient.invalidateQueries({ queryKey: ['company-profile'] })
+      if (result.categories_written === 0) {
+        setAnalyzeError('No company intelligence could be extracted from this document. Try a document with company positioning, products, or customer information.')
+      } else {
+        // 4. Refresh profile data
+        queryClient.invalidateQueries({ queryKey: ['company-profile'] })
+      }
     } catch (err) {
       console.error('Document analyze failed:', err)
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed')
@@ -599,6 +610,79 @@ function DocumentAnalyzePanel() {
       </div>
     </div>
   )
+}
+
+// ---------------------------------------------------------------------------
+// Enrichment status banner
+// ---------------------------------------------------------------------------
+
+interface EnrichmentBannerProps {
+  status: string | null
+  uploadedFiles: ProfileUploadedFile[]
+}
+
+function EnrichmentBanner({ status, uploadedFiles }: EnrichmentBannerProps) {
+  const retryEnrichment = useRetryEnrichment()
+
+  if (status === 'pending' || status === 'running') {
+    return (
+      <div
+        className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-4"
+        style={{
+          backgroundColor: 'rgba(59,130,246,0.08)',
+          border: '1px solid rgba(59,130,246,0.2)',
+        }}
+      >
+        <div className="flex items-center gap-2.5">
+          <Loader2 className="size-4 animate-spin" style={{ color: '#3B82F6' }} />
+          <span className="text-sm" style={{ color: colors.bodyText }}>
+            Enriching with web research...
+          </span>
+        </div>
+        <span className="text-xs" style={{ color: colors.secondaryText }}>
+          This may take 15-30 seconds
+        </span>
+      </div>
+    )
+  }
+
+  if (status === 'failed') {
+    return (
+      <div
+        className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-4"
+        style={{
+          backgroundColor: 'rgba(239,68,68,0.08)',
+          border: '1px solid rgba(239,68,68,0.2)',
+        }}
+      >
+        <div className="flex items-center gap-2.5">
+          <AlertCircle className="size-4" style={{ color: '#EF4444' }} />
+          <span className="text-sm" style={{ color: colors.bodyText }}>
+            Web research enrichment failed.
+          </span>
+        </div>
+        <button
+          onClick={() => {
+            const fileId = uploadedFiles[0]?.id
+            if (fileId) retryEnrichment.mutate(fileId)
+          }}
+          disabled={retryEnrichment.isPending || uploadedFiles.length === 0}
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity disabled:opacity-60"
+          style={{ backgroundColor: colors.brandCoral }}
+        >
+          {retryEnrichment.isPending ? (
+            <Loader2 className="size-3.5 animate-spin" />
+          ) : (
+            <RefreshCw className="size-3.5" />
+          )}
+          {retryEnrichment.isPending ? 'Retrying...' : 'Retry'}
+        </button>
+      </div>
+    )
+  }
+
+  // null, undefined, or 'complete' — no banner
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -772,6 +856,9 @@ export function CompanyProfilePage() {
             </div>
           </div>
         )}
+
+        {/* Enrichment status banner */}
+        <EnrichmentBanner status={profile.enrichment_status} uploadedFiles={profile.uploaded_files} />
 
         {/* Empty state: inline crawl + document analyze */}
         {!hasGroups ? (
