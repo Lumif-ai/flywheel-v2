@@ -38,6 +38,11 @@ const AccountDetailPage = lazy(() =>
   import('@/features/accounts/components/AccountDetailPage').then((m) => ({ default: m.AccountDetailPage }))
 )
 
+// Lazy-loaded pipeline page
+const PipelinePage = lazy(() =>
+  import('@/features/pipeline/components/PipelinePage').then((m) => ({ default: m.PipelinePage }))
+)
+
 // Lazy-loaded public pages (infrequently accessed)
 const TermsPage = lazy(() =>
   import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage }))
@@ -63,6 +68,7 @@ export function AppRoutes() {
       <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/invite" element={<InviteAcceptPage />} />
       <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />
+      <Route path="/pipeline" element={<Suspense fallback={null}><PipelinePage /></Suspense>} />
       <Route path="/accounts" element={<Suspense fallback={null}><AccountsPage /></Suspense>} />
       <Route path="/accounts/:id" element={<Suspense fallback={null}><AccountDetailPage /></Suspense>} />
       <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />

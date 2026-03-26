@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
@@ -115,6 +115,26 @@ export function AppSidebar() {
                 >
                   <FileText className="size-4" />
                   <span>Library</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname.startsWith('/accounts')}
+                  render={<NavLink to="/accounts" />}
+                  tooltip="Accounts"
+                >
+                  <Building2 className="size-4" />
+                  <span>Accounts</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname === '/pipeline'}
+                  render={<NavLink to="/pipeline" />}
+                  tooltip="Pipeline"
+                >
+                  <TrendingUp className="size-4" />
+                  <span>Pipeline</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               <SidebarMenuItem>

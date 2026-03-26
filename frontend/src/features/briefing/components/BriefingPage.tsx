@@ -1,5 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
 import { useBriefing } from '../hooks/useBriefing'
+import { PulseSignals } from './PulseSignals'
 import { useStreams } from '../hooks/useStreams'
 import { BriefingCard } from './BriefingCard'
 import { PersonalGapCard } from './PersonalGapCard'
@@ -13,6 +14,7 @@ import { BrandedCard } from '@/components/ui/branded-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Link } from 'react-router'
 import { useAuthStore } from '@/stores/auth'
+import { useFocusStore } from '@/stores/focus'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { FileText, Building2, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
@@ -70,6 +72,7 @@ export function BriefingPage() {
   const { data: streamsData } = useStreams()
   const user = useAuthStore(state => state.user)
   const { state: lifecycleState, isAnonymous, runCount } = useLifecycleState()
+  const activeFocus = useFocusStore((s) => s.activeFocus)
 
   const [recentDocs, setRecentDocs] = useState<RecentDocument[] | null>(null)
   const [docsLoading, setDocsLoading] = useState(true)
@@ -487,6 +490,13 @@ export function BriefingPage() {
                       </Link>
                     ))}
                   </div>
+                </div>
+              )}
+
+              {/* Pulse Signals (Revenue focus only) */}
+              {activeFocus?.name?.toLowerCase().includes('revenue') && (
+                <div style={{ marginBottom: spacing.section }}>
+                  <PulseSignals />
                 </div>
               )}
 
