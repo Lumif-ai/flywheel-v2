@@ -23,20 +23,20 @@ Requirements for the AI-Native CRM milestone. Each maps to roadmap phases.
 
 ### Frontend: Accounts
 
-- [ ] **UI-01**: Accounts list page at `/accounts` — table with name, status badge, fit score/tier, contacts count, last interaction, next action due; filter by status/focus, search, sort, pagination
-- [ ] **UI-02**: Account detail page at `/accounts/{id}` — header with company info, left panel contacts, center timeline feed, right panel intel sidebar, bottom commitments, action bar (Prep/Research/Follow-up)
+- [x] **UI-01**: Accounts list page at `/accounts` — table with name, status badge, fit score/tier, contacts count, last interaction, next action due; filter by status/focus, search, sort, pagination
+- [x] **UI-02**: Account detail page at `/accounts/{id}` — header with company info, left panel contacts, center timeline feed, right panel intel sidebar, bottom commitments, action bar (Prep/Research/Follow-up)
 
 ### Frontend: Pipeline
 
-- [ ] **UI-03**: Pipeline page at `/pipeline` — table of prospect accounts sorted by fit score, with outreach status, days since last action, draft preview; filter by fit tier/outreach status, graduate action button
+- [x] **UI-03**: Pipeline page at `/pipeline` — table of prospect accounts sorted by fit score, with outreach status, days since last action, draft preview; filter by fit tier/outreach status, graduate action button
 
 ### Frontend: Navigation
 
-- [ ] **UI-04**: Sidebar navigation — Accounts (Building2 icon) and Pipeline (TrendingUp icon) added between Library and Email, with active state highlighting
+- [x] **UI-04**: Sidebar navigation — Accounts (Building2 icon) and Pipeline (TrendingUp icon) added between Library and Email, with active state highlighting
 
 ### Pulse & Automation
 
-- [ ] **PULSE-01**: Pulse feed component on Briefing page — shows top 5 signals from Pulse API when Revenue focus is active, clickable cards linking to accounts
+- [x] **PULSE-01**: Pulse feed component on Briefing page — shows top 5 signals from Pulse API when Revenue focus is active, clickable cards linking to accounts
 - [x] **AUTO-01**: Account graduation automation — when outreach status updated to 'replied', auto-promote prospect account to 'engaged' and log context entry
 - [x] **UTIL-01**: Company name normalization utility — `normalize_company_name()` function stripping suffixes, "The " prefix, collapsing whitespace, lowercasing for comparison
 
@@ -77,11 +77,11 @@ Deferred beyond v2.0.
 | API-04 | Phase 52 | ✓ Done |
 | API-05 | Phase 52 | ✓ Done |
 | AUTO-01 | Phase 52 | ✓ Done |
-| UI-01 | Phase 53 | Pending |
-| UI-02 | Phase 53 | Pending |
-| UI-03 | Phase 53 | Pending |
-| UI-04 | Phase 53 | Pending |
-| PULSE-01 | Phase 53 | Pending |
+| UI-01 | Phase 53 | ✓ Done |
+| UI-02 | Phase 53 | ✓ Done |
+| UI-03 | Phase 53 | ✓ Done |
+| UI-04 | Phase 53 | ✓ Done |
+| PULSE-01 | Phase 53 | ✓ Done |
 
 **Coverage:**
 - v2.0 requirements: 15 total

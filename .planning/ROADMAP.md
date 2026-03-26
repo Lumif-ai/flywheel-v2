@@ -3,7 +3,7 @@
 ## Milestones
 
 - ✅ **v1.0 Email Copilot** — Phases 1–6 + patches 48, 49, 49.1 (shipped 2026-03-25)
-- 🚧 **v2.0 AI-Native CRM** — Phases 50–53 (in progress)
+- ✅ **v2.0 AI-Native CRM** — Phases 50–53 (shipped 2026-03-27)
 
 ## Phases
 
@@ -277,9 +277,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 53-01-PLAN.md — Accounts list page (/accounts) with table, filters, search, sort, pagination, and React Query integration
-- [ ] 53-02-PLAN.md — Account detail page (/accounts/{id}) with contacts panel, timeline feed, intel sidebar, commitments, and action bar
-- [ ] 53-03-PLAN.md — Pipeline page (/pipeline), sidebar navigation links (UI-04), and Pulse feed component on Briefing page (PULSE-01)
+- [x] 53-01-PLAN.md — Accounts list page (/accounts) with table, filters, search, sort, pagination, and React Query integration ✓
+- [x] 53-02-PLAN.md — Account detail page (/accounts/{id}) with contacts panel, timeline feed, intel sidebar, commitments, and action bar ✓
+- [x] 53-03-PLAN.md — Pipeline page (/pipeline), sidebar navigation links (UI-04), and Pulse feed component on Briefing page (PULSE-01) ✓
 
 ---
 
@@ -301,7 +301,7 @@ Plans:
 | 50. Data Model and Utilities | v2.0 | 2/2 | ✓ Complete | 2026-03-26 |
 | 51. Seed CLI | v2.0 | 1/1 | ✓ Complete | 2026-03-27 |
 | 52. Backend APIs | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
-| 53. Frontend | v2.0 | 0/3 | Not started | — |
+| 53. Frontend | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 
 ---
 *Roadmap created: 2026-03-24*
