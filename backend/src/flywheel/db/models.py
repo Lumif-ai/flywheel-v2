@@ -1,10 +1,11 @@
-"""SQLAlchemy 2.0 ORM models for all 16 Flywheel tables.
+"""SQLAlchemy 2.0 ORM models for all Flywheel tables.
 
 Schema matches V2-PRODUCT-SPEC.md. Tables are divided into:
 - System tables (tenants, profiles) -- NOT tenant-scoped, no RLS
 - Tenant-scoped tables (9 tables) -- all have tenant_id FK, RLS enforced
 - Focus tables (2 tables) -- focus/lens scoping for context
 - Context graph tables (3 tables) -- entity graph layer on top of context_entries
+- CRM tables (3 tables) -- accounts, contacts, outreach activities for v2.0 GTM CRM
 """
 
 from __future__ import annotations
@@ -240,6 +241,10 @@ class ContextEntry(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+    account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    account: Mapped["Account | None"] = relationship()
 
 
 class ContextCatalog(Base):
@@ -1076,3 +1081,139 @@ class EmailVoiceProfile(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+
+
+# ---------------------------------------------------------------------------
+# CRM TABLES (tenant-scoped, RLS enforced)
+# ---------------------------------------------------------------------------
+
+
+class Account(Base):
+    """Prospect or customer company tracked in the GTM CRM."""
+
+    __tablename__ = "accounts"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "normalized_name", name="uq_account_tenant_normalized"),
+        Index("idx_account_tenant_status", "tenant_id", "status"),
+        Index(
+            "idx_account_next_action",
+            "tenant_id",
+            "next_action_due",
+            postgresql_where=text("next_action_due IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default="prospect")
+    fit_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    fit_tier: Mapped[str | None] = mapped_column(Text)
+    intel: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    last_interaction_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    next_action_due: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    next_action_type: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    contacts: Mapped[list["AccountContact"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+    outreach_activities: Mapped[list["OutreachActivity"]] = relationship(
+        back_populates="account", cascade="all, delete-orphan"
+    )
+
+
+class AccountContact(Base):
+    """A person at an account relevant to a deal or relationship."""
+
+    __tablename__ = "account_contacts"
+    __table_args__ = (
+        Index("idx_contact_account", "account_id"),
+        Index(
+            "idx_contact_tenant_email",
+            "tenant_id",
+            "email",
+            postgresql_where=text("email IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    role_in_deal: Mapped[str | None] = mapped_column(Text)
+    linkedin_url: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    account: Mapped["Account"] = relationship(back_populates="contacts")
+
+
+class OutreachActivity(Base):
+    """A single outreach touchpoint (email sent, call made, LinkedIn message, etc.)."""
+
+    __tablename__ = "outreach_activities"
+    __table_args__ = (
+        Index("idx_outreach_account", "account_id"),
+        Index("idx_outreach_tenant_sent", "tenant_id", text("sent_at DESC")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    account_id: Mapped[UUID] = mapped_column(
+        ForeignKey("accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    contact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("account_contacts.id", ondelete="SET NULL"), nullable=True
+    )
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    direction: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default="sent")
+    subject: Mapped[str | None] = mapped_column(Text)
+    body_preview: Mapped[str | None] = mapped_column(Text)
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    account: Mapped["Account"] = relationship(back_populates="outreach_activities")
+    contact: Mapped["AccountContact | None"] = relationship()
