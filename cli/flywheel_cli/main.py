@@ -6,7 +6,9 @@ import base64
 import hashlib
 import json
 import secrets
+import shutil
 import socket
+import subprocess
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlparse
@@ -513,6 +515,72 @@ def logout() -> None:
     """Remove stored credentials."""
     clear_credentials()
     console.print("[green]Logged out successfully.[/green]")
+
+
+# ---------------------------------------------------------------------------
+# Setup Claude Code (MCP server registration)
+# ---------------------------------------------------------------------------
+
+
+@cli.command("setup-claude-code")
+def setup_claude_code() -> None:
+    """Register Flywheel MCP server with Claude Code."""
+    # 1. Check flywheel-mcp is on PATH
+    mcp_path = shutil.which("flywheel-mcp")
+    if not mcp_path:
+        console.print(
+            "[red]flywheel-mcp not found on PATH. "
+            "Install with: cd cli && pip install -e .[/red]"
+        )
+        raise SystemExit(1)
+
+    # 2. Check claude CLI is on PATH
+    claude_path = shutil.which("claude")
+    if not claude_path:
+        console.print(
+            "[red]Claude Code CLI not found. "
+            "Install Claude Code first: https://code.claude.com[/red]"
+        )
+        raise SystemExit(1)
+
+    # 3. Register the MCP server
+    result = subprocess.run(
+        [
+            "claude",
+            "mcp",
+            "add",
+            "--transport",
+            "stdio",
+            "--scope",
+            "user",
+            "flywheel",
+            "--",
+            mcp_path,
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    # 4. Report result
+    if result.returncode == 0:
+        console.print(
+            Panel(
+                "Flywheel MCP server configured for Claude Code.\n\n"
+                "[bold]Tools available:[/bold]\n"
+                "  - flywheel_run_skill: Run meeting-prep, company-intel, etc.\n"
+                "  - flywheel_read_context: Search your business knowledge\n"
+                "  - flywheel_write_context: Store business intelligence\n\n"
+                "[dim]Restart Claude Code to activate.[/dim]",
+                title="Setup Complete",
+                border_style="green",
+            )
+        )
+    else:
+        console.print(f"[red]Failed to register MCP server:[/red]\n{result.stderr}")
+        console.print(
+            "\n[yellow]Try running manually:[/yellow]\n"
+            f"  claude mcp add --transport stdio --scope user flywheel -- {mcp_path}"
+        )
 
 
 # ---------------------------------------------------------------------------
