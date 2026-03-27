@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-26)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** v2.0 AI-Native CRM complete — next milestone TBD
+**Current focus:** Milestone v2.1 — CRM Redesign: Intelligence-First Relationships
 
 ## Current Position
 
-Phase: 53 of 53 (Frontend) — MILESTONE v2.0 COMPLETE
-Plan: All plans complete across all phases
-Status: Milestone shipped
-Last activity: 2026-03-27 — v2.0 AI-Native CRM milestone archived
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-03-27 — Milestone v2.1 started
 
-Progress: [██████████] 100% (v2.0 milestone — shipped)
+Progress: [░░░░░░░░░░] 0% (v2.1 milestone)
 
 ## Performance Metrics
 

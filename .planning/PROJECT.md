@@ -8,15 +8,24 @@ An AI-powered work intelligence platform that compounds knowledge from meetings,
 
 Founders never lose track of an account again. Every company they're engaging with — prospects, active deals, customers — has a single screen showing all contacts, interaction timeline, commitments, intel, and next actions. All populated automatically from skill runs.
 
-## Current State
+## Current Milestone: v2.1 CRM Redesign — Intelligence-First Relationships
+
+**Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
+
+**Target features:**
+- Data model evolution: relationship_type array, entity_level (company/person), relationship_status separation
+- Pipeline as Airtable-style configurable data grid (column management, filters, saved views, inline actions)
+- Four relationship surfaces with type-driven rendering (shared detail component, five configurations)
+- AI context panel per relationship (synthesis, Q&A, note capture, file attachments)
+- Premium design system (two-layer shadows, translucent badges, 56px rows, avatars, warm tints, micro-interactions)
+- Signal layer with sidebar badge counts
+- Graduation flow with type assignment modal
 
 **Shipped milestones:**
 - **v1.0 Email Copilot** (2026-03-25) — Gmail sync, 5-tier scoring, voice-learned drafts, review UI, feedback loop
 - **v2.0 AI-Native CRM** (2026-03-27) — Accounts/Pipeline/Pulse surfaces, REST APIs, seed CLI, auto-graduation
 
-**Codebase:** FastAPI + React, ~63 files changed in v2.0 (+7,866 lines), 206 seeded accounts from GTM stack
-
-**Next milestone:** Not yet defined — run `/gsd:new-milestone` to plan
+**Codebase:** FastAPI + React, 206 seeded accounts from GTM stack
 
 ## Requirements
 
@@ -55,9 +64,19 @@ Founders never lose track of an account again. Every company they're engaging wi
 
 ### Active
 
-<!-- Next milestone scope — TBD -->
+<!-- v2.1 CRM Redesign scope -->
 
-(None yet — define with `/gsd:new-milestone`)
+- [ ] Data model: relationship_type array, entity_level, relationship_status on accounts
+- [ ] Relationships API: list/detail/type-change/graduate/notes/files/synthesize/ask/signals
+- [ ] Pipeline grid: Airtable-style configurable data grid with column management
+- [ ] Relationship surfaces: Prospects, Customers, Advisors, Investors as sidebar sections
+- [ ] Relationship detail: type-driven tabs, AI panel, commitments, action bar
+- [ ] AI synthesis: cached narrative summaries with graceful degradation
+- [ ] AI Q&A: ask questions about a relationship with RAG context
+- [ ] Quick-add: notes + file attachments on every relationship page
+- [ ] Signal layer: sidebar badge counts, computed signals per relationship type
+- [ ] Premium design system: shadows, badges, avatars, transitions, emotional registers
+- [ ] Sidebar redesign: RELATIONSHIPS section with 4 type links + badge counts
 
 ### Out of Scope
 
@@ -75,14 +94,20 @@ Founders never lose track of an account again. Every company they're engaging wi
 
 **Existing architecture:** FastAPI + PostgreSQL (async, tenant-isolated, RLS), Supabase Storage, multi-provider OAuth (Google, Microsoft, Slack), skill-based execution (async tool loops with context weighting), context store (atomic facts + full-text search + entity graph).
 
-**CRM design principles:**
-- Company-first, not person-first — B2B engagement is account-level
+**CRM design principles (evolved in v2.1 brainstorm):**
+- Company-first for Prospects/Customers, person-first for Advisors/Angel investors
+- Five distinct JTBD: triage (Pipeline), nurture prospects, manage customers, maintain advisors, manage investors
 - View layer over accumulated intelligence — not a database to fill
-- No manual data entry forms — accounts, contacts, outreach created by skills and seed commands
-- Three distinct jobs: triage (Pipeline), execute (outreach), follow-up (Accounts + Pulse)
+- Manual context capture allowed (notes, files) alongside skill-generated data
+- Two paradigms: Pipeline is a data grid (Airtable), Relationships are intelligence journals (warmth)
+- AI synthesis is the product differentiator, not just the UI
 
-**Spec:** `.planning/SPEC-ai-native-crm.md`
-**Concept brief:** `.planning/CONCEPT-BRIEF-ai-native-crm.md`
+**Specs:**
+- `.planning/SPEC-ai-native-crm.md` (v2.0 — original)
+- `.planning/SPEC-crm-redesign.md` (v2.1 — current)
+**Concept briefs:**
+- `.planning/CONCEPT-BRIEF-ai-native-crm.md` (v2.0)
+- `.planning/CONCEPT-BRIEF-crm-redesign.md` (v2.1 — 5-round brainstorm + design advisory)
 
 ## Constraints
 
@@ -109,6 +134,13 @@ Founders never lose track of an account again. Every company they're engaging wi
 | Correlated subquery for contact_count | Avoids left join complexity when counting | ✓ Good |
 | 3-source timeline merged in Python | Simpler than UNION ALL with mismatched column shapes | ✓ Good |
 | ActionBar buttons as toast stubs | Skill integration deferred — keep UI shippable now | — Pending |
+| Five separate relationship surfaces | Different JTBD and emotional registers per type | — Pending |
+| Advisors are people-first | Advisors/angels are individuals, not company-level | — Pending |
+| Multi-type relationships | A person/company can hold multiple types simultaneously | — Pending |
+| AI synthesis from day one | 8-10 relationships have deep data; graceful degradation for sparse | — Pending |
+| Auto-materialization for prospects | Reply/meeting signal promotes from Pipeline | — Pending |
+| Pipeline as Airtable grid | 200+ companies need spreadsheet-density triage | — Pending |
+| Interactive AI panel | Chat + notes + files in one panel per relationship | — Pending |
 
 ---
-*Last updated: 2026-03-27 after v2.0 milestone completion*
+*Last updated: 2026-03-27 after v2.1 milestone initialization*
