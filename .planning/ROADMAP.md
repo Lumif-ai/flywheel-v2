@@ -4,6 +4,7 @@
 
 - ✅ **v1.0 Email Copilot** — Phases 1–6 + patches 48, 49, 49.1 (shipped 2026-03-25)
 - ✅ **v2.0 AI-Native CRM** — Phases 50–53 (shipped 2026-03-27)
+- 🚧 **v2.1 CRM Redesign** — Phases 54–57 (in progress)
 
 ## Phases
 
@@ -200,9 +201,112 @@ Plans:
 
 ---
 
+### 🚧 v2.1 CRM Redesign — Intelligence-First Relationships (In Progress)
+
+**Milestone Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
+
+---
+
+### Phase 54: Data Model Foundation
+
+**Goal:** The schema evolution is complete and safely deployed — new relationship columns exist with correct indexes, the two-phase status rename is underway with zero API outage, and AI synthesis cache fields are in place. Every subsequent phase builds on a stable schema.
+
+**Depends on:** Phase 53
+
+**Requirements:** DM-01, DM-02, DM-03, DM-04
+
+**Success Criteria** (what must be TRUE):
+  1. Developer runs migration and confirms `relationship_type text[]` column exists on accounts with GIN index — `WHERE 'advisor' = ANY(relationship_type)` uses index scan (verifiable via EXPLAIN)
+  2. All 206 existing accounts have `relationship_type = '{prospect}'` after migration — no accounts lost or corrupted
+  3. `entity_level` column exists with `DEFAULT 'company'` — existing accounts unaffected, no null values present
+  4. Phase A of status rename complete: `relationship_status` and `pipeline_stage` columns exist alongside old `status` column, data copied — APIs still read `status` without error
+  5. `ai_summary` and `ai_summary_updated_at` columns exist on accounts — detail endpoint returns null summary without triggering any LLM call
+
+**Plans:** TBD
+
+Plans:
+- [ ] 54-01-PLAN.md — Alembic migrations: relationship_type array + GIN index (DM-01), entity_level (DM-02), ai_summary fields (DM-04), ORM model updates
+- [ ] 54-02-PLAN.md — Two-phase status rename Phase A: add relationship_status + pipeline_stage, copy data from status (DM-03)
+
+---
+
+### Phase 55: Relationships and Signals APIs
+
+**Goal:** The backend API surface is complete — every relationship surface and signal badge has a stable endpoint. The partition predicate preventing accounts from leaking across Pipeline and Relationships surfaces is enforced at the query level. AI synthesis is rate-limited and never auto-triggered.
+
+**Depends on:** Phase 54
+
+**Requirements:** RAPI-01, RAPI-02, RAPI-03, RAPI-04, RAPI-05, RAPI-06, RAPI-07, RAPI-08, SIG-01, SIG-02
+
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/v1/relationships/?type=advisor` returns only graduated advisor accounts — a prospect account with no `graduated_at` does not appear even if it has `advisor` in `relationship_type`
+  2. `POST /api/v1/relationships/{id}/synthesize` called twice within 5 minutes returns 429 on the second call — the LLM is not invoked; called with null `ai_summary` returns cached null, not a new LLM invocation
+  3. `POST /api/v1/relationships/{id}/ask` returns an answer with at least one source attribution citing the specific context entry — does not call LLM when account has fewer than 3 context entries
+  4. `GET /api/v1/signals/` returns per-type badge counts (prospects/customers/advisors/investors separately) — counts are non-zero when stale accounts or overdue follow-ups exist
+  5. `PATCH /api/v1/relationships/{id}/type` rejects an empty type array and rejects unknown type values — minimum-one-type validation enforced at API layer
+
+**Plans:** TBD
+
+Plans:
+- [ ] 55-01-PLAN.md — Relationships router: GET list (filtered + partition predicate), GET detail (contacts + timeline + cached summary), PATCH type, POST graduate
+- [ ] 55-02-PLAN.md — SynthesisEngine service: generate, cache (24h TTL), rate-limit (5-min DB-level), graceful degradation for sparse data; POST synthesize + POST ask endpoints
+- [ ] 55-03-PLAN.md — Notes, files, and signals: POST notes (ContextEntry link), POST files (Supabase Storage), GET signals (per-type badge counts + SIG-02 signal taxonomy)
+
+---
+
+### Phase 56: Pipeline Grid
+
+**Goal:** The Pipeline page is a configurable Airtable-style data grid with filters, saved view tabs, and a graduation flow. The design system tokens powering this phase are also established here — shadows, badges, avatars, transitions — so Phase 57 inherits them without rework.
+
+**Depends on:** Phase 55
+
+**Requirements:** DS-01, DS-02, DS-03, DS-04, GRID-01, GRID-02, GRID-03, GRID-04, GRID-05
+
+**Success Criteria** (what must be TRUE):
+  1. Design tokens are applied globally — card shadows render without borders, translucent badge opacity-10 style is visible, avatar component renders initials at 32px and 48px, interactive elements transition in 150ms, skeleton shimmer loading states appear on initial grid load
+  2. Pipeline grid loads with 8 default columns at 56px row height, columns are resizable and reorderable, column visibility state persists across page navigations (localStorage)
+  3. Filter bar narrows the grid in real time — Fit Tier multi-select, Outreach Status multi-select, and text search all reduce visible rows within 300ms debounce; "Stale" saved view tab shows only accounts with >14 days since last action
+  4. Stale rows render with warm tint background, new replies float to top with coral accent — both visible without any filter interaction
+  5. Clicking "Graduate" on a row opens the type-selection modal, submitting the modal calls the graduate API, the row slides out with animation, and the sidebar badge count for the selected type increments
+
+**Plans:** TBD
+
+Plans:
+- [ ] 56-01-PLAN.md — Design system: token updates (shadows, badges, avatar component, status dots, transitions), skeleton shimmer component, empty state component; emotional register CSS for Pipeline vs Relationships
+- [ ] 56-02-PLAN.md — AG Grid pipeline page: column definitions (Company+avatar, Contact+title, Email, LinkedIn, Fit Tier badge, Outreach Status dot, Last Action, Days Stale), column resize/reorder/visibility, localStorage state persistence
+- [ ] 56-03-PLAN.md — Filter bar + saved view tabs + pagination (25/50/100), stale row tint, reply float-to-top, graduation modal with type selection + slide-out animation + sidebar badge increment
+
+---
+
+### Phase 57: Relationship Surfaces
+
+**Goal:** All four relationship surfaces are live — Prospects, Customers, Advisors, and Investors each have a card-grid list page and a shared detail page with type-driven tabs, an AI context panel, and a full action bar. The sidebar shows badge counts. A founder can open any relationship and immediately understand the full state.
+
+**Depends on:** Phase 56
+
+**Requirements:** REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, REL-09
+
+**Success Criteria** (what must be TRUE):
+  1. Sidebar shows RELATIONSHIPS section with Prospects, Customers, Advisors, Investors links — each has a coral badge count reflecting the signal count for that type; Pipeline appears below the four relationship links
+  2. Each relationship type list page renders as a card grid (3-col desktop) — cards are sorted by urgency, warm tint background visible; empty state with type-specific illustration and CTA appears when no relationships of that type exist
+  3. Clicking a card opens the detail page — left AI panel (320px) shows cached AI summary (or graceful placeholder when null), input accepts both notes (saved as ContextEntry) and Q&A questions (calls ask API); source citations appear with Q&A answers
+  4. Detail page tab set is type-driven: Prospects and Customers show an Intelligence tab with labeled data points (Pain, Budget, Competition, Champion, Blocker, Fit Reasoning); Advisors and Investors do not show this tab
+  5. Commitments tab shows two-column layout (What You Owe / What They Owe) with overdue entries highlighted; Timeline tab shows annotated entries with icon, direction, contact, and time-ago; People tab shows contact cards with 48px avatars, role badges, and last-contacted date
+
+**Plans:** TBD
+
+Plans:
+- [ ] 57-01-PLAN.md — Sidebar redesign: RELATIONSHIPS section header, four type links with badge counts (React Query from signals endpoint), Pipeline repositioned below; query key factory (queryKeys.ts) for cross-surface invalidation
+- [ ] 57-02-PLAN.md — Relationship list pages: card grid component (3-col/2-col/1-col responsive), type-specific card content, urgency sort, warm tint register, empty states per type
+- [ ] 57-03-PLAN.md — Shared RelationshipDetail page: fromType URL param routing, left AI panel + main area layout, header card with avatar + type badges, tab navigation with type-driven config map
+- [ ] 57-04-PLAN.md — Detail tabs: Timeline (annotated entries, expandable, paginated), People (contact cards), Intelligence (Prospects/Customers only — labeled data points, editable), Commitments (two-column, overdue highlight), action bar (type-specific buttons with toast stubs)
+- [ ] 57-05-PLAN.md — AI context panel: cached summary display, skeleton on load, note capture (ContextEntry POST), Q&A input (ask endpoint), source attribution display, graceful degradation for thin context
+
+---
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -219,8 +323,13 @@ Plans:
 | 51. Seed CLI | v2.0 | 1/1 | ✓ Complete | 2026-03-27 |
 | 52. Backend APIs | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 | 53. Frontend | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
+| 54. Data Model Foundation | v2.1 | 0/2 | Not started | — |
+| 55. Relationships and Signals APIs | v2.1 | 0/3 | Not started | — |
+| 56. Pipeline Grid | v2.1 | 0/3 | Not started | — |
+| 57. Relationship Surfaces | v2.1 | 0/5 | Not started | — |
 
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
 *v2.0 shipped: 2026-03-27*
+*v2.1 milestone added: 2026-03-27*

@@ -95,44 +95,44 @@ Deferred beyond v2.1.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DM-01 | — | Pending |
-| DM-02 | — | Pending |
-| DM-03 | — | Pending |
-| DM-04 | — | Pending |
-| RAPI-01 | — | Pending |
-| RAPI-02 | — | Pending |
-| RAPI-03 | — | Pending |
-| RAPI-04 | — | Pending |
-| RAPI-05 | — | Pending |
-| RAPI-06 | — | Pending |
-| RAPI-07 | — | Pending |
-| RAPI-08 | — | Pending |
-| SIG-01 | — | Pending |
-| SIG-02 | — | Pending |
-| GRID-01 | — | Pending |
-| GRID-02 | — | Pending |
-| GRID-03 | — | Pending |
-| GRID-04 | — | Pending |
-| GRID-05 | — | Pending |
-| REL-01 | — | Pending |
-| REL-02 | — | Pending |
-| REL-03 | — | Pending |
-| REL-04 | — | Pending |
-| REL-05 | — | Pending |
-| REL-06 | — | Pending |
-| REL-07 | — | Pending |
-| REL-08 | — | Pending |
-| REL-09 | — | Pending |
-| DS-01 | — | Pending |
-| DS-02 | — | Pending |
-| DS-03 | — | Pending |
-| DS-04 | — | Pending |
+| DM-01 | Phase 54 | Pending |
+| DM-02 | Phase 54 | Pending |
+| DM-03 | Phase 54 | Pending |
+| DM-04 | Phase 54 | Pending |
+| RAPI-01 | Phase 55 | Pending |
+| RAPI-02 | Phase 55 | Pending |
+| RAPI-03 | Phase 55 | Pending |
+| RAPI-04 | Phase 55 | Pending |
+| RAPI-05 | Phase 55 | Pending |
+| RAPI-06 | Phase 55 | Pending |
+| RAPI-07 | Phase 55 | Pending |
+| RAPI-08 | Phase 55 | Pending |
+| SIG-01 | Phase 55 | Pending |
+| SIG-02 | Phase 55 | Pending |
+| GRID-01 | Phase 56 | Pending |
+| GRID-02 | Phase 56 | Pending |
+| GRID-03 | Phase 56 | Pending |
+| GRID-04 | Phase 56 | Pending |
+| GRID-05 | Phase 56 | Pending |
+| DS-01 | Phase 56 | Pending |
+| DS-02 | Phase 56 | Pending |
+| DS-03 | Phase 56 | Pending |
+| DS-04 | Phase 56 | Pending |
+| REL-01 | Phase 57 | Pending |
+| REL-02 | Phase 57 | Pending |
+| REL-03 | Phase 57 | Pending |
+| REL-04 | Phase 57 | Pending |
+| REL-05 | Phase 57 | Pending |
+| REL-06 | Phase 57 | Pending |
+| REL-07 | Phase 57 | Pending |
+| REL-08 | Phase 57 | Pending |
+| REL-09 | Phase 57 | Pending |
 
 **Coverage:**
 - v2.1 requirements: 32 total
-- Mapped to phases: 0 (pending roadmap)
-- Unmapped: 32
+- Mapped to phases: 32
+- Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-27*
-*Last updated: 2026-03-27 — initial definition from SPEC-crm-redesign.md + research*
+*Last updated: 2026-03-27 — traceability mapped after roadmap creation*

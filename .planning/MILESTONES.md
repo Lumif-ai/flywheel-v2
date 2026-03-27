@@ -40,3 +40,23 @@
 - Pulse signals — revenue-gated signal cards on Briefing page linking to accounts
 
 ---
+
+## v2.1 — CRM Redesign: Intelligence-First Relationships 🚧
+
+**Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
+
+**Started:** 2026-03-27
+**Completed:** —
+**Phases:** 54-57 (4 phases, 13 plans)
+**Last phase number:** 57 (planned)
+
+**Key deliverables:**
+- Data model evolution — relationship_type array + GIN index, entity_level, relationship_status separation, ai_summary cache fields
+- Relationships API — list/detail/type-change/graduate/notes/files/synthesize/ask endpoints with partition predicate + rate limiting
+- Signal layer — per-type badge counts from stale detection, overdue follow-ups, and reply signals
+- Pipeline grid — Airtable-style configurable grid with AG Grid, filter bar, saved view tabs, graduation modal
+- Design system — two-layer shadows, translucent badges, avatar component, emotional register variants, skeleton states
+- Four relationship surfaces — card-grid list pages + shared detail with type-driven tabs
+- AI context panel — cached synthesis display, note capture, Q&A with source attribution per relationship
+
+---
