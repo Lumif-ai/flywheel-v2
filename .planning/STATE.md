@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 54 of 57 (Data Model Foundation)
-Plan: 1 of 2 in current phase
-Status: In progress
-Last activity: 2026-03-27 — Phase 54 Plan 01 complete (migration 028 + Account ORM columns)
+Plan: 2 of 2 in current phase
+Status: Phase complete
+Last activity: 2026-03-27 — Phase 54 Plan 02 complete (migration 029 + status rename Phase A)
 
-Progress: [██████████░░░░░░░░░░] 54% (14/26 total plans complete across all milestones)
+Progress: [███████████░░░░░░░░░] 58% (15/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -46,6 +46,8 @@ Recent decisions affecting current work:
 - [v2.1 roadmap]: DS-01 through DS-04 placed in Phase 56 (first frontend phase) so Phase 57 inherits tokens without rework
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
+- [54-02 execution]: Two-phase zero-downtime rename pattern: add nullable → bulk UPDATE → set NOT NULL → Phase B (drop) deferred until post-stable-deploy
+- [54-02 execution]: down_revision must reference the actual revision variable (e.g. 028_acct_ext), not the migration filename stem
 
 ### Pending Todos
 
@@ -59,5 +61,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 54 Plan 01 complete — ready for Plan 02 (status → pipeline_stage migration)
+Stopped at: Phase 54 Plan 02 complete — Phase 54 (Data Model Foundation) complete, ready for Phase 55 (Pipeline API)
 Resume file: None
