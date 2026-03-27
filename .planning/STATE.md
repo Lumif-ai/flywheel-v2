@@ -58,6 +58,9 @@ Recent decisions affecting current work:
 - [57-01 execution]: ContactItem uses created_at (not last_contacted_at) — backend does not expose last_contacted_at; use for "Added X ago" display in PeopleTab
 - [57-01 execution]: signalByType helper reads from useSignals() data — avoids prop drilling signal counts through sidebar tree
 - [57-01 execution]: Placeholder RelationshipListPage/RelationshipDetail components registered in Plan 01 so routes work immediately — Plans 02/03 replace them
+- [57-02 execution]: RelationshipCard uses BrandedCard variant='action' (coral left border) when signal_count > 0, 'info' otherwise — consistent with pipeline urgency styling
+- [57-02 execution]: TYPE_CONFIG object maps RelationshipType to label/icon/emptyDescription — single source of truth, avoids scattered switch statements
+- [57-02 execution]: sortByUrgency() sorts client-side by signal_count desc then last_interaction_at desc (nulls last) — no extra server round trip
 - [57-03 execution]: TAB_CONFIG defined at module level outside component — single authoritative constant for tab sets per type; prevents recreation on every render
 - [57-03 execution]: fromType URL param is CRITICAL source of truth — never derive tab config or back-link from account.relationship_type (account may belong to multiple types)
 - [57-03 execution]: AI panel placeholder is dashed border div with comment "AskPanel slot — replaced in Plan 05"; tab content placeholders have "Coming soon..." and comment for Plan 04
