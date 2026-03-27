@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.1 — Phase 57: Relationship Surfaces
+**Current focus:** Milestone v2.1 — Phase 58: Unified Company Intelligence Engine
 
 ## Current Position
 
-Phase: 57 of 57 (Relationship Surfaces)
-Plan: 5 of 5 in current phase
-Status: Complete
-Last activity: 2026-03-27 — Phase 57 Plan 05 complete (AskPanel — AI context panel with dual-mode input, source citations, synthesis refresh)
+Phase: 58 of 58 (Unified Company Intelligence Engine)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-27 — Plan 58-01 complete: document input and gap-aware enrichment
 
-Progress: [████████████████████] 92% (25/27 total plans complete across all milestones)
+Progress: [████████████████████] 90% (26/29 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -82,6 +82,10 @@ Recent decisions affecting current work:
 - [55-03 execution]: Signal queries are 4 separate queries per type (not window functions) — simpler to extend, graduated_at.isnot(None) in base_filters on every query
 - [55-02 execution]: enforce_rate_limit() MUST be called before generate() in POST /synthesize — rate limit fires before any LLM call even when ai_summary is NULL
 - [55-02 execution]: Sparse data in generate() still updates ai_summary_updated_at = now — prevents rapid re-attempts on thin accounts; ask() has no rate limit (stateless)
+- [58-01 execution]: DOCUMENT_FILE_PREFIX constant defined inside _execute_company_intel (not module-level) — only used there, avoids namespace pollution
+- [58-01 execution]: is_document flag drives source_label ("document-upload" vs "website-crawl") and gates companies cache upsert (skipped for document-only inputs — no domain)
+- [58-01 execution]: Supplementary doc fetch failures logged as warnings (not errors) — partial supplementary data preferable to aborting run
+- [58-01 execution]: enrich_with_web_research max_uses reduced from 5 to 3 when existing_profile_keys count > half of total profile files (saves API credits on refresh)
 
 ### Pending Todos
 
@@ -90,10 +94,10 @@ None yet.
 ### Blockers/Concerns
 
 - [Phase 56]: RESOLVED — AG Grid themeQuartz.withParams() with CSS custom properties works cleanly with Tailwind v4 (no CSS imports needed)
-- [Phase 57]: AskPanel conversational UI is highest-complexity component in milestone — consider focused implementation spike before building
+- [Phase 57]: RESOLVED — AskPanel implemented with 4-mode state machine, dual-mode input, source citations — no spike needed
 
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Completed 57-05-PLAN.md — AskPanel AI context panel with dual-mode input (note/Q&A), source citations, synthesis refresh; Phase 57 complete
+Stopped at: Completed 58-01-PLAN.md — document input discriminator and gap-aware enrichment in company intel engine
 Resume file: None
