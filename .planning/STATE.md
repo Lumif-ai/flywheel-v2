@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.1 — Phase 55: Relationships and Signals APIs
+**Current focus:** Milestone v2.1 — Phase 56: Pipeline Grid
 
 ## Current Position
 
-Phase: 55 of 57 (Relationships and Signals APIs)
-Plan: 3 of 3 in current phase — PHASE COMPLETE
+Phase: 56 of 57 (Pipeline Grid)
+Plan: 1 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-27 — Phase 55 Plan 03 complete (RAPI-05/06 notes+files endpoints, SIG-01/02 signals badge count API)
+Last activity: 2026-03-27 — Phase 56 Plan 01 complete (design system tokens, avatar xl, shimmer skeleton, empty state)
 
-Progress: [█████████████░░░░░░░] 69% (18/26 total plans complete across all milestones)
+Progress: [█████████████░░░░░░░] 71% (19/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -44,6 +44,8 @@ Recent decisions affecting current work:
 - [v2.1 research]: fromType URL param drives tab config and back-link on shared RelationshipDetail page
 - [v2.1 research]: Query key factory (queryKeys.ts) established in Phase 56 — graduation invalidates pipeline + relationships + signals simultaneously
 - [v2.1 roadmap]: DS-01 through DS-04 placed in Phase 56 (first frontend phase) so Phase 57 inherits tokens without rework
+- [56-01 execution]: badge-translucent provides shared pill shape only; individual badge rgba colors applied via inline styles to avoid combinatorial CSS class explosion
+- [56-01 execution]: Register pattern: pipeline=--page-bg (cool white), relationship=--brand-tint-warm, personal=--brand-tint-warmest — drives page background switching
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
 - [54-02 execution]: Two-phase zero-downtime rename pattern: add nullable → bulk UPDATE → set NOT NULL → Phase B (drop) deferred until post-stable-deploy
@@ -67,5 +69,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 55 fully complete (Plans 01-03) — ready for Phase 56 (Frontend Pipeline + Relationships)
+Stopped at: Phase 56 Plan 01 complete — ready for Phase 56 Plan 02 (AG Grid pipeline page)
 Resume file: None
