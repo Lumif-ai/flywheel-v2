@@ -683,8 +683,9 @@ async def execute_run(run: SkillRun) -> None:
             await session.commit()
 
         # Create document artifact — DB insert only, no external storage dependency.
-        # Content is served from skill_runs.rendered_html via GET /documents/{id}/content.
-        if rendered_html:
+        # Content is served from skill_runs.rendered_html (or raw output) via
+        # the frontend SkillRenderer components.
+        if output:
             try:
                 from flywheel.services.document_storage import (
                     _generate_title, _extract_document_metadata
@@ -697,6 +698,7 @@ async def execute_run(run: SkillRun) -> None:
                     run.skill_name, run.input_text, doc_metadata
                 )
                 doc_id = str(uuid4())
+                content_for_size = rendered_html or output
                 async with factory() as session:
                     doc = Document(
                         id=doc_id,
@@ -705,7 +707,7 @@ async def execute_run(run: SkillRun) -> None:
                         title=doc_title,
                         document_type=run.skill_name,
                         storage_path=None,
-                        file_size_bytes=len(rendered_html.encode("utf-8")),
+                        file_size_bytes=len(content_for_size.encode("utf-8")),
                         skill_run_id=run.id,
                         metadata_=doc_metadata,
                     )
@@ -836,46 +838,128 @@ async def _execute_company_intel(
         enrich_with_web_research,
     )
     from flywheel.storage import append_entry as async_append_entry
+    from flywheel.db.models import UploadedFile
 
-    url = input_text.strip()
+    DOCUMENT_FILE_PREFIX = "DOCUMENT_FILE:"
+
     output_parts = []
     tool_calls = []
 
-    # Stage 1: Crawl the website
-    await _append_event_atomic(factory, run_id, {
-        "event": "stage",
-        "data": {"stage": "crawling", "message": f"Crawling {url}..."},
-    })
+    # --- Input discriminator ---
+    lines = input_text.strip().split("\n")
+    primary = lines[0].strip()
+    supplementary_file_ids: list[str] = []
+    for line in lines[1:]:
+        stripped = line.strip()
+        if stripped.startswith(DOCUMENT_FILE_PREFIX):
+            supplementary_file_ids.append(stripped[len(DOCUMENT_FILE_PREFIX):])
 
-    crawl_result = await crawl_company(url)
-    pages_crawled = crawl_result.get("pages_crawled", 0)
-    tool_calls.append({"tool": "crawl_company", "input": url, "result_length": pages_crawled})
+    is_document = primary.startswith(DOCUMENT_FILE_PREFIX)
 
-    if not crawl_result.get("success"):
-        output_parts.append(f"Could not crawl {url}. No pages returned content.")
-        return "\n\n".join(output_parts), {}, tool_calls
+    # Determine the URL for metadata / logging
+    url = "document-upload" if is_document else primary
 
-    await _append_event_atomic(factory, run_id, {
-        "event": "stage",
-        "data": {
-            "stage": "crawled",
-            "message": f"Crawled {pages_crawled} pages",
-        },
-    })
+    pages_crawled = 0
 
-    # Combine raw page text for structuring
-    raw_text = "\n\n---\n\n".join(
-        f"[{path}]\n{text}" for path, text in crawl_result["raw_pages"].items()
-    )
+    if is_document:
+        # Stage 1 (document path): fetch extracted_text from DB, skip crawl
+        file_id = primary[len(DOCUMENT_FILE_PREFIX):]
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "structuring", "message": "Analyzing document..."},
+        })
 
-    # Stage 2: Structure with LLM
-    await _append_event_atomic(factory, run_id, {
-        "event": "stage",
-        "data": {"stage": "structuring", "message": "Analyzing company information..."},
-    })
+        try:
+            async with factory() as _doc_sess:
+                await _doc_sess.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                _file_row = (await _doc_sess.execute(
+                    select(UploadedFile).where(UploadedFile.id == file_id)
+                )).scalar_one_or_none()
+        except Exception as _doc_err:
+            await _append_event_atomic(factory, run_id, {
+                "event": "crawl_error",
+                "data": {
+                    "error": f"Failed to fetch document: {_doc_err}",
+                    "retryable": False,
+                },
+            })
+            output_parts.append(f"Could not fetch document {file_id}.")
+            return "\n\n".join(output_parts), {}, tool_calls
 
+        if _file_row is None or not _file_row.extracted_text:
+            await _append_event_atomic(factory, run_id, {
+                "event": "crawl_error",
+                "data": {
+                    "error": "Document not found or has no extracted text.",
+                    "retryable": False,
+                },
+            })
+            output_parts.append(f"Document {file_id} not found or has no extracted text.")
+            return "\n\n".join(output_parts), {}, tool_calls
+
+        raw_text = _file_row.extracted_text
+        url = f"document:{file_id}"
+
+    else:
+        # Stage 1 (URL path): crawl the website
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "crawling", "message": f"Crawling {primary}..."},
+        })
+
+        crawl_result = await crawl_company(primary)
+        pages_crawled = crawl_result.get("pages_crawled", 0)
+        tool_calls.append({"tool": "crawl_company", "input": primary, "result_length": pages_crawled})
+
+        if not crawl_result.get("success"):
+            output_parts.append(f"Could not crawl {primary}. No pages returned content.")
+            return "\n\n".join(output_parts), {}, tool_calls
+
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {
+                "stage": "crawled",
+                "message": f"Crawled {pages_crawled} pages",
+            },
+        })
+
+        # Combine raw page text for structuring
+        raw_text = "\n\n---\n\n".join(
+            f"[{path}]\n{text}" for path, text in crawl_result["raw_pages"].items()
+        )
+
+        # Append supplementary document texts (refresh scenario)
+        if supplementary_file_ids:
+            for _sup_fid in supplementary_file_ids:
+                try:
+                    async with factory() as _sup_sess:
+                        await _sup_sess.execute(
+                            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                            {"tid": str(tenant_id)},
+                        )
+                        _sup_row = (await _sup_sess.execute(
+                            select(UploadedFile).where(UploadedFile.id == _sup_fid)
+                        )).scalar_one_or_none()
+                    if _sup_row and _sup_row.extracted_text:
+                        raw_text += f"\n\n---\nDocument supplement:\n\n{_sup_row.extracted_text}"
+                except Exception as _sup_err:
+                    logger.warning("Could not fetch supplementary document %s: %s", _sup_fid, _sup_err)
+
+        # Stage 2 (URL path): Structure with LLM
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "structuring", "message": "Analyzing company information..."},
+        })
+
+    # Stage 2: Structure with LLM (stage event already emitted in both branches above)
     intelligence = await asyncio.to_thread(
-        structure_intelligence, raw_text, "website-crawl", api_key=api_key
+        structure_intelligence,
+        raw_text,
+        "document-upload" if is_document else "website-crawl",
+        api_key=api_key,
     )
 
     tool_calls.append({"tool": "structure_intelligence", "input": "raw_text", "result_length": len(str(intelligence))})
@@ -899,14 +983,18 @@ async def _execute_company_intel(
         "data": {"stage": "structured", "message": f"Identified: {company_name}"},
     })
 
-    # Stage 3: Enrich with web research
+    # Stage 3: Enrich with web research (gap-aware — skip already-populated categories)
+    from flywheel.engines.company_intel import _get_existing_profile_keys
+    existing_keys = await _get_existing_profile_keys(factory, tenant_id)
+
     await _append_event_atomic(factory, run_id, {
         "event": "stage",
         "data": {"stage": "enriching", "message": "Researching company online..."},
     })
 
     enriched = await asyncio.to_thread(
-        enrich_with_web_research, company_name, intelligence, api_key=api_key
+        enrich_with_web_research, company_name, intelligence,
+        api_key=api_key, existing_profile_keys=existing_keys
     )
 
     tool_calls.append({"tool": "enrich_with_web_research", "input": company_name, "result_length": len(str(enriched))})
@@ -1033,37 +1121,39 @@ async def _execute_company_intel(
             })
 
     # Stage 4a: Upsert into shared companies table (cache for all tenants)
-    import urllib.parse as _urlparse_co
-    _parsed_co = _urlparse_co.urlparse(url if url.startswith("http") else f"https://{url}")
-    _co_domain = (_parsed_co.hostname or url).removeprefix("www.").lower()
+    # Skip for document-only inputs — no domain to cache against.
+    if not is_document:
+        import urllib.parse as _urlparse_co
+        _parsed_co = _urlparse_co.urlparse(url if url.startswith("http") else f"https://{url}")
+        _co_domain = (_parsed_co.hostname or url).removeprefix("www.").lower()
 
-    # Merge intelligence + enrichment for the cached intel dict
-    _merged_intel = {**intelligence, **enriched}
-    _merged_intel.pop("_source_url", None)  # keep source_url out of shared cache
+        # Merge intelligence + enrichment for the cached intel dict
+        _merged_intel = {**intelligence, **enriched}
+        _merged_intel.pop("_source_url", None)  # keep source_url out of shared cache
 
-    try:
-        from flywheel.db.models import Company
-        from sqlalchemy.dialects.postgresql import insert as _pg_insert
+        try:
+            from flywheel.db.models import Company
+            from sqlalchemy.dialects.postgresql import insert as _pg_insert
 
-        async with factory() as _co_sess:
-            _co_stmt = _pg_insert(Company).values(
-                domain=_co_domain,
-                name=_merged_intel.get("company_name"),
-                intel=_merged_intel,
-                crawled_at=datetime.now(timezone.utc),
-            ).on_conflict_do_update(
-                index_elements=["domain"],
-                set_={
-                    "name": _merged_intel.get("company_name"),
-                    "intel": _merged_intel,
-                    "crawled_at": datetime.now(timezone.utc),
-                },
-            )
-            await _co_sess.execute(_co_stmt)
-            await _co_sess.commit()
-        logger.info("Upserted companies cache for domain=%s", _co_domain)
-    except Exception as _co_err:
-        logger.error("Companies table upsert failed for %s: %s", _co_domain, _co_err)
+            async with factory() as _co_sess:
+                _co_stmt = _pg_insert(Company).values(
+                    domain=_co_domain,
+                    name=_merged_intel.get("company_name"),
+                    intel=_merged_intel,
+                    crawled_at=datetime.now(timezone.utc),
+                ).on_conflict_do_update(
+                    index_elements=["domain"],
+                    set_={
+                        "name": _merged_intel.get("company_name"),
+                        "intel": _merged_intel,
+                        "crawled_at": datetime.now(timezone.utc),
+                    },
+                )
+                await _co_sess.execute(_co_stmt)
+                await _co_sess.commit()
+            logger.info("Upserted companies cache for domain=%s", _co_domain)
+        except Exception as _co_err:
+            logger.error("Companies table upsert failed for %s: %s", _co_domain, _co_err)
 
     # Stage 4b: Write to context store (async, tenant-scoped)
     await _append_event_atomic(factory, run_id, {
@@ -1144,7 +1234,10 @@ async def _execute_company_intel(
 
     # Build output summary
     output_parts.append(f"# Company Intelligence: {company_name}")
-    output_parts.append(f"\nCrawled {pages_crawled} pages from {url}")
+    if is_document:
+        output_parts.append(f"\nAnalyzed from uploaded document ({url})")
+    else:
+        output_parts.append(f"\nCrawled {pages_crawled} pages from {url}")
 
     if enriched.get("what_they_do"):
         output_parts.append(f"\n**What they do:** {enriched['what_they_do']}")

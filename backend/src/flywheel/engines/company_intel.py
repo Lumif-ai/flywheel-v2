@@ -77,6 +77,39 @@ ENRICHMENT_KEYS = [
 
 
 # ---------------------------------------------------------------------------
+# Gap-aware enrichment helper
+# ---------------------------------------------------------------------------
+
+
+async def _get_existing_profile_keys(
+    factory,  # async_sessionmaker
+    tenant_id,  # UUID
+) -> set:
+    """Return file_names that already have non-empty content in the tenant's profile.
+
+    Used by gap-aware enrichment to skip researching already-populated categories.
+    """
+    from sqlalchemy import select, text as sa_text
+    from flywheel.db.models import ContextEntry
+
+    async with factory() as session:
+        await session.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+        rows = (await session.execute(
+            select(ContextEntry.file_name).where(
+                ContextEntry.tenant_id == tenant_id,
+                ContextEntry.source == "company-intel-onboarding",
+                ContextEntry.deleted_at.is_(None),
+                ContextEntry.content.isnot(None),
+                ContextEntry.content != "",
+            )
+        )).scalars().all()
+    return set(rows)
+
+
+# ---------------------------------------------------------------------------
 # 1. crawl_company (async)
 # ---------------------------------------------------------------------------
 
@@ -404,7 +437,13 @@ def structure_from_answers(answers: dict) -> dict:
 # ---------------------------------------------------------------------------
 
 
-def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: str | None = None) -> dict:
+def enrich_with_web_research(
+    company_name: str,
+    intelligence: dict,
+    *,
+    api_key: str | None = None,
+    existing_profile_keys: set | None = None,
+) -> dict:
     """Enrich intelligence using Anthropic's server-side web search.
 
     Uses Claude's built-in web_search_20250305 tool which performs real web
@@ -414,6 +453,10 @@ def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: 
     Args:
         company_name: Company name for research queries.
         intelligence: Existing intelligence dict from site crawl.
+        api_key: Anthropic API key (optional; falls back to environment).
+        existing_profile_keys: Set of file_names already populated in the tenant's
+            context store. When provided, the prompt skips already-filled categories
+            and reduces web search budget accordingly.
 
     Returns:
         Enriched intelligence dict. On any failure, returns the original
@@ -437,22 +480,45 @@ def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: 
 
     company_url = intelligence.get("_source_url", "")
 
+    # Build gap-aware skip markers for search items
+    epk = existing_profile_keys or set()
+
+    def _skip(key: str) -> str:
+        return "(SKIP - already have) " if key in epk else ""
+
+    item1_prefix = _skip("leadership.md")
+    item2_prefix = _skip("company-details.md")
+    item4_prefix = _skip("company-details.md")
+    item5_prefix = _skip("competitive-intel.md")
+    item6_prefix = _skip("tech-stack.md")
+    item10_prefix = _skip("leadership.md")
+
+    # Build gap notice when profile already has populated categories
+    gap_notice = ""
+    if epk:
+        gap_notice = (
+            "The company profile already has data for these categories: %s\n"
+            "Focus your research ONLY on categories that are missing or sparse. "
+            "Do NOT research categories that are already well-populated.\n\n"
+        ) % ", ".join(sorted(epk))
+
     user_message = (
         "Research this company deeply using web search:\n\n"
         "Company: %s\n"
         "Website: %s\n\n"
         "What we already know from their website:\n%s\n\n"
+        "%s"
         "Search for ALL of these:\n"
-        "1. Leadership team — CEO, founders, key executives with their titles\n"
-        "2. Company size — employee count, offices, global presence\n"
+        "1. %sLeadership team — CEO, founders, key executives with their titles\n"
+        "2. %sCompany size — employee count, offices, global presence\n"
         "3. Funding — investors, rounds, amounts raised\n"
-        "4. Headquarters location\n"
-        "5. Competitors in their space\n"
-        "6. Tech stack — from job postings or engineering blog\n"
+        "4. %sHeadquarters location\n"
+        "5. %sCompetitors in their space\n"
+        "6. %sTech stack — from job postings or engineering blog\n"
         "7. Recent news, press releases, announcements\n"
         "8. Social accounts — LinkedIn company page, Twitter/X, GitHub\n"
         "9. Blog topics — what they write about\n"
-        "10. Key people's LinkedIn profiles\n\n"
+        "10. %sKey people's LinkedIn profiles\n\n"
         "After researching, return ONLY a JSON object (no markdown fencing) with these keys "
         "(omit any you couldn't find evidence for):\n"
         "- competitors: list of 3-5 competitors\n"
@@ -468,7 +534,17 @@ def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: 
         "- blog_topics: list of recent blog topics\n\n"
         "CRITICAL: Only include information you actually found in search results. "
         "LinkedIn URLs must be REAL URLs from search results, never guessed."
-    ) % (company_name, company_url, known_summary)
+    ) % (
+        company_name, company_url, known_summary,
+        gap_notice,
+        item1_prefix, item2_prefix, item4_prefix,
+        item5_prefix, item6_prefix, item10_prefix,
+    )
+
+    # Reduce web search budget when more than half the categories are already populated
+    # (saves API credits on refresh scenarios)
+    _total_profile_files = 5  # positioning, icp-profiles, competitive-intel, product-modules, market-taxonomy
+    max_web_searches = 3 if len(epk) > (_total_profile_files // 2) else 5
 
     try:
         client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
@@ -480,7 +556,7 @@ def enrich_with_web_research(company_name: str, intelligence: dict, *, api_key: 
             tools=[{
                 "type": "web_search_20250305",
                 "name": "web_search",
-                "max_uses": 5,
+                "max_uses": max_web_searches,
             }],
             messages=[{"role": "user", "content": user_message}],
         )
