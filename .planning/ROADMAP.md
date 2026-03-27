@@ -222,11 +222,11 @@ Plans:
   4. Phase A of status rename complete: `relationship_status` and `pipeline_stage` columns exist alongside old `status` column, data copied — APIs still read `status` without error
   5. `ai_summary` and `ai_summary_updated_at` columns exist on accounts — detail endpoint returns null summary without triggering any LLM call
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 54-01-PLAN.md — Alembic migrations: relationship_type array + GIN index (DM-01), entity_level (DM-02), ai_summary fields (DM-04), ORM model updates
-- [ ] 54-02-PLAN.md — Two-phase status rename Phase A: add relationship_status + pipeline_stage, copy data from status (DM-03)
+- [x] 54-01-PLAN.md — Alembic migrations: relationship_type array + GIN index (DM-01), entity_level (DM-02), ai_summary fields (DM-04), ORM model updates ✓
+- [x] 54-02-PLAN.md — Two-phase status rename Phase A: add relationship_status + pipeline_stage, copy data from status (DM-03) ✓
 
 ---
 
@@ -245,7 +245,7 @@ Plans:
   4. `GET /api/v1/signals/` returns per-type badge counts (prospects/customers/advisors/investors separately) — counts are non-zero when stale accounts or overdue follow-ups exist
   5. `PATCH /api/v1/relationships/{id}/type` rejects an empty type array and rejects unknown type values — minimum-one-type validation enforced at API layer
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 55-01-PLAN.md — Relationships router: GET list (filtered + partition predicate), GET detail (contacts + timeline + cached summary), PATCH type, POST graduate
@@ -269,7 +269,7 @@ Plans:
   4. Stale rows render with warm tint background, new replies float to top with coral accent — both visible without any filter interaction
   5. Clicking "Graduate" on a row opens the type-selection modal, submitting the modal calls the graduate API, the row slides out with animation, and the sidebar badge count for the selected type increments
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 56-01-PLAN.md — Design system: token updates (shadows, badges, avatar component, status dots, transitions), skeleton shimmer component, empty state component; emotional register CSS for Pipeline vs Relationships
@@ -293,7 +293,7 @@ Plans:
   4. Detail page tab set is type-driven: Prospects and Customers show an Intelligence tab with labeled data points (Pain, Budget, Competition, Champion, Blocker, Fit Reasoning); Advisors and Investors do not show this tab
   5. Commitments tab shows two-column layout (What You Owe / What They Owe) with overdue entries highlighted; Timeline tab shows annotated entries with icon, direction, contact, and time-ago; People tab shows contact cards with 48px avatars, role badges, and last-contacted date
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 57-01-PLAN.md — Sidebar redesign: RELATIONSHIPS section header, four type links with badge counts (React Query from signals endpoint), Pipeline repositioned below; query key factory (queryKeys.ts) for cross-surface invalidation
@@ -323,7 +323,7 @@ Plans:
 | 51. Seed CLI | v2.0 | 1/1 | ✓ Complete | 2026-03-27 |
 | 52. Backend APIs | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 | 53. Frontend | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
-| 54. Data Model Foundation | v2.1 | 0/2 | Not started | — |
+| 54. Data Model Foundation | v2.1 | 2/2 | ✓ Complete | 2026-03-27 |
 | 55. Relationships and Signals APIs | v2.1 | 0/3 | Not started | — |
 | 56. Pipeline Grid | v2.1 | 0/3 | Not started | — |
 | 57. Relationship Surfaces | v2.1 | 0/5 | Not started | — |

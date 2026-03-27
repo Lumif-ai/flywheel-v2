@@ -95,10 +95,10 @@ Deferred beyond v2.1.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DM-01 | Phase 54 | Pending |
-| DM-02 | Phase 54 | Pending |
-| DM-03 | Phase 54 | Pending |
-| DM-04 | Phase 54 | Pending |
+| DM-01 | Phase 54 | ✓ Complete |
+| DM-02 | Phase 54 | ✓ Complete |
+| DM-03 | Phase 54 | ✓ Complete |
+| DM-04 | Phase 54 | ✓ Complete |
 | RAPI-01 | Phase 55 | Pending |
 | RAPI-02 | Phase 55 | Pending |
 | RAPI-03 | Phase 55 | Pending |

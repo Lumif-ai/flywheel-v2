@@ -126,6 +126,10 @@ def _account_to_list_item(a: Account, contact_count: int) -> dict:
         "next_action_due": a.next_action_due.isoformat() if a.next_action_due else None,
         "next_action_type": a.next_action_type,
         "source": a.source,
+        "relationship_type": a.relationship_type,
+        "entity_level": a.entity_level,
+        "relationship_status": a.relationship_status,
+        "pipeline_stage": a.pipeline_stage,
     }
 
 
@@ -137,6 +141,8 @@ def _account_to_detail(a: Account, contacts: list, timeline: list) -> dict:
         "intel": a.intel or {},
         "contacts": contacts,
         "recent_timeline": timeline,
+        "ai_summary": a.ai_summary,
+        "ai_summary_updated_at": a.ai_summary_updated_at.isoformat() if a.ai_summary_updated_at else None,
     }
 
 
