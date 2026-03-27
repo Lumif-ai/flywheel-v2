@@ -1101,6 +1101,7 @@ class Account(Base):
             "next_action_due",
             postgresql_where=text("next_action_due IS NOT NULL"),
         ),
+        Index("idx_account_relationship_type", "relationship_type", postgresql_using="gin"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -1117,6 +1118,16 @@ class Account(Base):
     fit_tier: Mapped[str | None] = mapped_column(Text)
     intel: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
     source: Mapped[str] = mapped_column(Text, nullable=False)
+    relationship_type: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{prospect}'::text[]")
+    )
+    entity_level: Mapped[str] = mapped_column(
+        Text, server_default=text("'company'")
+    )
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary_updated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
     last_interaction_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )
