@@ -4,7 +4,8 @@
 
 - ✅ **v1.0 Email Copilot** — Phases 1–6 + patches 48, 49, 49.1 (shipped 2026-03-25)
 - ✅ **v2.0 AI-Native CRM** — Phases 50–53 (shipped 2026-03-27)
-- 🚧 **v2.1 CRM Redesign** — Phases 54–57 (in progress)
+- ✅ **v2.1 CRM Redesign** — Phases 54–58 (shipped 2026-03-27)
+- 🚧 **v3.0 Intelligence Flywheel** — Phases 59–63 (in progress)
 
 ## Phases
 
@@ -201,7 +202,7 @@ Plans:
 
 ---
 
-### 🚧 v2.1 CRM Redesign — Intelligence-First Relationships (In Progress)
+### ✅ v2.1 CRM Redesign — Intelligence-First Relationships (Shipped 2026-03-27)
 
 **Milestone Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
 
@@ -296,17 +297,165 @@ Plans:
 **Plans:** 5 plans
 
 Plans:
-- [ ] 57-01-PLAN.md — Sidebar redesign: RELATIONSHIPS section header, four type links with badge counts (React Query from signals endpoint), Pipeline repositioned below; query key factory (queryKeys.ts) for cross-surface invalidation
-- [ ] 57-02-PLAN.md — Relationship list pages: card grid component (3-col/2-col/1-col responsive), type-specific card content, urgency sort, warm tint register, empty states per type
-- [ ] 57-03-PLAN.md — Shared RelationshipDetail page: fromType URL param routing, left AI panel + main area layout, header card with avatar + type badges, tab navigation with type-driven config map
-- [ ] 57-04-PLAN.md — Detail tabs: Timeline (annotated entries, expandable, paginated), People (contact cards), Intelligence (Prospects/Customers only — labeled data points, editable), Commitments (two-column, overdue highlight), action bar (type-specific buttons with toast stubs)
-- [ ] 57-05-PLAN.md — AI context panel: cached summary display, skeleton on load, note capture (ContextEntry POST), Q&A input (ask endpoint), source attribution display, graceful degradation for thin context
+- [x] 57-01-PLAN.md — Sidebar redesign: RELATIONSHIPS section header, four type links with badge counts (React Query from signals endpoint), Pipeline repositioned below; query key factory (queryKeys.ts) for cross-surface invalidation ✓
+- [x] 57-02-PLAN.md — Relationship list pages: card grid component (3-col/2-col/1-col responsive), type-specific card content, urgency sort, warm tint register, empty states per type ✓
+- [x] 57-03-PLAN.md — Shared RelationshipDetail page: fromType URL param routing, left AI panel + main area layout, header card with avatar + type badges, tab navigation with type-driven config map ✓
+- [x] 57-04-PLAN.md — Detail tabs: Timeline (annotated entries, expandable, paginated), People (contact cards), Intelligence (Prospects/Customers only — labeled data points, editable), Commitments (two-column, overdue highlight), action bar (type-specific buttons with toast stubs) ✓
+- [x] 57-05-PLAN.md — AI context panel: cached summary display, skeleton on load, note capture (ContextEntry POST), Q&A input (ask endpoint), source attribution display, graceful degradation for thin context ✓
+
+---
+
+### Phase 58: Unified Company Intelligence Engine
+
+**Goal:** Document uploads and URL crawls flow through a single skill engine with intelligence-driven enrichment. The document upload parallel path is eliminated. Founders can refresh or reset their company profile from the profile page.
+
+**Depends on:** Phase 57
+
+**Success Criteria** (what must be TRUE):
+  1. `_execute_company_intel()` accepts both URLs and document text — document text skips crawl, goes straight to structuring
+  2. `POST /profile/analyze-document` creates a SkillRun and routes through the existing company-intel engine — no more background enrichment side path
+  3. Enrichment prompt reads existing profile entries and focuses research on gaps — not the same 10 generic searches every time
+  4. `POST /profile/refresh` re-runs the skill with tenant URL + all linked document content, dedup merges with existing data
+  5. `POST /profile/reset` soft-deletes all `company-intel-onboarding` entries, then runs the same refresh flow
+  6. Frontend profile page shows Refresh and Reset buttons — both display the existing SSE discovery streaming UI during execution
+
+**Plans:** 3 plans
+
+Plans:
+- [x] 58-01-PLAN.md — Engine extension: detect URL vs document text input, skip crawl for documents, gap-aware enrichment prompt that reads existing profile before researching ✓
+- [x] 58-02-PLAN.md — Route document uploads through skill engine: POST /profile/analyze-document creates SkillRun, remove background enrichment path; add POST /profile/refresh and POST /profile/reset endpoints ✓
+- [x] 58-03-PLAN.md — Frontend: Refresh and Reset buttons on CompanyProfilePage, confirmation modal for reset, SSE streaming reuse from onboarding ✓
+
+---
+
+### 🚧 v3.0 Intelligence Flywheel — Conversations Become CRM Intelligence (In Progress)
+
+**Milestone Goal:** Every conversation source (meetings, emails, Slack) flows through a unified intelligence pipeline that extracts structured insights, auto-links to accounts/contacts, and enriches relationship surfaces. The flywheel loop: Ingest → Enrich → Prepare. User-level privacy ensures raw content stays private while extracted intelligence benefits the whole team.
+
+---
+
+### Phase 59: Team Privacy Foundation
+
+**Goal:** User-level RLS policies enforce that personal data (emails, integrations, calendar, skill runs) is invisible to other team members. This is the security prerequisite for any multi-user or team feature.
+
+**Depends on:** Phase 58
+
+**Requirements:** PRIV-01, PRIV-02, PRIV-03, PRIV-04, PRIV-05, PRIV-06, PRIV-07
+
+**Success Criteria** (what must be TRUE):
+  1. User B in the same tenant calls `GET /email/threads` and gets zero results (not User A's emails)
+  2. User B calls `DELETE /integrations/{user_a_id}` and gets 404 Not Found (avoids leaking resource existence)
+  3. User B calls `GET /skills/runs` and sees only their own runs
+  4. All 7 tables have user-level RLS policies enforced at the database level
+  5. Existing single-user functionality is unaffected
+
+**Plans:** 2 plans
+
+Plans:
+- [x] 59-01-PLAN.md — Alembic migration: user-level RLS policies on emails, email_scores, email_drafts, email_voice_profiles, integrations, work_items, skill_runs ✓
+- [x] 59-02-PLAN.md — API-level ownership guards: email endpoint user_id filters, integration DELETE/sync ownership checks, skill_runs list user scoping ✓
+
+---
+
+### Phase 60: Meeting Data Model and Granola Adapter
+
+**Goal:** The meetings table exists with split-visibility RLS, Granola is connected as an integration with encrypted API key, and meetings can be synced from Granola into the database with dedup. No processing yet — just the data foundation and sync pipeline.
+
+**Depends on:** Phase 59
+
+**Requirements:** MDE-01, MDE-02, GRA-01, GRA-02, GRA-03
+
+**Success Criteria** (what must be TRUE):
+  1. `meetings` table exists with tenant-level RLS for metadata, transcript stored in Supabase Storage with user-level access
+  2. User can connect Granola via API key in Settings — key is encrypted in Integration table
+  3. `POST /meetings/sync` pulls meetings from Granola, dedup by external_id, creates meeting rows with `processing_status='pending'`
+  4. Synced meetings show title, date, attendees, provider — no processing yet
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 60-01-PLAN.md — Alembic migration: meetings table with split-visibility RLS, ORM model, indexes
+- [ ] 60-02-PLAN.md — Granola adapter: IntelligenceSource interface, GranolaAdapter (list_meetings, get_meeting_content, test_connection), Integration flow (API key encrypt/store/validate)
+- [ ] 60-03-PLAN.md — Sync endpoint: POST /meetings/sync, dedup logic, meeting row creation, auto-filter with processing rules from Integration settings
+
+---
+
+### Phase 61: Meeting Intelligence Pipeline
+
+**Goal:** Synced meetings are automatically processed — classified by type, intelligence extracted across 9 insight types, written to 7 context store files, and auto-linked to accounts and contacts. The extraction step transforms private transcripts into shared team intelligence.
+
+**Depends on:** Phase 60
+
+**Requirements:** MPP-01, MPP-02, MPP-03, MPP-04, MPP-05, AAL-01, AAL-02, AAL-03
+
+**Success Criteria** (what must be TRUE):
+  1. `_execute_meeting_processor()` fetches transcript, classifies type (8 types via Haiku), extracts insights (9 types via Sonnet), writes to context store
+  2. After processing, meeting row has `summary` JSONB populated with tldr, key_decisions, action_items, and `processing_status='complete'`
+  3. Attendee email domains auto-match to existing accounts — `meeting.account_id` is set
+  4. Unknown attendee domains auto-create prospect accounts with contacts
+  5. Processing rules (skip internal, skip by domain, skip by type) correctly filter meetings to `processing_status='skipped'`
+  6. SSE events stream during processing (reuses existing SkillRun event pattern)
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 61-01-PLAN.md — Meeting processor engine: _execute_meeting_processor() in skill_executor.py with 7-stage pipeline (fetch → store → classify → extract → context write → update meeting → emit events), web-adapted SKILL.md copy
+- [ ] 61-02-PLAN.md — Account auto-linking: domain matching (attendee email → accounts.domain), contact discovery (attendee → AccountContact), prospect auto-creation for unknown domains
+- [ ] 61-03-PLAN.md — Processing rules: auto-filter engine reading Integration settings JSONB, skip rules (internal, domain, type, specific meeting), processing_status state machine
+
+---
+
+### Phase 62: Meeting Surfaces and Relationship Enrichment
+
+**Goal:** Meetings have a dedicated page with list/detail views. Processed meetings enrich relationship surfaces — timeline shows meeting entries, intelligence tabs show extracted insights, people tabs show discovered contacts, signal badges reflect meeting activity. The CRM surfaces built in v2.1 now fill with real conversation intelligence.
+
+**Depends on:** Phase 61
+
+**Requirements:** FE-01, FE-02, FE-03, FE-04, RSE-01, RSE-02, RSE-03
+
+**Success Criteria** (what must be TRUE):
+  1. Meetings page shows synced meetings with status badges (pending/processing/complete/skipped), sync button triggers Granola pull
+  2. Meeting detail shows metadata for all team members, transcript only for the meeting owner (403 for others)
+  3. Granola API key connection in Settings page with test/disconnect flow
+  4. Relationship timeline tab shows meeting entries with date, type badge, attendees, tldr
+  5. Relationship intelligence tab includes pain points, buying signals, competitor mentions extracted from meetings
+  6. Sidebar signal badges increment when new meetings are processed for an account
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 62-01-PLAN.md — Meetings page: list view with meeting cards, status badges, sync button, processing SSE feedback; meeting detail view with privacy enforcement (transcript owner-only)
+- [ ] 62-02-PLAN.md — Granola settings: API key input in SettingsPage, connection status indicator, test/disconnect flow, sync controls
+- [ ] 62-03-PLAN.md — Relationship enrichment: meeting entries in timeline tab, intelligence tab data from meeting context entries, people tab contacts from meeting attendees, signal badge integration
+
+---
+
+### Phase 63: Meeting Prep Loop
+
+**Goal:** The flywheel closes — meeting prep reads the enriched context store and produces intelligence briefings for upcoming meetings. A founder preparing for a call with Acme sees full relationship history, known pain points, open action items, and competitive positioning. The prep makes the meeting more productive, which produces richer intelligence for next time.
+
+**Depends on:** Phase 62
+
+**Requirements:** PREP-01, PREP-02
+
+**Success Criteria** (what must be TRUE):
+  1. User can trigger meeting prep from meetings page or relationship page — "Prep for meeting with Acme"
+  2. Prep reads context store entries linked to the account (pain points, competitor intel, action items, contacts, timeline)
+  3. Briefing is rendered as HTML with structured sections (relationship summary, known pain points, open action items, competitive landscape, suggested questions)
+  4. Prep is user-initiated only (no auto-trigger in v1)
+  5. Briefing is private to the requesting user (Zone 1)
+
+**Plans:** 2 plans
+
+Plans:
+- [ ] 63-01-PLAN.md — Meeting prep engine: web-adapted prep skill, context reader (account-scoped entries from 7 files), LLM briefing generation, HTML rendering
+- [ ] 63-02-PLAN.md — Prep frontend: trigger from meetings page and relationship page, SSE streaming during generation, briefing viewer
 
 ---
 
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -326,10 +475,18 @@ Plans:
 | 54. Data Model Foundation | v2.1 | 2/2 | ✓ Complete | 2026-03-27 |
 | 55. Relationships and Signals APIs | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
 | 56. Pipeline Grid | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
-| 57. Relationship Surfaces | v2.1 | 0/5 | Not started | — |
+| 57. Relationship Surfaces | v2.1 | 5/5 | ✓ Complete | 2026-03-27 |
+| 58. Unified Company Intelligence Engine | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
+| 59. Team Privacy Foundation | v3.0 | 2/2 | ✓ Complete | 2026-03-28 |
+| 60. Meeting Data Model and Granola Adapter | v3.0 | 0/3 | Not started | — |
+| 61. Meeting Intelligence Pipeline | v3.0 | 0/3 | Not started | — |
+| 62. Meeting Surfaces and Relationship Enrichment | v3.0 | 0/3 | Not started | — |
+| 63. Meeting Prep Loop | v3.0 | 0/2 | Not started | — |
 
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
 *v2.0 shipped: 2026-03-27*
 *v2.1 milestone added: 2026-03-27*
+*v2.1 shipped: 2026-03-27*
+*v3.0 milestone added: 2026-03-28*

@@ -9,10 +9,10 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 
 ## Current Position
 
-Phase: 59 of 63 (Team Privacy Foundation)
-Plan: 2 of 2 in current phase
-Status: Complete
-Last activity: 2026-03-28 — Phase 59 Plan 02 complete: API-layer user_id defense-in-depth filters on email, integrations, skills
+Phase: 60 of 63 (Meeting Data Model and Granola Adapter)
+Plan: 0 of 3 in current phase
+Status: Not started
+Last activity: 2026-03-28 — Phase 59 complete: user-level RLS on 7 tables + API ownership guards on 13 query locations
 
 Progress: [█████████████████░░░] 85% (31/42 total plans complete across all milestones)
 
