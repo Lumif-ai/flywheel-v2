@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.1 — Phase 56: Pipeline Grid
+**Current focus:** Milestone v2.1 — Phase 57: Relationship Surfaces
 
 ## Current Position
 
-Phase: 56 of 57 (Pipeline Grid)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-03-27 — Phase 56 Plan 03 complete (filter bar, view tabs, graduation modal, stale/reply row styling, pagination)
+Phase: 57 of 57 (Relationship Surfaces)
+Plan: 1 of 5 in current phase
+Status: In progress
+Last activity: 2026-03-27 — Phase 57 Plan 01 complete (data layer, sidebar, routes)
 
-Progress: [███████████████░░░░░] 80% (21/26 total plans complete across all milestones)
+Progress: [█████████████████░░░] 85% (22/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -55,6 +55,9 @@ Recent decisions affecting current work:
 - [56-03 execution]: Stale tab (>14 days) uses client-side filter on already-loaded data — days_since_last_outreach already in each row, no extra server round trip
 - [56-03 execution]: Entity level auto-detection in GraduationModal — only advisor/investor selected => person, otherwise company
 - [56-03 execution]: Count query LEFT JOINs last_status_sq subquery so outreach_status filter applies correctly and pagination totals stay accurate
+- [57-01 execution]: ContactItem uses created_at (not last_contacted_at) — backend does not expose last_contacted_at; use for "Added X ago" display in PeopleTab
+- [57-01 execution]: signalByType helper reads from useSignals() data — avoids prop drilling signal counts through sidebar tree
+- [57-01 execution]: Placeholder RelationshipListPage/RelationshipDetail components registered in Plan 01 so routes work immediately — Plans 02/03 replace them
 - [56-03 execution]: AG Grid getRowStyle used for stale/replied/graduating row styles — avoids Tailwind v4 CSS class conflicts
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
@@ -73,11 +76,11 @@ None yet.
 
 ### Blockers/Concerns
 
-- [Phase 56]: AG Grid CSS variable theming against Tailwind v4 Vite plugin architecture untested in this codebase — plan a 1-hour spike before committing to theming approach
+- [Phase 56]: RESOLVED — AG Grid themeQuartz.withParams() with CSS custom properties works cleanly with Tailwind v4 (no CSS imports needed)
 - [Phase 57]: AskPanel conversational UI is highest-complexity component in milestone — consider focused implementation spike before building
 
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 56 Plan 03 complete — Phase 56 fully done, ready for Phase 57 (RelationshipDetail)
+Stopped at: Completed 57-01-PLAN.md — data layer, sidebar RELATIONSHIPS section, 5 routes
 Resume file: None
