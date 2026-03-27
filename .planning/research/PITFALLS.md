@@ -1,344 +1,665 @@
-# Pitfalls Research
+# Domain Pitfalls: CRM Redesign — Multi-Type Relationships, AI Synthesis, Configurable Grid
 
-**Domain:** AI Email Copilot integration into existing multi-tenant SaaS (Flywheel V2)
-**Researched:** 2026-03-24
-**Confidence:** HIGH — research verified with official Gmail API docs, Google dev forums, academic security research, and community post-mortems
+**Domain:** Brownfield CRM migration — adding multi-type relationships, AI synthesis caching,
+configurable data grid, and entity-level switching (person vs company) to existing system
+**Researched:** 2026-03-27
+**Confidence:** HIGH for migration/backend pitfalls (direct codebase inspection + official docs).
+MEDIUM for frontend grid pitfalls (official TanStack docs + community patterns). MEDIUM for AI
+cost/caching (multiple credible sources, no single authoritative reference).
+
+---
+
+## Context: What Already Exists
+
+The existing system has:
+- `accounts` table with a `status TEXT` column (values: `prospect`, `engaged`, etc.)
+- 206 seeded accounts, all with `status = 'prospect'` or `status = 'engaged'`
+- `GET /pipeline/` filters on `Account.status`
+- `POST /accounts/{id}/graduate` sets `status = 'engaged'`
+- Frontend `PipelineItem` TypeScript type has `status: string` field
+- Frontend `pipeline/api.ts` calls `GET /pipeline/` and `POST /accounts/{id}/graduate`
+- `GET /accounts/?status=...` filters on the `status` column directly
+
+The migration renames `status` → `pipeline_stage`, adds `relationship_type text[]`,
+`relationship_status text`, `entity_level text`, `ai_summary text`, and `ai_summary_updated_at`.
 
 ---
 
 ## Critical Pitfalls
 
-### Pitfall 1: historyId Expiry Without Full-Sync Fallback
+Mistakes that cause rewrites, data loss, or major regressions.
+
+---
+
+### Pitfall 1: Atomic Rename — The Gap Between Migration and Code Deploy
 
 **What goes wrong:**
-The Gmail sync worker stores a `historyId` watermark and calls `history.list(startHistoryId=...)` on each cycle. After a weekend outage, token expiry, or any gap longer than ~1 week, the stored historyId falls outside Gmail's available range. Gmail returns HTTP 404. The worker catches a generic exception, logs it, and continues with the stale watermark — silently missing every email received during the gap. Users never see these emails in the copilot.
+`status` is renamed to `pipeline_stage` in Alembic. The migration runs. For the window
+between migration completion and code deploy, the existing API code still references
+`Account.status`. SQLAlchemy raises `AttributeError: Account has no attribute 'status'` on
+every request. The entire `/accounts/`, `/pipeline/`, and `/graduate` API surface goes 500.
+With 206 accounts in the DB, this affects every user immediately.
 
 **Why it happens:**
-Developers treat historyId like a reliable pagination cursor (analogous to database sequence IDs). It isn't. Google documents that "records may be available for at least one week and often longer, but sometimes significantly less." A historyId is also non-contiguous — there are gaps between valid IDs, and a push notification historyId often cannot be used directly in `history.list` (returns empty results). The 404 is the documented failure mode, but developers handle it as a generic error rather than a full-sync trigger.
+In Python SQLAlchemy, the ORM model attribute name and the DB column name must stay in sync.
+When you rename a column in the DB (via `op.alter_column`) but haven't updated the ORM model or
+the API code, every ORM reference to `Account.status` compiles to SQL referencing a column that
+no longer exists. PostgreSQL returns `column "status" does not exist`.
 
-**How to avoid:**
-- Explicitly catch HTTP 404 from `history.list` as a distinct code path — not a generic exception.
-- On 404: delete the stored `history_id` from `integration.settings`, set `initial_sync_done = False`, and re-run the initial sync for that integration.
-- After full sync completes, capture the new historyId from the response's `historyId` field.
-- Track `last_full_sync_at` in `integration.settings` to monitor gap recovery.
-- Never trust that the current historyId will work after more than 3 days of inactivity.
+Additionally, the existing `PATCH /accounts/{id}` endpoint accepts `UpdateAccountRequest` with
+a `status` field. After the migration, this field silently does nothing (the column is gone) —
+no error, just silent data loss if not updated.
 
-**Warning signs:**
-- A user reports "I had emails that weren't scored" after being offline or after a deploy.
-- The sync worker logs 404 errors for an integration but doesn't reset its watermark.
-- Monitoring shows zero new emails ingested over a 2-hour window during business hours.
+**Consequences:**
+- Total API outage for all CRM endpoints during the deploy gap
+- Silent silent data loss if any client writes to `status` field after rename
+- Pipeline frontend breaks (reads `item.status` from API response)
 
-**Phase to address:** Phase 1 (Gmail Read Service + Sync Worker) — the fallback must be built into `sync_inbox()` from day one. Adding it later requires careful state migration for all existing integration rows.
+**Prevention:**
+Use a two-phase migration:
+1. Phase A (additive): Add `pipeline_stage`, `relationship_type`, `relationship_status`,
+   `entity_level` as new columns. Copy data: `UPDATE accounts SET pipeline_stage = status`.
+   Deploy code that writes to BOTH `status` AND `pipeline_stage`, reads from `pipeline_stage`.
+2. Phase B (cleanup): After Phase A is stable for ≥1 deploy cycle, drop `status` column.
+   Remove dual-write code. Remove `status` field from all Pydantic models.
+
+Never do a single-phase rename in a brownfield system with live traffic.
+
+**Detection:**
+- Any Alembic migration that calls `op.alter_column(..., new_column_name='...')` without a
+  matching same-commit ORM model update.
+- SQLAlchemy errors containing `column "status" does not exist` in staging logs.
+- `grep -r "Account.status" backend/src/` should return zero results after Phase A deploy.
+
+**Phase to address:** Data Model phase (first phase of milestone). Phase A migration must be
+deployed and verified before any relationship API code is written. Phase B is a cleanup task
+in a later phase or a follow-up commit.
 
 ---
 
-### Pitfall 2: OAuth Scope Expansion Breaks Existing Users
+### Pitfall 2: Array Column Filter Without GIN Index — Silent Full Table Scan
 
 **What goes wrong:**
-The existing `google_gmail.py` grants `gmail.send` scope. A developer adds `gmail.readonly` to the existing `SCOPES` list (the obvious path). Existing users have refresh tokens for `gmail.send` only. On the next token refresh, the API call includes the new scope — Google detects scope mismatch and returns `invalid_grant`. The send integration goes red for all connected users. Now to reconnect Gmail send, every user must re-authorize from scratch.
+The new `relationship_type text[]` column is added. The relationships API filters with
+`WHERE 'advisor' = ANY(relationship_type)`. PostgreSQL executes this correctly but performs a
+full sequential scan on the `accounts` table for every request. At 206 rows this is imperceptible.
+At 2,000+ rows (after sales and seeding cycles), list page latency crosses 300ms. By 5,000 rows
+it is visibly slow. The query never shows up in slow-query logs because it is measured in
+milliseconds per row, not absolute time — until it isn't.
 
 **Why it happens:**
-`gmail.readonly` is a **restricted scope** (it grants access to the entire inbox). Google's OAuth 2.0 requires explicit user consent for each new scope grant. There is no background upgrade path. The scope set in the OAuth flow must exactly match what the user consented to. Adding a new scope to an existing flow silently requests something the stored token never authorized.
+PostgreSQL's standard B-tree index does not support the `ANY()` operator on arrays. The GIN
+(Generalized Inverted Index) index is required. Without it, every relationship type filter
+is a full table scan. This is a well-documented PostgreSQL behavior that developers miss because
+the query "works" without the index — it just doesn't scale.
 
-**How to avoid:**
-- NEVER modify the `SCOPES` list in `google_gmail.py`. The send integration is already in production.
-- Create a completely separate OAuth flow (`gmail_read.py`) with `SCOPES = [gmail.readonly, gmail.modify]`.
-- Store as `provider="gmail-read"` in the `Integration` table — a new row, not an update.
-- The integration settings page shows two separate Gmail entries: "Gmail (Send)" and "Gmail (Inbox)."
-- Users explicitly opt in to the inbox reading integration. It is never auto-enabled.
-- Before shipping: verify the new OAuth app passes Google's restricted scope verification for `gmail.readonly`. This process takes 2-6 weeks if the app is in "Testing" mode or has fewer than 100 verified users.
+**Consequences:**
+- Relationship list page degrades progressively as account count grows
+- Signal computation (which queries across all accounts by type) hits the same problem
+- Performance cliff is invisible in dev/staging with small datasets
 
-**Warning signs:**
-- Any PR that modifies the `SCOPES` variable in `google_gmail.py`.
-- A developer proposes "combining the scopes for simplicity."
-- The OAuth consent screen is updated in Google Cloud Console without documenting the change.
+**Prevention:**
+Add the GIN index in the same Alembic migration that creates `relationship_type`:
+```sql
+CREATE INDEX idx_account_relationship_type
+  ON accounts USING GIN (relationship_type);
+```
 
-**Phase to address:** Phase 1 (Gmail OAuth expansion) — the architectural decision to use separate Integration rows must be enforced before any code is written for `gmail_read.py`.
+In Alembic:
+```python
+op.create_index(
+    'idx_account_relationship_type',
+    'accounts',
+    ['relationship_type'],
+    postgresql_using='gin'
+)
+```
+
+Also index `(tenant_id, relationship_type)` for the most common query pattern
+(all queries are scoped by tenant first).
+
+Note on GIN index cost: GIN indexes are larger than the table itself and updates are
+more expensive than B-tree (`UPDATE` to an array-indexed column is effectively a DELETE
++ INSERT in the index). For 200-2000 accounts with infrequent type changes, this is
+completely acceptable. Flag for reconsideration at 100K+ rows.
+
+**Detection:**
+- `EXPLAIN ANALYZE SELECT * FROM accounts WHERE 'advisor' = ANY(relationship_type)` shows
+  `Seq Scan` instead of `Bitmap Index Scan`.
+- Missing `postgresql_using='gin'` in the migration that adds `relationship_type`.
+
+**Phase to address:** Data Model phase. The GIN index must ship in the same migration as
+the column. Do not add it as a "follow-up optimization."
 
 ---
 
-### Pitfall 3: The 5-Minute Polling Wall at 200+ Users
+### Pitfall 3: Account Appears in Both Pipeline AND Relationship Surface Simultaneously
 
 **What goes wrong:**
-The `email_sync_loop()` iterates over all connected integrations sequentially. At 50 users it takes ~50 seconds per cycle, well within the 5-minute window. At 200 users it takes 3-4 minutes. At 500+ users, one full cycle takes longer than 5 minutes — the next scheduled cycle starts before the first finishes, connections pile up, DB pool exhausts, and the system slogs into a semi-deadlock where most users get stale data indefinitely.
+The pipeline query filters on `pipeline_stage IN ('prospect', 'sent', 'awaiting')`. The
+relationships query filters on `relationship_type`. After graduation, an account has
+`relationship_type = ['customer']` AND `pipeline_stage = 'engaged'`. Both queries match it.
+The account appears in the Pipeline grid AND the Customers list. A founder graduates a company,
+navigates to Customers, sees it there — then goes back to Pipeline and finds it still listed.
+They graduate it again. The graduation endpoint returns 409 (already has this type), but the
+frontend shows no clear explanation.
 
 **Why it happens:**
-The calendar sync clone pattern works for a small user base. The asyncio sleep-based loop has no built-in sharding or per-user concurrency. Each `sync_inbox()` call blocks the loop until it completes (even though it's async, it still runs sequentially if awaited serially).
+The partition between Pipeline and Relationship surfaces is defined by business logic in the
+API query, not enforced by the data model. If the query predicates are not precisely defined
+and enforced consistently in BOTH the pipeline and relationships endpoints, accounts leak across
+surfaces.
 
-**How to avoid:**
-- Build `email_sync_loop()` to iterate users in batches of 20-50, running each batch concurrently with `asyncio.gather()`.
-- Add a hard timeout per integration (e.g., 30 seconds) to prevent one slow API call from blocking the batch.
-- Track `last_synced_at` per integration so you can skip recently-synced ones if the loop is overloaded.
-- When the loop iteration time exceeds 60% of `SYNC_INTERVAL`, emit a warning metric.
-- At the architecture level, the transition to Gmail Pub/Sub push notifications is documented as the correct solution above 500 users — plan the migration path in the data model (add `pubsub_subscription_id` to Integration) even if you don't implement it immediately.
+**Consequences:**
+- Data integrity confusion — the same account appears in two places
+- Double-graduation attempts cause confusing 409 errors
+- React Query caches both surfaces independently; after graduation one cache is stale
 
-**Warning signs:**
-- Total sync cycle time logged as approaching 4+ minutes.
-- `asyncio.sleep(300)` effectively sleeping for 0 seconds because cycle takes 5+ min.
-- DB connection pool errors appearing in logs during sync cycles.
+**Prevention:**
+Define the partition predicate once and use it in both endpoints:
+- **Pipeline:** accounts where `relationship_type = '{prospect}'` (exactly, no other types)
+  AND `pipeline_stage NOT IN ('engaged')`, OR `relationship_type @> '{prospect}'` AND
+  no other type AND `pipeline_stage` is pre-engagement.
+- **Relationships:** accounts where `relationship_type && ARRAY['customer','advisor','investor']`
+  OR (`relationship_type = '{prospect}'` AND `pipeline_stage = 'engaged'`).
 
-**Phase to address:** Phase 1 (Sync Worker) — the concurrency structure must be correct from the start. Refactoring from sequential to concurrent at scale requires careful state management and is expensive to do after the fact.
+The cleanest implementation: add a `graduated_at timestamp` column. When `graduated_at IS NOT
+NULL`, the account is a relationship. Pipeline filters `WHERE graduated_at IS NULL`.
+
+After graduation mutation, React Query must invalidate BOTH `['pipeline']` and `['relationships']`
+query keys in the same `onSuccess` callback.
+
+**Detection:**
+- Test: graduate an account; assert it no longer appears in `GET /pipeline/`; assert it does
+  appear in `GET /relationships/?type=customer`.
+- Frontend: after graduation modal confirm, check that `usePipeline` and `useRelationships`
+  both re-fetch.
+
+**Phase to address:** Backend API phase (relationships endpoint). The Pipeline endpoint must
+also be updated in the same phase to filter graduated accounts out.
 
 ---
 
-### Pitfall 4: Tenant Context Leakage via Shared LLM Prompt Context
+### Pitfall 4: Person vs Company Entity Confusion — The Self-Contact Trap
 
 **What goes wrong:**
-The email scorer runs as a batch SkillRun. The system prompt is assembled with context entries for the current tenant. If the skill executor's context loading is not strictly tenant-scoped, entries from another tenant's context store can appear in the assembled prompt. The LLM generates a score referencing a competitor's deal (from tenant B) while processing tenant A's emails. This is a silent, hard-to-detect data breach.
+An advisor is created as a person-level account (`entity_level = 'person'`). The spec says
+"a single AccountContact exists where the contact IS the relationship (self-contact pattern)."
+In practice, a developer creates the AccountContact for the advisor but uses the advisor's
+own name/email. Later, the People tab queries contacts for this account and shows one card.
+Another developer adds the graduation flow: when graduating a company as "Advisor", the UI
+asks "Who is the advisor?" and creates a second AccountContact with the same person's details.
+Now there are two identical contacts for the same person-level account, and the dedup logic
+doesn't exist.
+
+A related failure: a prospect has a contact named "Laurie Chen" (CFO at Howden). Laurie
+becomes an advisor. The team creates a new person-level account for "Laurie Chen (Advisor)".
+Now Laurie appears in two places — as a contact under Howden (company) and as a standalone
+advisor account. In v2.1 these are intentionally not linked. But if the graduation flow
+incorrectly creates a NEW account instead of a NEW contact entry on the same account, the
+person-level logic is broken.
 
 **Why it happens:**
-RLS protects direct SQL queries, but RLS does not protect LLM prompt context. The skill executor's `context_tools` may execute FTS queries that inherit the current DB session's `app.tenant_id` setting — but if the session is reused across batch jobs, the tenant setting can carry over. Additionally, the voice profile JSONB contains training examples from specific users; if the profile lookup uses `user_id` without also filtering by `tenant_id`, cross-tenant profile reads are possible in multi-tenant deployments.
+The `entity_level` column is a convention, not a database constraint. There is no FK linking
+a person-level account to the contact who IS that account. The self-contact pattern is
+implicit — it relies on the application layer to maintain the invariant.
 
-**How to avoid:**
-- Every `context_tools` call inside a skill execution must explicitly pass `tenant_id` as a filter parameter, not rely solely on session-level RLS.
-- The `EmailVoiceProfile` lookup in the drafter skill must always `WHERE tenant_id = $1 AND user_id = $2` — both conditions, never just `user_id`.
-- The email scorer's system prompt must never include raw email content from any source other than the current batch's emails.
-- Write an integration test that creates two tenants, syncs emails for both, and asserts that tenant A's score prompt contains zero content from tenant B's context store.
-- Use separate DB sessions per SkillRun execution — never share a session across different tenants' skill runs.
+**Consequences:**
+- Duplicate contacts for the same person-level account
+- People tab rendering shows 2 identical cards (confusing UX)
+- AI synthesis pulls duplicate context and double-counts interactions
+- The advisor/investor graduation flow creates a dangling person-level account with no self-contact
 
-**Warning signs:**
-- Skill run logs showing context entries with `tenant_id` different from the current run's tenant.
-- A user reports a draft referencing people or companies they don't know.
-- Missing `AND tenant_id = $1` clause in any context query within skill execution.
+**Prevention:**
+- Add a `primary_contact_id UUID FK -> account_contacts.id` nullable column to `accounts`.
+  For person-level accounts, this FK points to the self-contact. This makes the relationship
+  explicit and queryable.
+- In the graduation flow: when graduating as advisor/investor, create the person-level
+  `AccountContact` first, then set `accounts.primary_contact_id` to that contact's ID.
+- Add a uniqueness constraint or application-layer guard: person-level accounts may not have
+  more than one `AccountContact` of type `self`.
+- Test: graduate a company as Advisor → verify exactly 1 contact created → verify
+  `primary_contact_id` is set on the account.
 
-**Phase to address:** Phase 2 (Email Scorer Skill) — tenant isolation must be verified in the scorer before the drafter is built. The drafter inherits all scorer context, so a leak in the scorer cascades into drafts.
+**Detection:**
+- `SELECT account_id, COUNT(*) FROM account_contacts GROUP BY account_id HAVING COUNT(*) > 1`
+  on person-level accounts (should always be 1).
+- Missing `primary_contact_id` FK on `accounts` table.
+
+**Phase to address:** Data Model phase (schema) + Graduation API phase (enforcement).
+The `primary_contact_id` column should be added in the schema migration. The graduation
+endpoint must create the self-contact atomically.
 
 ---
 
-### Pitfall 5: Voice Profile Poisoned by Auto-Replies and Out-of-Office Messages
+### Pitfall 5: AI Synthesis Cost Runaway — LLM Called on Cache Miss, Not on Request
 
 **What goes wrong:**
-The voice profile initializer pulls the user's last 100 sent emails to learn their tone. The batch includes: 15 out-of-office auto-replies ("I am out of the office until..."), 8 calendar invite acceptances ("Accepted: Your meeting request"), 12 form confirmations ("Thank you for contacting us"), and 3 bounce notifications. The model learns a stilted, robotic, impersonal voice. Drafts sound like system messages. Users dismiss every draft and distrust the feature.
+The detail page loads. `ai_summary` is NULL (account has never been synthesized). The API
+automatically calls the LLM to generate a summary and blocks the response until generation
+completes (5-15 seconds). The user sees a spinner. Meanwhile, 8 other detail pages load —
+same behavior. 8 LLM calls in parallel, each with full account context (10-20KB of context
+per call). The Anthropic bill for that hour is $12. Multiplied by daily usage, the monthly
+AI synthesis bill exceeds the product's ARR.
+
+A more subtle variant: the synthesis endpoint has no rate limiting. A bug in the frontend
+calls `POST /relationships/{id}/synthesize` in a `useEffect` with a dependency that fires on
+every render. Each account detail load triggers 3-5 synthesis calls before the user even
+reads the page.
 
 **Why it happens:**
-The Gmail API `messages.list` with `in:sent` returns ALL sent messages, including those sent by Gmail automation (calendar invites, auto-responders, Workspace rules). Developers assume "sent by the user" means "written by the user."
+"Cached AI synthesis" sounds solved at architecture time but implementation defaults to
+"generate if null." The cache invalidation logic is undefined. The spec says "regenerated on
+new data arrival" — but no one defines what "new data arrival" means as a trigger. Without
+explicit triggers, the path of least resistance is to always regenerate.
 
-**How to avoid:**
-- Filter sent messages before passing to voice profile analysis:
-  - Exclude messages where `Auto-Submitted` header is present (RFC 3834 standard for auto-replies).
-  - Exclude messages shorter than 3 sentences (captures one-liners and form confirmations).
-  - Exclude messages where the sender is a noreply/no-reply address pattern.
-  - Exclude messages that match common auto-reply phrases: "Out of office", "automatic reply", "on vacation", "I will be back", "do not reply to this email."
-  - Prefer messages with at least one sentence of original content (exclude pure quote replies).
-- After filtering, if fewer than 30 quality samples remain, flag the profile as `low_confidence: true` and surface a UI prompt asking the user to add writing samples or confirm the extracted style.
-- Log how many emails were filtered vs. used so you can tune the filter over time.
+**Consequences:**
+- Unbounded LLM cost correlated with page loads (not user value)
+- Detail page latency of 5-15 seconds for first-time loads (cold cache = slow page)
+- Synthesis rate limiter (1 per account per 5 min) is the only guard, but frontend bugs
+  bypass it via multiple parallel calls
 
-**Warning signs:**
-- Voice profile JSONB shows `samples_analyzed < 20` after initialization on a user with 200+ sent emails.
-- Profile `tone` field is blank or shows "formal, brief."
-- First draft generated is under 50 words for a scenario that requires a substantive reply.
+**Prevention:**
+- `ai_summary` being NULL should return NULL, not trigger generation. The page renders with
+  a "Generate summary" CTA.
+- Synthesis is ALWAYS explicit: user clicks a button OR a background job runs after
+  new data arrives. Never auto-triggered on page load.
+- Background trigger: after `POST /relationships/{id}/notes` or `POST /relationships/{id}/files`
+  or graduation, enqueue a synthesis job. Do not block the response.
+- The `/synthesize` endpoint must be rate-limited at the DB level: store `synthesis_requested_at`,
+  return 429 if within 5 minutes of last request (not just last completion).
+- Frontend: call synthesis only from an explicit user action (button click), never from
+  `useEffect` or query lifecycle hooks.
+- Token budget guard: count context tokens before LLM call. If context is under a minimum
+  threshold (< 3 meaningful entries), return a template string without an LLM call.
 
-**Phase to address:** Phase 2 (Voice Profile Init in Sync Worker) — the filter logic must ship with the initial voice profile extraction. Reprocessing 100 sent emails after users have had a bad first experience doesn't recover trust.
+**Detection:**
+- LLM call count per hour exceeds (number of active users × 2). Any higher indicates
+  automated triggering.
+- Any `useEffect` or `useQuery` in frontend code that calls `/synthesize` without a user
+  interaction event as its trigger.
+- Synthesis endpoint logs showing multiple calls per account within seconds.
+
+**Phase to address:** AI Synthesis phase. Rate limiting and explicit-trigger-only must be
+designed before the endpoint is built, not added afterward.
 
 ---
 
-### Pitfall 6: Email Body in Error Logs (GDPR Time Bomb)
+## Moderate Pitfalls
+
+Mistakes that cause rework or significant UX degradation without data loss.
+
+---
+
+### Pitfall 6: Signal Computation on Every Request — Scan-on-Read Anti-Pattern
 
 **What goes wrong:**
-The drafter skill fetches the email body on demand. A MIME parsing error throws an exception. The exception handler does `logger.exception("Failed to parse email body: %s", raw_mime_payload)`. The raw email body — which contains names, financial figures, private health information, or legal communications — is now in the application log, which is shipped to Datadog/CloudWatch/Sentry. The log retention is 90 days. A routine security audit discovers the PII. Legal is involved.
+`GET /api/v1/signals/` is called on app mount and polled every 60 seconds. Each call computes
+signals by scanning `outreach_activities` for overdue follow-ups, `context_entries` for stale
+relationships, and `accounts` for next_action_due dates. At 206 accounts with ~1 outreach
+activity each, this is ~3 table scans per poll cycle. At 1,000 accounts across multiple users,
+the signal endpoint becomes the most expensive API call in the system, running every 60 seconds
+per connected user.
 
 **Why it happens:**
-Developer instinct during debugging is to log the value that caused the error. This is correct for most data. Email bodies are categorically different — they are not application data, they are user-owned communication content with GDPR/CCPA implications.
+Signal computation seems simple when the data is small. The temptation is to compute signals
+in real-time as a query so they're always fresh. The problem is that "fresh every 60 seconds"
+does not require "computed on every request" — these are different things.
 
-**How to avoid:**
-- Establish a hard rule at project kickoff: email body content NEVER appears in log output at any level (DEBUG, INFO, WARNING, ERROR).
-- The body fetch function `get_message_body()` wraps all operations in a try/except that logs only the message ID and error type, never the content.
-- Use structured logging with an `email_body` field that is always redacted: `logger.error("body_parse_failed", extra={"gmail_message_id": msg_id, "error": str(e), "body": "[REDACTED]"})`.
-- The Sentry/error tracking integration must have a before-send hook that strips any field named `body`, `content`, `text`, or `snippet` from event payloads.
-- Apply the same rule to email metadata (subject lines can contain sensitive information): log message IDs, never subjects in error paths.
-- Write a linting rule (pre-commit hook or CI check) that scans skill files and service files for log statements that reference body/content variables.
+**Prevention:**
+- For v2.1 at 206 accounts: accept real-time computation. Add `EXPLAIN ANALYZE` to the
+  signal query before shipping to verify it uses existing indexes.
+- Add a defensive cap: `LIMIT 50` on signal results. Never scan unboundedly.
+- Ensure `idx_account_next_action` partial index (already exists from migration 027) is
+  used by the query.
+- Design the signal count response as a separate lightweight query (just counts, no full
+  objects) for the sidebar badges. The full signal list is only fetched when the user opens
+  a signal drawer.
+- Document the scale threshold: at >500 accounts, move signal computation to a background
+  job that writes to a `signals` table, polled by the API. Do not wait until you hit the
+  wall to plan the migration.
 
-**Warning signs:**
-- Any log line containing more than 100 characters of free-form text from an email processing context.
-- Sentry events that have large string payloads from Gmail processing functions.
-- A developer adding `print(body)` debug statements during local testing that aren't removed before commit.
+**Detection:**
+- Signal endpoint p95 latency exceeds 200ms with < 1000 accounts.
+- `EXPLAIN ANALYZE` shows sequential scans on `outreach_activities` or `accounts` without
+  index usage during signal computation.
 
-**Phase to address:** Phase 1 (Gmail Read Service) — the log redaction pattern must be enforced in `gmail_read.py` from the first line. Every subsequent file that touches email content inherits this pattern.
+**Phase to address:** Backend API phase (signals endpoint). Add EXPLAIN verification before
+declaring the endpoint done.
 
 ---
 
-### Pitfall 7: On-Demand Body Fetch Fails Silently During Draft Review
+### Pitfall 7: React Query Key Collision — Pipeline and Relationships Share Stale Cache
 
 **What goes wrong:**
-A user sees a draft in the UI and clicks "View full email" to read what the draft is responding to. The frontend makes a request. The backend calls `gmail_read.get_message_body(integration, gmail_message_id)`. The Gmail access token has expired (user hasn't touched the app in a week). The fetch fails. The UI shows a loading spinner that never resolves, or returns an empty email body. The user tries to review the draft against an empty original — approves a contextually wrong reply, sending it to a business contact.
+The graduation mutation completes. The success handler calls
+`queryClient.invalidateQueries(['pipeline'])`. The Relationships list page is open in another
+tab. The `['relationships', 'advisor']` query key is NOT invalidated. The Relationships page
+still shows 0 advisors (the just-graduated account is not there yet). The user thinks
+graduation failed. They try again — the second call hits the graduation endpoint with the
+same type, gets 409, and the frontend shows an unhelpful error.
+
+A related variant: the existing `useAccounts` hook in `features/accounts/` uses query key
+`['accounts']`. The new relationships endpoint is `['relationships']`. These are separate caches.
+If any legacy code path writes to an account via the old `/accounts/PATCH` endpoint, the
+`['relationships']` cache is not invalidated, and the relationship detail shows stale data.
 
 **Why it happens:**
-Token expiry between sync and draft review is not an edge case — it's the normal case for users who check the copilot weekly. The on-demand body fetch creates a live dependency on a valid auth token at the moment of review, which is harder to guarantee than at sync time.
+React Query's cache invalidation requires exact key matching by default. When query keys
+evolve across a brownfield migration (old `['accounts']` plus new `['relationships']` plus
+`['pipeline']`), no single mutation knows to invalidate all affected caches.
 
-**How to avoid:**
-- On any 401/403 from the Gmail API during body fetch: return a structured error, not an empty string. The frontend must distinguish "body unavailable due to auth" from "body is empty."
-- Surface a re-authorization prompt when body fetch fails: "Your Gmail connection needs to be refreshed to show the original email."
-- Implement proactive token refresh in `gmail_read.py`: if the access token is within 5 minutes of expiry, refresh it before the fetch attempt.
-- Store the 200-character Gmail snippet (already in the `emails` table) as a fallback — if body fetch fails, show the snippet in the review UI so the user has minimal context.
-- The `EmailDraft` row should record `body_fetched_at` — if the draft was generated more than 7 days ago, treat the stored body reference as potentially stale and re-fetch.
+**Prevention:**
+- Define a query key factory in a single file (`queryKeys.ts`):
+  ```typescript
+  export const queryKeys = {
+    pipeline: () => ['pipeline'],
+    relationships: (type?: string) => ['relationships', type].filter(Boolean),
+    relationshipDetail: (id: string) => ['relationships', 'detail', id],
+    signals: () => ['signals'],
+  }
+  ```
+- Graduation mutation invalidates all three: `pipeline`, `relationships`, `signals`.
+- Use `queryClient.invalidateQueries({ queryKey: ['relationships'], exact: false })` to
+  invalidate ALL relationship queries regardless of type parameter.
+- After any account mutation (PATCH, graduation, note-add), run:
+  `['pipeline', 'relationships', 'signals'].forEach(key => queryClient.invalidateQueries(key))`
+- Remove or redirect the old `useAccounts` hook so it does not exist in parallel with
+  `useRelationships`.
 
-**Warning signs:**
-- Draft approval rate drops below 30% — users are approving without proper context.
-- Error logs show body fetch failures with 401 responses but no re-auth prompts in the UI.
-- User support tickets: "I approved a draft that made no sense."
+**Detection:**
+- After graduation, manually check: does the item disappear from Pipeline list? Does it
+  appear in the target Relationship list? Both must be true within the same 200ms window.
+- Search frontend code for any component that reads `queryClient.getQueryData(['accounts'])`
+  — these are stale cache reads that bypass the new key structure.
 
-**Phase to address:** Phase 3 (Email Drafter) and Phase 4 (Review API) — the auth failure path must be specced in both the skill execution and the API layer before the frontend is built.
-
----
-
-## Technical Debt Patterns
-
-Shortcuts that seem reasonable but create long-term problems.
-
-| Shortcut | Immediate Benefit | Long-term Cost | When Acceptable |
-|----------|-------------------|----------------|-----------------|
-| Store email body in DB instead of fetching on-demand | Simpler drafting, no live API dependency | GDPR liability, PII archive, storage growth at scale | Never — privacy minimization is a hard requirement |
-| Single historyId with no 404 fallback | 20 lines less code | Silent sync gaps after any outage or gap | Never — the fallback IS the feature |
-| Score one email per SkillRun (not batched) | Simpler logic, easier debugging | LLM cost 10-20x higher, quota exhaustion at 50+ users | Only in earliest dev/demo mode — remove before beta |
-| Block sync loop on skill execution (await inline) | Simpler control flow | Sync backs up for all users when one LLM call is slow | Never — decoupling via job_queue is the architectural requirement |
-| Voice profile from all sent emails (unfiltered) | Dead simple implementation | Robotic voice from auto-replies poisons the model | Never — filtering is part of the feature correctness |
-| Use same DB session across tenants in batch scoring | Avoids session overhead | Cross-tenant context leakage via RLS session state | Never — always use per-tenant sessions |
-| Log email content in DEBUG mode only | Easier debugging | Debug logs get shipped to logging infra; GDPR violation | Never — environment-conditional PII logging is still a violation |
-| Polling forever (no Pub/Sub migration plan) | No GCP Pub/Sub setup | Architecture cliff at 500 users, costly migration | Acceptable for Phase 1, but add `pubsub_subscription_id` column now |
+**Phase to address:** Frontend Pipeline Grid phase (graduation flow). The query key factory
+must be established before any mutation hooks are written.
 
 ---
 
-## Integration Gotchas
+### Pitfall 8: Multi-Type Display — Account Appears in Two Sidebar Sections, UI Looks Broken
 
-Common mistakes when connecting to external services.
+**What goes wrong:**
+An account has `relationship_type = ['advisor', 'investor']`. It correctly appears in both the
+Advisors list and the Investors list. The user opens Advisors, clicks the account, sees the
+detail page. The detail page back-link shows "← Advisors." The user then opens Investors,
+clicks the same account — same detail page, but the back-link still says "← Advisors" (cached
+from the previous navigation). The tab configuration shows advisor-specific tabs, not investor-
+specific tabs. The user thinks the investor view is broken.
 
-| Integration | Common Mistake | Correct Approach |
-|-------------|----------------|------------------|
-| Gmail API `history.list` | Treating historyId as stable indefinitely | Always handle HTTP 404 as full-sync trigger; store `initial_sync_done: false` on 404 |
-| Gmail API scopes | Adding new scope to existing OAuth client | Create separate Integration row with separate OAuth flow; never modify existing scope set |
-| Gmail Pub/Sub watch | Assuming the watch auto-renews forever | Schedule explicit re-watch call every 5 days (watch expires at 7 days); monitor silently-expired watches |
-| Gmail API quota | Assuming per-project quota is the bottleneck | Per-user limit is 15,000 units/minute; at 1000 users polling every 5 min, aggregate is fine but a single user's initial backfill can exhaust their per-user quota instantly |
-| Gmail `messages.get` | Fetching full message on every email in sync | Use `format=METADATA` with `metadataHeaders=[From,Subject,Date,Message-ID,References]` during sync; only fetch full body on-demand for drafting |
-| Anthropic API | One SkillRun per email | Batch 15-20 emails per SkillRun; one LLM call scores the batch; cross-email pattern reasoning improves quality |
-| Anthropic API | Passing full context store dump to scorer | Targeted retrieval — lookup sender entity + 3 most relevant context entries per email; do not send the entire context store |
-| OAuth token storage | Refreshing token synchronously on every API call | Cache access tokens in memory (or Redis for multi-process); refresh only when within 5 minutes of expiry |
-| Gmail API MIME | Assuming `payload.body.data` is always the email body | Multipart emails have `payload.parts[]`; some have nested multipart; always walk the parts tree recursively |
+**Why it happens:**
+The detail page is shared across all relationship types. When it receives an account with
+`relationship_type = ['advisor', 'investor']`, it must know WHICH type context the user
+arrived from to render the correct tabs and back-link. Without navigation state tracking,
+the detail page either picks one type arbitrarily or shows all tabs from all types mixed
+together.
 
----
+**Prevention:**
+- Pass `fromType` as a URL query parameter: `/relationships/{id}?from=investor`
+- The detail page reads `fromType` from the URL to:
+  1. Render the back-link as "← Investors"
+  2. Show the tab set for investor context first
+  3. Still show type badges indicating all types (advisor, investor both badged)
+- If `fromType` is absent (e.g., direct link or signal navigation), default to the first
+  type in `relationship_type` array.
+- On graduation modal confirm, the navigation `push` must include `?from={type}`.
 
-## Performance Traps
+**Detection:**
+- Create a test account with `relationship_type = ['advisor', 'investor']`.
+- Navigate to it from Advisors — verify back-link says "← Advisors", tabs show advisor config.
+- Navigate to it from Investors — verify back-link says "← Investors", tabs show investor config.
 
-Patterns that work at small scale but fail as usage grows.
-
-| Trap | Symptoms | Prevention | When It Breaks |
-|------|----------|------------|----------------|
-| Sequential sync loop (no concurrency) | Sync cycle time creeps toward 5 min; users report stale data | Run integrations in concurrent batches using `asyncio.gather()`; add per-integration timeout | ~200 connected users |
-| Scoring every email on every sync | LLM costs spike; Anthropic rate limit errors appear | Filter to `WHERE scored = false`; idempotency key on `(tenant_id, gmail_message_id)` | ~50 active users with busy inboxes |
-| No per-tenant scoring cap | One high-volume user consumes all Anthropic quota | Add `daily_score_budget` per tenant; queue overflow emails for next day | First power user with 200+ emails/day |
-| Unbounded email table growth | DB queries slow; full-text index bloat | Add retention policy: soft-delete emails older than 90 days that are `is_replied=true` and have no pending draft | ~6 months of production data for 100 users |
-| Thread view GROUP BY without index | Thread list page times out | Composite index on `(tenant_id, gmail_thread_id, received_at DESC)` — must exist at migration time | ~5000 emails per tenant |
-| Voice profile update on every draft approval | Profile JSONB grows unbounded; every approval triggers a re-analysis LLM call | Debounce: update profile only after 5 new approvals accumulate, or once daily | Individually acceptable; multiplied across 100 users it's background noise |
-| Fetch full message body in metadata for all emails | API quota consumed on useless data | Always request `format=METADATA` in sync; only `format=FULL` on-demand for drafting | Initial backfill for a user with 1000 emails |
-
----
-
-## Security Mistakes
-
-Domain-specific security issues beyond general web security.
-
-| Mistake | Risk | Prevention |
-|---------|------|------------|
-| Email body in application logs | GDPR violation, PII in logging infrastructure | Hard rule: never log body content; log only message IDs; add Sentry before-send hook to strip body fields |
-| Shared LLM context across tenants | Cross-tenant data leak — Tenant A sees Tenant B's contact details in AI outputs | Explicit `tenant_id` filter on every context query; separate DB sessions per SkillRun; integration test verifying isolation |
-| Voice profile accessible by user_id alone | User data accessible across tenants in edge cases | Always query `WHERE tenant_id = $1 AND user_id = $2` — both conditions required |
-| Draft body stored indefinitely after approval | Approved draft body is an archived copy of the original email content (indirect PII) | Null out `EmailDraft.body` after `status=sent`; retain only metadata (approved_at, edit_count) |
-| HTML email rendering without sanitization | XSS via crafted email displayed in UI | Never render raw HTML from email bodies in the review UI; use plain text extraction only; if HTML preview is needed, use DOMPurify in the frontend |
-| OAuth tokens in application error responses | Token exposed in Sentry or error tracking | Ensure no token data reaches exception context; scrub credential objects from Sentry payloads |
-| Email sender data in client-side state without scoping | Frontend Zustand store holds all email threads; XSS could expose them | Emails are user-specific; ensure auth middleware validates all email API responses are scoped to the authenticated user |
+**Phase to address:** Frontend Relationship Surfaces phase (detail page). The `fromType`
+routing pattern must be designed before the detail page is built.
 
 ---
 
-## UX Pitfalls
+### Pitfall 9: Configurable Grid Column State Not Persisted — Lost on Navigation
 
-Common user experience mistakes in this domain.
+**What goes wrong:**
+The user opens Pipeline, adds the "Industry" column, resizes the "Company" column to 250px,
+reorders "Fit Tier" to the third position. They click a row to open the preview card, close it,
+and navigate to Briefing. They come back to Pipeline. All column customizations are gone.
+The grid is back to its 8-column default. The user configures it again. This happens every
+session. The "configurable grid" feature feels like a toy, not a tool.
 
-| Pitfall | User Impact | Better Approach |
-|---------|-------------|-----------------|
-| Bad first draft kills feature adoption permanently | User dismisses every draft for a week; turns off feature; never returns | Gate draft visibility behind a 3-day confidence-building delay; only surface drafts when confidence is established from initial voice profile |
-| Urgency inflation (everything scored high) | User ignores all urgency signals after the first false alarm; feature becomes noise | Score conservatively; fewer P1 alerts with high precision beats many P1 alerts with low precision; calibrate thresholds on real inbox before shipping |
-| No explanation for why an email was scored high | User distrusts score; cannot act on it | Always show 1-2 sentence reasoning with the score: "This is from your largest account and mentions contract renewal — matched 3 context entries." |
-| Draft approval with no original context visible | User approves a contextually wrong reply; sends to a business contact; embarrassment | Show Gmail snippet (already stored) alongside draft; add "View full email" that fetches body on-demand with clear auth-failure handling |
-| Voice learning from edited drafts without diff | Profile drifts toward the AI's own style (circular reinforcement) | Learn from edits, not from the final approved text; the delta between draft and user edit is the signal; the approved text has model influence baked in |
-| Notification for every new email synced | Notification fatigue within 24 hours; user disables all copilot notifications | Notify only on genuine P1s (priority 5, immediate action required); batch P2-P3 into a daily digest; never notify on routine emails |
-| Re-auth prompt appearing mid-workflow | User interrupted during draft review; loses context; frustration | Proactive token refresh on app load; surface re-auth banner in the email UI header, not as a blocking modal mid-review |
-| "AI wrote this" visible to email recipients | Recipients trust messages less when they know AI drafted them | Drafts are for the user to send as their own; no AI footprint in outbound email; no "drafted with Flywheel" signature added by default |
+**Why it happens:**
+Column state (visible columns, order, widths) is stored in React local state. React state is
+destroyed on component unmount. Pipeline unmounts on navigation. Even if state is lifted to
+Zustand or a React context, the default Vite/React setup does not persist across page refreshes.
+
+**Prevention:**
+- Store column state in `localStorage` under a key like `flywheel:pipeline:columns`.
+- Shape: `{ visible: string[], widths: Record<string, number>, order: string[] }`.
+- Load from localStorage on grid mount as initial state.
+- Debounce writes to localStorage (don't write on every pixel of column drag).
+- Provide a "Reset to defaults" button that clears the localStorage key and resets state.
+- Do NOT persist column state to the backend for v2.1 — localStorage per browser is
+  acceptable for a single-user founder tool.
+
+**Detection:**
+- Configure columns; navigate away and back; verify configuration is preserved.
+- Hard-refresh the page; verify configuration is preserved (requires localStorage, not just Zustand).
+
+**Phase to address:** Frontend Pipeline Grid phase. localStorage persistence must be
+built into the initial grid implementation, not added later.
+
+---
+
+### Pitfall 10: Drag-and-Drop Column Reorder Conflicts with Column Resize Handles
+
+**What goes wrong:**
+The grid has both column resize (drag on column edge) and column reorder (drag on column header).
+When the user tries to resize the "Company" column by dragging the right edge, the drag
+event is captured by the header's drag-to-reorder handler first. The column reorders instead
+of resizes. The user has to click precisely on the 4px resize handle border — but at 56px row
+height, the resize zone is tiny and the drag start ambiguity triggers reorder instead.
+
+**Why it happens:**
+TanStack Table's column resizing and drag-based column reordering both listen to `onMouseDown`
+or `onPointerDown` events on the `<th>` element. When both are active, the event propagation
+order determines which wins. If the resize handler does not properly `stopPropagation`, the
+reorder handler fires.
+
+**Prevention:**
+- Implement resize handles as a distinct child element inside `<th>` with explicit event
+  capture and `stopPropagation`:
+  ```tsx
+  <th onMouseDown={header.getResizeHandler()}>
+    <div className="header-content" onMouseDown={handleReorderDragStart}>
+      {header.column.columnDef.header}
+    </div>
+    <div
+      className="resize-handle"
+      onMouseDown={(e) => { e.stopPropagation(); header.getResizeHandler()(e); }}
+    />
+  </th>
+  ```
+- Make the resize zone visually obvious: 8-12px wide, with a distinct cursor and a visible
+  separator line on hover.
+- Test the interaction explicitly: click anywhere in the header text → triggers reorder.
+  Click on the right-edge resize zone → triggers resize, not reorder.
+
+**Detection:**
+- Manual test: attempt to resize a column by clicking 3px from the right edge of the header.
+  Verify it resizes, not reorders.
+- Browser DevTools: add `console.log` to both handlers and verify only the correct one fires.
+
+**Phase to address:** Frontend Pipeline Grid phase. The resize/reorder interaction must be
+tested before the grid is declared done.
+
+---
+
+## Minor Pitfalls
+
+Mistakes that cause small regressions or cosmetic issues.
+
+---
+
+### Pitfall 11: AI Summary Preview Truncation at Wrong Boundary
+
+**What goes wrong:**
+`ai_summary_preview` is defined as "first 200 chars" of `ai_summary`. A 200-character slice
+mid-word produces: "Satguru Industries has been in engaged outreach since January. Key champion
+is Rajiv Mehta (CFO). Last interaction was a demo call where they expressed interest in
+enterprise tier. Budget convers..." — truncated mid-word. The card reads awkwardly.
+
+**Prevention:**
+Truncate at the last word boundary before 200 characters:
+```python
+def truncate_at_word(text: str, limit: int = 200) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit].rsplit(' ', 1)[0] + '…'
+```
+
+---
+
+### Pitfall 12: Relationship Status vs Pipeline Stage Semantic Confusion in API Responses
+
+**What goes wrong:**
+The API response for `GET /relationships/` includes both `pipeline_stage` and
+`relationship_status` fields. Frontend developers misread `relationship_status` (which means
+`active|inactive|churned`) as a status indicator for filtering in the Pipeline grid. They
+wire the Pipeline's "Outreach Status" column to `relationship_status` instead of
+`last_outreach_status`. The Pipeline shows "active" for every company. The status filter
+does nothing useful.
+
+**Prevention:**
+- Name fields unambiguously in the response schemas:
+  - `pipeline_stage`: only present in Pipeline endpoint responses
+  - `relationship_status`: only present in Relationship endpoint responses
+  - `outreach_status`: the latest outreach activity status (sent/replied/bounced)
+- Do not return `pipeline_stage` in relationship responses or vice versa.
+- Write an API contract test that verifies the Pipeline response does NOT contain
+  `relationship_status` and the Relationships response does NOT contain `pipeline_stage`.
+
+---
+
+### Pitfall 13: RLS Bypass When Querying for Signal Counts
+
+**What goes wrong:**
+The signals endpoint aggregates counts across accounts. A developer writes:
+```python
+result = await db.execute(
+    select(func.count()).select_from(Account).where(
+        Account.relationship_type.any("prospect")
+    )
+)
+```
+This uses `db` which is the tenant-scoped session (RLS enforced). But if the developer uses
+`db` from a different dependency (e.g., a shared session not from `get_tenant_db`), the
+RLS `app.tenant_id` setting is not applied and the query returns counts across ALL tenants.
+
+**Prevention:**
+- Signal computation must always use `db: AsyncSession = Depends(get_tenant_db)`.
+- Add a CI test: create two tenants with accounts, call signals endpoint as tenant A,
+  verify total count is only tenant A's accounts.
+- The signal computation code must never use a raw `engine.connect()` or any session
+  obtained outside the `get_tenant_db` dependency.
+
+---
+
+### Pitfall 14: Stale Sidebar Badge Count After In-Page Actions
+
+**What goes wrong:**
+The user opens the Advisors list. One advisor has a stale relationship signal (badge count: 1).
+The user opens the advisor detail, adds a note (which resolves the staleness). Navigates back to
+Advisors list. The badge still shows 1. The signal was resolved but the badge count didn't
+update until the 60-second poll cycle.
+
+**Prevention:**
+- After any note-add, file-add, or synthesis call, also invalidate the `['signals']` query key.
+- The signal polling is 60 seconds — this is acceptable as documented in the spec. But
+  explicit mutations that clearly resolve a signal should trigger an immediate re-fetch.
+- `queryClient.invalidateQueries({ queryKey: ['signals'] })` must be called from the same
+  mutation `onSuccess` callbacks as relationship invalidation.
+
+---
+
+## Phase-Specific Warnings
+
+| Phase Topic | Likely Pitfall | Mitigation |
+|-------------|---------------|------------|
+| Data model migration | Atomic rename causes API outage | Two-phase migration: add columns first, rename later |
+| Data model migration | Missing GIN index on `relationship_type` | Add `CREATE INDEX ... USING GIN` in same migration |
+| Data model migration | Person-level accounts missing self-contact FK | Add `primary_contact_id` FK to `accounts` table now |
+| Backend relationships API | Accounts in both Pipeline and Relationships | Strictly defined partition predicate; test both endpoints |
+| Backend graduation endpoint | Person-level entity_level not set atomically | Graduation endpoint sets `entity_level`, creates self-contact, sets `primary_contact_id` in one transaction |
+| Backend signals API | Full table scan on every 60-second poll | Add EXPLAIN ANALYZE; verify GIN index usage; separate count vs full signals queries |
+| Backend AI synthesis | LLM called on cache miss automatically | NULL summary → return NULL; synthesis always explicit; rate limit at DB level |
+| Frontend pipeline grid | Column state lost on navigation | localStorage persistence from day one |
+| Frontend pipeline grid | Drag reorder conflicts with column resize | Explicit resize handle zones; stopPropagation from resize handler |
+| Frontend pipeline grid | Graduation: stale pipeline and relationships caches | Query key factory; invalidate pipeline + relationships + signals on graduation success |
+| Frontend relationship detail | Multi-type accounts show wrong tabs/back-link | `?from=type` URL param; detail page renders based on fromType |
+| Frontend relationship detail | AI synthesis triggered on page load | Synthesis only via explicit user action; never from useEffect or query lifecycle |
+| Signal layer | Sidebar badge stale after in-page resolution | Invalidate signals on every mutation that could resolve a signal |
 
 ---
 
 ## "Looks Done But Isn't" Checklist
 
-Things that appear complete but are missing critical pieces.
-
-- [ ] **Gmail Sync:** Full-sync fallback on 404 — verify historyId invalidation is handled, not just logged
-- [ ] **Gmail Sync:** Concurrent integration processing — verify loop doesn't run integrations serially
-- [ ] **Email Scorer:** `scored = true` idempotency check — verify emails are never scored twice
-- [ ] **Email Scorer:** Tenant isolation — verify SkillRun for tenant A cannot read context entries from tenant B
-- [ ] **Email Drafter:** Voice profile filter — verify auto-replies excluded before profile generation
-- [ ] **Email Drafter:** Body fetch failure handling — verify UI shows snippet when body fetch fails, not blank
-- [ ] **Voice Profile:** `low_confidence` flag — verify profile shows cold-start disclaimer when < 30 quality samples
-- [ ] **Privacy:** Log redaction — verify no email body content appears in any log at any log level
-- [ ] **Privacy:** Draft body nulled on send — verify `EmailDraft.body` is cleared after `status=sent`
-- [ ] **OAuth:** Separate Integration row — verify `google_gmail.py` SCOPES list was not modified
-- [ ] **OAuth:** Token proactive refresh — verify tokens are refreshed before expiry, not reactively on failure
-- [ ] **Scale:** Per-tenant daily scoring cap — verify a single tenant cannot exhaust platform-wide Anthropic quota
-- [ ] **Scale:** Retention policy — verify email table has scheduled cleanup for replied+old emails
-- [ ] **UX:** Score reasoning surfaced — verify every `EmailScore` row has a `reasoning` string visible to the user
+- [ ] **Migration**: Phase A migration adds columns AND copies `status → pipeline_stage` data in same transaction
+- [ ] **Migration**: GIN index on `relationship_type` created in same migration as the column
+- [ ] **Migration**: All 206 existing accounts have `relationship_type = '{prospect}'` after migration (verify with count query)
+- [ ] **Migration**: `PATCH /accounts/{id}` no longer accepts `status` field (field removed from Pydantic model)
+- [ ] **Pipeline API**: `GET /pipeline/` returns zero results for graduated accounts (verify with post-graduation query)
+- [ ] **Pipeline API**: `GET /pipeline/` uses `pipeline_stage`, not `status`, in WHERE clause
+- [ ] **Relationships API**: `GET /relationships/?type=advisor` returns ONLY accounts where `'advisor' = ANY(relationship_type)`, scoped by tenant
+- [ ] **Graduation**: After graduation, account disappears from Pipeline list AND appears in target Relationship list (test both in sequence)
+- [ ] **Graduation**: Person-level graduation creates exactly 1 self-contact and sets `primary_contact_id`
+- [ ] **AI synthesis**: `GET /relationships/{id}` returns `ai_summary: null` for unsynthesized accounts without triggering LLM call
+- [ ] **AI synthesis**: `POST /relationships/{id}/synthesize` returns 429 if called within 5 minutes of previous call
+- [ ] **AI synthesis**: Accounts with < 3 context entries return template string, not LLM call
+- [ ] **Signals**: Signal count query uses existing `idx_account_next_action` index (verify with EXPLAIN)
+- [ ] **Signals**: Signal counts are tenant-scoped (two-tenant isolation test)
+- [ ] **Grid**: Column config survives page navigation (localStorage write verified in Network tab)
+- [ ] **Grid**: Column config survives hard refresh (localStorage read on mount verified)
+- [ ] **Grid**: Column resize does not accidentally trigger column reorder (manual interaction test)
+- [ ] **Frontend**: `fromType` URL param drives back-link and initial tab on detail page
+- [ ] **Frontend**: Query key factory used for all pipeline/relationships/signals queries
+- [ ] **Frontend**: Graduation success invalidates pipeline, relationships (all types), and signals simultaneously
 
 ---
 
 ## Recovery Strategies
 
-When pitfalls occur despite prevention, how to recover.
+When pitfalls occur despite prevention.
 
 | Pitfall | Recovery Cost | Recovery Steps |
 |---------|---------------|----------------|
-| historyId expiry and missed emails | LOW | Set `initial_sync_done = false` for affected integration; next sync cycle runs full backfill; emails processed in priority order |
-| Scope expansion breaking send integration | HIGH | Rollback scope change; restore original SCOPES list; trigger forced re-consent for affected users via email; create separate read integration correctly |
-| Voice profile poisoned by auto-replies | MEDIUM | Delete `EmailVoiceProfile` row; re-run voice profile init with corrected filter; requires one LLM call per user |
-| Email body in logs (GDPR incident) | HIGH | Identify affected log entries; purge from logging system; assess retention period; notify DPA if required under GDPR Article 33; patch log redaction before re-deploy |
-| Cross-tenant context leakage in LLM | HIGH | Audit all skill_runs from affected time window; identify which tenants could have been exposed; notify affected users per GDPR; patch session isolation; regression test |
-| Score fatigue / adoption loss | MEDIUM | Reset user's notification preferences to default (conservative); adjust scoring thresholds downward for that user; offer manual calibration mode |
-| Draft approval of wrong reply | LOW | User can recall/correct manually; no automated recovery; improve draft quality via voice profile re-init |
-
----
-
-## Pitfall-to-Phase Mapping
-
-How roadmap phases should address these pitfalls.
-
-| Pitfall | Prevention Phase | Verification |
-|---------|------------------|--------------|
-| historyId expiry without full-sync fallback | Phase 1: Gmail Read Service | Integration test: invalidate stored historyId; verify full sync runs on next cycle |
-| OAuth scope expansion breaks existing users | Phase 1: Gmail OAuth Integration | Code review: grep for any modification to `google_gmail.py` SCOPES list |
-| Polling wall at 200+ users | Phase 1: Sync Worker | Load test: simulate 200 integrations; verify cycle completes in < 3 min |
-| Tenant context leakage | Phase 2: Email Scorer Skill | Cross-tenant isolation test: two tenants, verify no context bleed in SkillRun prompts |
-| Voice profile poisoned by auto-replies | Phase 2: Voice Profile Init | Unit test: feed known auto-reply corpus; verify all filtered; check samples_analyzed count |
-| Email body in error logs | Phase 1: Gmail Read Service | Log audit: run MIME error scenario; grep logs for email content strings |
-| On-demand body fetch auth failure | Phase 3: Email Drafter + Phase 4: Review API | Integration test: revoke token; attempt body fetch; verify structured error + snippet fallback |
-| Score at message level vs thread display | Phase 2: Scorer + Phase 4: API | Edge case test: thread where first email is low priority, reply is high priority; verify thread shows high priority |
-| Notification fatigue | Phase 4: Review UI | Dogfood with real inbox for 1 week before release; count P1 alerts surfaced vs. genuinely urgent |
-| Draft body retained after send | Phase 3: Email Drafter | DB audit: verify `body IS NULL` for all `status=sent` rows |
-| LLM cost at scale | Phase 2: Scorer | Cost test: score 100 emails; verify < $0.10 per user per day at current token rates |
+| Atomic rename caused API outage | HIGH | Roll back migration (downgrade removes new columns, restores status column); revert code deploy; execute two-phase approach |
+| Missing GIN index on production | LOW | `CREATE INDEX CONCURRENTLY idx_account_relationship_type ON accounts USING GIN (relationship_type);` — CONCURRENTLY avoids table lock |
+| Account stuck in both Pipeline and Relationships | LOW | Direct DB fix: verify `relationship_type` is correct; query returns correct results after fix |
+| Self-contact not created during graduation | MEDIUM | Write a backfill script: for each person-level account missing a contact, create one from the account's own data; set `primary_contact_id` |
+| AI synthesis runaway cost | MEDIUM | Kill frontend query triggering synthesis; add rate limiter retroactively; review Anthropic bill for unbounded calls |
+| Column state not persisting | LOW | Add localStorage persistence in a hotfix; no data loss, only UX regression |
+| Wrong partition logic — graduated account in Pipeline | LOW | Update Pipeline query predicate; no data migration needed, just query fix |
 
 ---
 
 ## Sources
 
-- Gmail API Sync documentation: [Synchronize clients with Gmail](https://developers.google.com/workspace/gmail/api/guides/sync) — historyId availability window, 404 error behavior
-- Gmail API Quota documentation: [Usage limits](https://developers.google.com/workspace/gmail/api/reference/quota) — per-user 15,000 units/minute, per-project 1,200,000 units/minute
-- Gmail API Scopes: [Choose Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) — restricted scope classification for `gmail.readonly`
-- Google OAuth Restricted Scope Verification: [Restricted scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) — verification timeline and requirements
-- OAuth invalid_grant: [Google OAuth invalid grant](https://nango.dev/blog/google-oauth-invalid-grant-token-has-been-expired-or-revoked) — token revocation causes including scope mismatch
-- Multi-tenant LLM leakage: [Cross Session Leak detection](https://www.giskard.ai/knowledge/cross-session-leak-when-your-ai-assistant-becomes-a-data-breach) — cross-tenant data exposure in AI systems
-- Multi-tenant LLM security: [Burn-After-Use architecture](https://arxiv.org/abs/2601.06627) — preventing data leakage in enterprise LLM systems
-- PII in logs: [PII in Logs is a GDPR Time Bomb](https://dev.to/polliog/pii-in-your-logs-is-a-gdpr-time-bomb-heres-how-to-defuse-it-307l) — practical log sanitization strategies
-- Gmail Pub/Sub watch expiry: [gmailpush library](https://github.com/byeokim/gmailpush), [openclaw watch renewal issue](https://github.com/openclaw/openclaw/issues/24765) — silent failure on watch expiry
-- Gmail API performance: [Performance Tips](https://developers.google.com/workspace/gmail/api/guides/performance) — batching, metadata-only fetches
-- Trust erosion in AI email: [AI transparency kills trust](https://www.nobodycaresaboutethics.com/blog/ai-disclosure-trust-research), [Workplace email AI trust study](https://completeaitraining.com/news/why-relying-on-ai-for-workplace-emails-can-erode-trust-between-managers-and-employees/)
-- HTML email XSS: [HTML Injection in email](https://github.com/eladnava/mailgen/security/advisories/GHSA-xw6r-chmh-vpmj), OWASP XSS Prevention Cheat Sheet
-- Codebase inspection: `backend/src/flywheel/services/calendar_sync.py`, `google_gmail.py`, `email_dispatch.py` — existing patterns being extended
+- Codebase inspection: `backend/src/flywheel/api/accounts.py` — existing `status` field usage in Pydantic models, ORM queries, and serializers
+- Codebase inspection: `backend/alembic/versions/027_crm_tables.py` — `status` column definition and existing indexes
+- Codebase inspection: `frontend/src/features/pipeline/types/pipeline.ts` — `status: string` field in TypeScript type
+- Codebase inspection: `backend/src/flywheel/api/outreach.py` — `GET /pipeline/` filters on `Account.status`
+- PostgreSQL GIN indexes: [Optimizing Array Queries With GIN Indexes in PostgreSQL](https://www.tigerdata.com/learn/optimizing-array-queries-with-gin-indexes-in-postgresql) — `ANY()` operator requires GIN, not B-tree
+- PostgreSQL GIN performance: [Understanding Postgres GIN Indexes: The Good and the Bad](https://pganalyze.com/blog/gin-index) — update cost analysis
+- PostgreSQL backward-compatible migration: [Using PostgreSQL views for non-breaking migrations](https://medium.com/ovrsea/using-postgresql-views-to-ensure-backwards-compatible-non-breaking-migrations-017288e77f06) — two-phase rename pattern
+- PostgreSQL migration safety: [How to Rename Tables and Columns Safely in PostgreSQL](https://oneuptime.com/blog/post/2026-01-21-postgresql-rename-tables-columns/view) — ACCESS EXCLUSIVE lock during rename
+- TanStack Table virtualization: [TanStack Virtual issue #685](https://github.com/TanStack/virtual/issues/685) — rendering lag with both row and column virtualization
+- TanStack Table virtualization: [Virtualization Guide](https://tanstack.com/table/v8/docs/guide/virtualization) — 50+ rows threshold for virtualization benefit
+- React Query cache invalidation: [Concurrent Optimistic Updates in React Query](https://tkdodo.eu/blog/concurrent-optimistic-updates-in-react-query) — race condition with optimistic updates
+- React Query cache invalidation: [Cache Invalidation Why UI Doesn't Update](https://medium.com/@kennediowusu/react-query-cache-invalidation-why-your-mutations-work-but-your-ui-doesnt-update-a1ad23bc7ef1) — exact key matching pitfall
+- LLM cost control: [LLM Cost Optimization: Complete Guide](https://ai.koombea.com/blog/llm-cost-optimization) — context window overload as primary cost driver
+- LLM cost control: [Practical LLMOps Cost Control](https://radicalbit.ai/resources/blog/cost-control/) — per-account budget controls and runaway cost patterns
+- Two-phase migration pattern: [Alembic Complete Developer's Guide](https://medium.com/@tejpal.abhyuday/alembic-database-migrations-the-complete-developers-guide-d3fc852a6a9e) — add/copy/remove pattern for zero-downtime renames
+- Multi-type entity design: [CRM Database Schema Example](https://www.dragonflydb.io/databases/schema/crm) — normalization principles for entity type hierarchies
 
 ---
 
-*Pitfalls research for: AI Email Copilot added to Flywheel V2 multi-tenant SaaS*
-*Researched: 2026-03-24*
+*Pitfalls research for: CRM Redesign — Multi-type relationships, AI synthesis, configurable grid*
+*Researched: 2026-03-27*
+*Codebase: brownfield FastAPI + SQLAlchemy 2.0 async + PostgreSQL + React + shadcn/ui*

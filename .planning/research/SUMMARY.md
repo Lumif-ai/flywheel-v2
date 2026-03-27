@@ -1,17 +1,17 @@
 # Project Research Summary
 
-**Project:** Flywheel V2 — Email Copilot
-**Domain:** AI-powered email triage, scoring, and draft reply generation integrated into multi-tenant SaaS
-**Researched:** 2026-03-24
-**Confidence:** HIGH
+**Project:** Flywheel v2.1 — Intelligence-First CRM Redesign
+**Domain:** Brownfield CRM migration — multi-type relationships, AI synthesis, configurable pipeline grid
+**Researched:** 2026-03-27
+**Confidence:** HIGH (stack + architecture verified against codebase; features MEDIUM from industry survey)
 
 ## Executive Summary
 
-The Flywheel Email Copilot is an AI email triage and drafting layer built on top of the existing Flywheel V2 platform. Unlike standalone competitors (Superhuman, Shortwave, SaneBox, Ellie AI), Flywheel's moat is the context store: meeting notes, entity relationships, and project intelligence already present before the first email is synced. Every competitor scores emails on surface signals alone (sender domain, keyword matching). Flywheel can score an email with the knowledge that Sarah Chen is the lead partner on the Series A, that the thread references a deal closing Friday, and that the sender has had 3 meetings with the user in the past month. This is a categorically different product. The research strongly supports building the context-powered scorer and drafter as the core differentiators from day one — not as post-MVP additions.
+Flywheel v2.1 adds an intelligence surface layer on top of a functioning v2.0 CRM. The core design decision is a two-paradigm layout: a configurable data grid for pipeline triage (Airtable-style) and intelligence journals for graduated relationships (cards with AI panels, type-driven tabs, commitment tracking). No competitor cleanly separates these two modes — Attio and Folk use uniform record layouts; Airtable feels clinical for investor journals. This separation is the product's conceptual differentiator and must be preserved as a design constraint throughout implementation.
 
-The recommended approach follows existing Flywheel patterns wherever possible: clone `calendar_sync.py` for the email sync worker, route scoring and drafting through the existing `skill_executor.py` job queue, and reuse `email_dispatch.py` for draft sends. This minimizes new code surface and keeps infrastructure changes small — only 4 new DB tables, 1 new backend service, 2 new skills, and 2 new frontend dependencies. The build order is strictly dependency-constrained: data layer first, Gmail read service second, sync worker third, scorer fourth, drafter fifth, REST API sixth, and review UI last. Attempting to build out of this order will block teams.
+The recommended approach is strictly additive. The existing FastAPI + SQLAlchemy + React + Supabase stack is sound and must not be disrupted. New stack additions are minimal: AG Grid Community for the configurable pipeline grid, Motion for spring animations, react-dropzone for file attachments, pgvector for future embeddings (deferred past MVP), and openai for text-embedding-3-small if and when RAG quality requires it. The AI synthesis layer uses vanilla Python over the existing Anthropic SDK — LangChain and LlamaIndex are explicitly rejected as bloated for this use case.
 
-The top risks are concentrated in the first two phases. OAuth scope expansion is a critical architectural decision that must be made correctly before any code is written: the existing `gmail.send` scope must never be modified, and the email read capability must be a completely separate OAuth grant stored as `provider="gmail-read"`. The Gmail `historyId` sync watermark must have a full-sync fallback on 404 from day one — adding it later requires state migration across all connected integrations. Voice profile extraction from sent mail must filter out auto-replies and one-liners before the first draft is ever generated; a poisoned voice profile on first use destroys user trust permanently and recovery is difficult. Build the safety mechanisms into the foundations, not as hardening passes.
+The biggest risk is the `status` to `pipeline_stage` column rename. This is a brownfield migration with 206 live accounts and existing API code that references `Account.status` on every request. A naive single-phase rename causes a complete API outage during the deploy gap. The mitigation is mandatory: a two-phase migration where the new column is added and data is copied before the old column is ever dropped. The second critical risk is AI synthesis cost runaway — the synthesis endpoint must never auto-trigger on page load, must rate-limit at the DB level, and must return `null` (not call the LLM) when `ai_summary` is NULL. These two risks are architectural, not implementation details, and must be designed in before any code is written.
 
 ---
 
@@ -19,249 +19,146 @@ The top risks are concentrated in the first two phases. OAuth scope expansion is
 
 ### Recommended Stack
 
-The project requires remarkably few new dependencies. The Flywheel V2 backend already has `google-api-python-client`, `anthropic`, `beautifulsoup4`, `html2text`, `cryptography`, and the full async SQLAlchemy + FastAPI stack. The frontend already has `@tanstack/react-query`, `zustand`, `dompurify`, `tailwindcss`, and `shadcn`. Only three new packages are needed across the entire feature.
+The existing stack (React 19, Vite, Tailwind v4, shadcn/ui, TanStack Query v5, Zustand, FastAPI, SQLAlchemy 2.0 async, Alembic, Anthropic SDK) requires four targeted additions. Nothing should be replaced.
 
-**Core new dependencies:**
-- `markdownify` (Python): HTML email body to clean markdown for LLM context — better than `html2text` for email HTML with nested blockquotes and forwarded-message trees
-- `@tanstack/react-virtual` (npm): Virtualized thread list — required for users with 1,000+ emails, same TanStack family as react-query (no version conflicts)
-- `@tailwindcss/typography` (npm dev): `prose` class for rendering sanitized email HTML bodies — verify Tailwind v4 plugin compatibility during Phase 4 setup
+**New dependencies — frontend:**
+- `ag-grid-community` + `ag-grid-react` v35.2.0 — configurable pipeline grid with column resize, reorder, hide, inline editing, and filters; the only community-edition library providing all these without an enterprise license; React 19 compatible since v34.3.0
+- `motion` v12 — spring animations and micro-interactions; Framer Motion is now deprecated (`framer-motion` package abandoned); import from `motion/react` exclusively
+- `react-dropzone` — headless file drop zone hook; integrates with existing Supabase Storage and FastAPI `/files/upload` endpoint without new upload infrastructure
 
-**What NOT to add:** `spacy`/`nltk`/`transformers` (heavyweight; Claude already installed and better for style understanding), `aiogoogle` (problem already solved by `asyncio.to_thread`), `react-quill`/`draft-js` (overkill; plain textarea is correct), raw MIME libraries (Gmail API returns structured JSON, not raw IMAP).
+**New dependencies — backend:**
+- `pgvector>=0.4.2` — vector storage in Supabase PostgreSQL; sufficient for CRM scale (<100k documents per tenant); integrates with SQLAlchemy 2.0 async via `Vector` type; avoids separate vector DB infrastructure
+- `openai>=1.0` — embeddings only (`text-embedding-3-small`); Anthropic SDK does not provide embeddings; needed only if full-text search proves insufficient for Q&A retrieval (deferred to post-MVP)
 
-**Gmail API scope change required:** Current `google_gmail.py` grants `gmail.send` only. Email Copilot requires `gmail.readonly` + `gmail.modify` as a separate OAuth grant, stored as a separate Integration row (`provider="gmail-read"`). This is architectural, not just a config change.
+**Explicitly rejected:** LangChain (bloated, conflicts with existing Anthropic SDK), LlamaIndex (overkill for per-relationship summaries), Pinecone/Qdrant (unnecessary infrastructure at CRM scale), `framer-motion` (deprecated).
 
-See `STACK.md` for full dependency table and version compatibility notes.
+See `.planning/research/STACK.md` for full rationale and version verification.
 
 ### Expected Features
 
-The feature landscape is well-researched across 5 competitors. No competitor accesses external context. That gap is Flywheel's entire value proposition and must be present in v1, not deferred.
+The feature landscape divides into three tiers. The table stakes are non-negotiable for the product to feel complete. The differentiators are what justify adoption over Attio or Folk. The anti-features are explicitly out of scope and must not be built.
 
-**Must have (table stakes — without these the product feels half-baked):**
-- Gmail inbox sync via 5-minute background poll
-- Voice profile extraction from last ~100 substantive sent emails (cold start before first draft)
-- Email scoring (5-tier) with context store cross-reference — this is the differentiator
-- Score reasoning with context references ("Scored 5/5 because: Sarah Chen is a known deal contact, matched 3 context entries")
-- Draft generation using voice profile + context-assembled reply
-- Configurable draft visibility delay (`draft_visibility_delay_days`) — 0 for dogfood, 3–7 for cautious rollouts
-- Draft review UI: approve / edit / dismiss with scored thread list
-- In-app alerts for priority 5 (critical) emails only
+**Must have (table stakes):**
+- Separate list pages per relationship type (Prospects, Customers, Advisors, Investors) — every CRM since Salesforce segments by type; founders cannot manage advisors and prospects in a single table
+- AI summary on relationship detail page (cached, not on-demand) — users expect synthesis; raw timeline is too slow to read
+- Graceful degradation when AI summary is empty — never show a blank panel; return template string when context entries < 3
+- Configurable Pipeline columns (show/hide) — any power user of CRMs expects Airtable-style column management
+- Signal count badges on sidebar — users need ambient awareness of where attention is needed
+- Graduation flow with type selection modal — the explicit promotion action from prospect to relationship
+- Commitments tab (What You Owe / What They Owe) — the primary founder cognitive burden after a meeting that no existing tool addresses
 
-**Should have after v1 validation (v1.x):**
-- Feedback flywheel: edit diffs feed back into voice profile
-- Re-scoring when thread receives new message
-- Daily digest document artifact for low-priority (1-2) emails
-- Unsubscribe suggestion in review UI
+**Should have (differentiators):**
+- Multi-type account (one entity = Advisor + Investor simultaneously) — Attio's primary differentiator for startup use cases; no other lightweight CRM does this cleanly
+- Interactive AI panel with Q&A about a relationship — RAG over account context; Folk offers draft-from-thread but not open Q&A
+- Type-specific tab sets per relationship (Advisor tabs differ from Investor tabs differ from Prospect tabs) — Attio and Folk use uniform layouts for all types
+- Stale relationship detection with ambient visual tint — glanceable staleness signals rather than disruptive notifications
+- File attachment on relationship (investor deck to investor record, NDA to customer record) — neither Attio nor Folk have this natively; Supabase Storage already exists
 
-**Defer to v2+:**
-- Gmail Pub/Sub push notifications (only if polling latency generates user complaints)
-- Morning briefing / autonomous agent mode (requires months of proven scoring accuracy)
-- Multi-account Gmail support
-- Slack DM notifications for critical emails
-- Auto-labeling (opt-in)
+**Defer to patch/v2.2:**
+- File attachments (API-06) — note capture delivers higher value per effort; files add storage wiring that should not block main surfaces
+- Full signal taxonomy beyond `stale_relationship` — `reply_received` and `commitment_due` require richer event wiring
+- Column drag-to-reorder — show/hide is sufficient for v2.1; reorder is polish
+- Action bar skill triggers — stubs with "Coming soon" toasts acceptable in v2.1
 
-**Hard anti-features (never ship):** Auto-send approved drafts, full email body storage in DB, auto-clicking unsubscribe links.
+**Anti-features (do not build):**
+- Custom pipeline stages, kanban drag-and-drop, bulk outreach sending, NLP auto-extraction of commitments from freeform notes, free-text contact creation from UI, mobile-responsive layout, Slack/email notification delivery — all explicitly out of scope per PROJECT.md
 
-See `FEATURES.md` for full competitor matrix and feature dependency graph.
+See `.planning/research/FEATURES.md` for full feature dependency graph and complexity assessment.
 
 ### Architecture Approach
 
-The architecture fits entirely within existing Flywheel patterns. Four new DB tables (`emails`, `email_scores`, `email_drafts`, `email_voice_profiles`) power the feature. A new `email_sync_loop()` background worker (modeled exactly on `calendar_sync_loop()`) polls Gmail every 5 minutes and creates `SkillRun` rows for the scorer. The scorer and drafter run through the existing `skill_executor.py` job queue — they are standard skills. The review UI is a new `EmailPage.tsx` with three sub-components. There is no new infrastructure.
+The architecture is strictly additive to the existing system. Every new capability integrates into existing infrastructure (FastAPI router pattern, SQLAlchemy models, React Query + Zustand state management, Supabase Realtime) rather than introducing parallel systems. Three schema additions power the feature: `account_syntheses` table, `relationship_types` array column on accounts, and `account_id` FK on uploaded_files. All follow established Alembic migration patterns. The AI synthesis engine is a new service module (`services/synthesis_engine.py`) that hooks into two existing write paths to invalidate its cache automatically.
 
 **Major components:**
-1. `gmail_read.py` — list messages, fetch headers, fetch body on-demand; separate from `google_gmail.py` (send-only)
-2. `email_sync.py` / `email_sync_loop()` — 5-min background poll, upsert Email rows, trigger scorer SkillRuns, run voice profile init on first connect
-3. `email-scorer` skill — context-powered 5-tier scoring via `skill_executor.py`; batches 15-20 emails per SkillRun
-4. `email-drafter` skill — fetches body on-demand from Gmail API, loads voice profile, assembles context, generates draft
-5. `api/email.py` — REST endpoints for review UI (GET threads, POST approve/edit/dismiss)
-6. `EmailPage.tsx` + sub-components — scored thread list with virtualization, draft review panel
+1. **SynthesisEngine** (`services/synthesis_engine.py`) — generates, caches (24h TTL), and invalidates account summaries; hooks into `storage.append_entry()` and outreach status writes; uses Haiku-4-5 at ~300 token budget per synthesis
+2. **AccountQA endpoint** (`POST /accounts/{id}/ask`) — RAG Q&A using existing full-text search on `context_entries` (TSVECTOR already indexed); vanilla Python + Anthropic SDK; no orchestration framework needed
+3. **GridView** (`features/accounts/components/GridView.tsx`) — TanStack Table v8 wrapper or AG Grid wrapper with column state persisted to localStorage; Zustand store for in-memory column state between navigations
+4. **Signal computation** — stays real-time SQL on GET /pulse for v2.1 at 206 accounts; background job pre-computation deferred until >1,000 accounts or push notifications are needed
+5. **Multi-type relationship model** — `accounts.relationship_types text[]` with GIN index; partition predicate between Pipeline (un-graduated) and Relationships (graduated) defined once and enforced in both endpoints
 
 **Key patterns:**
-- Sync worker decoupled from skill execution via job queue (never await LLM inline in sync loop)
-- Thread grouping as SQL view (GROUP BY `gmail_thread_id`), not a stored entity
-- Voice profile in JSONB (open-ended schema, no migration required for new pattern fields)
-- Body stored as snippet only; full body fetched on-demand and discarded after draft generation
-- Each SkillRun uses its own DB session with explicit `tenant_id` filter on every context query
+- Synthesis is never auto-triggered on page load — NULL summary returns NULL, not an LLM call
+- Two-phase migration for `status` to `pipeline_stage` rename — additive first, cleanup after stable deploy
+- Query key factory in `queryKeys.ts` — graduation invalidates pipeline + relationships + signals simultaneously
+- `fromType` URL parameter drives tab config and back-link on the shared relationship detail page
 
-See `ARCHITECTURE.md` for the full system diagram, data flow, and build order.
+See `.planning/research/ARCHITECTURE.md` for component boundary tables, data flow diagrams, and suggested build order.
 
 ### Critical Pitfalls
 
-1. **historyId expiry without full-sync fallback** — Gmail's `history.list` returns HTTP 404 when the watermark is stale (after any gap > ~1 week). Without an explicit 404 handler that resets `initial_sync_done = false` and triggers a full re-sync, emails are silently missed forever. Must be in `sync_inbox()` from day one.
+1. **Atomic column rename causes API outage** — Never rename `status` to `pipeline_stage` in a single migration. Use two phases: add `pipeline_stage`, copy data, deploy code that reads from `pipeline_stage`, then drop `status` in a follow-up migration. A single-phase rename causes a complete API outage during the deploy gap for all CRM endpoints.
 
-2. **OAuth scope expansion breaking existing users** — Adding `gmail.readonly` to the existing `SCOPES` list in `google_gmail.py` will cause `invalid_grant` for all users who consented to send-only. Their Gmail send integration goes red. Recovery requires forced re-consent for every user. The fix is a completely separate `gmail-read` Integration row with its own OAuth flow. This is the single highest-impact architectural decision.
+2. **AI synthesis cost runaway** — NULL `ai_summary` must return NULL, not trigger an LLM call. Synthesis must be explicit (user action or background job trigger), never from a `useEffect` or query lifecycle hook. Rate limit at the DB level (`synthesis_requested_at`; return 429 within 5 minutes). Context under 3 meaningful entries gets a template string, not an LLM call.
 
-3. **Voice profile poisoned by auto-replies** — Gmail's sent folder includes out-of-office messages, calendar acceptances, and form confirmations. Running voice extraction on these produces a robotic profile. First drafts sound like system messages. Users abandon the feature after the first impression. Filter must exclude messages with `Auto-Submitted` header, messages under 3 sentences, and common auto-reply phrases before any profile is built.
+3. **Missing GIN index on relationship_types array** — Without a GIN index, `WHERE 'advisor' = ANY(relationship_types)` is a full table scan. At 206 rows it is invisible; at 5,000 rows it is visibly slow. The GIN index must ship in the same migration that adds the column — not as a follow-up optimization.
 
-4. **Tenant context leakage in LLM prompts** — RLS protects SQL queries but not LLM prompt context. If DB sessions are shared across batch SkillRuns or `tenant_id` is not explicitly passed to every context query, one tenant's context entries can appear in another tenant's score prompt. This is a silent data breach. Every context tool call must include explicit `tenant_id` filtering; separate DB sessions must be used per SkillRun.
+4. **Account leaks across Pipeline and Relationships surfaces** — After graduation, an account can appear in both surfaces if the partition predicate is not precisely defined. Define the predicate once; add `graduated_at` timestamp as the cleanest partition signal. Test both endpoints after every graduation.
 
-5. **Email body in error logs (GDPR time bomb)** — Developer instinct is to log the value that caused a parse error. Email bodies contain PII (names, financials, legal content). Once in logs, they are shipped to Datadog/Sentry and retained for 90 days. Establish a hard rule at kickoff: email content never appears in any log at any level. Enforce with a Sentry before-send hook and a pre-commit lint check.
-
-See `PITFALLS.md` for full pitfall descriptions, recovery strategies, and phase-to-pitfall mapping.
+5. **React Query key collision after graduation** — The graduation mutation must invalidate `['pipeline']`, `['relationships']` (all type variants), and `['signals']` simultaneously. Use a query key factory; invalidate with `exact: false` for the relationships key.
 
 ---
 
 ## Implications for Roadmap
 
-Based on the combined research, the feature dependency graph, build order analysis, and pitfall phase mapping, the following phase structure is recommended.
+Based on combined research, the build order is dictated by three rules: (1) schema migrations before service or API code, (2) backend before frontend, (3) independent features before integrated features. The suggested phase structure below respects all feature dependency constraints from FEATURES.md and the pitfall mitigation requirements from PITFALLS.md.
 
-### Phase 1: Data Layer and Gmail Foundation
+### Phase 1: Data Model Foundation
 
-**Rationale:** All subsequent work depends on DB models and Gmail read access existing. This phase has no prerequisites and unblocks every other phase. The critical architectural decision (separate OAuth grant for read scope) must be enforced here before any code is written.
+**Rationale:** Every other feature blocks on the schema. The column rename, new columns, and new table must be stable before any API code is written. This is also where the two most critical pitfalls are addressed — the atomic rename risk and the missing GIN index.
+**Delivers:** `pipeline_stage` column via two-phase migration, `relationship_types text[]` with GIN index, `account_syntheses` table, `entity_level` column, `primary_contact_id` FK on accounts, `account_id` FK on uploaded_files, ORM model updates for all changes
+**Addresses:** DM-01 through DM-04 from FEATURES.md (all data model work)
+**Avoids:** Pitfall 1 (atomic rename outage), Pitfall 2 (missing GIN index), Pitfall 4 (self-contact trap on person-level accounts)
+**Research flag:** Standard Alembic patterns — skip research-phase. Use the two-phase migration template documented in PITFALLS.md.
 
-**Delivers:**
-- 4 new DB tables with RLS policies: `emails`, `email_scores`, `email_drafts`, `email_voice_profiles`
-- SQLAlchemy models for all 4 tables
-- `gmail_read.py`: list messages, fetch headers, fetch body on-demand, fetch sent messages
-- New OAuth flow for `gmail-read` scope; new Integration row pattern
-- `config.py` addition: `draft_visibility_delay_days`
+### Phase 2: Relationship and Signals APIs
 
-**Addresses (from FEATURES.md):** Gmail inbox sync foundation; configurable draft visibility
+**Rationale:** Backend API contracts must be stable before any frontend component is built. This phase also defines the partition predicate that prevents accounts leaking across surfaces (Pitfall 3) and enforces the synthesis rate limiting that prevents cost runaway (Pitfall 5).
+**Delivers:** `GET /relationships/?type=` (filtered by type, tenant-scoped), `PATCH /accounts/{id}` with relationship_types, `GET /relationships/{id}` with synthesis + files, `POST /relationships/{id}/synthesize` (explicit trigger only, rate-limited), `POST /relationships/{id}/ask` (Q&A), signals count endpoint, graduation endpoint with type assignment and self-contact creation
+**Uses:** FastAPI router pattern (existing), SynthesisEngine service (new), full-text search on context_entries (existing TSVECTOR)
+**Avoids:** Pitfall 3 (dual-surface account appearance), Pitfall 5 (synthesis cost runaway), Pitfall 13 (RLS bypass on signals)
+**Research flag:** Standard FastAPI patterns — skip research-phase. Synthesis rate limiting and partition predicate require careful implementation review before the endpoints are declared done.
 
-**Avoids (from PITFALLS.md):**
-- OAuth scope expansion pitfall: separate `provider="gmail-read"` Integration row enforced here
-- Email body in logs: log redaction pattern established in `gmail_read.py` from line 1
+### Phase 3: Pipeline Grid (Frontend)
 
-**Research flag:** Standard patterns — follows existing `google_gmail.py` and RLS migration patterns exactly. Skip research-phase.
+**Rationale:** The configurable pipeline grid is self-contained and does not depend on relationship surfaces. It can ship independently and unblock founder use of the pipeline before relationship views are complete. The query key factory (Pitfall 7 mitigation) must be established in this phase before any mutation hooks are written.
+**Delivers:** AG Grid-based Pipeline page with column show/hide, filter tabs (All / Strong Fit / Needs Follow-up / Stale), stale relationship ambient tint, graduation modal with type selection, localStorage column state persistence
+**Uses:** ag-grid-community, motion (entrance animations), query key factory (`queryKeys.ts`)
+**Avoids:** Pitfall 7 (React Query key collision), Pitfall 9 (column state lost on navigation), Pitfall 10 (drag/resize conflict)
+**Research flag:** AG Grid CSS variable overrides against Tailwind v4 may need a 1-hour implementation spike. Tailwind v4's new Vite-plugin architecture (no config file) has not been tested against AG Grid's class-based theme system. Spike before committing to the theming approach.
 
----
+### Phase 4: Relationship Surfaces (Frontend)
 
-### Phase 2: Sync Worker and Voice Profile
+**Rationale:** After the relationship APIs are stable (Phase 2), the four relationship list pages and the shared detail page can be built. The `fromType` URL parameter pattern must be established before the detail page is built to avoid the multi-type tab/back-link confusion (Pitfall 8).
+**Delivers:** Sidebar with 5 sections and signal badge counts (Supabase Realtime), 4 relationship type list pages (card grid), shared RelationshipDetail with type-driven tab configs (Advisor / Investor / Customer / Prospect), AI synthesis panel (read-only display with skeleton on load, never auto-triggered), Commitments tab (two-column What You Owe / What They Owe), Timeline renderer with optimistic note-add
+**Uses:** motion (card entrance animations), react-dropzone (file attachment panel), `fromType` URL param routing
+**Avoids:** Pitfall 8 (multi-type detail page tab confusion), Pitfall 5 (synthesis auto-trigger on load), Pitfall 14 (stale sidebar badge after in-page action)
+**Research flag:** Standard React patterns for type-driven component config maps. The AskPanel conversational UI is the highest-complexity component in the milestone — consider a focused implementation spike before building.
 
-**Rationale:** The sync worker creates Email rows and triggers all downstream processing. Voice profile extraction must run on first connect — before any draft is generated. Getting the filter logic correct here prevents the poisoned-profile trust failure. The concurrency structure (asyncio.gather batches) must be correct from the start; retrofitting it later is expensive.
+### Phase 5: AI Q&A Panel
 
-**Delivers:**
-- `email_sync.py`: `email_sync_loop()`, `sync_inbox()`, `upsert_email()`, `voice_profile_init()`
-- Incremental sync via `historyId` with explicit 404 full-sync fallback
-- Concurrent integration processing (asyncio.gather, 20-50 per batch, per-integration timeout)
-- Voice profile extraction filtered to substantive sent emails (>3 sentences, no auto-replies)
-- `low_confidence` flag when fewer than 30 quality samples remain
-- `main.py` registration of `email_sync_loop()` asyncio task
-
-**Addresses (from FEATURES.md):** Gmail read sync (P1); voice profile extraction on setup (P1)
-
-**Avoids (from PITFALLS.md):**
-- historyId expiry: 404 full-sync fallback built into `sync_inbox()`
-- Polling wall at 200+ users: concurrent batch processing from day one
-- Voice profile poisoned by auto-replies: filter logic ships with initial extraction
-
-**Research flag:** Standard patterns — clones `calendar_sync.py`. The concurrency model (asyncio.gather with per-integration timeout) is the only non-trivial design decision. Skip research-phase.
-
----
-
-### Phase 3: Email Scorer Skill
-
-**Rationale:** Scoring is the core differentiator and gates both drafting and the review UI. The scorer must be stable before the drafter is built (drafter decisions depend on score). Tenant isolation must be verified before the drafter inherits all scorer context. Batching (15-20 emails per SkillRun) must be implemented here, not retrofit later.
-
-**Delivers:**
-- `skills/email-scorer/SKILL.md`: system prompt, context tool usage, scoring schema
-- `SkillDefinition` seed for `email-scorer`
-- Batched scoring (15-20 emails per SkillRun)
-- `EmailScore` rows with: priority (1-5), category, action, reasoning string, `context_refs[]`
-- Context store cross-reference: sender entity lookup + 3 most relevant context entries per email
-- Scorer triggers `email-drafter` SkillRun for emails where `action == "draft_reply"`
-- High-signal emails (meeting followups, deal updates) write `context_entries`
-- Per-tenant daily scoring cap
-
-**Addresses (from FEATURES.md):** Email scoring (P1); score reasoning + context refs (P1); in-app alerts for priority 5 (P1); thread-level display with message-level scoring (P1)
-
-**Avoids (from PITFALLS.md):**
-- Tenant context leakage: explicit `tenant_id` on every context query; separate DB sessions per SkillRun
-- LLM cost at scale: batching + idempotency check (`scored = false` filter) + per-tenant cap
-
-**Research flag:** Needs deeper research during planning. The LLM prompt structure for multi-signal scoring (sender entity weight vs. urgency keywords vs. thread staleness) is not documented. The exact balance of scoring signals needs prompt engineering iteration. Flag Phase 3 for `/gsd:research-phase`.
-
----
-
-### Phase 4: Email Drafter Skill
-
-**Rationale:** Depends on EmailScore existing (Phase 3) and voice profile being populated (Phase 2). The on-demand body fetch and its failure handling must be specced before the review API is built — the API must know what structured errors to surface.
-
-**Delivers:**
-- `skills/email-drafter/SKILL.md`: system prompt with voice profile injection, context assembly
-- `SkillDefinition` seed for `email-drafter`
-- On-demand Gmail body fetch inside skill execution (never stored)
-- Draft body nulled after `status=sent`
-- `EmailDraft` rows: `status=pending`, `visible_after=now+delay_days`, `user_edits` field
-- Structured error on body fetch failure (401/403) vs. generic failure — snippet fallback
-- Proactive token refresh (refresh if within 5 minutes of expiry)
-
-**Addresses (from FEATURES.md):** Draft generation with voice profile + context assembly (P1); configurable draft visibility delay (P1); graceful degradation when Gmail API unavailable (P1)
-
-**Avoids (from PITFALLS.md):**
-- On-demand body fetch auth failure: structured error + snippet fallback in review UI
-- Draft body retained after send: null `EmailDraft.body` on `status=sent`
-- Voice learning from edited drafts without diff: capture `user_edits` as delta, not final text
-
-**Research flag:** Needs deeper research during planning. Draft quality is highly dependent on prompt engineering and context assembly strategy. The voice profile injection format and context relevance ranking (which 3 context entries to include) need validation. Flag Phase 4 for `/gsd:research-phase`.
-
----
-
-### Phase 5: Review API and Frontend
-
-**Rationale:** Depends on Email, EmailScore, and EmailDraft rows existing (Phases 1-4). The API and UI can be built in parallel once the backend endpoints are defined, but the API spec must be finalized first. No SSE required — email review is request/response, not streaming.
-
-**Delivers:**
-- `api/email.py`: GET threads, GET thread detail, POST approve, POST edit, POST dismiss, GET voice-profile
-- Thread grouping via SQL GROUP BY (not stored entity); composite index on `(tenant_id, gmail_thread_id, received_at DESC)`
-- `EmailPage.tsx`: scored thread list sorted by priority tier, then recency
-- `ThreadList.tsx`: virtualized with `@tanstack/react-virtual` for inboxes > 100 emails
-- `ThreadCard.tsx`: score badge, reasoning snippet, draft-ready indicator, approve/edit/dismiss
-- `DraftReview.tsx`: draft text, context refs, inline edit mode (textarea, not rich editor)
-- `useEmailThreads.ts` hook, `stores/email.ts` Zustand store
-- In-app alert integration (priority 5 → existing notification system)
-- Score reasoning visible on every email (not behind a toggle)
-
-**Addresses (from FEATURES.md):** Draft review UI (P1); one-click approval (P1); draft edit (P1); draft dismiss (P1); in-app critical alerts (P1); score reasoning visible (P1)
-
-**Avoids (from PITFALLS.md):**
-- Notification fatigue: alert only on priority 5; batch everything else
-- Bad first draft kills adoption: draft visibility delay config gates early exposure
-- No original context visible: snippet shown alongside draft; "View full email" with auth-failure handling
-- Urgency inflation: alert threshold is priority 5 only, never lower
-
-**Research flag:** Standard patterns — Tailwind v4 + `@tailwindcss/typography` integration needs a quick verification step during setup (plugin API changed in v4). Otherwise well-documented React patterns. Skip research-phase.
-
----
-
-### Phase 6: Feedback Flywheel and v1.x Polish
-
-**Rationale:** Add only after v1 dogfooding has generated edit signal. The flywheel only works when there is data to learn from. Adding it pre-launch adds complexity with no signal to process.
-
-**Delivers:**
-- Edit-to-learn: `user_edits` diff analysis → voice profile update (debounced to every 5 approvals or daily)
-- Re-scoring trigger on thread update (new message in existing thread)
-- Daily digest document artifact for priority 1-2 emails (reuses existing document artifact system)
-- Unsubscribe suggestion in review UI (manual, user clicks the link)
-
-**Addresses (from FEATURES.md):** Feedback flywheel (P2); re-scoring on thread update (P2); daily digest (P2); unsubscribe suggestion (P2)
-
-**Avoids (from PITFALLS.md):**
-- Voice drift from circular reinforcement: learn from edit delta, not final approved text
-- Voice profile update on every approval (unbounded growth): debounce to batch updates
-
-**Research flag:** Standard patterns — voice profile update is a targeted LLM call using the existing skill executor. Skip research-phase.
-
----
+**Rationale:** Q&A depends on Phase 2 (the ask endpoint) and Phase 4 (the detail page it lives in). It also benefits from Phase 4's relationship surfaces being stable so the panel has rich account data to query. Q&A is a differentiator, not table stakes — it can slip to v2.2 if Phase 4 is late without blocking the core product.
+**Delivers:** AskPanel component with conversational Q&A, source citations showing which context entries informed the answer, question history (local state, not persisted), graceful degradation when context is thin (< 3 entries shows a "not enough context yet" state)
+**Uses:** `POST /relationships/{id}/ask` endpoint (Phase 2), existing Anthropic SDK, TSVECTOR full-text retrieval
+**Avoids:** Pitfall 5 (cost runaway — same discipline applies to Q&A call volume; never auto-trigger)
+**Research flag:** RAG retrieval quality needs validation mid-phase. TSVECTOR full-text search is the MVP strategy, but its adequacy for temporal questions ("what did we discuss last month") against 20-100 context entries per account is MEDIUM confidence. Plan a quality checkpoint at mid-phase; pgvector embeddings are the verified fallback.
 
 ### Phase Ordering Rationale
 
-- Phases 1-2 are non-negotiable foundations: nothing can be built or tested without the data layer and sync worker.
-- Phase 3 (Scorer) before Phase 4 (Drafter): the drafter's context and trigger logic depends on EmailScore rows; building them in parallel risks integration mismatch.
-- Phase 5 (API + UI) last in the backend sequence: the REST endpoints can only be specced once the data structures from Phases 3-4 are stable.
-- Phase 6 post-dogfood: feedback flywheel without signal is infrastructure waste.
-- The architecture research's 7-step build order (`ARCHITECTURE.md` — Step 1 through Step 7) maps directly to this phase structure and should be used as the implementation checklist within each phase.
+- Schema-first is non-negotiable: the `status` rename affects every existing API endpoint and must be stable before any new code references account fields
+- Phase 2 (APIs) before Phases 3 and 4 (frontends): stable API contracts prevent frontend rework when response shapes change
+- Phases 3 and 4 can overlap if two engineers are available — Pipeline grid has no dependency on relationship surfaces
+- Phase 5 (Q&A) is last because it benefits from rich context data accumulated across other phases, and it can be deferred without blocking the core product
 
 ### Research Flags
 
-**Phases needing `/gsd:research-phase` during planning:**
-- **Phase 3 (Email Scorer):** LLM prompt engineering for multi-signal scoring is uncharted for this codebase. Signal weighting (sender entity vs. urgency keywords vs. thread staleness) needs validation. Batching strategy and cross-email pattern reasoning in a single prompt need prompt engineering experimentation.
-- **Phase 4 (Email Drafter):** Draft quality is the highest-risk user-facing element. Context assembly strategy (which entries to include, how to rank them for the prompt), voice profile injection format, and cold-start draft behavior all need deliberate prompt engineering research before implementation.
+**Phases needing deeper research during planning:**
+- **Phase 3 (Pipeline Grid):** AG Grid CSS variable theming against Tailwind v4 Vite plugin architecture — integration is documented but the combination has not been tested in this codebase. Recommend a 1-hour spike before committing to the theming approach.
+- **Phase 5 (AI Q&A):** RAG retrieval quality with TSVECTOR for temporal and conceptual questions — MEDIUM confidence. Plan a quality review checkpoint mid-phase before completing the frontend integration.
 
 **Phases with standard patterns (skip research-phase):**
-- **Phase 1:** Direct application of existing OAuth and Alembic migration patterns
-- **Phase 2:** Direct clone of `calendar_sync.py` with concurrency extension
-- **Phase 5:** Well-documented React patterns; only Tailwind v4 typography plugin needs a quick compatibility check
-- **Phase 6:** Standard skill executor patterns for voice update
+- **Phase 1 (Data Model):** Standard Alembic two-phase migration pattern; all SQL is documented in PITFALLS.md
+- **Phase 2 (APIs):** Standard FastAPI CRUD patterns; existing codebase has 8 endpoints to reference
+- **Phase 4 (Relationship Surfaces):** Standard React Query + Zustand patterns; motion animations follow existing project conventions
 
 ---
 
@@ -269,49 +166,52 @@ Based on the combined research, the feature dependency graph, build order analys
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Minimal new dependencies; existing libraries confirmed via official docs and PyPI/npm. Only gap is Tailwind v4 + typography plugin compatibility — flag for Phase 5 setup. |
-| Features | HIGH | Competitor analysis confirmed via multiple sources. Flywheel-specific feature decisions derived from concept brief and advisory board decisions. Scoring prompt design is the one LOW-confidence sub-area. |
-| Architecture | HIGH | Based on direct codebase inspection of `calendar_sync.py`, `skill_executor.py`, `google_gmail.py`, and `email_dispatch.py`. No guesswork — patterns are directly reused. |
-| Pitfalls | HIGH | Verified against official Gmail API docs, Google developer forums, GDPR compliance literature, and multi-tenant LLM security research. All 7 critical pitfalls have documented real-world precedents. |
+| Stack | HIGH | All versions verified against npm registry and PyPI. AG Grid React 19 compatibility confirmed in changelog. Motion rebranding verified from official blog. pgvector SQLAlchemy integration verified from GitHub. |
+| Features | MEDIUM | Table stakes derived from Attio, Folk, HubSpot, Zoho comparison (credible industry sources). Differentiator value claims are practitioner consensus, not quantitative user research. Anti-features verified against PROJECT.md decisions. |
+| Architecture | HIGH | Based on direct codebase inspection of models.py, storage.py, skill_executor.py, existing API routers, and migration 027. Integration points are grounded in actual code, not assumptions. |
+| Pitfalls | HIGH (backend) / MEDIUM (frontend) | Backend pitfalls (column rename, GIN index, RLS) verified against PostgreSQL docs and actual codebase. Frontend pitfalls (TanStack Table interaction, React Query keys) from official docs and community patterns. |
 
-**Overall confidence:** HIGH
+**Overall confidence:** HIGH for technical approach; MEDIUM for feature prioritization (user value ranking is informed judgment, not user research data)
 
 ### Gaps to Address
 
-- **Scoring prompt design (Phase 3):** The exact signal weighting and prompt structure for the email-scorer skill is the biggest open question. Plan for 2-3 prompt engineering iteration cycles before the scorer produces reliable 5-tier results. Do not set user-visible accuracy expectations until after dogfooding.
-
-- **Draft quality (Phase 4):** Draft quality is highly dependent on context richness (how populated the context store is) and voice profile quality (how many substantive sent emails the user has). Users with sparse context stores and few sent emails will see lower-quality drafts. Plan a cold-start UI experience that sets expectations rather than promising context-aware drafts from day one.
-
-- **Tailwind v4 typography plugin:** `@tailwindcss/typography` v0.5.x plugin API compatibility with `@tailwindcss/vite` v4 is flagged as needing implementation-time verification. May require `@tailwindcss/typography@next`. Resolve at the start of Phase 5.
-
-- **Google restricted scope verification timeline:** `gmail.readonly` is a restricted scope requiring Google verification for apps in production. If the app has fewer than 100 verified users or is still in "Testing" mode in Google Cloud Console, the verification process takes 2-6 weeks. This must be initiated no later than the end of Phase 2 to avoid blocking Phase 5 rollout.
+- **Q&A retrieval quality:** TSVECTOR full-text search adequacy for temporal and conceptual Q&A questions is assumed based on the small context size (20-100 entries per account). Validate with real account data during Phase 5 implementation before committing to the retrieval architecture. pgvector is the verified fallback.
+- **AG Grid + Tailwind v4 theming:** Tailwind v4 uses a fundamentally different configuration model (Vite plugin, CSS-first config). AG Grid's theming uses CSS custom properties, which should be compatible, but the interaction with Tailwind v4's build pipeline has not been tested in this codebase. Spike before Phase 3 implementation.
+- **Synthesis quality at thin context:** The template-string fallback for accounts with fewer than 3 context entries is the right UX decision, but the threshold of 3 entries is an estimate. Adjust based on early synthesis output quality during Phase 2 API development.
+- **Signal computation at scale:** Current real-time SQL computation is adequate at 206 accounts. The scale threshold (>500 accounts triggers background job pre-computation) is documented in ARCHITECTURE.md but the migration path has not been designed. Low urgency for v2.1, but should be addressed before any significant customer onboarding.
 
 ---
 
 ## Sources
 
-### Primary (HIGH confidence — official documentation and codebase inspection)
-- [Google Gmail API — Synchronize clients](https://developers.google.com/workspace/gmail/api/guides/sync) — historyId watermark, 404 behavior, full-sync fallback
-- [Google Gmail API — Usage limits](https://developers.google.com/workspace/gmail/api/reference/quota) — per-user quota (15,000 units/min), per-project quota
-- [Google Gmail API — Choose scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) — restricted scope classification for `gmail.readonly`
-- [Google restricted scope verification](https://developers.google.com/identity/protocols/oauth2/production-readiness/restricted-scope-verification) — verification timeline
-- [google-api-python-client PyPI](https://pypi.org/project/google-api-python-client/) — version 2.193.0 confirmed
-- [markdownify PyPI](https://pypi.org/project/markdownify/) — version 1.2.2 confirmed
-- [@tanstack/react-virtual npm](https://www.npmjs.com/package/@tanstack/react-virtual) — version 3.13.23 confirmed, React 19 support
-- Codebase inspection: `backend/src/flywheel/services/` — `calendar_sync.py`, `google_gmail.py`, `email_dispatch.py`, `skill_executor.py`, `job_queue.py`
-- Codebase inspection: `backend/src/flywheel/db/models.py` — Integration, SkillRun, ContextEntry patterns
-- Concept brief: `.planning/CONCEPT-BRIEF-email-copilot.md` — architecture decisions, privacy minimization, advisory board decisions
+### Primary (HIGH confidence — direct codebase inspection)
+- `backend/src/flywheel/db/models.py` — Account model, column names, existing indexes
+- `backend/src/flywheel/storage.py` — `append_entry()` signature; invalidation hook location
+- `backend/src/flywheel/services/skill_executor.py` — Anthropic SDK usage pattern, BYOK context
+- `backend/src/flywheel/api/accounts.py`, `outreach.py`, `timeline.py` — existing endpoint patterns, Pydantic models
+- `backend/alembic/versions/027_crm_tables.py` — current schema, index definitions
+- `frontend/src/features/accounts/` — existing component structure, React Query hooks, TypeScript types
 
-### Secondary (MEDIUM confidence — community sources, multiple corroborating sources)
-- [Shortwave vs Superhuman 2025 Exec Guide](https://www.baytechconsulting.com/blog/shortwave-vs-superhuman-the-2025-executives-guide-to-ai-email-clients) — competitor feature analysis
-- [Ellie AI Deep Dive](https://skywork.ai/skypage/en/ellie-ai-email-assistant/1976860414183534592) — voice learning patterns
-- [PII in Logs is a GDPR Time Bomb](https://dev.to/polliog/pii-in-your-logs-is-a-gdpr-time-bomb-heres-how-to-defuse-it-307l) — log sanitization guidance
-- [Cross Session Leak detection](https://www.giskard.ai/knowledge/cross-session-leak-when-your-ai-assistant-becomes-a-data-breach) — multi-tenant LLM context leakage
+### Primary (HIGH confidence — official documentation)
+- [AG Grid React Compatibility](https://www.ag-grid.com/react-data-grid/compatibility/) — React 19 support from v34.3.0
+- [Motion Installation Docs](https://motion.dev/docs/react-installation) — v12, import from `motion/react`
+- [pgvector Python PyPI](https://pypi.org/project/pgvector/) — v0.4.2, SQLAlchemy 2.0 integration
+- [TanStack Table Column Visibility API](https://tanstack.com/table/v8/docs/api/features/column-visibility)
+- [PostgreSQL GIN Indexes — pganalyze](https://pganalyze.com/blog/gin-index) — update cost analysis
 
-### Tertiary (LOW confidence — inferred or single-source)
-- Scoring prompt signal weighting — no established benchmark; requires empirical validation during Phase 3 implementation
-- Draft quality benchmarks — no published metrics for context-assembled email draft approval rates; must be measured during dogfooding
+### Secondary (MEDIUM confidence — industry survey and community patterns)
+- [Attio CRM Review 2026 — Authencio](https://www.authencio.com/blog/attio-crm-review-features-pricing-customization-alternatives) — multi-type account differentiator
+- [Folk CRM AI Features](https://www.folk.app/articles/folk-crm-ai-features) — AI enrichment patterns, Q&A comparison
+- [Zoho CRM Signals Overview](https://help.zoho.com/portal/en/kb/crm/experience-center/salessignals/articles/signals-an-overview) — signal taxonomy reference
+- [React Query Cache Invalidation — tkdodo](https://tkdodo.eu/blog/concurrent-optimistic-updates-in-react-query) — query key factory pattern
+- [LLM Cost Optimization — Koombea AI](https://ai.koombea.com/blog/llm-cost-optimization) — runaway cost patterns
+- [PostgreSQL backward-compatible migration — Ovrsea/Medium](https://medium.com/ovrsea/using-postgresql-views-to-ensure-backwards-compatible-non-breaking-migrations-017288e77f06) — two-phase rename pattern
+
+### Tertiary (MEDIUM confidence — practitioner consensus)
+- [LangChain too complex for simple RAG — GitHub discussion #182015](https://github.com/orgs/community/discussions/182015) — community consensus 2025; no single authoritative reference
+- [Personal CRM Guide 2025 — folk.app](https://www.folk.app/articles/personal-crm-guide) — stale contact detection patterns
+- [4Degrees CRM Features for PE](https://www.4degrees.ai/blog/essential-crm-features-for-private-equity-firms-in-2025-streamline-deal-flow-relationships-and-data-driven-decisions) — founder/VC segmentation best practices
 
 ---
-*Research completed: 2026-03-24*
+*Research completed: 2026-03-27*
 *Ready for roadmap: yes*

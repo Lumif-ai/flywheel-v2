@@ -1,251 +1,181 @@
-# Feature Research
+# Feature Landscape — v2.1 CRM Redesign
 
-**Domain:** AI Email Copilot — context-aware email scoring, triage, draft generation, voice learning, and review UX
-**Researched:** 2026-03-24
-**Confidence:** HIGH (competitor feature analysis confirmed via multiple sources; Flywheel-specific recommendations derived from concept brief + advisory board decisions)
-
----
-
-## Competitor Feature Analysis
-
-| Feature | Superhuman | Shortwave | SaneBox | Ellie AI | Flowrite / MailMaestro | Our Approach |
-|---------|------------|-----------|---------|----------|------------------------|--------------|
-| Email prioritization | Split Inbox (manual workstreams) + VIP detection via ML | Smart Bundles (auto-grouped by type) | Behavioral folder sorting (@SaneLater, @SaneBlackHole) | None — draft-only | None | Score at message level, display at thread level. 5-tier numeric score (1=noise, 5=critical) cross-referenced against context store |
-| Draft generation | "Instant Reply" via OpenAI — criticized as generic/formal | Ghostwriter learns from sent history — praised as natural-sounding | None | Learns from sent mail passively; single-click draft | Template + tone selection; one-click draft | Sent mail voice profile (100 substantive emails) + full context store assembly. Drafts are always context-aware, never generic |
-| Voice learning | No voice learning — generic drafts | Analyzes sent history for tone, word choice, phrase patterns | None | Passive learning from sent mail — same mechanism | Manual tone presets (casual, formal, etc.) | Automated analysis of last ~100 substantive sent emails; stores `EmailVoiceProfile` with tone, length, sign-off, characteristic phrases; updates as user edits drafts |
-| Scoring transparency | None — priority is binary (important / other) | None — bundles are opaque | None — folder sorting with no explanation | None | None | Full reasoning string per score; context_refs linking to which meeting notes / entities influenced the decision |
-| Triage UX | Keyboard-driven inbox; split view | Bundle review; Cmd+J AI assistant | Drag-and-drop training | Inline draft button per email | Chrome extension overlay | Dedicated review page: scored thread list by priority tier; one-tap approve, edit, or dismiss |
-| Cold start | No cold start — generic scoring from day 1 | Style learning takes a few days | Behavioral learning takes weeks | Passive learning; starts generic | No learning | Context store pre-loaded with meetings/companies/entities from day 1. Voice profile extracted in Phase 1 sync before any drafts surface |
-| Notification | No critical alert system | No critical alert system | Email summaries | None | None | In-app alert for priority 5 (critical) emails; Slack DM deferred to post-MVP |
-| Daily digest | No | No | Scheduled summaries | No | No | Low-priority (1-2) emails batched into document artifact digest |
-| Thread handling | Thread summarization ("Auto Summarize") | Thread summaries via AI | Thread-level folder routing | Per-email draft | Per-email draft | Score at message level, surface at thread level (highest score wins); re-score when thread gets new message |
-| Feedback loop | None explicit | None explicit | Drag-and-drop retraining | None explicit | None | Approval/edit/dismissal feed back into `EmailVoiceProfile` and scoring refinement |
-
-**Key gap across all competitors:** None of them can access external context (meeting notes, company intel, project knowledge, relationship history). Their scoring is surface-signal-only. This is Flywheel's moat.
+**Domain:** Intelligence-first founder CRM (relationship type segmentation, AI synthesis, configurable pipeline grid, commitment tracking, signal layer)
+**Researched:** 2026-03-27
+**Confidence:** MEDIUM — sources include Attio, Folk, Notion CRM patterns, Zoho Signals, TanStack Table docs. Most architectural claims verified. UX pattern claims are MEDIUM confidence (WebSearch + practitioner consensus).
 
 ---
 
-## Feature Landscape
+## Context: What Already Exists vs What's New
 
-### Table Stakes (Users Expect These)
+The v2.0 CRM shipped flat account tables, basic pipeline triage, and REST APIs. v2.1 builds intelligence surfaces on top of that data. Nothing in this document requires rebuilding what works — it only extends it.
 
-Features that make the copilot feel complete and trustworthy. Missing any of these = product feels half-baked.
+| Already Shipped (v2.0) | Status |
+|------------------------|--------|
+| Accounts list + detail page | Done |
+| Pipeline page (table + Graduate button) | Done |
+| Pulse signals on Briefing page | Done |
+| REST APIs: accounts, contacts, outreach, timeline, pulse | Done |
+| Sidebar with Accounts + Pipeline links | Done |
 
-| Feature | Why Expected | Complexity | Notes |
-|---------|--------------|------------|-------|
-| Gmail inbox sync (read) | Without it, there is no product | MEDIUM | Expand existing OAuth from send-only to `gmail.readonly` + `gmail.modify`; follow `calendar_sync.py` pattern; 5-min poll |
-| Email priority scoring (5-tier) | Users need to know what the system thinks matters, or they can't trust it | HIGH | LLM skill cross-referencing sender entities, topic signals, urgency keywords against context store; requires EmailScore model |
-| Score reasoning / transparency | Superhuman and Shortwave give no explanation — users distrust opaque prioritization | MEDIUM | "Scored 5/5 because: Sarah Chen is a known deal contact (matched entity graph), mentions 'close by Friday', thread is 72h old" — stored as `reasoning` string |
-| Thread-level display with message-level scoring | Human mental model: the thread got important when Sarah replied, not from the start | LOW | Aggregate: show highest message score at thread level; show which message triggered elevation |
-| One-click draft approval | Reviewers expect a single action for accept; multi-step approve is friction | LOW | API endpoint: PATCH /drafts/{id}/approve → triggers email_dispatch.py |
-| Draft edit before send | Not every draft is perfect; users must be able to correct without restarting | LOW | Edit mode in review UI; diffs stored as `user_edits` in EmailDraft for voice learning |
-| Draft dismiss | Users need to reject bad drafts without penalty | LOW | PATCH /drafts/{id}/dismiss; dismiss teaches the scorer (this email did not warrant a draft) |
-| In-app alert for critical emails | Priority 5 emails need immediate attention; buried in a list is not enough | LOW | Reuse existing in-app notification system; badge + alert card for priority 5 |
-| Voice profile extraction on setup | If first drafts sound generic, users abandon immediately | HIGH | Pull last 200 sent emails on first Gmail sync, filter to ~100 substantive (>3 sentences), extract tone/length/sign-off/phrases into EmailVoiceProfile |
-| Unsubscribe suggestion | Marketing/newsletter emails are noise; users expect help | LOW | Suggest unsubscribe in UI; do NOT automate clicking unsubscribe links in v1 |
-| Configurable draft visibility delay | Operators need to control when drafts surface; aggressive for dogfood, cautious for external | LOW | `draft_visibility_delay_days` config; drafts stored in `pending` status, flipped to `visible` after delay passes |
+---
 
-### Differentiators (Competitive Advantage)
+## Table Stakes
 
-Features that set Flywheel Email Copilot apart. Not table stakes — but these are the reason users stay.
+Features users expect. Missing = product feels incomplete or broken.
+
+| Feature | Why Expected | Complexity | Depends On |
+|---------|--------------|------------|------------|
+| Separate list pages per relationship type (Prospects, Customers, Advisors, Investors) | Every CRM since Salesforce 2005 segments contacts. Attio, Folk, HubSpot all do this. Users cannot mentally manage Advisors and Prospects in a single table — the context and actions are completely different. | Medium | DM-01 `relationship_type[]` migration, API-01 |
+| Click-through to relationship detail | Navigation to detail is non-negotiable. No CRM ships a list-only view. | Low | Existing account detail page — reuse and extend |
+| Primary contact visible on list card | Folk, Attio, and Notion CRM templates all surface the lead contact inline. Users cannot remember which card is which without a name. | Low | API-01 `primary_contact` field |
+| AI summary on detail page (cached, not on-demand) | Nutshell, Attio, and Folk all ship cached relationship summaries. Users expect synthesis; reading raw timeline is too slow. | Medium | DM-04 `ai_summary` + `ai_summary_updated_at` columns, API-07 synthesize |
+| Graceful degradation when AI summary is empty | Attio shows enrichment data when AI context is thin. Folk shows a limited-data research note. Industry consensus: never show a blank panel — display a shorter template-based summary or a "not enough data yet" state instead. | Low | API-07 threshold logic (fewer than 3 data points triggers template summary not LLM call) |
+| Note capture on any relationship (quick-add) | Every personal CRM (Dex, Nimble, Folk) has a quick note field. It's the primary data input for founder users. | Low | API-05 quick-add note, context entry system (already built) |
+| Timeline showing all interaction history | Core CRM table stakes since Salesforce. Users orient by recency. | Low | API already ships unified timeline; FE-09 is the new renderer |
+| Sidebar navigation with relationship type sections | HubSpot, Attio, and Pipedrive all have persistent type-based navigation. Founders context-switch constantly between investor mode and customer mode. | Low | FE-06 sidebar redesign |
+| Graduate-to-relationship flow from Pipeline | Users need an explicit promotion action — this is the "graduation ceremony" of a prospect becoming a real relationship. | Low | API-04 graduate endpoint (already designed) |
+| Configurable Pipeline columns (show/hide) | Airtable-style column management. Any power user of CRMs expects this. TanStack Table supports it natively with column visibility state. | Medium | FE-01 Pipeline grid |
+| Signal count badges on sidebar | Zoho CRM Signals, HubSpot notification dots, Intercom badge counts — users need to know where attention is needed without opening every page. | Medium | API-09 signals endpoint, FE-06 |
+
+---
+
+## Differentiators
+
+Features that set this product apart from standard CRMs. Not expected, but create meaningful value and justify adoption over commodity alternatives.
 
 | Feature | Value Proposition | Complexity | Notes |
 |---------|-------------------|------------|-------|
-| Context-store-powered scoring | No competitor can score "this email is about the Series A — Sarah is the lead partner we met last Thursday" because they lack meeting notes + entity graph | HIGH | Scorer skill queries context_entries and context_entities; context_refs in EmailScore links the dots visibly |
-| Context-assembled drafts | Draft that opens with "Following up on our Thursday call where we discussed the $5M cap table..." is categorically different from a generic AI reply | HIGH | email_drafter skill fetches body on-demand from Gmail API, loads voice profile, assembles relevant context entries; drafted reply reflects actual relationship history |
-| Scoring transparency with context references | Competitors are black boxes. Showing the user exactly which meeting note or entity card drove a score builds trust faster than any other mechanism | MEDIUM | `context_refs[]` in EmailScore, surfaced in UI as linked evidence ("Influenced by: Meeting with Sarah Chen 2026-03-18") |
-| Feedback flywheel (edit-to-learn) | Every edit the user makes refines the voice profile and scoring model — the product gets measurably better per week of use | MEDIUM | Diff analysis on user_edits in EmailDraft; periodic (every 50 new sent emails) voice profile refresh; approve/dismiss pattern tracking for scorer |
-| Daily digest document artifact | Low-priority emails batched into a scannable HTML report (reusing existing document artifact system) — no competitor does this | LOW | Generate digest as document artifact (existing system); links to full email on demand via Gmail on-demand fetch |
-| Context-aware sender scoring | "I know this person — we've met 3 times, they're involved in Project Titan" vs. "unknown sender" changes everything about triage | MEDIUM | `sender_entity_id` in EmailScore links sender to context_entities; relationship depth (meeting count, recency, project involvement) feeds into priority calculation |
-| Re-scoring on thread update | Shortwave/Superhuman score once and never revise. A thread that starts as low priority becomes critical when the CEO joins it | MEDIUM | Trigger re-score when email_sync picks up a new message in an existing thread; update EmailScore, re-evaluate draft need |
-| Graceful degradation when Gmail API is unavailable | Users still see score + reasoning even if body fetch fails; no silent failures | LOW | On-demand body fetch failure: show EmailScore + snippet, surface "Full body temporarily unavailable" message in UI; do not block review |
+| Multi-type account (one entity = Advisor + Investor simultaneously) | Attio supports this and it is their primary differentiator for startup use cases. For a founder, their lead investor IS also their advisor. No other lightweight CRM does this cleanly — most require separate records or a single forced type. | Medium | DM-01 text array not enum; type badge chips with PATCH API-03 |
+| Interactive AI panel — Q&A about a relationship | Asking "what did we discuss last about pricing?" is impossible in legacy CRMs. RAG over account context is founder-specific and high value. Folk offers "draft follow-up from thread" but not open Q&A. | High | API-08 ask endpoint; requires quality RAG implementation with source attribution |
+| Two-paradigm layout: Pipeline as data grid, Relationships as intelligence journals | No single CRM separates these cleanly. Airtable feels clinical for investor journals; Notion feels too freeform for outreach triage. The design decision to have two distinct visual modes is the conceptual differentiator. | High | FE-01 (grid) and FE-07/FE-08 (cards and detail) must look and feel different from each other |
+| Commitment tracking — "What You Owe / What They Owe" | This is the founder's primary cognitive burden after a meeting. Meeting notes contain commitments but no tool extracts and surfaces them bidirectionally. Closest competitor is OnePageCRM's "next action" concept, but that is unidirectional and not commitment-specific. | Medium | FE-12 Commitments tab; API-02 commitments field |
+| Type-specific tab sets per relationship (Advisor tabs differ from Investor tabs differ from Prospect tabs) | Folk and Attio use the same record layout for all contact types. Flywheel's type-driven rendering is a meaningful UX improvement — advisors have "What They Help With", investors have "Updates Owed", prospects have "Outreach". | Medium | FE-08 tab config map; shared RelationshipDetail component with four configurations |
+| Signal layer with priority tiers (reply_received above followup_overdue above commitment_due above stale) | Zoho's Signals are limited to email-open events. Flywheel's signal taxonomy is relationship-aware and multi-source — it covers outreach staleness, commitment deadlines, and inbound replies in a single feed. | Medium | API-09 signal computation; signal types map to founder job-to-be-done |
+| File attachment on relationship (PDF, contract, deck) | Neither Attio nor Folk have native file attachment to contact records. Supabase Storage already exists in this codebase — it is low-cost to add but high value for founder workflows (investor deck attached to investor record, NDA attached to customer). | Medium | API-06, Supabase Storage (already in stack) |
+| Stale relationship detection with ambient visual tint | "Losing touch" detection exists in Dex and Nimble but is limited to notification reminders. Flywheel's grid shows staleness inline (colored number and row background tint) making it ambient and glanceable rather than disruptive. | Low | `days_since_last_outreach` computed field plus CSS class on row |
+| AI-generated type-specific action prompts (Advisor gets "Draft Thank You", Investor gets "Draft Update") | The action bar adapting to relationship type signals the system understands who this person is. No commodity CRM does type-aware action suggestions. The stubs in v2.1 set the surface for v3 skill triggers. | Low | FE-13 type-to-button config map; most buttons are stubs in v2.1 with "Coming soon" toasts |
 
-### Anti-Features (Commonly Requested, Often Problematic)
+---
 
-| Feature | Why Requested | Why Problematic | Alternative |
-|---------|---------------|-----------------|-------------|
-| Auto-send approved drafts | Saves one tap; removes friction | Trust cannot be assumed from day 1. One bad auto-sent email (wrong tone, wrong context, leaked information) destroys trust permanently. The cost of a false positive here is catastrophic. | Draft-only with one-tap approval — the tap is a human decision gate, not a burden |
-| Full email body storage | Enables richer drafts; avoids API call latency | Creates a PII archive that grows indefinitely. Legal/compliance risk (GDPR, CCPA) exceeds value. 90% of drafting value comes from extracted context + snippet. | Extract context entries on ingest; fetch full body on-demand from Gmail API only when drafting |
-| Auto-unsubscribe (click links) | Obvious productivity win | Clicking unsubscribe links on behalf of the user is an action with unpredictable side effects (confirmation pages, account changes, legal opt-outs). A bug here can unsubscribe users from things they want. | Surface unsubscribe suggestions in review UI; user clicks the link themselves |
-| "Morning briefing" autonomous agent mode | The north-star vision — chief of staff | Requires months of established scoring accuracy and voice accuracy before users will trust an autonomous morning summary. Shipping it pre-trust earns bad press. | Earn trust through the review UI first; morning briefing is v2+ when precision is proven |
-| Gmail push notifications (Pub/Sub) | Lower latency than 5-min poll | Adds infrastructure complexity (HTTPS callback endpoint, subscription management, token rotation). 5-minute latency is acceptable for v1 and follows proven calendar_sync pattern. | Poll every 5 minutes via background worker; upgrade to Pub/Sub push in v2 if latency becomes a user complaint |
-| Multi-account Gmail support | Many users have personal + work accounts | Multiplies sync complexity, OAuth credential management, and scoring confusion (do cross-account context signals merge?). | Single Gmail account for v1; scope multi-account support post-PMF |
-| Auto-labeling / modifying Gmail labels | Feels like organizing directly in Gmail | Label mutations via API require `gmail.modify` scope already needed for other reasons, but auto-applying labels without explicit user training feels presumptuous and risks misclassification | Suggest labels in UI; user applies manually; add auto-labeling as an opt-in feature in v2 |
-| Scoring by email content alone (no context) | Easier to build; no dependency on context store | Produces the same result as Superhuman/SaneBox — surface signals only. Kills the differentiation entirely. Every scoring decision must draw from context store, even if the context match is weak. | Always cross-reference context store, even for low-confidence matches; surface confidence level in reasoning string |
+## Anti-Features
+
+Features to explicitly avoid. Building these would dilute focus, add maintenance cost, or conflict with existing design decisions already recorded in PROJECT.md.
+
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Custom pipeline stages | Out of scope per PROJECT.md. Stages are fixed by design. Adding configurability requires a settings page, migration strategy, and validation logic that does not add founder value. | Document the 5 fixed stages clearly in UI. |
+| Kanban drag-and-drop for Pipeline | Out of scope per PROJECT.md. Adds complex drag state, mobile incompatibility, and conflicts with the "data grid" paradigm. | Provide inline status dropdown per row if needed in a future patch. |
+| Bulk outreach sending from Pipeline UI | Out of scope per PROJECT.md. Creates compliance risk and undermines the founder ethos of intentional, skill-generated outreach. | Keep outreach generated by skills only. |
+| AI-auto-populate commitments from NLP extraction (v2.1) | High complexity, high error rate. NLP commitment extraction from freeform meeting notes is a standalone ML problem. Wrong commitments displayed as facts erode trust faster than the feature delivers value. | Extract commitments from context entries with `source = "commitment"` — manual capture first, NLP deferred to v3. |
+| Free-text contact creation from UI | Conflicts with no-manual-entry design principle from PROJECT.md. Contacts are created by skills and seed CLI. Adding forms opens data hygiene debt with duplicates and normalization issues. | If quick-add is needed, call the existing contact API with minimal fields. Defer to v3. |
+| Kanban board view for relationship types (e.g., Advisors as Kanban) | Relationships are not a pipeline — they are persistent and do not move through stages. A board view implies stage progression, which is conceptually wrong for advisor/investor relationships. | Card grid for relationships, table grid for pipeline. The two-paradigm design is a stated principle. |
+| Mobile-responsive layout | Out of scope per PROJECT.md. Responsive work doubles CSS complexity. This is a daily-use desktop tool for founders. | Use minimum widths, defer mobile to a dedicated milestone. |
+| Slack and email notification delivery for signals | Out of scope. In-app badges and Briefing page cover signal surfacing for v2.1 without delivery infrastructure. | Ship in-app first, notification delivery is v3. |
+| Account merge and dedup UI | Out of scope per PROJECT.md. Normalization handles this at seed time via CLI. UI dedup adds complex conflict resolution UI. | Run normalization CLI when duplicates appear. |
+| Server-side saved views (persisted to DB) | Overengineered for v2.1. The 4 predefined filter tabs (All, Strong Fit, Needs Follow-up, Stale) cover 90% of pipeline triage needs without requiring a views table, API, and settings UI. | Client-side filter presets. Add server persistence when users explicitly request custom views. |
 
 ---
 
 ## Feature Dependencies
 
+Build order constraints — features downstream of others must wait.
+
 ```
-Voice Profile Extraction
-    └──required by──> Draft Generation
-                          └──required by──> Draft Review UI
-                                                └──required by──> Feedback Flywheel
+DM-01 (relationship_type[] column)
+  → API-01 (relationships list filtered by type)
+    → FE-07 (relationship list pages — 4 surfaces)
+    → FE-06 (sidebar badge counts)
+  → API-03 (type update)
+    → FE-08 type badges (clickable)
+  → API-04 (graduate with type assignment)
+    → FE-04 (graduation modal)
 
-Gmail Read Sync
-    └──required by──> Email Scoring
-                          └──required by──> Draft Generation
-                          └──required by──> In-App Critical Alerts
-                          └──required by──> Daily Digest
+DM-02 (entity_level column)
+  → FE-10 (People tab — person-level = single prominent card, not grid)
 
-Context Store (already built)
-    └──enhances──> Email Scoring (sender entity lookup, topic matching)
-    └──enhances──> Draft Generation (context assembly for reply body)
+DM-03 (relationship_status + pipeline_stage rename)
+  → API-01 (relationship list filters on relationship_status)
+  → API-10 (pipeline filters on pipeline_stage)
+  → FE-01 (Pipeline grid uses pipeline_stage not old status)
 
-Scoring Transparency (context_refs)
-    └──enhances──> User Trust
-    └──required by──> Thread Detail View (showing which meeting note triggered priority)
+DM-04 (ai_summary + ai_summary_updated_at columns)
+  → API-07 (synthesize endpoint)
+    → FE-08 AI panel (cached summary display)
+  → API-08 (ask endpoint)
+    → FE-08 AI panel (Q&A mode — question detection)
 
-Email Scoring
-    └──required by──> Re-Scoring on Thread Update
+API-05 (quick-add note)
+  → FE-08 AI panel note input
+    → FE-09 Timeline (optimistic update, new entry at top)
 
-Document Artifact System (already built)
-    └──enhances──> Daily Digest Generation
+API-06 (file upload)
+  → FE-08 AI panel attachment button
+    → FE-09 Timeline file-type entries
 
-In-App Notification System (already built)
-    └──required by──> Critical Email Alerts (priority 5)
+API-09 (signals)
+  → FE-06 sidebar badge counts
+  → FE-07 card signal indicator
+  → FE-08 signal banner on detail page
 
-Gmail Send Dispatch (already built)
-    └──required by──> Draft Approval / Send
+Existing (already built):
+  - Timeline API → API-07 synthesize and API-08 ask both consume this data
+  - Context store → AI endpoints read from it; note quick-add writes to it
+  - Accounts API Graduate endpoint → API-04 extends it with type parameter
+  - Supabase Storage → API-06 file upload uses the existing storage pattern
 ```
 
-### Dependency Notes
+---
 
-- **Voice Profile Extraction requires Gmail Read Sync:** Profile is built from sent mail pulled during first sync. Must complete before any draft is generated.
-- **Email Scoring requires Context Store:** Scoring without context store cross-reference produces competitor-parity results, not differentiated results. Non-negotiable.
-- **Draft Generation requires on-demand Gmail body fetch:** Bodies are not stored. Drafter skill must fetch full body from Gmail API at draft time. Failure mode must be handled gracefully.
-- **Feedback Flywheel requires Draft Review UI:** Approvals, edits, and dismissals are the signal source. No UI = no feedback loop.
-- **Re-scoring on thread update requires Email Scoring:** Obvious, but ensures the scorer is stable before adding re-trigger logic.
+## MVP Recommendation
+
+Given the target user (founder managing 15 deep relationships plus 200 outreach pipeline), the minimum shipping set for v2.1:
+
+**Prioritize — cannot ship without:**
+1. DM-01 to DM-03 data model migrations (all other features block on this)
+2. API-01 and API-02 relationship list and detail with primary_contact and signal_count
+3. FE-06 sidebar with 5 surfaces and badge counts
+4. FE-07 relationship card list pages (4 type surfaces)
+5. FE-08 relationship detail with AI panel and type-driven tabs
+6. FE-01 Pipeline grid (Airtable-style) with column show/hide and filter tabs
+7. FE-04 graduation flow with type selection modal
+8. API-07 synthesize and API-08 ask endpoints with graceful degradation
+9. FE-12 Commitments tab (the founder pain point v2.0 does not address at all)
+
+**Defer to patch or v2.2:**
+- File attachments (API-06 and attachment button in FE-08) — note capture is higher value per effort; files add Supabase storage wiring that should not block the main surfaces
+- Action bar skill triggers (FE-13 stubs are fine for v2.1 — "Coming soon" toasts are acceptable)
+- Signal computation beyond `stale_relationship` type — reply_received and commitment_due require richer event wiring that can ship as a follow-on
+- Column drag-to-reorder — show/hide is sufficient for v2.1; drag-reorder is polish
 
 ---
 
-## MVP Definition
+## Complexity Assessment by Feature Area
 
-### Launch With (v1 — dogfooding-ready)
-
-- [ ] Gmail read sync via background poll (5 min) — foundation for everything else
-- [ ] Voice profile extraction from sent mail (100 substantive emails) — without this, first drafts are generic and users disengage
-- [ ] Email scoring (5-tier) with context store cross-reference — the core differentiator; scoring-only still has value if drafts are delayed
-- [ ] Score reasoning with context references — trust mechanism; without transparency, users can't verify the system is using context correctly
-- [ ] Draft generation with voice profile + context assembly — the step-change value; one good context-aware draft converts skeptics
-- [ ] Configurable draft visibility delay (`draft_visibility_delay_days`) — allows delay=0 for dogfood, delay=7 for cautious external users
-- [ ] Draft review UI: scored thread list + approve/edit/dismiss — required to actually use drafts
-- [ ] In-app alerts for priority 5 (critical) emails — ensures critical emails never go unnoticed
-
-### Add After Validation (v1.x)
-
-- [ ] Feedback flywheel: edit diffs → voice profile update — add when edit patterns accumulate (after ~2 weeks of use)
-- [ ] Re-scoring on thread update — add when scoring stability is confirmed; premature re-scoring can confuse users
-- [ ] Daily digest document artifact for low-priority emails — add when users report batch review need; low development cost
-- [ ] Unsubscribe suggestion in review UI — low cost, high annoyance reduction; add in first polish sprint
-
-### Future Consideration (v2+)
-
-- [ ] Slack DM notifications for critical emails — already decided as post-MVP; requires Slack integration infrastructure
-- [ ] Morning briefing / autonomous agent mode — requires months of proven scoring accuracy + established user trust
-- [ ] Gmail push notifications (Pub/Sub) — only if 5-min poll latency generates user complaints
-- [ ] Multi-account Gmail support — post-PMF, after single-account pattern is proven
-- [ ] Auto-labeling (opt-in) — after feedback loop is stable and users request it
-
----
-
-## Feature Prioritization Matrix
-
-| Feature | User Value | Implementation Cost | Priority |
-|---------|------------|---------------------|----------|
-| Gmail read sync | HIGH | MEDIUM | P1 |
-| Voice profile extraction | HIGH | HIGH | P1 |
-| Email scoring with context store | HIGH | HIGH | P1 |
-| Score reasoning + context refs | HIGH | MEDIUM | P1 |
-| Draft generation | HIGH | HIGH | P1 |
-| Draft visibility delay config | HIGH | LOW | P1 |
-| Draft review UI (approve/edit/dismiss) | HIGH | MEDIUM | P1 |
-| In-app critical alerts | HIGH | LOW | P1 |
-| Thread-level display, message-level scoring | MEDIUM | LOW | P1 |
-| Graceful degradation on Gmail API failure | HIGH | LOW | P1 |
-| Feedback flywheel (edit-to-learn) | HIGH | MEDIUM | P2 |
-| Re-scoring on thread update | MEDIUM | MEDIUM | P2 |
-| Daily digest artifact | MEDIUM | LOW | P2 |
-| Unsubscribe suggestion | MEDIUM | LOW | P2 |
-| Slack DM for critical | MEDIUM | MEDIUM | P3 |
-| Morning briefing / autonomous mode | HIGH | HIGH | P3 |
-| Multi-account Gmail | MEDIUM | HIGH | P3 |
-| Gmail Pub/Sub push | LOW | HIGH | P3 |
-
-**Priority key:**
-- P1: Must have for dogfooding launch
-- P2: Should have, add after v1 validates
-- P3: Future milestone, after PMF
-
----
-
-## Implementation Notes by Feature Area
-
-### Email Scoring
-
-- Five scoring tiers map to four routing decisions: 5=notify+draft, 3-4=draft, 1-2=file+digest, 0=archive
-- Scoring signals (in priority order): sender entity match in context graph → topic match against active projects/meetings → urgency keywords (deadlines, "by Friday", "urgent", "action required") → email age/thread staleness → historical sender importance (reply frequency from sent mail)
-- Cold start is solved by context store pre-population: meeting notes and entity relationships exist before email sync begins
-- Error bias: aggressive escalation (prefer false positive over false negative for high-priority routing), conservative suppression (never auto-archive unless confidence is very high)
-- Confidence LOW: The exact LLM prompt structure and weight balancing for scoring needs phase-specific research. Training data for scoring accuracy is not available until user interactions accumulate.
-
-### Voice Profile Learning
-
-- Extract from last 200 sent emails; filter to those >3 sentences to exclude trivial replies ("Sounds good!", "Thanks!")
-- Extract: tone (formal/casual/direct/warm), typical length (word count percentile), sign-off (exact string), characteristic phrases (repeated expressions), sentence structure patterns
-- Microsoft Copilot's approach (manual style guide) is the wrong model — users should not have to author their voice profile. Shortwave's passive learning (like Ellie AI) is the right model.
-- Voice drift: re-run extraction every 50 new sent emails, or on explicit user request. Deferred to implementation.
-- Confidence MEDIUM: Specific NLP techniques for phrase extraction from email samples need validation during implementation.
-
-### Draft Generation
-
-- Fetch full email body on-demand from Gmail API at draft time (not stored)
-- Assemble context: EmailVoiceProfile + relevant context_entries (matched by sender entity, topics, project mentions) + thread history (fetched as thread, not single message)
-- Drafts stored with `visible_after` timestamp; `status: pending` until delay passes; `status: visible` thereafter
-- `user_edits` field captures diff between generated and approved/edited draft — primary input for voice refinement
-- Confidence LOW on quality: draft quality is highly dependent on prompt engineering, context assembly strategy, and the richness of the context store. This is the highest-risk feature for user trust. Carmack's framing: "the actual hard problem is learning user voice for drafts." Plan for multiple iteration cycles.
-
-### Review UX
-
-- Thread list sorted by score tier (priority 5 first), then recency within tier
-- Thread row shows: sender, subject, score badge (1-5), score category label, age, draft-ready indicator
-- Thread detail shows: score reasoning text, context refs (linked to context entries), email snippet, full draft (when visible), approve/edit/dismiss actions
-- "Approve" is the primary action — should be the most visually prominent control
-- "Edit" opens inline editor, not a separate page — friction must be minimal
-- "Dismiss" removes draft from queue, does not send — dismissal signal fed to feedback loop
-- Ive's UX principle (from concept brief): "the review experience should feel like approving, not editing" — the draft should be good enough that approve is the natural default action
-
-### Critical Alert Design
-
-- Priority 5 triggers in-app notification (reusing existing notification system)
-- Alert surface: persistent badge in nav + alert card in email copilot view
-- Alert card shows: sender, subject, score reasoning one-liner, "Review now" CTA
-- Do not alert on priority 4 or below — alert fatigue is a real risk; better to under-alert than over-alert
-- Slack DM deferred: requires Slack integration, out of scope for v1
-
-### Daily Digest
-
-- Generated as document artifact (HTML report via existing system)
-- Covers: all priority 1-2 emails batched since last digest
-- Format: grouped by category (informational, marketing, newsletters) with one-line summaries
-- Link to each email goes to on-demand Gmail fetch, not stored body
-- Generation trigger: scheduled (e.g., end of business day) or manual from UI
+| Feature Area | Complexity | Risk | Notes |
+|-------------|------------|------|-------|
+| Data model migrations (DM-01 to DM-04) | Low | Low | Additive columns only; existing data gets safe defaults |
+| Relationships API (API-01 to API-10) | Medium | Low | Follows established FastAPI patterns already in codebase |
+| Pipeline grid (FE-01 to FE-05) | Medium | Medium | TanStack Table v8 handles column state; saved-view tabs are client-side only |
+| Relationship list pages (FE-07) | Low | Low | Card grid with type-config map; mostly CSS and one API call |
+| Relationship detail (FE-08 to FE-12) | High | Medium | Multi-tab, AI panel, Q&A detection, optimistic updates — most complex FE component |
+| AI synthesis (API-07, AI panel display) | Medium | Medium | Prompt engineering and graceful degradation logic; LLM latency needs streaming or spinner |
+| AI Q&A (API-08) | High | Medium | RAG quality determines usefulness; source attribution adds implementation complexity |
+| Signal layer (API-09 and sidebar badges) | Medium | Low | Signal computation is rule-based (not ML); badge polling or React Query invalidation needed |
+| Commitment tracking (FE-12) | Medium | Low | Two-column layout with context entry storage is straightforward; display is harder than storage |
+| Premium design system | Low | Low | Design tokens already defined in project constraints; mostly Tailwind utility classes |
 
 ---
 
 ## Sources
 
-- Superhuman AI features: [Superhuman Mail AI Guide](https://blog.superhuman.com/the-best-ai-email-management-tool/), [Shortwave vs Superhuman 2025 Exec Guide](https://www.baytechconsulting.com/blog/shortwave-vs-superhuman-the-2025-executives-guide-to-ai-email-clients)
-- Shortwave features: [Shortwave AI Assistant Docs](https://www.shortwave.com/docs/guides/ai-assistant/), [Shortwave Review 2025](https://max-productive.ai/ai-tools/shortwave/)
-- SaneBox triage mechanism: [SaneBox Review 2025](https://decidesoftware.com/sanebox-review-a-deep-practical-look-at-the-ai-email-organizer-that-works-with-your-existing-inbox/)
-- Ellie AI voice learning: [Ellie AI Deep Dive](https://skywork.ai/skypage/en/ellie-ai-email-assistant/1976860414183534592), [Ellie.ai](https://tryellie.com/)
-- Flowrite / MailMaestro: [Flowrite acquired by MailMaestro 2025](https://www.maestrolabs.com/flowrite)
-- Microsoft Copilot Outlook: [Prioritize My Inbox](https://support.microsoft.com/en-us/topic/prioritize-my-inbox-65e37040-2c90-4ee3-86d9-e95d5ba0e3cb), [Copilot Voice Style Learning](https://support.microsoft.com/en-us/topic/ask-copilot-to-make-email-drafts-sound-like-you-62cbb77e-2828-4ff2-826e-ca09b1f4e803)
-- AI email trust / pitfalls: [Hidden risks of AI emails](https://www.futureofbeinghuman.com/p/the-hidden-risks-of-ai-for-email), [AI email management pros/cons](https://gmelius.com/blog/pros-and-cons-of-ai-assistants)
-- Triage review UX patterns: [AI Email Automation](https://www.lindy.ai/solutions/email), [AI email triage classification](https://instantly.ai/blog/automate-email-triage-classification-ai/)
-- Project concept brief and advisory decisions: `.planning/CONCEPT-BRIEF-email-copilot.md`
-
----
-*Feature research for: AI Email Copilot — Flywheel V2 Email Copilot Milestone*
-*Researched: 2026-03-24*
+- Attio multi-type custom objects and relationship intelligence: [Attio CRM Review 2025 — Stacksync](https://www.stacksync.com/blog/attio-crm-2025-review-features-pros-cons-pricing), [Attio CRM Review 2026 — Authencio](https://www.authencio.com/blog/attio-crm-review-features-pricing-customization-alternatives), [Attio vs Folk 2025 — popi.ai](https://popi.ai/compare/crm-software/attio-vs-folk-crm/)
+- Folk Magic Fields and AI enrichment: [Folk CRM AI Features — folk.app](https://www.folk.app/articles/folk-crm-ai-features)
+- AI relationship summaries (Nutshell timeline summarization): [AI-Powered CRM 2025 — usemotion.com](https://www.usemotion.com/blog/ai-crm)
+- Saved views and column config patterns (Airtable): [Getting Started with Airtable Views](https://support.airtable.com/docs/getting-started-with-airtable-views)
+- TanStack Table column sizing and state persistence: [Column Sizing Guide — TanStack Table](https://tanstack.com/table/v8/docs/guide/column-sizing)
+- Zoho CRM Signals (real-time notification system): [Signals — Zoho CRM Help](https://help.zoho.com/portal/en/kb/crm/experience-center/salessignals/articles/signals-an-overview)
+- AI graceful degradation patterns: [Graceful Degradation — MOTA AI on Medium](https://medium.com/@mota_ai/building-ai-that-never-goes-down-the-graceful-degradation-playbook-d7428dc34ca3)
+- Stale contact detection patterns: [CRM Health Score — Medium](https://medium.com/@williamflaiz/your-crm-health-score-is-hiding-a-2m-problem-heres-the-scorecard-that-exposes-it-4a1ee8c4452d)
+- Personal CRM losing-touch detection: [Personal CRM Guide 2025 — folk.app](https://www.folk.app/articles/personal-crm-guide)
+- Segmentation best practices for founders and VCs: [Essential CRM Features for Private Equity — 4Degrees](https://www.4degrees.ai/blog/essential-crm-features-for-private-equity-firms-in-2025-streamline-deal-flow-relationships-and-data-driven-decisions)

@@ -1,215 +1,230 @@
-# Stack Research
+# Technology Stack — CRM Redesign Additions
 
-**Domain:** Email Copilot — Gmail sync, scoring, drafting, review UI
-**Researched:** 2026-03-24
-**Confidence:** HIGH (backend), MEDIUM (frontend components)
-
----
-
-## Context: What Already Exists (Do Not Re-add)
-
-The following are already in `pyproject.toml` or `package.json` and serve the Email Copilot directly:
-
-| Existing Dependency | Email Copilot Use |
-|---------------------|-------------------|
-| `google-api-python-client>=2.150` | Gmail API calls (already imported in `google_gmail.py`) |
-| `google-auth-oauthlib>=1.2` | OAuth flow for Gmail (already in use) |
-| `google-auth-httplib2>=0.2` | Transport layer for Google auth |
-| `html2text>=2024.2.26` | HTML-to-text (already installed, usable for email bodies) |
-| `beautifulsoup4>=4.12` | HTML parsing (already installed) |
-| `anthropic>=0.86.0` | LLM calls for scoring + drafting (skill executor pattern) |
-| `cryptography>=46.0.5` | AES-256-GCM credential encryption (already used for Gmail creds) |
-| `@tanstack/react-query` v5 | API state management for review UI |
-| `zustand` v5 | Client state (draft approvals, filter state) |
-| `lucide-react` | Icons for email UI |
-| `dompurify` | Sanitize email HTML bodies when rendering on-demand fetches |
-| `tailwindcss` v4, `shadcn` | Existing component system for review UI |
+**Project:** Flywheel CRM Redesign (Intelligence-First CRM Milestone)
+**Researched:** 2026-03-27
+**Confidence:** HIGH (all claims verified against official sources or npm registry)
 
 ---
 
-## New Backend Dependencies
+## Context: What Already Exists (Do NOT Re-add)
 
-### Core — Gmail Read Capabilities
+The following are already in the project and must not be duplicated or replaced:
 
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `google-api-python-client` | `>=2.193` (bump from `>=2.150`) | Gmail `messages.list`, `messages.get`, `history.list`, `users.watch` | Already installed; bump version constraint to get `history.list` incremental sync fixes from 2.160+. The single library handles all Gmail API surface. No separate package needed. |
-
-**No new Gmail library needed.** `google-api-python-client` already provides the full Gmail API surface including `users().messages().list()`, `users().messages().get()`, `users().history().list()`, and `users().watch()`. The existing `google_gmail.py` uses `build("gmail", "v1", credentials=creds)` and `asyncio.to_thread` — this exact pattern scales to read/list/fetch. Confidence: HIGH (official Google docs).
-
-### Email Parsing
-
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `markdownify` | `>=1.2.2` | HTML email body → clean text for LLM context | Better than `html2text` for email HTML: handles nested structures, `<blockquote>` chains, inline styles, and forwarded-message trees more cleanly. BeautifulSoup4 backend means it handles malformed email HTML gracefully. Used only during on-demand body fetch for drafting — not for stored data. |
-
-**For MIME parsing: use Python stdlib `email` module.** Gmail API returns message bodies as base64url-encoded strings — no external MIME library needed. The stdlib `email.message_from_bytes()` + `email.policy.default` handles multipart MIME, charset decoding, and part extraction reliably. `beautifulsoup4` (already installed) handles HTML part cleanup. Confidence: HIGH (Python docs, official Gmail API docs).
-
-**Do NOT add:** `mailparser`, `imaplib`, `imapclient` — Gmail API returns pre-parsed payloads in JSON format with `parts[]` array. Raw IMAP/MIME parsing libraries are for IMAP connections, not Gmail API. Confidence: HIGH.
-
-### Voice Profile Learning (NLP)
-
-**Recommendation: Use Claude (already installed) as the NLP engine for voice extraction, not spaCy or NLTK.**
-
-Rationale: Voice profile extraction requires understanding semantic patterns ("this person writes formally, uses 'Let me know if...' closings, averages 3 paragraphs"). This is a language understanding task, not a feature extraction task. Claude haiku (cheap, fast) extracting structured `EmailVoiceProfile` JSON from a batch of sent emails outperforms any statistical NLP library for this use case. The skill executor pattern (already built) makes this a natural fit.
-
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `anthropic` | `>=0.86.0` (already installed) | Voice profile extraction from sent emails | Prompt `claude-haiku-4-5` with 10-20 sent email samples → structured `{tone, avg_length, phrases[], sign_off}` JSON. Costs ~$0.001 per profile build. Re-run when 50+ new sent emails accumulate. |
-
-**Do NOT add:** `spacy`, `nltk`, `transformers`, `sentence-transformers` — heavyweight installs, require model downloads, add 500MB+ to container. Claude API already present; use it. spaCy is appropriate for entity extraction at scale, but the context store already handles entity extraction via the existing entity extraction pipeline. Confidence: MEDIUM (training data supports this; Claude's structured output capability is HIGH confidence from official docs).
-
-### Sync Architecture
-
-No new infrastructure libraries needed for Phase 1 (polling). The `calendar_sync.py` pattern using `asyncio` + SQLAlchemy + background worker is the correct template.
-
-For Phase 5+ only (Gmail push notifications — NOT needed for MVP):
-
-| Library | Version | Purpose | Condition |
-|---------|---------|---------|-----------|
-| `google-cloud-pubsub` | `>=2.34` | Receive Gmail `users.watch()` push notifications via Pub/Sub | Only add if polling latency becomes a user-visible problem. Adds GCP Pub/Sub dependency, requires public webhook endpoint, watch renewals every 7 days. Premature for MVP. |
-
-**Decision: Poll, don't push.** 5-minute polling matches `calendar_sync.py` pattern, requires zero new infrastructure, and is sufficient for the trust-earning MVP phase. Gmail's `history.list` with `startHistoryId` makes incremental polling efficient — only changed messages are fetched, not full mailbox scans. Confidence: HIGH (Gmail API docs on `history.list`).
+| Technology | Version | Notes |
+|------------|---------|-------|
+| React | ^19.0.0 | Already installed |
+| Vite + TypeScript | ^6.0.0 / ^5.5.0 | Build toolchain locked |
+| Tailwind CSS v4 | ^4.0.0 | @tailwindcss/vite integration |
+| shadcn/ui + @base-ui/react | — | Component primitives |
+| TanStack Query | ^5.91.2 | Server state |
+| TanStack Virtual | ^3.13.23 | Already installed — use for any custom virtual scroll |
+| Zustand | ^5.0.12 | Client state |
+| Lucide React | ^0.577.0 | Icons |
+| Sonner | ^2.0.7 | Toasts |
+| Supabase JS | ^2.99.3 | Auth + storage |
+| FastAPI | >=0.115 | Backend framework |
+| SQLAlchemy (async) | >=2.0 | ORM |
+| Alembic | >=1.14 | Migrations |
+| anthropic | >=0.86.0 | LLM SDK — already in pyproject.toml |
+| pdfplumber + python-docx | — | Document parsing |
+| httpx | >=0.27 | Async HTTP |
 
 ---
 
-## New Frontend Dependencies
+## New Stack Additions
 
-### Core Review UI
+### 1. Airtable-Style Data Grid
 
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `@tanstack/react-virtual` | `^3.13.23` | Virtualized email thread list | A user with 1,000 emails in their inbox cannot render 1,000 DOM nodes. `@tanstack/react-virtual` (same TanStack family as already-installed `react-query`) renders only visible items. Headless, integrates cleanly with existing Tailwind layout. Not needed for draft queue (typically <20 items) but essential for thread list. |
+**Recommended: AG Grid Community** (`ag-grid-community` + `ag-grid-react`)
 
-**Do NOT add:** `react-virtualized` (archived, unmaintained), `react-window` (lighter but less maintained, TanStack Virtual supersedes it). Confidence: HIGH (npm, TanStack official docs, confirmed current version 3.13.23 as of March 2026).
+**Version:** 35.2.0 (latest as of 2026-03-27, last published 2 days ago)
 
-### Email Body Rendering
+**Why AG Grid over alternatives:**
+- AG Grid Community (free, MIT-compatible for community edition) is the only library that ships column resize + reorder + hide + inline cell editing + column filters all without an enterprise license.
+- `react-datasheet-grid` (v4.11.6, ~49k weekly downloads) is optimized for spreadsheet data entry (like a form with rows), not for CRM record tables with mixed column types, custom renderers, and server-side filtering. It does not support column reorder or hide natively.
+- TanStack Table is headless — you build all UI yourself. Given TanStack Virtual is already in the project, this would work but costs 2-3x implementation time compared to AG Grid's batteries-included approach, and inline editing requires completely custom implementation.
+- AG Grid v34.3.0+ explicitly supports React 19 (confirmed in changelog). The app uses React 19.0.0, making versions prior to 34.3.0 a blocker.
+- AG Grid 33.0+ collapsed all modules into `ag-grid-community` — no longer need `@ag-grid-community/core` separately.
 
-No new library needed. `dompurify` (already installed) sanitizes on-demand fetched HTML bodies before rendering via `dangerouslySetInnerHTML`. This is the only safe approach for rendering external email HTML in React.
+**Key community-edition features confirmed available:**
+- Column resize, reorder, hide (via Columns Tool Panel)
+- Inline cell editing (single or double click)
+- Column filters (text, number, date, set)
+- Row selection, keyboard navigation
+- Custom cell renderers (React components)
+- Virtualized rows (built-in, no separate library needed)
 
-**Pattern:**
-```tsx
-// Sanitize fetched email HTML before rendering
-const clean = DOMPurify.sanitize(emailBody, { USE_PROFILES: { html: true } });
-<div dangerouslySetInnerHTML={{ __html: clean }} className="prose prose-sm" />
-```
-
-Requires `@tailwindcss/typography` for `prose` classes — see below.
-
-### Typography for Email Body Rendering
-
-| Library | Version | Purpose | Why |
-|---------|---------|---------|-----|
-| `@tailwindcss/typography` | `^0.5.15` | `prose` class for email body rendering | Email bodies rendered as HTML need opinionated typographic defaults (paragraph spacing, list styles, link colors). The `prose` class handles this correctly without hand-rolling CSS for all possible email HTML structures. |
-
-**Install as dev dependency** (Tailwind plugin, build-time only after Tailwind v4 migration). Confidence: MEDIUM (Tailwind v4 plugin API changed; verify plugin integration with `@tailwindcss/vite` during implementation).
-
----
-
-## Installation
+**NOT available in community (enterprise-only):**
+- Pivoting, row grouping aggregations, integrated charts
+- Excel export, server-side row model with SSRM
+- These are not needed for this milestone.
 
 ```bash
-# Backend — bump version constraint in pyproject.toml
-# google-api-python-client is already present; update constraint:
-# "google-api-python-client>=2.193"
+npm install ag-grid-community ag-grid-react
+```
 
-# Add markdownify
-uv add markdownify
+**Integration note:** AG Grid ships its own CSS theme (`ag-theme-quartz` or `ag-theme-alpine`). To match Tailwind v4 + shadcn design, use `ag-theme-quartz` as the base and override CSS variables for colors, fonts, border radius. Do not fight the theming system — it uses CSS custom properties which are straightforward to override.
 
-# Frontend
-npm install @tanstack/react-virtual
-npm install -D @tailwindcss/typography
+---
+
+### 2. Spring Animations + Micro-Interactions
+
+**Recommended: Motion** (`motion`)
+
+**Version:** 12.38.0 (latest as of 2026-03-27)
+
+**Why Motion (formerly Framer Motion):**
+- Framer Motion was rebranded to Motion in 2025 when it became an independent project. The `framer-motion` package is now unmaintained — `motion` is the active package.
+- Import path changed: `import { motion } from "motion/react"` (not `framer-motion`).
+- Motion v12 uses the Web Animations API + ScrollTimeline for 120fps native performance, falling back to JS when needed.
+- 30 million monthly npm downloads — the dominant animation library for React.
+- The existing `tw-animate-css` in the project is CSS-only animations. Motion adds JS-driven spring physics for drag interactions, layout transitions, shared-element transitions, and gesture-based micro-interactions that CSS alone cannot do.
+- React Spring is the alternative for physics-heavy animations, but Motion's API is declarative and component-based, which integrates more naturally with the existing React + Tailwind codebase. React Spring requires imperative spring configuration and doesn't support layout animations.
+
+**Requires:** React >=18.2. The project uses React 19.0.0 — compatible.
+
+```bash
+npm install motion
+```
+
+**Integration note:** Do not install `framer-motion` — it is the deprecated package. Import exclusively from `motion/react`.
+
+---
+
+### 3. File Upload Component
+
+**Recommended: react-dropzone** (`react-dropzone`)
+
+**Why react-dropzone:**
+- The project uses Supabase Storage (already configured via `@supabase/supabase-js`). File upload plumbing already exists in `backend/src/flywheel/api/documents.py`. No new upload infrastructure needed — just a drop zone UI.
+- `react-dropzone` provides `useDropzone` hook (headless — no opinionated UI). This integrates cleanly with existing shadcn/ui card components and Tailwind styling.
+- React 19 peer dependency PR merged (confirmed in GitHub issues). Use the latest version.
+- Alternative `uppy` is far heavier (multiple packages, ~200kb+) and targets multi-provider uploads — overkill for a simple relationship-page attachment pattern.
+
+```bash
+npm install react-dropzone
+```
+
+**Integration note:** The upload flow is: `useDropzone` captures file → POST to FastAPI `/documents/upload` (already exists) → store object path in relationship record's `attachments` JSONB column. Supabase storage bucket `documents` is already in use.
+
+---
+
+### 4. AI Synthesis Engine (Backend — RAG + Embeddings)
+
+**Recommended: pgvector + openai (embeddings only)**
+
+#### 4a. Vector Storage: pgvector
+
+**Python package:** `pgvector` v0.4.2 (released Dec 5, 2025)
+**PostgreSQL extension:** `pgvector` (already on Supabase — enabled by default on all Supabase projects)
+
+**Why pgvector over a separate vector database:**
+- The project already uses PostgreSQL via Supabase. Adding a separate vector database (Pinecone, Weaviate, Qdrant) means a new infrastructure dependency, new credentials, new cost tier, and operational overhead.
+- pgvector integrates directly with SQLAlchemy 2.0 async via `pgvector.sqlalchemy.Vector` type and works with Alembic migrations.
+- For CRM RAG (relationship notes, emails, documents per contact/account — likely <100k documents per tenant), pgvector with HNSW index is sufficient. Separate vector DBs only win at 10M+ vectors.
+
+```bash
+pip install pgvector>=0.4.2
+```
+
+**Alembic integration:** Requires registering the vector type in `env.py`:
+```python
+from pgvector.sqlalchemy import Vector
+# In env.py, after connecting:
+connection.dialect.ischema_names['vector'] = Vector
+```
+
+#### 4b. Embedding Model: OpenAI text-embedding-3-small
+
+**Why NOT use Anthropic for embeddings:**
+- The Anthropic Python SDK (already in the project at `>=0.86.0`) does not provide embedding models. Anthropic's API is generation-only.
+- OpenAI `text-embedding-3-small` is the current standard: 1536 dimensions, $0.02/1M tokens, strong retrieval accuracy, widely documented.
+
+**Python package:** `openai` — already likely installed as a transitive dependency, but add explicitly.
+
+```bash
+pip install openai>=1.0
+```
+
+**Integration note:** The `skill_executor.py` already manages Anthropic API key context per-tenant. Extend the same BYOK pattern for OpenAI keys if per-tenant embedding is needed, or use a single platform key for synthesis.
+
+#### 4c. RAG Orchestration: No LangChain/LlamaIndex
+
+**Why vanilla Python over LangChain or LlamaIndex:**
+- LangChain is considered bloated for simple RAG in 2025 community consensus (GitHub discussion #182015 with 200+ upvotes).
+- The required pattern is: embed query → pgvector similarity search → assemble context chunks → call Anthropic messages API. This is ~30 lines of Python and does not benefit from an orchestration framework.
+- LangChain adds ~50MB to the dependency tree and introduces version lock-in conflicts with the existing `anthropic` SDK.
+- The existing `skill_executor.py` already handles LLM prompt assembly and context injection. The RAG layer adds one function: `retrieve_context(query, relationship_id) -> str`.
+
+**No new orchestration dependency needed.** Implement as a service function using existing `anthropic` + new `openai` (embeddings) + `pgvector`.
+
+---
+
+### 5. Signal/Notification Badge System
+
+**No new dependencies needed.**
+
+The notification badge system is pure UI state. Recommended implementation:
+- Store signal counts in a `signals` table (already planned in data model).
+- Zustand store slice for real-time signal counts (already in project).
+- Motion (added above) for badge entrance animations.
+- Supabase Realtime for push updates to signal counts (already available via `@supabase/supabase-js`).
+
+---
+
+## Complete Installation Summary
+
+### Frontend (npm)
+
+```bash
+# Airtable-style grid
+npm install ag-grid-community ag-grid-react
+
+# Spring animations + micro-interactions
+npm install motion
+
+# File drag-drop
+npm install react-dropzone
+```
+
+### Backend (pip / pyproject.toml additions)
+
+```toml
+# pyproject.toml dependencies additions
+"pgvector>=0.4.2",
+"openai>=1.0",
 ```
 
 ---
 
 ## Alternatives Considered
 
-| Recommended | Alternative | Why Not |
-|-------------|-------------|---------|
-| `markdownify` for HTML→text | `html2text` (already installed) | `html2text` is already present and usable as a fallback, but produces noisier output on email HTML with inline styles, `<blockquote>` nesting, and email signatures. Use `markdownify` as primary, `html2text` as fallback if parse fails. |
-| Claude for voice extraction | `spacy` + statistical NLP | spaCy requires model download (50-500MB), is better for entity/POS tasks than style understanding. Claude already present, cheaper to operate, and semantically richer for style characterization. |
-| Polling (`history.list`) for sync | Gmail Pub/Sub push | Push requires GCP Pub/Sub setup, public webhook, 7-day watch renewals, and more failure modes. Polling is simpler, proven by `calendar_sync.py`, and sufficient for 5-minute freshness. |
-| `@tanstack/react-virtual` | `react-window` | `react-window` is stable but has reduced maintenance activity. `@tanstack/react-virtual` is actively maintained, headless, and part of the already-adopted TanStack family. |
-| Python stdlib `email` module for MIME | `mailparser`, `imaplib` | Gmail API returns JSON payloads with pre-parsed message parts. MIME libraries solve the wrong problem — they're for raw IMAP connections. |
-| `dompurify` (already installed) for HTML sanitization | Custom HTML stripping | DOMPurify is the standard; re-implementing HTML sanitization introduces XSS risk. Already installed. |
-
----
-
-## What NOT to Use
-
-| Avoid | Why | Use Instead |
-|-------|-----|-------------|
-| `aiogoogle` | Async wrapper around Google APIs — adds a dependency for a problem already solved by `asyncio.to_thread(build(...).execute)` | `google-api-python-client` + `asyncio.to_thread` (already established pattern in `google_gmail.py`) |
-| `imaplib` / `imapclient` | Raw IMAP access — Gmail API returns structured JSON, IMAP is the wrong abstraction | `google-api-python-client` Gmail v1 API |
-| `simplegmail` | Thin wrapper that hides API details and hasn't been updated to handle `history.list` properly | `google-api-python-client` directly |
-| `spacy` / `nltk` / `transformers` | 100-500MB model downloads, K8s resource pressure, no better than Claude for this use case | Anthropic Claude haiku via existing `anthropic` client |
-| Embedding-based email scoring | Requires a vector index, embedding model, and similarity search pipeline — high infrastructure cost | LLM scoring via skill executor using context store text search (already built) |
-| Permanent raw email body storage | PII liability, GDPR exposure, unnecessary data duplication | Extract context entries, fetch body on-demand from Gmail API |
-| `react-quill` / `draft-js` for draft editing | Full rich-text editors are overkill for email draft review; add 100KB+ to bundle | `<textarea>` with auto-resize (CSS) or `contenteditable` div — drafts are plain text |
-
----
-
-## Scope Boundaries for Each Phase
-
-| Phase | New Backend Libraries | New Frontend Libraries |
-|-------|-----------------------|------------------------|
-| Phase 1: Gmail Sync | `markdownify` (for voice learning pipeline) | None |
-| Phase 2: Scoring | None (all scoring via existing `anthropic` + context store) | None |
-| Phase 3: Drafting | None | None |
-| Phase 4: Review UI | None | `@tanstack/react-virtual`, `@tailwindcss/typography` |
-| Phase 5: Feedback | None | None |
-
-Total new dependencies: **1 backend** (`markdownify`), **2 frontend** (`@tanstack/react-virtual`, `@tailwindcss/typography`).
-
----
-
-## Version Compatibility
-
-| Package | Compatible With | Notes |
-|---------|-----------------|-------|
-| `google-api-python-client>=2.193` | Python 3.12, `google-auth>=2.x` | Already in venv. `history.list` has been stable since v2; bump just ensures latest quota handling fixes. |
-| `markdownify>=1.2.2` | `beautifulsoup4>=4.12` (already installed) | No conflicts. Uses existing BS4 installation. |
-| `@tanstack/react-virtual^3.13.23` | React 19 (already in use), `@tanstack/react-query` v5 | Same TanStack family; no version conflicts expected. |
-| `@tailwindcss/typography^0.5.15` | Tailwind v4 (in use via `@tailwindcss/vite`) | Tailwind v4 changed the plugin API. **Verify** `@tailwindcss/typography` v0.5.x works with `@tailwindcss/vite` v4 during Phase 4 setup. May need `@tailwindcss/typography@next` if v4 plugin API requires it. Flag as needing implementation verification. |
-
----
-
-## Gmail API Scope Changes Required
-
-The existing `google_gmail.py` uses `gmail.send` scope only. Email Copilot requires:
-
-```python
-# Current (send-only)
-SCOPES = ["https://www.googleapis.com/auth/gmail.send"]
-
-# Required for Email Copilot
-SCOPES = [
-    "https://www.googleapis.com/auth/gmail.send",
-    "https://www.googleapis.com/auth/gmail.readonly",   # read/list/fetch
-    "https://www.googleapis.com/auth/gmail.modify",     # label, mark read
-]
-```
-
-**Architecture note:** Per the comment in `google_gmail.py`, Gmail and Calendar use SEPARATE Integration rows. The Email Copilot should create a NEW Gmail Read integration (separate from the existing Gmail Send integration) to avoid breaking existing `gmail.send` grants. Users who already connected Gmail for sending should not be forced to re-grant — the Email Copilot OAuth flow is a separate grant with broader scopes. This is an architectural decision, not a library decision, but it affects how the OAuth flow is implemented.
-
-**Re-auth requirement:** Existing Gmail OAuth tokens with only `gmail.send` cannot be upgraded in-place. Users must perform a new OAuth consent flow for the expanded scopes. `prompt="consent"` and `access_type="offline"` (already set in the existing flow) ensure a new refresh token is issued.
+| Category | Recommended | Alternative | Why Not |
+|----------|-------------|-------------|---------|
+| Data Grid | ag-grid-community@35 | TanStack Table (headless) | Inline editing, column management, and filtering require full custom implementation; 2-3x more code |
+| Data Grid | ag-grid-community@35 | react-datasheet-grid@4 | No column reorder/hide; optimized for form-entry rows, not CRM record tables |
+| Data Grid | ag-grid-community@35 | AG Grid Enterprise | Paywall; community edition covers all required features |
+| Animation | motion@12 | react-spring@10 | Less natural integration with component-based React; no layout animation support |
+| Animation | motion@12 | framer-motion | Deprecated package; motion is the current name |
+| Animation | motion@12 | tw-animate-css (already in project) | CSS-only; cannot do spring physics, drag interactions, or layout transitions |
+| Vector DB | pgvector (Supabase) | Pinecone / Qdrant | New infrastructure dependency; unnecessary at CRM scale |
+| RAG Framework | vanilla Python | LangChain | Bloated for simple RAG; conflicts with existing anthropic SDK |
+| RAG Framework | vanilla Python | LlamaIndex | Overkill; good for complex document indexing pipelines, not per-relationship summaries |
+| Embeddings | openai (text-embedding-3-small) | Anthropic | Anthropic SDK does not provide embeddings |
+| File Upload UI | react-dropzone | uppy | ~10x heavier; multi-provider support not needed when Supabase storage is already set up |
 
 ---
 
 ## Sources
 
-- [Google Gmail API — Method: users.messages.list](https://developers.google.com/workspace/gmail/api/guides/list-messages) — confirmed `messages.list`, `history.list` pagination patterns
-- [Google Gmail API — Synchronize clients](https://developers.google.com/workspace/gmail/api/guides/sync) — confirmed `historyId` incremental sync approach, 404 full-re-sync handling
-- [google-api-python-client PyPI](https://pypi.org/project/google-api-python-client/) — confirmed latest version 2.193.0, Python 3.12 support
-- [markdownify PyPI](https://pypi.org/project/markdownify/) — confirmed version 1.2.2 (Nov 2025), BeautifulSoup4 dependency
-- [Gmail API — Configure push notifications](https://developers.google.com/workspace/gmail/api/guides/push) — confirmed Pub/Sub push complexity, 7-day watch renewal requirement
-- [@tanstack/react-virtual npm](https://www.npmjs.com/package/@tanstack/react-virtual) — confirmed version 3.13.23, React 19 support
-- [Gmail API Usage Limits](https://developers.google.com/workspace/gmail/api/reference/quota) — confirmed 250 quota units/user/second burst limit
-- [Google API Python client — async issue #1637](https://github.com/googleapis/google-api-python-client/issues/1637) — confirmed no native async support; `asyncio.to_thread` is the established workaround
-- Python stdlib `email` module — standard library, no external source needed
-- Anthropic API (existing dependency) — Claude haiku for voice extraction, same client used by skill executor
-
----
-*Stack research for: Email Copilot milestone on Flywheel V2*
-*Researched: 2026-03-24*
+- [AG Grid React Version Compatibility](https://www.ag-grid.com/react-data-grid/compatibility/) — React 19 support confirmed in v34.3.0+
+- [AG Grid What's New](https://www.ag-grid.com/whats-new/) — v35.2.0 latest
+- [AG Grid Community Cell Editing](https://www.ag-grid.com/react-data-grid/cell-editing/) — confirmed community edition
+- [Motion Installation Docs](https://motion.dev/docs/react-installation) — v12.37.0, npm package `motion`
+- [Motion Rebranding Announcement](https://motion.dev/blog/framer-motion-is-now-independent-introducing-motion) — framer-motion deprecated
+- [pgvector Python PyPI](https://pypi.org/project/pgvector/) — v0.4.2, Dec 2025
+- [pgvector SQLAlchemy/Alembic integration](https://github.com/pgvector/pgvector-python) — Vector type for SQLAlchemy 2.0
+- [OpenAI text-embedding-3-small](https://platform.openai.com/docs/models/text-embedding-3-small) — $0.02/1M tokens
+- [react-dropzone React 19 PR](https://github.com/react-dropzone/react-dropzone/pull/1422) — React 19 peer dep added
+- [LangChain too complex for simple RAG discussion](https://github.com/orgs/community/discussions/182015) — community consensus 2025
+- [npmtrends react-datasheet-grid](https://npmtrends.com/react-datasheet-grid) — v4.11.6, ~49k weekly downloads
