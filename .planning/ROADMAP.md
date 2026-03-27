@@ -248,9 +248,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 55-01-PLAN.md — Relationships router: GET list (filtered + partition predicate), GET detail (contacts + timeline + cached summary), PATCH type, POST graduate
-- [ ] 55-02-PLAN.md — SynthesisEngine service: generate, cache (24h TTL), rate-limit (5-min DB-level), graceful degradation for sparse data; POST synthesize + POST ask endpoints
-- [ ] 55-03-PLAN.md — Notes, files, and signals: POST notes (ContextEntry link), POST files (Supabase Storage), GET signals (per-type badge counts + SIG-02 signal taxonomy)
+- [x] 55-01-PLAN.md — Relationships router: GET list (filtered + partition predicate), GET detail (contacts + timeline + cached summary), PATCH type, POST graduate ✓
+- [x] 55-02-PLAN.md — SynthesisEngine service: generate, cache (24h TTL), rate-limit (5-min DB-level), graceful degradation for sparse data; POST synthesize + POST ask endpoints ✓
+- [x] 55-03-PLAN.md — Notes, files, and signals: POST notes (ContextEntry link), POST files (Supabase Storage), GET signals (per-type badge counts + SIG-02 signal taxonomy) ✓
 
 ---
 
@@ -269,7 +269,7 @@ Plans:
   4. Stale rows render with warm tint background, new replies float to top with coral accent — both visible without any filter interaction
   5. Clicking "Graduate" on a row opens the type-selection modal, submitting the modal calls the graduate API, the row slides out with animation, and the sidebar badge count for the selected type increments
 
-**Plans:** 2 plans
+**Plans:** 3 plans
 
 Plans:
 - [ ] 56-01-PLAN.md — Design system: token updates (shadows, badges, avatar component, status dots, transitions), skeleton shimmer component, empty state component; emotional register CSS for Pipeline vs Relationships
@@ -324,7 +324,7 @@ Plans:
 | 52. Backend APIs | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 | 53. Frontend | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 | 54. Data Model Foundation | v2.1 | 2/2 | ✓ Complete | 2026-03-27 |
-| 55. Relationships and Signals APIs | v2.1 | 0/3 | Not started | — |
+| 55. Relationships and Signals APIs | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
 | 56. Pipeline Grid | v2.1 | 0/3 | Not started | — |
 | 57. Relationship Surfaces | v2.1 | 0/5 | Not started | — |
 
