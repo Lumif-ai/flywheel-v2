@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 54 of 57 (Data Model Foundation)
-Plan: 0 of 2 in current phase
-Status: Ready to plan
-Last activity: 2026-03-27 — v2.1 roadmap created (4 phases, 32 requirements mapped)
+Plan: 1 of 2 in current phase
+Status: In progress
+Last activity: 2026-03-27 — Phase 54 Plan 01 complete (migration 028 + Account ORM columns)
 
-Progress: [██████████░░░░░░░░░░] 52% (13/25 total plans complete across all milestones)
+Progress: [██████████░░░░░░░░░░] 54% (14/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -44,6 +44,8 @@ Recent decisions affecting current work:
 - [v2.1 research]: fromType URL param drives tab config and back-link on shared RelationshipDetail page
 - [v2.1 research]: Query key factory (queryKeys.ts) established in Phase 56 — graduation invalidates pipeline + relationships + signals simultaneously
 - [v2.1 roadmap]: DS-01 through DS-04 placed in Phase 56 (first frontend phase) so Phase 57 inherits tokens without rework
+- [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
+- [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
 
 ### Pending Todos
 
@@ -57,5 +59,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: v2.1 roadmap created — ready to plan Phase 54
+Stopped at: Phase 54 Plan 01 complete — ready for Plan 02 (status → pipeline_stage migration)
 Resume file: None
