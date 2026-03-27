@@ -179,7 +179,10 @@ async def list_threads(
                 EmailDraft.status == "pending",
             ),
         )
-        .where(Email.tenant_id == user.tenant_id)
+        .where(
+            Email.tenant_id == user.tenant_id,
+            Email.user_id == user.sub,
+        )
         .order_by(Email.received_at.desc())
     )
     result = await db.execute(stmt)
@@ -285,6 +288,7 @@ async def get_thread(
             and_(
                 Email.gmail_thread_id == thread_id,
                 Email.tenant_id == user.tenant_id,
+                Email.user_id == user.sub,
             )
         )
         .order_by(Email.received_at.asc())
@@ -368,11 +372,12 @@ async def trigger_sync(
 
     Returns immediately — sync runs in the background.
     """
-    # Verify the tenant has a connected gmail-read integration
+    # Verify the user has a connected gmail-read integration (defense-in-depth user filter)
     intg_result = await db.execute(
         select(Integration).where(
             and_(
                 Integration.tenant_id == user.tenant_id,
+                Integration.user_id == user.sub,
                 Integration.provider == "gmail-read",
                 Integration.status == "connected",
             )
@@ -484,6 +489,7 @@ async def get_digest(
         .where(
             and_(
                 Email.tenant_id == user.tenant_id,
+                Email.user_id == user.sub,
                 Email.received_at >= today_start,
                 EmailScore.priority <= 2,
             )
@@ -559,13 +565,13 @@ async def approve_draft(
             detail="Draft has no body (already sent or nulled)",
         )
 
-    # Load the parent email
+    # Load the parent email and verify user ownership (defense-in-depth)
     email_result = await db.execute(
         select(Email).where(Email.id == draft.email_id)
     )
     email = email_result.scalar_one_or_none()
-    if email is None:
-        raise HTTPException(status_code=404, detail="Parent email not found")
+    if email is None or email.user_id != user.sub:
+        raise HTTPException(status_code=404, detail="Draft not found")
 
     # Load gmail-read integration for this tenant
     intg_result = await db.execute(
@@ -672,6 +678,12 @@ async def dismiss_draft(
     if draft is None:
         raise HTTPException(status_code=404, detail="Draft not found")
 
+    # Verify parent email ownership (defense-in-depth)
+    email_result = await db.execute(select(Email).where(Email.id == draft.email_id))
+    email = email_result.scalar_one_or_none()
+    if email is None or email.user_id != user.sub:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
     if draft.status != "pending":
         raise HTTPException(
             status_code=400,
@@ -719,6 +731,12 @@ async def edit_draft(
     )
     draft = result.scalar_one_or_none()
     if draft is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+
+    # Verify parent email ownership (defense-in-depth)
+    email_result = await db.execute(select(Email).where(Email.id == draft.email_id))
+    email = email_result.scalar_one_or_none()
+    if email is None or email.user_id != user.sub:
         raise HTTPException(status_code=404, detail="Draft not found")
 
     if draft.status != "pending":

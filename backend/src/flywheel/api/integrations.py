@@ -102,8 +102,10 @@ async def list_integrations(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """List all integrations for the current tenant."""
-    result = await db.execute(select(Integration))
+    """List all integrations for the current user (defense-in-depth user filter)."""
+    result = await db.execute(
+        select(Integration).where(Integration.user_id == user.sub)
+    )
     integrations = result.scalars().all()
     return {
         "items": [_integration_to_dict(i) for i in integrations]
@@ -613,7 +615,10 @@ async def disconnect_integration(
     """Disconnect an integration by setting status to 'disconnected'."""
     integration = (
         await db.execute(
-            select(Integration).where(Integration.id == integration_id)
+            select(Integration).where(
+                Integration.id == integration_id,
+                Integration.user_id == user.sub,
+            )
         )
     ).scalar_one_or_none()
 
@@ -641,7 +646,10 @@ async def sync_integration(
     """Trigger an immediate calendar sync for a specific integration."""
     integration = (
         await db.execute(
-            select(Integration).where(Integration.id == integration_id)
+            select(Integration).where(
+                Integration.id == integration_id,
+                Integration.user_id == user.sub,
+            )
         )
     ).scalar_one_or_none()
 

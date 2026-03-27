@@ -416,8 +416,8 @@ async def list_runs(
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict[str, Any]:
     """Paginated execution history with optional filters."""
-    base = select(SkillRun)
-    count_q = select(func.count(SkillRun.id))
+    base = select(SkillRun).where(SkillRun.user_id == user.sub)
+    count_q = select(func.count(SkillRun.id)).where(SkillRun.user_id == user.sub)
 
     if skill_name:
         base = base.where(SkillRun.skill_name == skill_name)
@@ -454,7 +454,9 @@ async def get_run(
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict[str, Any]:
     """Return full run object including output and events_log."""
-    result = await db.execute(select(SkillRun).where(SkillRun.id == run_id))
+    result = await db.execute(
+        select(SkillRun).where(SkillRun.id == run_id, SkillRun.user_id == user.sub)
+    )
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(
@@ -476,7 +478,9 @@ async def get_run_attribution(
     db: AsyncSession = Depends(get_tenant_db),
 ) -> AttributionResponse:
     """Return attribution data showing which context entries informed a skill run."""
-    result = await db.execute(select(SkillRun).where(SkillRun.id == run_id))
+    result = await db.execute(
+        select(SkillRun).where(SkillRun.id == run_id, SkillRun.user_id == user.sub)
+    )
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(
@@ -523,7 +527,9 @@ async def get_run_trace(
     db: AsyncSession = Depends(get_tenant_db),
 ) -> ReasoningTraceResponse:
     """Return the reasoning trace for a run: routing decision, context consumed, files read."""
-    result = await db.execute(select(SkillRun).where(SkillRun.id == run_id))
+    result = await db.execute(
+        select(SkillRun).where(SkillRun.id == run_id, SkillRun.user_id == user.sub)
+    )
     run = result.scalar_one_or_none()
     if run is None:
         raise HTTPException(
