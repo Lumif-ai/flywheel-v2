@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.1 — Phase 54: Data Model Foundation
+**Current focus:** Milestone v2.1 — Phase 55: Relationships and Signals APIs
 
 ## Current Position
 
-Phase: 54 of 57 (Data Model Foundation)
-Plan: 2 of 2 in current phase
-Status: Phase complete
-Last activity: 2026-03-27 — Phase 54 Plan 02 complete (migration 029 + status rename Phase A)
+Phase: 55 of 57 (Relationships and Signals APIs)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-27 — Phase 55 Plan 01 complete (migration 030 + relationships router with 4 endpoints)
 
-Progress: [███████████░░░░░░░░░] 58% (15/26 total plans complete across all milestones)
+Progress: [████████████░░░░░░░░] 61% (16/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -48,6 +48,8 @@ Recent decisions affecting current work:
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
 - [54-02 execution]: Two-phase zero-downtime rename pattern: add nullable → bulk UPDATE → set NOT NULL → Phase B (drop) deferred until post-stable-deploy
 - [54-02 execution]: down_revision must reference the actual revision variable (e.g. 028_acct_ext), not the migration filename stem
+- [55-01 execution]: graduated_at partition predicate (Account.graduated_at.isnot(None)) must appear on every relationships read/write endpoint — POST /graduate is the only intentional exception (targets un-graduated accounts)
+- [55-01 execution]: _graduate_account() sets graduated_at = now so both auto-graduation (reply trigger) and manual graduation always timestamp the event
 
 ### Pending Todos
 
@@ -61,5 +63,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 54 Plan 02 complete — Phase 54 (Data Model Foundation) complete, ready for Phase 55 (Pipeline API)
+Stopped at: Phase 55 Plan 01 complete — relationships router + migration 030, ready for Phase 55 Plan 02
 Resume file: None
