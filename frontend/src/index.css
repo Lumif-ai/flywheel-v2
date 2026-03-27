@@ -68,6 +68,12 @@
     --brand-gradient-end: #D4432E;
     --brand-tint: rgba(233,77,53,0.04);
     --brand-light: rgba(233,77,53,0.1);
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.08), 0 1px 2px rgba(0,0,0,0.06);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.10), 0 2px 4px rgba(0,0,0,0.06);
+    --brand-tint-warm: rgba(233,77,53,0.02);
+    --brand-tint-warmest: rgba(233,77,53,0.04);
+    --transition-fast: 150ms ease;
+    --row-height-grid: 56px;
     --success: #22C55E;
     --warning: #F59E0B;
     --error: #EF4444;
@@ -111,6 +117,10 @@
     --skeleton-bg: var(--shimmer-base);
     --shimmer-base: #2a2a2a;
     --shimmer-highlight: #3a3a3a;
+    --card-shadow: 0 1px 3px rgba(0,0,0,0.3), 0 1px 2px rgba(0,0,0,0.2);
+    --card-shadow-hover: 0 4px 12px rgba(0,0,0,0.4), 0 2px 4px rgba(0,0,0,0.2);
+    --brand-tint-warm: rgba(233,77,53,0.04);
+    --brand-tint-warmest: rgba(233,77,53,0.08);
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -191,6 +201,25 @@
   .stagger-3 { animation-delay: 150ms; }
   .stagger-4 { animation-delay: 200ms; }
   .stagger-5 { animation-delay: 250ms; }
+  .transition-interactive {
+    transition: all var(--transition-fast);
+  }
+  .badge-translucent {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 10px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.5;
+  }
+  @keyframes slide-out-right {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(40px); }
+  }
+  .animate-slide-out-right {
+    animation: slide-out-right 300ms ease-out forwards;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

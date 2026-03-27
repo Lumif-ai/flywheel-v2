@@ -31,6 +31,10 @@ export const colors = {
   success: 'var(--success)',
   warning: 'var(--warning)',
   error: 'var(--error)',
+  cardShadow: 'var(--card-shadow)',
+  cardShadowHover: 'var(--card-shadow-hover)',
+  brandTintWarm: 'var(--brand-tint-warm)',
+  brandTintWarmest: 'var(--brand-tint-warmest)',
 } as const;
 
 export const cardBorderColors = {
@@ -38,4 +42,31 @@ export const cardBorderColors = {
   complete: '#22C55E',  // green - done
   warning: '#F59E0B',   // amber - stale/attention
   info: 'transparent',  // no left border
+} as const;
+
+export const shadows = {
+  card: 'var(--card-shadow)',
+  cardHover: 'var(--card-shadow-hover)',
+} as const;
+
+export const transitions = {
+  fast: 'var(--transition-fast)',
+  interactive: '150ms ease',
+} as const;
+
+export const registers = {
+  pipeline: { background: 'var(--page-bg)' },           // cool white, dense
+  relationship: { background: 'var(--brand-tint-warm)' }, // warm tint
+  personal: { background: 'var(--brand-tint-warmest)' },  // warmest
+} as const;
+
+export const badges = {
+  fitTier: {
+    excellent: { bg: 'rgba(34, 197, 94, 0.1)', text: '#16a34a' },
+    strong:    { bg: 'rgba(34, 197, 94, 0.1)', text: '#16a34a' },
+    good:      { bg: 'rgba(59, 130, 246, 0.1)', text: '#2563eb' },
+    fair:      { bg: 'rgba(245, 158, 11, 0.1)', text: '#d97706' },
+    weak:      { bg: 'rgba(239, 68, 68, 0.1)', text: '#dc2626' },
+    poor:      { bg: 'rgba(239, 68, 68, 0.1)', text: '#dc2626' },
+  },
 } as const;
