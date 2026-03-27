@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 58 of 58 (Unified Company Intelligence Engine)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-27 — Plan 58-01 complete: document input and gap-aware enrichment
+Last activity: 2026-03-27 — Plan 58-02 complete: profile API routed through SkillRun engine
 
-Progress: [████████████████████] 90% (26/29 total plans complete across all milestones)
+Progress: [████████████████████] 93% (27/29 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -86,6 +86,9 @@ Recent decisions affecting current work:
 - [58-01 execution]: is_document flag drives source_label ("document-upload" vs "website-crawl") and gates companies cache upsert (skipped for document-only inputs — no domain)
 - [58-01 execution]: Supplementary doc fetch failures logged as warnings (not errors) — partial supplementary data preferable to aborting run
 - [58-01 execution]: enrich_with_web_research max_uses reduced from 5 to 3 when existing_profile_keys count > half of total profile files (saves API credits on refresh)
+- [58-02 execution]: enrichment_status field retained on CompanyProfileResponse but hardcoded to None — avoids frontend breakage while removing all enrichment logic
+- [58-02 execution]: refresh_profile called directly (not via HTTP) from reset_profile — keeps db session shared, avoids double commit overhead
+- [58-02 execution]: profile_linked flag auto-set in analyze-document before SkillRun creation — ensures file appears in subsequent refresh aggregation without a separate upload call
 
 ### Pending Todos
 
@@ -99,5 +102,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Completed 58-01-PLAN.md — document input discriminator and gap-aware enrichment in company intel engine
+Stopped at: Completed 58-02-PLAN.md — profile API SkillRun routing, refresh and reset endpoints, background enrichment removed
 Resume file: None
