@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-27)
 
 **Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v2.1 — Phase 58: Unified Company Intelligence Engine
+**Current focus:** Milestone v3.0 — Intelligence Flywheel (Phases 59–63)
 
 ## Current Position
 
-Phase: 58 of 58 (Unified Company Intelligence Engine)
-Plan: 3 of 3 in current phase
+Phase: 59 of 63 (Team Privacy Foundation)
+Plan: 2 of 2 in current phase
 Status: Complete
-Last activity: 2026-03-27 — Plan 58-03 complete: Refresh/Reset buttons with SSE streaming on company profile page
+Last activity: 2026-03-28 — Phase 59 Plan 02 complete: API-layer user_id defense-in-depth filters on email, integrations, skills
 
-Progress: [████████████████████] 100% (29/29 total plans complete across all milestones)
+Progress: [█████████████████░░░] 85% (31/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -93,6 +93,12 @@ Recent decisions affecting current work:
 - [58-03 execution]: startFromRunId() accepts caller-provided run_id and only sets SSE URL — DocumentAnalyzePanel owns the POST, hook owns only SSE
 - [58-03 execution]: useSSE already appends token internally — SSE URL in useProfileRefresh is plain path without ?token= suffix to avoid double-appending
 - [58-03 execution]: 'discovery' event type added to sse.ts SSEEventType union — skills/runs stream sends discovery events; original type list only had text/stage/done/error/crawl_error
+- [59-01 execution]: integrations table RLS policy name is 'integrations_tenant_isolation' (not 'tenant_isolation') — must use exact name in any future policy DROP/replace operations on this table
+- [59-01 execution]: user_isolation policy uses nullable pattern (user_id IS NULL OR user_id = current_setting(...)) for work_items and skill_runs — NULL user_id rows are tenant-shared system items
+- [59-01 execution]: email_scores and email_drafts own no user_id column — user isolation enforced via subquery: email_id IN (SELECT id FROM emails WHERE user_id = current_setting('app.user_id', true)::uuid)
+- [Phase 59]: Return 404 (not 403) on ownership mismatches — avoids leaking resource existence to potential attackers
+- [Phase 59]: user.sub (not user.id) used for all user_id comparisons — TokenPayload exposes .sub as the UUID field
+- [Phase 59]: Both base and count_q in list_runs() get user_id filter — ensures pagination totals stay accurate
 
 ### Pending Todos
 
@@ -105,6 +111,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-27
-Stopped at: Completed 58-03-PLAN.md — Refresh/Reset buttons with SSE streaming, useProfileRefresh hook, EnrichmentBanner dead code removed, DocumentAnalyzePanel refactored to onRunStarted pattern
+Last session: 2026-03-28
+Stopped at: Completed 59-02-PLAN.md — Phase 59 (Team Privacy Foundation) fully complete; ready for Phase 60
 Resume file: None
