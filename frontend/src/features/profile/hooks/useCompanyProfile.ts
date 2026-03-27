@@ -89,17 +89,3 @@ export function useLinkProfileFile() {
     },
   })
 }
-
-export function useRetryEnrichment() {
-  const queryClient = useQueryClient()
-
-  return useMutation({
-    mutationFn: (fileId: string) =>
-      api.post<{ success: boolean; enrichment_status: string }>('/profile/retry-enrichment', {
-        file_id: fileId,
-      }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['company-profile'] })
-    },
-  })
-}

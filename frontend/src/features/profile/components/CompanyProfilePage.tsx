@@ -1,5 +1,6 @@
 import { useState, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { useProfileRefresh } from '../hooks/useProfileRefresh'
 import {
   Building2,
   Package,
@@ -14,7 +15,6 @@ import {
   Clock,
   AlertCircle,
   RefreshCw,
-  Loader2,
 } from 'lucide-react'
 import { colors, spacing, typography } from '@/lib/design-tokens'
 import {
@@ -22,7 +22,6 @@ import {
   useUpdateCategory,
   useCreateCategory,
   useLinkProfileFile,
-  useRetryEnrichment,
   type ProfileGroup,
   type ProfileUploadedFile,
 } from '../hooks/useCompanyProfile'
@@ -505,11 +504,14 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
 // Empty state: Document upload + analyze panel
 // ---------------------------------------------------------------------------
 
-function DocumentAnalyzePanel() {
+interface DocumentAnalyzePanelProps {
+  onRunStarted?: (runId: string) => void
+}
+
+function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [analyzeError, setAnalyzeError] = useState<string | null>(null)
-  const queryClient = useQueryClient()
   const linkFile = useLinkProfileFile()
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -536,19 +538,14 @@ function DocumentAnalyzePanel() {
       // 2. Link file to profile
       await linkFile.mutateAsync(fileId)
 
-      // 3. Trigger analysis
-      const result = await api.post<{ success: boolean; categories_written: number }>(
+      // 3. Trigger analysis — returns run_id for SSE streaming
+      const result = await api.post<{ run_id: string }>(
         '/profile/analyze-document',
         { file_id: fileId },
       )
-      console.log('analyze-document result:', result)
 
-      if (result.categories_written === 0) {
-        setAnalyzeError('No company intelligence could be extracted from this document. Try a document with company positioning, products, or customer information.')
-      } else {
-        // 4. Refresh profile data
-        queryClient.invalidateQueries({ queryKey: ['company-profile'] })
-      }
+      // 4. Hand off to parent for SSE streaming
+      onRunStarted?.(result.run_id)
     } catch (err) {
       console.error('Document analyze failed:', err)
       setAnalyzeError(err instanceof Error ? err.message : 'Analysis failed')
@@ -613,86 +610,15 @@ function DocumentAnalyzePanel() {
 }
 
 // ---------------------------------------------------------------------------
-// Enrichment status banner
-// ---------------------------------------------------------------------------
-
-interface EnrichmentBannerProps {
-  status: string | null
-  uploadedFiles: ProfileUploadedFile[]
-}
-
-function EnrichmentBanner({ status, uploadedFiles }: EnrichmentBannerProps) {
-  const retryEnrichment = useRetryEnrichment()
-
-  if (status === 'pending' || status === 'running') {
-    return (
-      <div
-        className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-4"
-        style={{
-          backgroundColor: 'rgba(59,130,246,0.08)',
-          border: '1px solid rgba(59,130,246,0.2)',
-        }}
-      >
-        <div className="flex items-center gap-2.5">
-          <Loader2 className="size-4 animate-spin" style={{ color: '#3B82F6' }} />
-          <span className="text-sm" style={{ color: colors.bodyText }}>
-            Enriching with web research...
-          </span>
-        </div>
-        <span className="text-xs" style={{ color: colors.secondaryText }}>
-          This may take 15-30 seconds
-        </span>
-      </div>
-    )
-  }
-
-  if (status === 'failed') {
-    return (
-      <div
-        className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-4"
-        style={{
-          backgroundColor: 'rgba(239,68,68,0.08)',
-          border: '1px solid rgba(239,68,68,0.2)',
-        }}
-      >
-        <div className="flex items-center gap-2.5">
-          <AlertCircle className="size-4" style={{ color: '#EF4444' }} />
-          <span className="text-sm" style={{ color: colors.bodyText }}>
-            Web research enrichment failed.
-          </span>
-        </div>
-        <button
-          onClick={() => {
-            const fileId = uploadedFiles[0]?.id
-            if (fileId) retryEnrichment.mutate(fileId)
-          }}
-          disabled={retryEnrichment.isPending || uploadedFiles.length === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity disabled:opacity-60"
-          style={{ backgroundColor: colors.brandCoral }}
-        >
-          {retryEnrichment.isPending ? (
-            <Loader2 className="size-3.5 animate-spin" />
-          ) : (
-            <RefreshCw className="size-3.5" />
-          )}
-          {retryEnrichment.isPending ? 'Retrying...' : 'Retry'}
-        </button>
-      </div>
-    )
-  }
-
-  // null, undefined, or 'complete' — no banner
-  return null
-}
-
-// ---------------------------------------------------------------------------
 // Main page
 // ---------------------------------------------------------------------------
 
 export function CompanyProfilePage() {
   const [editMode, setEditMode] = useState(false)
+  const [resetConfirm, setResetConfirm] = useState(false)
   const { data: profile, isLoading, isError } = useCompanyProfile()
   const linkFile = useLinkProfileFile()
+  const refresh = useProfileRefresh()
 
   if (isLoading) {
     return (
@@ -790,35 +716,62 @@ export function CompanyProfilePage() {
           </div>
 
           {hasGroups && (
-            <button
-              onClick={() => setEditMode((v) => !v)}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
-              style={
-                editMode
-                  ? {
-                      backgroundColor: colors.brandCoral,
-                      borderColor: colors.brandCoral,
-                      color: '#fff',
-                    }
-                  : {
-                      backgroundColor: colors.cardBg,
-                      borderColor: colors.subtleBorder,
-                      color: colors.headingText,
-                    }
-              }
-            >
-              {editMode ? (
-                <>
-                  <Check className="size-4" />
-                  Done editing
-                </>
-              ) : (
-                <>
-                  <Edit3 className="size-4" />
-                  Edit profile
-                </>
-              )}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => refresh.startRefresh()}
+                disabled={refresh.phase === 'refreshing'}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
+                style={{
+                  backgroundColor: colors.cardBg,
+                  borderColor: colors.subtleBorder,
+                  color: colors.headingText,
+                }}
+              >
+                <RefreshCw className={`size-4 ${refresh.phase === 'refreshing' ? 'animate-spin' : ''}`} />
+                Refresh
+              </button>
+              <button
+                onClick={() => setResetConfirm(true)}
+                disabled={refresh.phase === 'refreshing'}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
+                style={{
+                  backgroundColor: colors.cardBg,
+                  borderColor: 'rgba(239,68,68,0.3)',
+                  color: '#EF4444',
+                }}
+              >
+                Reset
+              </button>
+              <button
+                onClick={() => setEditMode((v) => !v)}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
+                style={
+                  editMode
+                    ? {
+                        backgroundColor: colors.brandCoral,
+                        borderColor: colors.brandCoral,
+                        color: '#fff',
+                      }
+                    : {
+                        backgroundColor: colors.cardBg,
+                        borderColor: colors.subtleBorder,
+                        color: colors.headingText,
+                      }
+                }
+              >
+                {editMode ? (
+                  <>
+                    <Check className="size-4" />
+                    Done editing
+                  </>
+                ) : (
+                  <>
+                    <Edit3 className="size-4" />
+                    Edit profile
+                  </>
+                )}
+              </button>
+            </div>
           )}
         </div>
 
@@ -857,11 +810,55 @@ export function CompanyProfilePage() {
           </div>
         )}
 
-        {/* Enrichment status banner */}
-        <EnrichmentBanner status={profile.enrichment_status} uploadedFiles={profile.uploaded_files} />
+        {/* Inline reset confirmation */}
+        {resetConfirm && (
+          <div
+            className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-4"
+            style={{
+              backgroundColor: 'rgba(239,68,68,0.06)',
+              border: '1px solid rgba(239,68,68,0.2)',
+            }}
+          >
+            <span className="text-sm" style={{ color: colors.bodyText }}>
+              This will clear your current profile and rebuild from scratch. Continue?
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => {
+                  setResetConfirm(false)
+                  void refresh.startReset()
+                }}
+                className="px-4 py-1.5 rounded-lg text-sm font-medium text-white"
+                style={{ backgroundColor: '#EF4444' }}
+              >
+                Confirm Reset
+              </button>
+              <button
+                onClick={() => setResetConfirm(false)}
+                className="px-4 py-1.5 rounded-lg text-sm font-medium"
+                style={{ color: colors.secondaryText, backgroundColor: colors.brandTint }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        )}
 
-        {/* Empty state: inline crawl + document analyze */}
-        {!hasGroups ? (
+        {/* SSE streaming overlay or profile body */}
+        {(refresh.phase === 'refreshing' || refresh.phase === 'complete') ? (
+          <div
+            className="rounded-xl border shadow-sm overflow-hidden p-6"
+            style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
+          >
+            <LiveCrawl
+              crawlItems={refresh.crawlItems}
+              crawlTotal={refresh.crawlTotal}
+              crawlStatus={refresh.crawlStatus}
+              isComplete={refresh.phase === 'complete'}
+              onContinue={() => refresh.dismiss()}
+            />
+          </div>
+        ) : !hasGroups ? (
           <div className="space-y-4">
             {/* URL crawl panel */}
             <CrawlPanel defaultUrl={defaultCrawlUrl} />
@@ -876,7 +873,7 @@ export function CompanyProfilePage() {
             </div>
 
             {/* Document upload + analyze panel */}
-            <DocumentAnalyzePanel />
+            <DocumentAnalyzePanel onRunStarted={(runId) => refresh.startFromRunId(runId)} />
 
             {/* Show linked files if any exist */}
             {profile.uploaded_files.length > 0 && (

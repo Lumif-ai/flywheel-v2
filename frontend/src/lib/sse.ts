@@ -1,7 +1,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '@/stores/auth'
 
-type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'stage' | 'result' | 'clarify' | 'error' | 'done' | 'crawl_error'
+type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'stage' | 'result' | 'clarify' | 'error' | 'done' | 'crawl_error' | 'discovery'
 
 interface SSEEvent {
   type: SSEEventType
@@ -32,7 +32,7 @@ export function useSSE(
     const source = new EventSource(fullUrl)
     sourceRef.current = source
 
-    const eventTypes: SSEEventType[] = ['thinking', 'text', 'skill_start', 'stage', 'result', 'clarify', 'error', 'done', 'crawl_error']
+    const eventTypes: SSEEventType[] = ['thinking', 'text', 'skill_start', 'stage', 'result', 'clarify', 'error', 'done', 'crawl_error', 'discovery']
     for (const type of eventTypes) {
       source.addEventListener(type, (e: MessageEvent) => {
         const data = JSON.parse(e.data)
