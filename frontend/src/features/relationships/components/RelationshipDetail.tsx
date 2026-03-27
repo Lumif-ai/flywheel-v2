@@ -6,6 +6,11 @@ import { spacing, registers } from '@/lib/design-tokens'
 import { useRelationshipDetail } from '../hooks/useRelationshipDetail'
 import { RelationshipHeader } from './RelationshipHeader'
 import { AskPanel } from './AskPanel'
+import { TimelineTab } from './tabs/TimelineTab'
+import { PeopleTab } from './tabs/PeopleTab'
+import { IntelligenceTab } from './tabs/IntelligenceTab'
+import { CommitmentsTab } from './tabs/CommitmentsTab'
+import { RelationshipActionBar } from './RelationshipActionBar'
 import type { RelationshipType } from '../types/relationships'
 
 // TAB_CONFIG drives all tab rendering — single source of truth
@@ -186,18 +191,30 @@ export function RelationshipDetail() {
                 ))}
               </TabsList>
 
-              {tabs.map((tab) => (
-                <TabsContent key={tab.key} value={tab.key}>
-                  {/* Plan 04 replaces these placeholders with real tab components */}
-                  <div className="py-4 text-muted-foreground text-sm">
-                    Coming soon...
-                  </div>
-                </TabsContent>
-              ))}
+              <TabsContent value="timeline">
+                <TimelineTab timeline={account.recent_timeline} />
+              </TabsContent>
+              <TabsContent value="people">
+                <PeopleTab contacts={account.contacts} />
+              </TabsContent>
+              {/* Intelligence tab: only rendered for prospect/customer (TAB_CONFIG drives visibility) */}
+              <TabsContent value="intelligence">
+                <IntelligenceTab intel={account.intel ?? {}} />
+              </TabsContent>
+              <TabsContent value="commitments">
+                <CommitmentsTab commitments={account.commitments ?? []} />
+              </TabsContent>
             </Tabs>
           </div>
         </div>
       </div>
+
+      {/* Action bar: sticky at bottom, type-specific quick actions */}
+      <RelationshipActionBar
+        type={fromType}
+        accountId={account.id}
+        accountName={account.name}
+      />
     </div>
   )
 }
