@@ -5,17 +5,18 @@ Endpoints:
 - PATCH /profile/category/{entry_id} -- Update a category entry's full content
 - POST /profile/category     -- Add a new category entry
 - POST /profile/upload       -- Link an uploaded file to the company profile
-- POST /profile/analyze-document -- Analyze an uploaded file and write context entries
+- POST /profile/analyze-document -- Route document analysis through the SkillRun engine
+- POST /profile/refresh      -- Re-run company intelligence with all available sources
+- POST /profile/reset        -- Soft-delete all intel entries then re-run from scratch
 """
 
 from __future__ import annotations
 
-import asyncio
 import datetime
 import logging
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -24,9 +25,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.api.context import _FILE_DISPLAY, _split_entry_items
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import ContextCatalog, ContextEntry, Tenant, UploadedFile
+from flywheel.db.models import ContextCatalog, ContextEntry, SkillRun, Tenant, UploadedFile
 
 router = APIRouter(prefix="/profile", tags=["profile"])
+
+logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -69,10 +72,6 @@ class LinkFileRequest(BaseModel):
 
 
 class AnalyzeDocumentRequest(BaseModel):
-    file_id: str
-
-
-class RetryEnrichmentRequest(BaseModel):
     file_id: str
 
 
@@ -149,19 +148,6 @@ async def get_company_profile(
         if entry_ts and (last_updated_dt is None or entry_ts > last_updated_dt):
             last_updated_dt = entry_ts
 
-    # Determine enrichment status from profile-linked files
-    enrichment_status: str | None = None
-    for f in all_files:
-        meta = f.metadata_ or {}
-        if meta.get("profile_linked") is True and meta.get("enrichment_status"):
-            file_status = meta["enrichment_status"]
-            # Prefer active states over terminal states
-            if file_status in ("running", "pending"):
-                enrichment_status = file_status
-                break
-            if enrichment_status is None or file_status == "complete":
-                enrichment_status = file_status
-
     return CompanyProfileResponse(
         company_name=tenant.name if tenant else None,
         domain=tenant.domain if tenant else None,
@@ -169,7 +155,7 @@ async def get_company_profile(
         total_items=total_items,
         last_updated=last_updated_dt.isoformat() if last_updated_dt else None,
         uploaded_files=uploaded_files,
-        enrichment_status=enrichment_status,
+        enrichment_status=None,
     )
 
 
@@ -320,232 +306,6 @@ async def link_profile_upload(
 
 
 # ---------------------------------------------------------------------------
-# Background enrichment helpers
-# ---------------------------------------------------------------------------
-
-logger = logging.getLogger(__name__)
-
-MAX_ENRICHMENT_RETRIES = 3
-
-
-def _build_enrichment_section_map(enriched: dict) -> dict:
-    """Map enrichment keys to context file entries.
-
-    Returns dict mapping filename to (content_lines, detail) tuples,
-    same format as the existing section_map used by analyze_document.
-    """
-    section_map: dict[str, tuple[str, str]] = {}
-
-    # Key people -> leadership.md
-    key_people = enriched.get("key_people") or []
-    if key_people:
-        lines = []
-        for person in key_people:
-            if isinstance(person, dict):
-                name = person.get("name", "Unknown")
-                title = person.get("title", "")
-                linkedin = person.get("linkedin")
-                line = f"{name} -- {title}" if title else name
-                if linkedin:
-                    line += f" ({linkedin})"
-                lines.append(line)
-            else:
-                lines.append(str(person))
-        if lines:
-            section_map["leadership.md"] = ("\n".join(lines), "key-people-enrichment")
-
-    # Company details -> company-details.md
-    detail_lines = []
-    if enriched.get("headquarters"):
-        detail_lines.append(f"Headquarters: {enriched['headquarters']}")
-    if enriched.get("employees"):
-        detail_lines.append(f"Employees: {enriched['employees']}")
-    if enriched.get("funding"):
-        detail_lines.append(f"Funding: {enriched['funding']}")
-    if detail_lines:
-        section_map["company-details.md"] = (
-            "\n".join(detail_lines),
-            "company-details-enrichment",
-        )
-
-    # Competitors -> competitive-intel.md
-    competitors = enriched.get("competitors") or []
-    if competitors:
-        comp_lines = [str(c) for c in competitors]
-        section_map["competitive-intel.md"] = (
-            "\n".join(comp_lines),
-            "competitive-landscape-enrichment",
-        )
-
-    # Tech stack -> tech-stack.md
-    tech_stack = enriched.get("tech_stack") or []
-    if tech_stack:
-        tech_lines = [str(t) for t in tech_stack]
-        section_map["tech-stack.md"] = (
-            "\n".join(tech_lines),
-            "tech-stack-enrichment",
-        )
-
-    return section_map
-
-
-async def _run_background_enrichment(
-    file_id: UUID,
-    tenant_id: UUID,
-    user_id: UUID,
-    company_name: str,
-    intelligence: dict,
-    api_key: str,
-) -> None:
-    """Run web research enrichment in the background with retry logic.
-
-    Updates UploadedFile.metadata_ with enrichment status at each stage.
-    Writes enrichment results as context entries on success.
-    """
-    from flywheel.db.session import get_session_factory
-    from flywheel.engines.company_intel import enrich_with_web_research
-    from flywheel.storage import append_entry as async_append_entry
-    from sqlalchemy import text as sa_text
-
-    factory = get_session_factory()
-
-    for attempt in range(MAX_ENRICHMENT_RETRIES):
-        try:
-            # Update status to running
-            async with factory() as session:
-                await session.execute(
-                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                    {"tid": str(tenant_id)},
-                )
-                await session.execute(
-                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
-                    {"uid": str(user_id)},
-                )
-                uploaded = (
-                    await session.execute(
-                        select(UploadedFile).where(UploadedFile.id == file_id)
-                    )
-                ).scalar_one_or_none()
-                if uploaded:
-                    meta = dict(uploaded.metadata_ or {})
-                    meta["enrichment_status"] = "running"
-                    meta["enrichment_attempts"] = attempt + 1
-                    if attempt == 0:
-                        meta["enrichment_started_at"] = (
-                            datetime.datetime.now(datetime.timezone.utc).isoformat()
-                        )
-                    uploaded.metadata_ = meta
-                await session.commit()
-
-            # Call enrichment (sync function, run in thread)
-            enriched = await asyncio.to_thread(
-                enrich_with_web_research, company_name, intelligence, api_key=api_key
-            )
-
-            if not enriched.get("_enriched"):
-                raise RuntimeError("Enrichment returned no new data")
-
-            # Build enrichment section map and write context entries
-            enrichment_sections = _build_enrichment_section_map(enriched)
-            source = "company-intel-onboarding"
-
-            async with factory() as session:
-                await session.execute(
-                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                    {"tid": str(tenant_id)},
-                )
-                await session.execute(
-                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
-                    {"uid": str(user_id)},
-                )
-
-                for filename, (content_lines, detail) in enrichment_sections.items():
-                    if not content_lines:
-                        continue
-                    entry = {
-                        "detail": detail,
-                        "confidence": "medium",
-                        "content": content_lines,
-                        "metadata": {"source_url": "web-research"},
-                    }
-                    await async_append_entry(
-                        session=session,
-                        file=filename.replace(".md", ""),
-                        entry=entry,
-                        source=source,
-                    )
-
-                # Mark enrichment complete
-                uploaded = (
-                    await session.execute(
-                        select(UploadedFile).where(UploadedFile.id == file_id)
-                    )
-                ).scalar_one_or_none()
-                if uploaded:
-                    meta = dict(uploaded.metadata_ or {})
-                    meta["enrichment_status"] = "complete"
-                    meta["enrichment_completed_at"] = (
-                        datetime.datetime.now(datetime.timezone.utc).isoformat()
-                    )
-                    uploaded.metadata_ = meta
-                await session.commit()
-
-            logger.info(
-                "Background enrichment complete: file_id=%s, tenant=%s, sections=%d",
-                file_id,
-                tenant_id,
-                len(enrichment_sections),
-            )
-            return
-
-        except Exception as e:
-            logger.warning(
-                "Enrichment attempt %d/%d failed for file %s: %s",
-                attempt + 1,
-                MAX_ENRICHMENT_RETRIES,
-                file_id,
-                e,
-            )
-            if attempt < MAX_ENRICHMENT_RETRIES - 1:
-                await asyncio.sleep(2**attempt)  # 1s, 2s, 4s
-            else:
-                # Final failure — mark as failed
-                try:
-                    async with factory() as session:
-                        await session.execute(
-                            sa_text(
-                                "SELECT set_config('app.tenant_id', :tid, true)"
-                            ),
-                            {"tid": str(tenant_id)},
-                        )
-                        await session.execute(
-                            sa_text(
-                                "SELECT set_config('app.user_id', :uid, true)"
-                            ),
-                            {"uid": str(user_id)},
-                        )
-                        uploaded = (
-                            await session.execute(
-                                select(UploadedFile).where(
-                                    UploadedFile.id == file_id
-                                )
-                            )
-                        ).scalar_one_or_none()
-                        if uploaded:
-                            meta = dict(uploaded.metadata_ or {})
-                            meta["enrichment_status"] = "failed"
-                            meta["enrichment_error"] = str(e)
-                            uploaded.metadata_ = meta
-                        await session.commit()
-                except Exception as final_err:
-                    logger.error(
-                        "Failed to update enrichment status to 'failed' for file %s: %s",
-                        file_id,
-                        final_err,
-                    )
-
-
-# ---------------------------------------------------------------------------
 # POST /profile/analyze-document
 # ---------------------------------------------------------------------------
 
@@ -553,274 +313,133 @@ async def _run_background_enrichment(
 @router.post("/analyze-document")
 async def analyze_document(
     body: AnalyzeDocumentRequest,
-    background_tasks: BackgroundTasks,
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
-    """Analyze an uploaded file's extracted text and write company intelligence entries.
-
-    Fetches the UploadedFile by file_id, runs structure_intelligence on its
-    extracted_text, and writes the resulting intelligence as context entries
-    using the same data path as the onboarding crawl.
-    """
-    from flywheel.config import settings
-    from flywheel.db.session import get_session_factory
-    from flywheel.engines.company_intel import (
-        _build_list_content,
-        _build_positioning_content,
-        structure_intelligence,
-    )
-    from flywheel.storage import append_entry as async_append_entry
-    from sqlalchemy import text as sa_text
-
-    # Validate API key
-    api_key = settings.flywheel_subsidy_api_key
-    if not api_key:
-        raise HTTPException(
-            status_code=500,
-            detail="API key not configured",
-        )
-
-    # Fetch the uploaded file record
+    """Analyze an uploaded file through the company-intel skill engine."""
     try:
         file_uuid = UUID(body.file_id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid file_id format")
 
-    uploaded = (
-        await db.execute(
-            select(UploadedFile).where(UploadedFile.id == file_uuid)
-        )
-    ).scalar_one_or_none()
+    uploaded = (await db.execute(
+        select(UploadedFile).where(UploadedFile.id == file_uuid)
+    )).scalar_one_or_none()
 
     if uploaded is None:
         raise HTTPException(status_code=404, detail="File not found")
+    if not uploaded.extracted_text or not uploaded.extracted_text.strip():
+        raise HTTPException(status_code=400, detail="No text could be extracted from this file")
 
-    extracted_text = uploaded.extracted_text
-    if not extracted_text or not extracted_text.strip():
+    # Ensure file is profile-linked
+    existing_meta = uploaded.metadata_ or {}
+    if not existing_meta.get("profile_linked"):
+        uploaded.metadata_ = {**existing_meta, "profile_linked": True}
+
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name="company-intel",
+        input_text=f"DOCUMENT_FILE:{body.file_id}",
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    await db.commit()
+
+    return {"run_id": str(run.id)}
+
+
+# ---------------------------------------------------------------------------
+# POST /profile/refresh
+# ---------------------------------------------------------------------------
+
+
+@router.post("/refresh")
+async def refresh_profile(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Re-run company intelligence with all available sources (URL + documents)."""
+    # Get tenant for domain/URL
+    tenant = (await db.execute(
+        select(Tenant).where(Tenant.id == user.tenant_id)
+    )).scalar_one_or_none()
+
+    # Get all profile-linked files
+    all_files = (await db.execute(select(UploadedFile))).scalars().all()
+    linked_files = [
+        f for f in all_files
+        if (f.metadata_ or {}).get("profile_linked") is True
+        and f.extracted_text and f.extracted_text.strip()
+    ]
+
+    has_url = tenant and tenant.domain
+    has_docs = len(linked_files) > 0
+
+    if not has_url and not has_docs:
         raise HTTPException(
             status_code=400,
-            detail="No text could be extracted from this file",
+            detail="Add a company URL or upload a document to refresh from",
         )
 
-    # Run structure_intelligence in a thread (it's sync and calls Anthropic)
-    try:
-        intelligence = await asyncio.to_thread(
-            structure_intelligence, extracted_text, "document-upload", api_key=api_key
-        )
-    except Exception as e:
-        logger.exception("structure_intelligence failed for file %s", body.file_id)
-        raise HTTPException(
-            status_code=502,
-            detail=f"Intelligence extraction failed: {type(e).__name__}: {e}",
-        )
+    # Build input_text: URL on first line, then DOCUMENT_FILE:{id} per doc
+    input_lines = []
+    if has_url:
+        input_lines.append(f"https://{tenant.domain}")
+    for f in linked_files:
+        input_lines.append(f"DOCUMENT_FILE:{str(f.id)}")
 
-    if not intelligence.get("structured"):
-        raise HTTPException(
-            status_code=422,
-            detail="Could not structure intelligence from document text",
-        )
+    # If no URL but has docs, first line is a DOCUMENT_FILE ref
+    # (engine will detect DOCUMENT_FILE prefix and skip crawl)
+    input_text = "\n".join(input_lines)
 
-    # Build section map (same as _execute_company_intel in skill_executor)
-    section_map = {
-        "positioning.md": _build_positioning_content(intelligence),
-        "icp-profiles.md": _build_list_content(
-            intelligence.get("target_customers", []), "target-customer-profiles"
-        ),
-        "competitive-intel.md": _build_list_content(
-            intelligence.get("competitors", []), "competitive-landscape"
-        ),
-        "product-modules.md": _build_list_content(
-            intelligence.get("products", []), "product-inventory"
-        ),
-        "market-taxonomy.md": _build_list_content(
-            intelligence.get("industries", []), "industry-verticals"
-        ),
-    }
-
-    source = "company-intel-onboarding"
-    factory = get_session_factory()
-    categories_written = 0
-
-    for filename, (content_lines, detail) in section_map.items():
-        if not content_lines:
-            continue
-
-        entry = {
-            "detail": detail,
-            "confidence": "medium",
-            "content": content_lines,
-            "metadata": {"source_url": "document-upload"},
-        }
-
-        try:
-            async with factory() as session:
-                await session.execute(
-                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                    {"tid": str(user.tenant_id)},
-                )
-                await session.execute(
-                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
-                    {"uid": str(user.sub)},
-                )
-                await async_append_entry(
-                    session=session,
-                    file=filename.replace(".md", ""),
-                    entry=entry,
-                    source=source,
-                )
-                await session.commit()
-            categories_written += 1
-        except Exception as e:
-            logger.exception("Context write failed for %s: %s", filename, e)
-
-    # Trigger background web research enrichment if company name is available
-    company_name = intelligence.get("company_name")
-    enrichment_status_value: str | None = None
-
-    if company_name:
-        # Set enrichment_status to pending on the uploaded file
-        try:
-            async with factory() as enrich_session:
-                await enrich_session.execute(
-                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                    {"tid": str(user.tenant_id)},
-                )
-                await enrich_session.execute(
-                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
-                    {"uid": str(user.sub)},
-                )
-                enrich_file = (
-                    await enrich_session.execute(
-                        select(UploadedFile).where(UploadedFile.id == file_uuid)
-                    )
-                ).scalar_one_or_none()
-                if enrich_file:
-                    meta = dict(enrich_file.metadata_ or {})
-                    meta["enrichment_status"] = "pending"
-                    enrich_file.metadata_ = meta
-                await enrich_session.commit()
-        except Exception as e:
-            logger.warning("Failed to set enrichment pending status: %s", e)
-
-        background_tasks.add_task(
-            _run_background_enrichment,
-            file_uuid,
-            user.tenant_id,
-            user.sub,
-            company_name,
-            intelligence,
-            api_key,
-        )
-        enrichment_status_value = "pending"
-
-    logger.info(
-        "analyze-document complete: file_id=%s, categories_written=%d, tenant=%s",
-        body.file_id, categories_written, user.tenant_id,
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name="company-intel",
+        input_text=input_text,
+        status="pending",
     )
+    db.add(run)
+    await db.flush()
+    await db.refresh(run)
+    await db.commit()
+
+    return {"run_id": str(run.id)}
+
+
+# ---------------------------------------------------------------------------
+# POST /profile/reset
+# ---------------------------------------------------------------------------
+
+
+@router.post("/reset")
+async def reset_profile(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Soft-delete all company profile entries, then re-run intelligence from scratch."""
+    from sqlalchemy import update as sa_update
+
+    # Soft-delete all company-intel-onboarding entries
+    result = await db.execute(
+        sa_update(ContextEntry)
+        .where(
+            ContextEntry.tenant_id == user.tenant_id,
+            ContextEntry.source == "company-intel-onboarding",
+            ContextEntry.deleted_at.is_(None),
+        )
+        .values(deleted_at=datetime.datetime.now(datetime.timezone.utc))
+    )
+    await db.commit()
+    deleted_count = result.rowcount
+
+    # Now run the same refresh flow to rebuild
+    refresh_result = await refresh_profile(user=user, db=db)
+
     return {
-        "success": True,
-        "categories_written": categories_written,
-        "enrichment_status": enrichment_status_value,
+        "run_id": refresh_result["run_id"],
+        "deleted_count": deleted_count,
     }
-
-
-# ---------------------------------------------------------------------------
-# POST /profile/retry-enrichment
-# ---------------------------------------------------------------------------
-
-
-@router.post("/retry-enrichment")
-async def retry_enrichment(
-    body: RetryEnrichmentRequest,
-    background_tasks: BackgroundTasks,
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> dict:
-    """Re-trigger web research enrichment for a file that previously failed.
-
-    Only works on files that are profile-linked and have enrichment_status='failed'.
-    """
-    from flywheel.config import settings
-    from flywheel.db.session import get_session_factory
-    from sqlalchemy import text as sa_text
-
-    # Validate API key
-    api_key = settings.flywheel_subsidy_api_key
-    if not api_key:
-        raise HTTPException(status_code=500, detail="API key not configured")
-
-    try:
-        file_uuid = UUID(body.file_id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid file_id format")
-
-    uploaded = (
-        await db.execute(
-            select(UploadedFile).where(UploadedFile.id == file_uuid)
-        )
-    ).scalar_one_or_none()
-
-    if uploaded is None:
-        raise HTTPException(status_code=404, detail="File not found")
-
-    meta = uploaded.metadata_ or {}
-    if not meta.get("profile_linked"):
-        raise HTTPException(
-            status_code=400, detail="File is not linked to the company profile"
-        )
-    if meta.get("enrichment_status") != "failed":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Enrichment status is '{meta.get('enrichment_status')}', not 'failed'",
-        )
-
-    # Get company name from tenant
-    tenant = (
-        await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
-    ).scalar_one_or_none()
-
-    company_name = tenant.name if tenant else None
-    if not company_name or company_name == "Anonymous Workspace":
-        raise HTTPException(
-            status_code=400, detail="No company name available for enrichment"
-        )
-
-    # Build minimal intelligence dict for enrichment
-    intelligence = {"company_name": company_name, "structured": True}
-
-    # Reset enrichment status
-    factory = get_session_factory()
-    async with factory() as session:
-        await session.execute(
-            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-            {"tid": str(user.tenant_id)},
-        )
-        await session.execute(
-            sa_text("SELECT set_config('app.user_id', :uid, true)"),
-            {"uid": str(user.sub)},
-        )
-        retry_file = (
-            await session.execute(
-                select(UploadedFile).where(UploadedFile.id == file_uuid)
-            )
-        ).scalar_one_or_none()
-        if retry_file:
-            retry_meta = dict(retry_file.metadata_ or {})
-            retry_meta["enrichment_status"] = "pending"
-            retry_meta["enrichment_attempts"] = 0
-            retry_meta.pop("enrichment_error", None)
-            retry_file.metadata_ = retry_meta
-        await session.commit()
-
-    background_tasks.add_task(
-        _run_background_enrichment,
-        file_uuid,
-        user.tenant_id,
-        user.sub,
-        company_name,
-        intelligence,
-        api_key,
-    )
-
-    return {"success": True, "enrichment_status": "pending"}
