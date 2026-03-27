@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 55 of 57 (Relationships and Signals APIs)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-27 — Phase 55 Plan 01 complete (migration 030 + relationships router with 4 endpoints)
+Last activity: 2026-03-27 — Phase 55 Plan 02 complete (SynthesisEngine + POST /synthesize + POST /ask endpoints)
 
-Progress: [████████████░░░░░░░░] 61% (16/26 total plans complete across all milestones)
+Progress: [████████████░░░░░░░░] 65% (17/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -50,6 +50,8 @@ Recent decisions affecting current work:
 - [54-02 execution]: down_revision must reference the actual revision variable (e.g. 028_acct_ext), not the migration filename stem
 - [55-01 execution]: graduated_at partition predicate (Account.graduated_at.isnot(None)) must appear on every relationships read/write endpoint — POST /graduate is the only intentional exception (targets un-graduated accounts)
 - [55-01 execution]: _graduate_account() sets graduated_at = now so both auto-graduation (reply trigger) and manual graduation always timestamp the event
+- [55-02 execution]: enforce_rate_limit() MUST be called before generate() in POST /synthesize — rate limit fires before any LLM call even when ai_summary is NULL
+- [55-02 execution]: Sparse data in generate() still updates ai_summary_updated_at = now — prevents rapid re-attempts on thin accounts; ask() has no rate limit (stateless)
 
 ### Pending Todos
 
@@ -63,5 +65,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 55 Plan 01 complete — relationships router + migration 030, ready for Phase 55 Plan 02
+Stopped at: Phase 55 Plan 02 complete — SynthesisEngine + POST /synthesize + POST /ask, ready for Phase 55 Plan 03
 Resume file: None
