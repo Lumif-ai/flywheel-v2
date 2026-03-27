@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 57 of 57 (Relationship Surfaces)
-Plan: 3 of 5 in current phase
-Status: In progress
-Last activity: 2026-03-27 — Phase 57 Plan 03 complete (RelationshipDetail two-panel shell, RelationshipHeader)
+Plan: 5 of 5 in current phase
+Status: Complete
+Last activity: 2026-03-27 — Phase 57 Plan 05 complete (AskPanel — AI context panel with dual-mode input, source citations, synthesis refresh)
 
-Progress: [█████████████████░░░] 86% (23/27 total plans complete across all milestones)
+Progress: [████████████████████] 92% (25/27 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -64,6 +64,9 @@ Recent decisions affecting current work:
 - [57-03 execution]: TAB_CONFIG defined at module level outside component — single authoritative constant for tab sets per type; prevents recreation on every render
 - [57-03 execution]: fromType URL param is CRITICAL source of truth — never derive tab config or back-link from account.relationship_type (account may belong to multiple types)
 - [57-03 execution]: AI panel placeholder is dashed border div with comment "AskPanel slot — replaced in Plan 05"; tab content placeholders have "Coming soon..." and comment for Plan 04
+- [57-05 execution]: lastAnswer is ephemeral (most recent Q&A only, lost on unmount) — stateless per locked design decision from research
+- [57-05 execution]: onSuccess/onError callbacks passed directly into mutate() call (not on hook definition) so mode resets correctly per submission
+- [57-05 execution]: Auto-resize textarea capped at 6 rows via scrollHeight comparison in useEffect
 - [56-03 execution]: AG Grid getRowStyle used for stale/replied/graduating row styles — avoids Tailwind v4 CSS class conflicts
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
@@ -88,5 +91,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Completed 57-03-PLAN.md — RelationshipDetail two-panel shell, RelationshipHeader with avatar/badges/domain
+Stopped at: Completed 57-05-PLAN.md — AskPanel AI context panel with dual-mode input (note/Q&A), source citations, synthesis refresh; Phase 57 complete
 Resume file: None
