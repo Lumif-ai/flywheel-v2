@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 58 of 58 (Unified Company Intelligence Engine)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-03-27 — Plan 58-02 complete: profile API routed through SkillRun engine
+Plan: 3 of 3 in current phase
+Status: Complete
+Last activity: 2026-03-27 — Plan 58-03 complete: Refresh/Reset buttons with SSE streaming on company profile page
 
-Progress: [████████████████████] 93% (27/29 total plans complete across all milestones)
+Progress: [████████████████████] 100% (29/29 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -89,6 +89,10 @@ Recent decisions affecting current work:
 - [58-02 execution]: enrichment_status field retained on CompanyProfileResponse but hardcoded to None — avoids frontend breakage while removing all enrichment logic
 - [58-02 execution]: refresh_profile called directly (not via HTTP) from reset_profile — keeps db session shared, avoids double commit overhead
 - [58-02 execution]: profile_linked flag auto-set in analyze-document before SkillRun creation — ensures file appears in subsequent refresh aggregation without a separate upload call
+- [58-03 execution]: useProfileRefresh is a separate hook from useProfileCrawl — decoupled per research recommendation, avoids God hook
+- [58-03 execution]: startFromRunId() accepts caller-provided run_id and only sets SSE URL — DocumentAnalyzePanel owns the POST, hook owns only SSE
+- [58-03 execution]: useSSE already appends token internally — SSE URL in useProfileRefresh is plain path without ?token= suffix to avoid double-appending
+- [58-03 execution]: 'discovery' event type added to sse.ts SSEEventType union — skills/runs stream sends discovery events; original type list only had text/stage/done/error/crawl_error
 
 ### Pending Todos
 
@@ -102,5 +106,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Completed 58-02-PLAN.md — profile API SkillRun routing, refresh and reset endpoints, background enrichment removed
+Stopped at: Completed 58-03-PLAN.md — Refresh/Reset buttons with SSE streaming, useProfileRefresh hook, EnrichmentBanner dead code removed, DocumentAnalyzePanel refactored to onRunStarted pattern
 Resume file: None
