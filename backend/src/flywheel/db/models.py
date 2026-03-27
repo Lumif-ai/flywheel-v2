@@ -1104,6 +1104,11 @@ class Account(Base):
         Index("idx_account_relationship_type", "relationship_type", postgresql_using="gin"),
         Index("idx_account_relationship_status", "tenant_id", "relationship_status"),
         Index("idx_account_pipeline_stage", "tenant_id", "pipeline_stage"),
+        Index(
+            "idx_account_graduated_at",
+            "graduated_at",
+            postgresql_where=text("graduated_at IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -1128,6 +1133,9 @@ class Account(Base):
     )
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
     ai_summary_updated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    graduated_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
     relationship_status: Mapped[str] = mapped_column(Text, nullable=False)

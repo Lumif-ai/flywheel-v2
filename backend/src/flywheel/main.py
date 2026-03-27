@@ -44,6 +44,7 @@ from flywheel.api.work_items import router as work_items_router
 from flywheel.api.outreach import router as outreach_router
 from flywheel.api.accounts import router as accounts_router
 from flywheel.api.timeline import router as timeline_router
+from flywheel.api.relationships import router as relationships_router
 from flywheel.config import settings
 from flywheel.middleware.rate_limit import limiter
 
@@ -172,6 +173,7 @@ def create_app() -> FastAPI:
     app.include_router(outreach_router, prefix="/api/v1")
     app.include_router(accounts_router, prefix="/api/v1")
     app.include_router(timeline_router, prefix="/api/v1")
+    app.include_router(relationships_router, prefix="/api/v1")
 
     return app
 

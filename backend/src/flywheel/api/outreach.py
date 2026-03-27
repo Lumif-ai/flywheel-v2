@@ -153,6 +153,7 @@ async def _graduate_account(
     today = datetime.date.today()
 
     account.status = "engaged"
+    account.graduated_at = now
     account.updated_at = now
 
     if outreach_id is not None:
