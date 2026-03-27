@@ -26,7 +26,7 @@ export interface PipelineResponse {
 export interface PipelineParams {
   offset?: number
   limit?: number
-  fit_tier?: string
-  outreach_status?: string
+  fit_tier?: string[]
+  outreach_status?: string[]
   search?: string
 }

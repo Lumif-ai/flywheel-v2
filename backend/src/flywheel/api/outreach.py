@@ -346,13 +346,25 @@ async def update_outreach(
 async def get_pipeline(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
-    fit_tier: str | None = Query(default=None),
-    outreach_status: str | None = Query(default=None),
+    fit_tier: list[str] | None = Query(default=None),
+    outreach_status: list[str] | None = Query(default=None),
+    search: str | None = Query(default=None),
     db: AsyncSession = Depends(get_tenant_db),
     user: TokenPayload = Depends(require_tenant),
 ) -> dict:
     """Cross-account pipeline view: prospect accounts sorted by fit_score with outreach stats."""
     now = datetime.datetime.now(datetime.timezone.utc)
+
+    # Expand comma-separated values in list params
+    # Supports both repeated params (?fit_tier=A&fit_tier=B) and comma-separated (?fit_tier=A,B)
+    def _expand(values: list[str]) -> list[str]:
+        expanded: list[str] = []
+        for v in values:
+            expanded.extend(v.split(","))
+        return expanded
+
+    fit_tier_expanded = _expand(fit_tier) if fit_tier is not None else None
+    outreach_status_expanded = _expand(outreach_status) if outreach_status is not None else None
 
     # Subquery: outreach stats per account (avoids N+1)
     # Computes: count, last sent_at, status of most-recent outreach
@@ -406,12 +418,6 @@ async def get_pipeline(
     )
 
     # Main query: prospects only, left join outreach stats and primary contact
-    filters = [Account.status == "prospect"]
-    if fit_tier is not None:
-        filters.append(Account.fit_tier == fit_tier)
-    if outreach_status is not None:
-        filters.append(last_status_sq.c.last_status == outreach_status)
-
     stmt = (
         select(
             Account,
@@ -426,22 +432,42 @@ async def get_pipeline(
         .outerjoin(outreach_stats, outreach_stats.c.account_id == Account.id)
         .outerjoin(last_status_sq, last_status_sq.c.account_id == Account.id)
         .outerjoin(primary_contact_sq, primary_contact_sq.c.account_id == Account.id)
-        .where(*filters)
+        .where(Account.status == "prospect")
         .order_by(Account.fit_score.desc().nulls_last())
         .offset(offset)
         .limit(limit)
     )
 
+    if fit_tier_expanded is not None:
+        stmt = stmt.where(Account.fit_tier.in_(fit_tier_expanded))
+    if outreach_status_expanded is not None:
+        stmt = stmt.where(last_status_sq.c.last_status.in_(outreach_status_expanded))
+    if search is not None:
+        pattern = f"%{search}%"
+        stmt = stmt.where(
+            Account.name.ilike(pattern) | Account.domain.ilike(pattern)
+        )
+
     result = await db.execute(stmt)
     rows = result.all()
 
-    # Count total prospects (with filters applied)
-    count_filters = [Account.status == "prospect"]
-    if fit_tier is not None:
-        count_filters.append(Account.fit_tier == fit_tier)
-    count_result = await db.execute(
-        select(func.count()).select_from(Account).where(*count_filters)
+    # Count total prospects (with same filters applied for accurate pagination)
+    count_stmt = (
+        select(func.count())
+        .select_from(Account)
+        .outerjoin(last_status_sq, last_status_sq.c.account_id == Account.id)
+        .where(Account.status == "prospect")
     )
+    if fit_tier_expanded is not None:
+        count_stmt = count_stmt.where(Account.fit_tier.in_(fit_tier_expanded))
+    if outreach_status_expanded is not None:
+        count_stmt = count_stmt.where(last_status_sq.c.last_status.in_(outreach_status_expanded))
+    if search is not None:
+        pattern = f"%{search}%"
+        count_stmt = count_stmt.where(
+            Account.name.ilike(pattern) | Account.domain.ilike(pattern)
+        )
+    count_result = await db.execute(count_stmt)
     total = count_result.scalar_one()
 
     items = []
