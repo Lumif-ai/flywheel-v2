@@ -1102,6 +1102,8 @@ class Account(Base):
             postgresql_where=text("next_action_due IS NOT NULL"),
         ),
         Index("idx_account_relationship_type", "relationship_type", postgresql_using="gin"),
+        Index("idx_account_relationship_status", "tenant_id", "relationship_status"),
+        Index("idx_account_pipeline_stage", "tenant_id", "pipeline_stage"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -1128,6 +1130,8 @@ class Account(Base):
     ai_summary_updated_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True), nullable=True
     )
+    relationship_status: Mapped[str] = mapped_column(Text, nullable=False)
+    pipeline_stage: Mapped[str] = mapped_column(Text, nullable=False)
     last_interaction_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )
