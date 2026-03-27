@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 57 of 57 (Relationship Surfaces)
-Plan: 1 of 5 in current phase
+Plan: 3 of 5 in current phase
 Status: In progress
-Last activity: 2026-03-27 — Phase 57 Plan 01 complete (data layer, sidebar, routes)
+Last activity: 2026-03-27 — Phase 57 Plan 03 complete (RelationshipDetail two-panel shell, RelationshipHeader)
 
-Progress: [█████████████████░░░] 85% (22/26 total plans complete across all milestones)
+Progress: [█████████████████░░░] 86% (23/27 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -58,6 +58,9 @@ Recent decisions affecting current work:
 - [57-01 execution]: ContactItem uses created_at (not last_contacted_at) — backend does not expose last_contacted_at; use for "Added X ago" display in PeopleTab
 - [57-01 execution]: signalByType helper reads from useSignals() data — avoids prop drilling signal counts through sidebar tree
 - [57-01 execution]: Placeholder RelationshipListPage/RelationshipDetail components registered in Plan 01 so routes work immediately — Plans 02/03 replace them
+- [57-03 execution]: TAB_CONFIG defined at module level outside component — single authoritative constant for tab sets per type; prevents recreation on every render
+- [57-03 execution]: fromType URL param is CRITICAL source of truth — never derive tab config or back-link from account.relationship_type (account may belong to multiple types)
+- [57-03 execution]: AI panel placeholder is dashed border div with comment "AskPanel slot — replaced in Plan 05"; tab content placeholders have "Coming soon..." and comment for Plan 04
 - [56-03 execution]: AG Grid getRowStyle used for stale/replied/graduating row styles — avoids Tailwind v4 CSS class conflicts
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
@@ -82,5 +85,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Completed 57-01-PLAN.md — data layer, sidebar RELATIONSHIPS section, 5 routes
+Stopped at: Completed 57-03-PLAN.md — RelationshipDetail two-panel shell, RelationshipHeader with avatar/badges/domain
 Resume file: None
