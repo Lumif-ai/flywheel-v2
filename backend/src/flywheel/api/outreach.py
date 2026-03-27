@@ -86,6 +86,10 @@ class PipelineItem(BaseModel):
     last_outreach_status: str | None
     days_since_last_outreach: int | None
     created_at: datetime.datetime
+    primary_contact_name: str | None = None
+    primary_contact_title: str | None = None
+    primary_contact_email: str | None = None
+    primary_contact_linkedin: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -342,6 +346,8 @@ async def update_outreach(
 async def get_pipeline(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=100),
+    fit_tier: str | None = Query(default=None),
+    outreach_status: str | None = Query(default=None),
     db: AsyncSession = Depends(get_tenant_db),
     user: TokenPayload = Depends(require_tenant),
 ) -> dict:
@@ -385,17 +391,42 @@ async def get_pipeline(
         .subquery("last_status_sq")
     )
 
-    # Main query: prospects only, left join outreach stats
+    # Primary contact subquery (first contact per account, avoids N+1)
+    primary_contact_sq = (
+        select(
+            AccountContact.account_id,
+            AccountContact.name.label("contact_name"),
+            AccountContact.title.label("contact_title"),
+            AccountContact.email.label("contact_email"),
+            AccountContact.linkedin_url.label("contact_linkedin"),
+        )
+        .distinct(AccountContact.account_id)
+        .order_by(AccountContact.account_id, AccountContact.created_at.asc())
+        .subquery("primary_contact")
+    )
+
+    # Main query: prospects only, left join outreach stats and primary contact
+    filters = [Account.status == "prospect"]
+    if fit_tier is not None:
+        filters.append(Account.fit_tier == fit_tier)
+    if outreach_status is not None:
+        filters.append(last_status_sq.c.last_status == outreach_status)
+
     stmt = (
         select(
             Account,
             func.coalesce(outreach_stats.c.outreach_count, 0).label("outreach_count"),
             outreach_stats.c.last_sent_at.label("last_sent_at"),
             last_status_sq.c.last_status.label("last_outreach_status"),
+            primary_contact_sq.c.contact_name.label("primary_contact_name"),
+            primary_contact_sq.c.contact_title.label("primary_contact_title"),
+            primary_contact_sq.c.contact_email.label("primary_contact_email"),
+            primary_contact_sq.c.contact_linkedin.label("primary_contact_linkedin"),
         )
         .outerjoin(outreach_stats, outreach_stats.c.account_id == Account.id)
         .outerjoin(last_status_sq, last_status_sq.c.account_id == Account.id)
-        .where(Account.status == "prospect")
+        .outerjoin(primary_contact_sq, primary_contact_sq.c.account_id == Account.id)
+        .where(*filters)
         .order_by(Account.fit_score.desc().nulls_last())
         .offset(offset)
         .limit(limit)
@@ -404,9 +435,12 @@ async def get_pipeline(
     result = await db.execute(stmt)
     rows = result.all()
 
-    # Count total prospects
+    # Count total prospects (with filters applied)
+    count_filters = [Account.status == "prospect"]
+    if fit_tier is not None:
+        count_filters.append(Account.fit_tier == fit_tier)
     count_result = await db.execute(
-        select(func.count()).select_from(Account).where(Account.status == "prospect")
+        select(func.count()).select_from(Account).where(*count_filters)
     )
     total = count_result.scalar_one()
 
@@ -416,6 +450,10 @@ async def get_pipeline(
         outreach_count = row[1] or 0
         last_sent_at = row[2]
         last_outreach_status = row[3]
+        primary_contact_name = row[4]
+        primary_contact_title = row[5]
+        primary_contact_email = row[6]
+        primary_contact_linkedin = row[7]
 
         # Compute days_since_last_outreach
         if last_sent_at is not None:
@@ -440,6 +478,10 @@ async def get_pipeline(
                 last_outreach_status=last_outreach_status,
                 days_since_last_outreach=days_since,
                 created_at=account.created_at,
+                primary_contact_name=primary_contact_name,
+                primary_contact_title=primary_contact_title,
+                primary_contact_email=primary_contact_email,
+                primary_contact_linkedin=primary_contact_linkedin,
             )
         )
 

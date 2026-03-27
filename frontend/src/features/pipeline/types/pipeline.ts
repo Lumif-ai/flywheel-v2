@@ -10,6 +10,10 @@ export interface PipelineItem {
   last_outreach_status: string | null
   days_since_last_outreach: number | null
   created_at: string
+  primary_contact_name: string | null
+  primary_contact_title: string | null
+  primary_contact_email: string | null
+  primary_contact_linkedin: string | null
 }
 
 export interface PipelineResponse {
@@ -24,4 +28,5 @@ export interface PipelineParams {
   limit?: number
   fit_tier?: string
   outreach_status?: string
+  search?: string
 }
