@@ -6,6 +6,10 @@ RAPI-01: GET  /relationships/              -- list graduated accounts (partition
 RAPI-02: GET  /relationships/{id}          -- detail with contacts, timeline, cached ai_summary
 RAPI-03: PATCH /relationships/{id}/type   -- update relationship_type (validated)
 RAPI-04: POST  /relationships/{id}/graduate -- graduate a prospect into relationships
+RAPI-05: POST  /relationships/{id}/notes   -- create a ContextEntry note linked to account
+RAPI-06: POST  /relationships/{id}/files   -- upload file to Supabase Storage and log ContextEntry
+RAPI-07: POST  /relationships/{id}/synthesize -- trigger AI summary generation (rate-limited)
+RAPI-08: POST  /relationships/{id}/ask    -- Q&A with source attribution from context entries
 
 PARTITION CONTRACT: Every query targeting graduated accounts MUST include
 `Account.graduated_at.isnot(None)`. The only exception is POST /graduate,
@@ -13,14 +17,19 @@ which intentionally targets un-graduated accounts.
 
 AI SUMMARY CONTRACT: GET endpoints return `ai_summary` from the column as-is
 (may be NULL). LLM synthesis is NEVER triggered on read.
+
+RATE-LIMIT CONTRACT: POST /synthesize enforces a 5-minute rate limit via
+`ai_summary_updated_at`. enforce_rate_limit() is ALWAYS called BEFORE generate().
 """
 
 from __future__ import annotations
 
 import datetime
+import os
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+import httpx
+from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +38,7 @@ from sqlalchemy.orm import selectinload
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Account, AccountContact, ContextEntry
+from flywheel.services.synthesis_engine import SynthesisEngine
 
 # No prefix — endpoints use full path segments directly
 router = APIRouter(tags=["relationships"])
@@ -113,6 +123,62 @@ class GraduateRequest(BaseModel):
             allowed_str = ", ".join(sorted(ALLOWED_TYPES))
             raise ValueError(f"Unknown type: {unknown[0]}. Allowed: {allowed_str}")
         return v
+
+
+class CreateNoteRequest(BaseModel):
+    content: str = ""
+    source: str = "manual:note"
+
+    @field_validator("content")
+    @classmethod
+    def validate_content(cls, v: str) -> str:
+        if not v or len(v.strip()) < 1:
+            raise ValueError("content must not be empty")
+        if len(v) > 5000:
+            raise ValueError("content must be 5000 characters or fewer")
+        return v
+
+
+class NoteResponse(BaseModel):
+    id: UUID
+    content: str
+    source: str
+    date: datetime.date
+    created_at: datetime.datetime
+
+
+class FileUploadResponse(BaseModel):
+    id: UUID
+    file_name: str
+    storage_path: str
+    source: str
+    date: datetime.date
+    created_at: datetime.datetime
+
+
+class SynthesizeResponse(BaseModel):
+    ai_summary: str | None
+    ai_summary_updated_at: datetime.datetime | None
+    insufficient_context: bool = False
+
+
+class AskRequest(BaseModel):
+    question: str
+
+    @field_validator("question")
+    @classmethod
+    def validate_question(cls, v: str) -> str:
+        if len(v.strip()) < 5:
+            raise ValueError("question must be at least 5 characters")
+        if len(v) > 1000:
+            raise ValueError("question must be 1000 characters or fewer")
+        return v
+
+
+class AskResponse(BaseModel):
+    answer: str
+    sources: list[dict]
+    insufficient_context: bool
 
 
 # ---------------------------------------------------------------------------
@@ -430,3 +496,233 @@ async def graduate_to_relationship(
         "graduated_at": account.graduated_at,
         "updated_at": account.updated_at,
     }
+
+
+# ---------------------------------------------------------------------------
+# RAPI-05: Add a note to a relationship
+# ---------------------------------------------------------------------------
+
+
+@router.post("/relationships/{id}/notes", status_code=status.HTTP_201_CREATED)
+async def create_relationship_note(
+    id: UUID,
+    body: CreateNoteRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+) -> NoteResponse:
+    """Create a ContextEntry note linked to a graduated account.
+
+    PARTITION CONTRACT: graduated_at IS NOT NULL enforced.
+    """
+    today = datetime.date.today()
+
+    # Fetch account — PARTITION PREDICATE enforced
+    result = await db.execute(
+        select(Account).where(
+            Account.id == id,
+            Account.tenant_id == user.tenant_id,
+            Account.graduated_at.isnot(None),
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Relationship not found",
+        )
+
+    entry = ContextEntry(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        file_name="relationship-notes",
+        source=body.source,
+        content=body.content,
+        date=today,
+        account_id=account.id,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+
+    return NoteResponse(
+        id=entry.id,
+        content=entry.content,
+        source=entry.source,
+        date=entry.date,
+        created_at=entry.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# RAPI-06: Upload a file to a relationship
+# ---------------------------------------------------------------------------
+
+# Maximum upload size: 10 MB
+_MAX_FILE_SIZE = 10 * 1024 * 1024  # bytes
+_STORAGE_BUCKET = "documents"
+
+
+@router.post("/relationships/{id}/files", status_code=status.HTTP_201_CREATED)
+async def upload_relationship_file(
+    id: UUID,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+) -> FileUploadResponse:
+    """Upload a file to Supabase Storage and log a ContextEntry for a graduated account.
+
+    PARTITION CONTRACT: graduated_at IS NOT NULL enforced.
+    File size limit: 10 MB.
+    """
+    today = datetime.date.today()
+
+    # Fetch account — PARTITION PREDICATE enforced
+    result = await db.execute(
+        select(Account).where(
+            Account.id == id,
+            Account.tenant_id == user.tenant_id,
+            Account.graduated_at.isnot(None),
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Relationship not found",
+        )
+
+    # Read file content and validate size
+    content = await file.read()
+    if len(content) > _MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"File size {len(content)} bytes exceeds 10 MB limit",
+        )
+
+    # Upload to Supabase Storage using httpx (matches existing document_storage.py pattern)
+    supabase_url = os.environ["SUPABASE_URL"]
+    service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    storage_path = f"relationships/{user.tenant_id}/{account.id}/{file.filename}"
+    upload_url = (
+        f"{supabase_url}/storage/v1/object/{_STORAGE_BUCKET}/{storage_path}"
+    )
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            upload_url,
+            content=content,
+            headers={
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": file.content_type or "application/octet-stream",
+            },
+        )
+        resp.raise_for_status()
+
+    # Log ContextEntry for audit trail and timeline visibility
+    entry = ContextEntry(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        file_name=file.filename,
+        source="manual:file-upload",
+        content=f"File uploaded: {file.filename}",
+        detail=storage_path,
+        date=today,
+        account_id=account.id,
+    )
+    db.add(entry)
+    await db.commit()
+    await db.refresh(entry)
+
+    return FileUploadResponse(
+        id=entry.id,
+        file_name=file.filename,
+        storage_path=storage_path,
+        source=entry.source,
+        date=entry.date,
+        created_at=entry.created_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# RAPI-07: AI synthesis trigger (rate-limited)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/relationships/{id}/synthesize", status_code=status.HTTP_200_OK)
+async def synthesize_relationship(
+    id: UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+) -> SynthesizeResponse:
+    """Trigger AI summary generation for a graduated account.
+
+    RATE-LIMIT CONTRACT: enforce_rate_limit() is called BEFORE generate().
+    This means the 429 is returned before any LLM call — even when ai_summary is NULL.
+
+    PARTITION CONTRACT: graduated_at IS NOT NULL enforced.
+    """
+    # Fetch account — PARTITION PREDICATE enforced
+    result = await db.execute(
+        select(Account).where(
+            Account.id == id,
+            Account.tenant_id == user.tenant_id,
+            Account.graduated_at.isnot(None),
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Relationship not found",
+        )
+
+    # CRITICAL ORDER: rate limit check FIRST, generate SECOND
+    # This ensures 429 is returned before any LLM call — see rate-limit contract above.
+    await SynthesisEngine.enforce_rate_limit(account)
+    summary = await SynthesisEngine.generate(db, account)
+
+    await db.commit()
+    await db.refresh(account)
+
+    return SynthesizeResponse(
+        ai_summary=account.ai_summary,
+        ai_summary_updated_at=account.ai_summary_updated_at,
+        insufficient_context=(summary is None),
+    )
+
+
+# ---------------------------------------------------------------------------
+# RAPI-08: Relationship Q&A with source attribution
+# ---------------------------------------------------------------------------
+
+
+@router.post("/relationships/{id}/ask", status_code=status.HTTP_200_OK)
+async def ask_relationship(
+    id: UUID,
+    body: AskRequest,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+) -> AskResponse:
+    """Answer a question about a relationship using context entries.
+
+    No rate limit — ask is stateless (does not write to the account).
+    Returns graceful "insufficient context" response when fewer than 3 entries exist.
+
+    PARTITION CONTRACT: graduated_at IS NOT NULL enforced.
+    """
+    # Fetch account — PARTITION PREDICATE enforced
+    result = await db.execute(
+        select(Account).where(
+            Account.id == id,
+            Account.tenant_id == user.tenant_id,
+            Account.graduated_at.isnot(None),
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Relationship not found",
+        )
+
+    result_dict = await SynthesisEngine.ask(db, account, body.question)
+    return AskResponse(**result_dict)
