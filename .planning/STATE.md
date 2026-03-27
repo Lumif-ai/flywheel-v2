@@ -64,6 +64,10 @@ Recent decisions affecting current work:
 - [57-03 execution]: TAB_CONFIG defined at module level outside component — single authoritative constant for tab sets per type; prevents recreation on every render
 - [57-03 execution]: fromType URL param is CRITICAL source of truth — never derive tab config or back-link from account.relationship_type (account may belong to multiple types)
 - [57-03 execution]: AI panel placeholder is dashed border div with comment "AskPanel slot — replaced in Plan 05"; tab content placeholders have "Coming soon..." and comment for Plan 04
+- [57-04 execution]: lookupValue does two passes (direct key match then case-insensitive scan) — JSONB intel keys may use any casing depending on how notes were processed
+- [57-04 execution]: CommitmentsTab always renders two-column structure even when empty — column headers provide UI affordance before data exists
+- [57-04 execution]: RelationshipDetail uses explicit TabsContent per tab key (not map) — ensures Intelligence content never renders for advisor/investor types
+- [57-04 execution]: ACTION_CONFIG Record<RelationshipType, ActionConfig[]> drives type-specific action bar — single source of truth for quick actions per relationship type
 - [57-05 execution]: lastAnswer is ephemeral (most recent Q&A only, lost on unmount) — stateless per locked design decision from research
 - [57-05 execution]: onSuccess/onError callbacks passed directly into mutate() call (not on hook definition) so mode resets correctly per submission
 - [57-05 execution]: Auto-resize textarea capped at 6 rows via scrollHeight comparison in useEffect
