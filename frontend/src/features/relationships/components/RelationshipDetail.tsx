@@ -5,6 +5,7 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { spacing, registers } from '@/lib/design-tokens'
 import { useRelationshipDetail } from '../hooks/useRelationshipDetail'
 import { RelationshipHeader } from './RelationshipHeader'
+import { AskPanel } from './AskPanel'
 import type { RelationshipType } from '../types/relationships'
 
 // TAB_CONFIG drives all tab rendering — single source of truth
@@ -165,15 +166,13 @@ export function RelationshipDetail() {
 
         {/* Two-panel layout */}
         <div className="flex flex-col lg:flex-row gap-6 mt-6">
-          {/* Left panel: 320px AI slot — Plan 05 replaces with AskPanel */}
-          {/* AskPanel slot — replaced in Plan 05 */}
+          {/* Left panel: 320px AI context panel */}
           <div className="w-full lg:w-[320px] lg:shrink-0">
-            <div
-              className="rounded-xl border border-dashed border-border flex items-center justify-center text-sm text-muted-foreground"
-              style={{ minHeight: '320px' }}
-            >
-              AI Panel
-            </div>
+            <AskPanel
+              accountId={account.id}
+              aiSummary={account.ai_summary}
+              aiSummaryUpdatedAt={account.ai_summary_updated_at}
+            />
           </div>
 
           {/* Right panel: header + type-driven tabs */}
