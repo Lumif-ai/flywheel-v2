@@ -3,7 +3,7 @@
 Endpoints (no prefix on router — paths are explicit):
 
 RAPI-01: GET  /relationships/              -- list graduated accounts (partition predicate enforced)
-RAPI-02: GET  /relationships/{id}          -- detail with contacts, timeline, cached ai_summary
+RAPI-02: GET  /relationships/{id}          -- detail with contacts, timeline, cached ai_summary, intel
 RAPI-03: PATCH /relationships/{id}/type   -- update relationship_type (validated)
 RAPI-04: POST  /relationships/{id}/graduate -- graduate a prospect into relationships
 RAPI-05: POST  /relationships/{id}/notes   -- create a ContextEntry note linked to account
@@ -26,6 +26,7 @@ from __future__ import annotations
 
 import datetime
 import os
+import re
 from uuid import UUID
 
 import httpx
@@ -85,6 +86,8 @@ class TimelineItem(BaseModel):
     content: str
     date: datetime.date
     created_at: datetime.datetime
+    direction: str | None = None      # "inbound", "outbound", "internal", "bidirectional"
+    contact_name: str | None = None   # derived from content or source context
 
 
 class RelationshipDetail(RelationshipListItem):
@@ -92,6 +95,7 @@ class RelationshipDetail(RelationshipListItem):
     contacts: list[ContactItem]
     recent_timeline: list[TimelineItem]
     commitments: list  # reserved for future use
+    intel: dict  # JSONB intelligence data
 
 
 class UpdateTypeRequest(BaseModel):
@@ -184,6 +188,46 @@ class AskResponse(BaseModel):
 # ---------------------------------------------------------------------------
 # Serialization helpers
 # ---------------------------------------------------------------------------
+
+_CONTACT_NAME_PATTERN = re.compile(
+    r'^(?:Email from|Meeting with|Call with)\s+(.+?)(?:\s*[-:])',
+    re.IGNORECASE,
+)
+
+
+def _derive_direction(source: str) -> str | None:
+    """Derive interaction direction from ContextEntry.source."""
+    if source.startswith("email:inbound") or "reply" in source:
+        return "inbound"
+    if source.startswith("email:outbound") or source.startswith("email:sent"):
+        return "outbound"
+    if source == "meeting" or source.startswith("meeting:"):
+        return "bidirectional"
+    if (
+        source == "manual:note"
+        or source.startswith("manual:")
+    ):
+        return "internal"
+    return None
+
+
+def _extract_contact_name(content: str) -> str | None:
+    """Extract contact name from common content patterns."""
+    match = _CONTACT_NAME_PATTERN.match(content)
+    return match.group(1).strip() if match else None
+
+
+def _serialize_timeline_item(entry: ContextEntry) -> dict:
+    """Serialize a ContextEntry to a timeline item dict with derived fields."""
+    return {
+        "id": entry.id,
+        "source": entry.source,
+        "content": entry.content,
+        "date": entry.date,
+        "created_at": entry.created_at,
+        "direction": _derive_direction(entry.source),
+        "contact_name": _extract_contact_name(entry.content),
+    }
 
 
 def _account_to_list_item(
@@ -358,17 +402,8 @@ async def get_relationship(
         for c in account.contacts
     ]
 
-    # Serialize timeline
-    recent_timeline = [
-        {
-            "id": e.id,
-            "source": e.source,
-            "content": e.content,
-            "date": e.date,
-            "created_at": e.created_at,
-        }
-        for e in timeline_entries
-    ]
+    # Serialize timeline with derived direction and contact_name fields
+    recent_timeline = [_serialize_timeline_item(e) for e in timeline_entries]
 
     return {
         **_account_to_list_item(account, signal_count, primary_contact_name),
@@ -376,6 +411,7 @@ async def get_relationship(
         "contacts": contacts,
         "recent_timeline": recent_timeline,
         "commitments": [],
+        "intel": account.intel or {},
     }
 
 

@@ -1,15 +1,17 @@
 import { useState } from 'react'
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Users, Briefcase, DollarSign } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
+import { useSignals } from '@/features/relationships/hooks/useSignals'
 import { colors, typography } from '@/lib/design-tokens'
 import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
+  SidebarGroupLabel,
   SidebarMenu,
   SidebarMenuItem,
   SidebarMenuButton,
@@ -27,6 +29,10 @@ export function AppSidebar() {
   const user = useAuthStore((s) => s.user)
   const [oauthLoading, setOauthLoading] = useState<'google' | 'microsoft' | null>(null)
   const { signInWithProvider } = useOAuthSignIn()
+  const { data: signals } = useSignals()
+
+  const signalByType = (type: string) =>
+    signals?.types.find((t) => t.type === type)?.total_signals ?? 0
 
   // Derive display name and initials from user metadata
   const initials = user?.display_name
@@ -84,6 +90,7 @@ export function AppSidebar() {
           </div>
         )}
 
+        {/* General navigation */}
         <SidebarGroup>
           <SidebarGroupContent>
             <SidebarMenu>
@@ -119,6 +126,17 @@ export function AppSidebar() {
               </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton
+                  isActive={location.pathname.startsWith('/email')}
+                  render={<NavLink to="/email" />}
+                  tooltip="Email"
+                >
+                  <Mail className="size-4" />
+                  <span>Email</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              {/* Accounts kept for backward compatibility */}
+              <SidebarMenuItem>
+                <SidebarMenuButton
                   isActive={location.pathname.startsWith('/accounts')}
                   render={<NavLink to="/accounts" />}
                   tooltip="Accounts"
@@ -127,6 +145,64 @@ export function AppSidebar() {
                   <span>Accounts</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Relationships section */}
+        <SidebarGroup>
+          <SidebarGroupLabel
+            style={{
+              fontSize: '11px',
+              fontWeight: 600,
+              textTransform: 'uppercase',
+              letterSpacing: '0.06em',
+              color: 'var(--secondary-text)',
+            }}
+          >
+            Relationships
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {[
+                { label: 'Prospects', type: 'prospect', path: '/relationships/prospects', icon: <Users className="size-4" /> },
+                { label: 'Customers', type: 'customer', path: '/relationships/customers', icon: <TrendingUp className="size-4" /> },
+                { label: 'Advisors', type: 'advisor', path: '/relationships/advisors', icon: <Briefcase className="size-4" /> },
+                { label: 'Investors', type: 'investor', path: '/relationships/investors', icon: <DollarSign className="size-4" /> },
+              ].map(({ label, type, path, icon }) => {
+                const badge = signalByType(type)
+                return (
+                  <SidebarMenuItem key={type}>
+                    <SidebarMenuButton
+                      isActive={location.pathname.startsWith(path)}
+                      render={<NavLink to={path} />}
+                      tooltip={label}
+                    >
+                      {icon}
+                      <span>{label}</span>
+                      {badge > 0 && (
+                        <span
+                          className="badge-translucent ml-auto"
+                          style={{
+                            background: 'rgba(233,77,53,0.1)',
+                            color: 'var(--brand-coral)',
+                          }}
+                        >
+                          {badge}
+                        </span>
+                      )}
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                )
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        {/* Pipeline — positioned below Relationships */}
+        <SidebarGroup>
+          <SidebarGroupContent>
+            <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={location.pathname === '/pipeline'}
@@ -135,16 +211,6 @@ export function AppSidebar() {
                 >
                   <TrendingUp className="size-4" />
                   <span>Pipeline</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname.startsWith('/email')}
-                  render={<NavLink to="/email" />}
-                  tooltip="Email"
-                >
-                  <Mail className="size-4" />
-                  <span>Email</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>

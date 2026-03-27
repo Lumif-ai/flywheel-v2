@@ -43,6 +43,14 @@ const PipelinePage = lazy(() =>
   import('@/features/pipeline/components/PipelinePage').then((m) => ({ default: m.PipelinePage }))
 )
 
+// Lazy-loaded relationship pages
+const RelationshipListPage = lazy(() =>
+  import('@/features/relationships/components/RelationshipListPage').then((m) => ({ default: m.RelationshipListPage }))
+)
+const RelationshipDetail = lazy(() =>
+  import('@/features/relationships/components/RelationshipDetail').then((m) => ({ default: m.RelationshipDetail }))
+)
+
 // Lazy-loaded public pages (infrequently accessed)
 const TermsPage = lazy(() =>
   import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage }))
@@ -69,6 +77,11 @@ export function AppRoutes() {
       <Route path="/invite" element={<InviteAcceptPage />} />
       <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />
       <Route path="/pipeline" element={<Suspense fallback={null}><PipelinePage /></Suspense>} />
+      <Route path="/relationships/prospects" element={<Suspense fallback={null}><RelationshipListPage type="prospect" /></Suspense>} />
+      <Route path="/relationships/customers" element={<Suspense fallback={null}><RelationshipListPage type="customer" /></Suspense>} />
+      <Route path="/relationships/advisors" element={<Suspense fallback={null}><RelationshipListPage type="advisor" /></Suspense>} />
+      <Route path="/relationships/investors" element={<Suspense fallback={null}><RelationshipListPage type="investor" /></Suspense>} />
+      <Route path="/relationships/:id" element={<Suspense fallback={null}><RelationshipDetail /></Suspense>} />
       <Route path="/accounts" element={<Suspense fallback={null}><AccountsPage /></Suspense>} />
       <Route path="/accounts/:id" element={<Suspense fallback={null}><AccountDetailPage /></Suspense>} />
       <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />
