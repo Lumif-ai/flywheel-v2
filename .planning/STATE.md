@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 56 of 57 (Pipeline Grid)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-03-27 — Phase 56 Plan 02 complete (AG Grid pipeline page, 9 columns, cell renderers, localStorage persistence)
+Plan: 3 of 3 in current phase
+Status: Phase complete
+Last activity: 2026-03-27 — Phase 56 Plan 03 complete (filter bar, view tabs, graduation modal, stale/reply row styling, pagination)
 
-Progress: [██████████████░░░░░░] 75% (20/26 total plans complete across all milestones)
+Progress: [███████████████░░░░░] 80% (21/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -51,6 +51,11 @@ Recent decisions affecting current work:
 - [56-02 execution]: GraduateButton reads onGraduate from AG Grid context prop (props.context.onGraduate) — decoupled from modal logic; Plan 03 replaces console.log stub
 - [56-02 execution]: localStorage key format established: flywheel:{page}:{stateType} (e.g., flywheel:pipeline:columnState)
 - [56-02 execution]: Pipeline endpoint now accepts fit_tier and outreach_status query params — filters applied at SQL level for accurate total count
+- [56-03 execution]: Comma-separated array param serialization — frontend sends fit_tier=Excellent,Strong; backend _expand() splits on commas; supports both repeated params and comma-separated
+- [56-03 execution]: Stale tab (>14 days) uses client-side filter on already-loaded data — days_since_last_outreach already in each row, no extra server round trip
+- [56-03 execution]: Entity level auto-detection in GraduationModal — only advisor/investor selected => person, otherwise company
+- [56-03 execution]: Count query LEFT JOINs last_status_sq subquery so outreach_status filter applies correctly and pagination totals stay accurate
+- [56-03 execution]: AG Grid getRowStyle used for stale/replied/graduating row styles — avoids Tailwind v4 CSS class conflicts
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
 - [54-02 execution]: Two-phase zero-downtime rename pattern: add nullable → bulk UPDATE → set NOT NULL → Phase B (drop) deferred until post-stable-deploy
@@ -74,5 +79,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 56 Plan 02 complete — ready for Phase 56 Plan 03 (graduation modal + filter bar)
+Stopped at: Phase 56 Plan 03 complete — Phase 56 fully done, ready for Phase 57 (RelationshipDetail)
 Resume file: None
