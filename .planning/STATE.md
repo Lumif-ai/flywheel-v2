@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 56 of 57 (Pipeline Grid)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-27 — Phase 56 Plan 01 complete (design system tokens, avatar xl, shimmer skeleton, empty state)
+Last activity: 2026-03-27 — Phase 56 Plan 02 complete (AG Grid pipeline page, 9 columns, cell renderers, localStorage persistence)
 
-Progress: [█████████████░░░░░░░] 71% (19/26 total plans complete across all milestones)
+Progress: [██████████████░░░░░░] 75% (20/26 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -46,6 +46,11 @@ Recent decisions affecting current work:
 - [v2.1 roadmap]: DS-01 through DS-04 placed in Phase 56 (first frontend phase) so Phase 57 inherits tokens without rework
 - [56-01 execution]: badge-translucent provides shared pill shape only; individual badge rgba colors applied via inline styles to avoid combinatorial CSS class explosion
 - [56-01 execution]: Register pattern: pipeline=--page-bg (cool white), relationship=--brand-tint-warm, personal=--brand-tint-warmest — drives page background switching
+- [56-02 execution]: AG Grid theming uses themeQuartz.withParams() only — no CSS imports from ag-grid-community/styles/ (prevents Tailwind v4 conflict)
+- [56-02 execution]: Cell renderers always wrap content in flex items-center h-full div for proper vertical centering in 56px rows
+- [56-02 execution]: GraduateButton reads onGraduate from AG Grid context prop (props.context.onGraduate) — decoupled from modal logic; Plan 03 replaces console.log stub
+- [56-02 execution]: localStorage key format established: flywheel:{page}:{stateType} (e.g., flywheel:pipeline:columnState)
+- [56-02 execution]: Pipeline endpoint now accepts fit_tier and outreach_status query params — filters applied at SQL level for accurate total count
 - [54-01 execution]: Alembic revision IDs must be <=32 chars — alembic_version.version_num is varchar(32); use short IDs like 028_acct_ext not full descriptive names
 - [54-01 execution]: ARRAY(Text) GIN indexes: always co-locate in same migration as column and replicate in ORM __table_args__
 - [54-02 execution]: Two-phase zero-downtime rename pattern: add nullable → bulk UPDATE → set NOT NULL → Phase B (drop) deferred until post-stable-deploy
@@ -69,5 +74,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-27
-Stopped at: Phase 56 Plan 01 complete — ready for Phase 56 Plan 02 (AG Grid pipeline page)
+Stopped at: Phase 56 Plan 02 complete — ready for Phase 56 Plan 03 (graduation modal + filter bar)
 Resume file: None
