@@ -25,7 +25,7 @@
   3. `gmail_read.py` can list message headers, fetch body on-demand, and fetch sent messages without touching `google_gmail.py`
   4. No email content appears in any application log at any level (verifiable by triggering a parse error and inspecting output)
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 01-01-PLAN.md — DB models and Alembic migration (emails, email_scores, email_drafts, email_voice_profiles with RLS) ✓
@@ -48,7 +48,7 @@ Plans:
   4. With 5 simultaneous connected users, sync completes without timeout errors (asyncio.gather batch behavior visible in logs)
   5. Email bodies are fetched on-demand (visible in `gmail_read.py` call logs) and not stored in the `emails` table
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 02-01-PLAN.md — email_sync_loop() background worker with historyId incremental sync and 404 full-sync fallback ✓
@@ -71,7 +71,7 @@ Plans:
   4. Thread-level priority reflects the highest unhandled message score in the thread, not a simple average
   5. Re-syncing a thread when a new message arrives produces an updated EmailScore for that message
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 03-01-PLAN.md — SKILL.md definition + email_scorer.py Python engine (scoring prompt, context lookups, EmailScore upsert) ✓
@@ -94,7 +94,7 @@ Plans:
   4. After draft is sent, `EmailDraft.draft_body` is nulled — the full body is not retained
   5. When Gmail API returns 401/403 during on-demand body fetch, the system falls back to snippet and surfaces a structured error (not a silent empty draft)
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 04-01-PLAN.md — email_drafter.py engine with voice injection, context assembly, on-demand body fetch, and SKILL.md ✓
@@ -140,7 +140,7 @@ Plans:
   2. When a new message arrives in an existing thread, that thread's priority score updates to reflect the latest message (not locked to original score)
   3. After dismissing several drafts for a sender category, subsequent emails from similar senders score lower (observable over 10+ interactions)
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 06-01-PLAN.md — Voice updater engine (diff analysis + Haiku profile merge), dismiss tracker engine, approve endpoint wiring, scorer dismiss injection ✓
@@ -222,7 +222,7 @@ Plans:
   4. Phase A of status rename complete: `relationship_status` and `pipeline_stage` columns exist alongside old `status` column, data copied — APIs still read `status` without error
   5. `ai_summary` and `ai_summary_updated_at` columns exist on accounts — detail endpoint returns null summary without triggering any LLM call
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [x] 54-01-PLAN.md — Alembic migrations: relationship_type array + GIN index (DM-01), entity_level (DM-02), ai_summary fields (DM-04), ORM model updates ✓
@@ -272,9 +272,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 56-01-PLAN.md — Design system: token updates (shadows, badges, avatar component, status dots, transitions), skeleton shimmer component, empty state component; emotional register CSS for Pipeline vs Relationships
-- [ ] 56-02-PLAN.md — AG Grid pipeline page: column definitions (Company+avatar, Contact+title, Email, LinkedIn, Fit Tier badge, Outreach Status dot, Last Action, Days Stale), column resize/reorder/visibility, localStorage state persistence
-- [ ] 56-03-PLAN.md — Filter bar + saved view tabs + pagination (25/50/100), stale row tint, reply float-to-top, graduation modal with type selection + slide-out animation + sidebar badge increment
+- [x] 56-01-PLAN.md — Design system: token updates (shadows, badges, avatar component, status dots, transitions), skeleton shimmer component, empty state component; emotional register CSS for Pipeline vs Relationships ✓
+- [x] 56-02-PLAN.md — AG Grid pipeline page: column definitions (Company+avatar, Contact+title, Email, LinkedIn, Fit Tier badge, Outreach Status dot, Last Action, Days Stale), column resize/reorder/visibility, localStorage state persistence ✓
+- [x] 56-03-PLAN.md — Filter bar + saved view tabs + pagination (25/50/100), stale row tint, reply float-to-top, graduation modal with type selection + slide-out animation + sidebar badge increment ✓
 
 ---
 
@@ -293,7 +293,7 @@ Plans:
   4. Detail page tab set is type-driven: Prospects and Customers show an Intelligence tab with labeled data points (Pain, Budget, Competition, Champion, Blocker, Fit Reasoning); Advisors and Investors do not show this tab
   5. Commitments tab shows two-column layout (What You Owe / What They Owe) with overdue entries highlighted; Timeline tab shows annotated entries with icon, direction, contact, and time-ago; People tab shows contact cards with 48px avatars, role badges, and last-contacted date
 
-**Plans:** 2 plans
+**Plans:** 5 plans
 
 Plans:
 - [ ] 57-01-PLAN.md — Sidebar redesign: RELATIONSHIPS section header, four type links with badge counts (React Query from signals endpoint), Pipeline repositioned below; query key factory (queryKeys.ts) for cross-surface invalidation
@@ -325,7 +325,7 @@ Plans:
 | 53. Frontend | v2.0 | 3/3 | ✓ Complete | 2026-03-27 |
 | 54. Data Model Foundation | v2.1 | 2/2 | ✓ Complete | 2026-03-27 |
 | 55. Relationships and Signals APIs | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
-| 56. Pipeline Grid | v2.1 | 0/3 | Not started | — |
+| 56. Pipeline Grid | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
 | 57. Relationship Surfaces | v2.1 | 0/5 | Not started | — |
 
 ---
