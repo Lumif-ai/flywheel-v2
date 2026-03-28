@@ -10,6 +10,7 @@ _execute_meeting_processor() 7-stage pipeline:
 - auto_link_meeting_to_account() — Match attendee domains to existing accounts
 - auto_create_prospect() — Auto-create prospect account for unknown external domains
 - upsert_account_contacts() — Upsert attendees as AccountContact rows
+- apply_post_classification_rules() — Post-classification skip check (MPP-05 rules)
 
 Important: this is the WEB implementation (async, ORM-based).
 Do NOT import from engines/meeting_processor.py (CLI, sync, storage_backend).
@@ -497,6 +498,69 @@ async def write_context_entries(
         written, meeting_slug, tenant_id,
     )
     return written
+
+
+# ---------------------------------------------------------------------------
+# Post-Classification Processing Rules (MPP-05)
+# ---------------------------------------------------------------------------
+
+
+def apply_post_classification_rules(
+    meeting_type: str,
+    external_id: str,
+    attendees: list[dict],
+    processing_rules: dict,
+    tenant_domain: str | None = None,
+) -> str:
+    """Apply post-classification processing rules to determine if a meeting should be skipped.
+
+    Implements all 4 MPP-05 rule types. Returns "skipped" if any rule matches,
+    "pending" if the meeting should continue processing.
+
+    Rules checked (from Integration.settings["processing_rules"]):
+    1. skip_meetings (manually_skipped): specific external_ids the user has excluded
+    2. skip_internal: meetings with no external attendees (default: ON)
+    3. skip_domains: meetings where all attendee domains are in the skip list
+    4. skip_types (skip_meeting_types): meetings of a specific type
+
+    This is a pure function — no DB access, no async needed.
+    """
+    if not processing_rules:
+        return "pending"
+
+    # Rule 1: skip_meetings (manually skipped by external_id)
+    manually_skipped = processing_rules.get("manually_skipped", [])
+    if external_id and external_id in manually_skipped:
+        return "skipped"
+
+    # Rule 2: skip_internal (default ON per spec)
+    # Skip meetings where no attendees have is_external=True
+    if processing_rules.get("skip_internal", True):
+        has_external = any(a.get("is_external", False) for a in (attendees or []))
+        if not has_external:
+            return "skipped"
+
+    # Rule 3: skip_domains
+    # Skip if all attendee domains are within the skip list (plus optional tenant domain)
+    skip_domains = set(processing_rules.get("skip_domains", []))
+    if skip_domains:
+        allowed_domains = skip_domains | ({tenant_domain} if tenant_domain else set())
+        domains: set[str] = set()
+        for a in (attendees or []):
+            email = (a.get("email") or "").strip()
+            if "@" in email:
+                domain = email.split("@")[-1].lower()
+                if domain:
+                    domains.add(domain)
+        if domains and domains.issubset(allowed_domains):
+            return "skipped"
+
+    # Rule 4: skip_types (skip_meeting_types key per spec)
+    skip_meeting_types = processing_rules.get("skip_meeting_types", [])
+    if meeting_type in skip_meeting_types:
+        return "skipped"
+
+    return "pending"
 
 
 # ---------------------------------------------------------------------------

@@ -1374,8 +1374,9 @@ async def _execute_meeting_processor(
         _make_meeting_slug,
         auto_link_meeting_to_account,
         upsert_account_contacts,
+        apply_post_classification_rules,
     )
-    from flywheel.db.models import Integration, Meeting
+    from flywheel.db.models import Integration, Meeting, Tenant
     from flywheel.auth.encryption import decrypt_api_key
     from flywheel.services.granola_adapter import get_meeting_content
 
@@ -1504,6 +1505,72 @@ async def _execute_meeting_processor(
             api_key=api_key,
         )
         logger.info("Run %s: classified meeting %s as '%s'", run_id, meeting_id, meeting_type)
+
+        # ------------------------------------------------------------------
+        # Post-classification rules check (MPP-05)
+        # Runs between Stage 3 and Stage 4 — saves LLM credits on skip
+        # ------------------------------------------------------------------
+        async with factory() as sess:
+            await sess.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            post_integration = (await sess.execute(
+                select(Integration).where(
+                    Integration.tenant_id == tenant_id,
+                    Integration.provider == "granola",
+                )
+            )).scalar_one_or_none()
+            processing_rules = (
+                (post_integration.settings or {}).get("processing_rules", {})
+                if post_integration else {}
+            )
+            # Also load tenant domain for skip_domains rule
+            tenant_row = (await sess.execute(
+                select(Tenant).where(Tenant.id == tenant_id)
+            )).scalar_one_or_none()
+            tenant_domain = tenant_row.domain if tenant_row else None
+
+        skip_result = apply_post_classification_rules(
+            meeting_type=meeting_type,
+            external_id=external_id or "",
+            attendees=content.attendees or [],
+            processing_rules=processing_rules,
+            tenant_domain=tenant_domain,
+        )
+
+        if skip_result == "skipped":
+            logger.info(
+                "Run %s: post-classification rules skipped meeting %s (type=%s)",
+                run_id, meeting_id, meeting_type,
+            )
+            async with factory() as sess:
+                await sess.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                await sess.execute(
+                    update(Meeting)
+                    .where(Meeting.id == meeting_id)
+                    .values(
+                        processing_status="skipped",
+                        meeting_type=meeting_type,
+                    )
+                )
+                await sess.commit()
+
+            await _append_event_atomic(factory, run_id, {
+                "event": "stage",
+                "data": {
+                    "stage": "done",
+                    "message": f"Meeting skipped by processing rules (type={meeting_type}).",
+                },
+            })
+            return (
+                f"Skipped: {meeting_type} is in skip list",
+                {},
+                tool_calls,
+            )
 
         # ------------------------------------------------------------------
         # Stage 4: extracting

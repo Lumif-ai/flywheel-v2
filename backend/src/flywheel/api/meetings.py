@@ -1,8 +1,11 @@
 """Meetings endpoints.
 
 Endpoints:
-- POST /meetings/sync         -- pull meetings from Granola, dedup, insert new rows
-- POST /meetings/{id}/process -- trigger meeting intelligence processing pipeline
+- POST /meetings/sync                -- pull meetings from Granola, dedup, insert new rows
+- POST /meetings/process-pending     -- batch trigger processing for all pending meetings
+- GET  /meetings/                    -- paginated list of meetings (optional status filter)
+- GET  /meetings/{id}                -- detail view (owner-only for transcript_url/ai_summary)
+- POST /meetings/{id}/process        -- trigger meeting intelligence processing pipeline
 """
 
 from __future__ import annotations
@@ -11,14 +14,14 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.encryption import decrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Integration, Meeting, SkillRun
-from flywheel.services.granola_adapter import RawMeeting, list_meetings
+from flywheel.services.granola_adapter import RawMeeting, list_meetings as granola_list_meetings
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -118,7 +121,7 @@ async def sync_meetings(
     api_key = decrypt_api_key(integration.credentials_encrypted)
 
     # 3. Fetch meetings from Granola (incremental via last_synced_at cursor)
-    raw_meetings = await list_meetings(api_key, since=integration.last_synced_at)
+    raw_meetings = await granola_list_meetings(api_key, since=integration.last_synced_at)
 
     # 4. Dedup: find external_ids already present in the DB
     existing_ids: set[str] = set()
@@ -174,6 +177,179 @@ async def sync_meetings(
         "already_seen": len(existing_ids),
         "total_from_provider": len(raw_meetings),
     }
+
+
+@router.post("/process-pending")
+async def process_pending_meetings(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Batch trigger meeting intelligence processing for all pending meetings.
+
+    Creates a SkillRun per pending meeting and marks each as "processing".
+    The job_queue_loop picks up each run and executes the 7-stage pipeline.
+
+    This is the endpoint the frontend sync button calls.
+
+    Returns:
+        queued: count of meetings queued for processing
+        run_ids: list of SkillRun UUIDs created
+    """
+    # Load all pending meetings for this tenant
+    result = await db.execute(
+        select(Meeting).where(
+            Meeting.tenant_id == user.tenant_id,
+            Meeting.processing_status == "pending",
+            Meeting.deleted_at.is_(None),
+        )
+    )
+    pending_meetings = result.scalars().all()
+
+    if not pending_meetings:
+        return {"queued": 0, "run_ids": []}
+
+    runs: list[SkillRun] = []
+    for meeting in pending_meetings:
+        # Mark as processing immediately (race condition guard)
+        meeting.processing_status = "processing"
+
+        run = SkillRun(
+            tenant_id=user.tenant_id,
+            user_id=user.sub,
+            skill_name="meeting-processor",
+            input_text=str(meeting.id),
+            status="pending",
+        )
+        db.add(run)
+        runs.append(run)
+
+    # Flush to populate run IDs, then link back to meetings
+    await db.flush()
+    for meeting, run in zip(pending_meetings, runs):
+        meeting.skill_run_id = run.id
+
+    await db.commit()
+
+    return {
+        "queued": len(runs),
+        "run_ids": [str(run.id) for run in runs],
+    }
+
+
+@router.get("/")
+async def list_meetings(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+    status: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> dict:
+    """Return a paginated list of meetings for the authenticated tenant.
+
+    Optionally filter by processing_status. Does NOT include transcript_url
+    or ai_summary (those are owner-only — see GET /{id}).
+
+    Returns:
+        items: list of meeting metadata dicts
+        total: total count (ignoring pagination)
+        limit: applied limit
+        offset: applied offset
+    """
+    base_q = select(Meeting).where(
+        Meeting.tenant_id == user.tenant_id,
+        Meeting.deleted_at.is_(None),
+    )
+    if status is not None:
+        base_q = base_q.where(Meeting.processing_status == status)
+
+    # Count query
+    count_q = select(func.count()).select_from(
+        select(Meeting.id).where(
+            Meeting.tenant_id == user.tenant_id,
+            Meeting.deleted_at.is_(None),
+            *([Meeting.processing_status == status] if status is not None else []),
+        ).subquery()
+    )
+    total_result = await db.execute(count_q)
+    total = total_result.scalar() or 0
+
+    # Paginated query
+    result = await db.execute(
+        base_q.order_by(Meeting.meeting_date.desc()).limit(limit).offset(offset)
+    )
+    meetings = result.scalars().all()
+
+    items = [
+        {
+            "id": str(m.id),
+            "title": m.title,
+            "meeting_date": m.meeting_date.isoformat() if m.meeting_date else None,
+            "duration_mins": m.duration_mins,
+            "attendees": m.attendees,
+            "meeting_type": m.meeting_type,
+            "processing_status": m.processing_status,
+            "account_id": str(m.account_id) if m.account_id else None,
+            "summary": m.summary,
+            "created_at": m.created_at.isoformat() if m.created_at else None,
+        }
+        for m in meetings
+    ]
+
+    return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.get("/{meeting_id}")
+async def get_meeting(
+    meeting_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Return full meeting detail, enforcing owner-only access for sensitive fields.
+
+    Owner (meeting.user_id == caller): receives all fields including
+    transcript_url and ai_summary.
+
+    Non-owner tenant member: receives metadata only (transcript_url and
+    ai_summary omitted per MDE-01 privacy spec).
+
+    Raises:
+        404 if meeting not found for this tenant
+    """
+    result = await db.execute(
+        select(Meeting).where(
+            Meeting.id == meeting_id,
+            Meeting.tenant_id == user.tenant_id,
+            Meeting.deleted_at.is_(None),
+        ).limit(1)
+    )
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    is_owner = str(meeting.user_id) == str(user.sub)
+
+    data: dict = {
+        "id": str(meeting.id),
+        "title": meeting.title,
+        "meeting_date": meeting.meeting_date.isoformat() if meeting.meeting_date else None,
+        "duration_mins": meeting.duration_mins,
+        "attendees": meeting.attendees,
+        "meeting_type": meeting.meeting_type,
+        "processing_status": meeting.processing_status,
+        "account_id": str(meeting.account_id) if meeting.account_id else None,
+        "summary": meeting.summary,
+        "skill_run_id": str(meeting.skill_run_id) if meeting.skill_run_id else None,
+        "processed_at": meeting.processed_at.isoformat() if meeting.processed_at else None,
+        "created_at": meeting.created_at.isoformat() if meeting.created_at else None,
+        "updated_at": meeting.updated_at.isoformat() if meeting.updated_at else None,
+    }
+
+    # Owner-only fields (privacy enforcement per MDE-01)
+    if is_owner:
+        data["transcript_url"] = meeting.transcript_url
+        data["ai_summary"] = meeting.ai_summary
+
+    return data
 
 
 @router.post("/{meeting_id}/process")
