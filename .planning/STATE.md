@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 60 of 63 (Meeting Data Model and Granola Adapter)
-Plan: 0 of 3 in current phase
-Status: Not started
-Last activity: 2026-03-28 — Phase 59 complete: user-level RLS on 7 tables + API ownership guards on 13 query locations
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-28 — Phase 60 Plan 01 complete: meetings table with split-visibility RLS and Meeting ORM model
 
-Progress: [█████████████████░░░] 85% (31/42 total plans complete across all milestones)
+Progress: [█████████████████░░░] 86% (32/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -99,6 +99,9 @@ Recent decisions affecting current work:
 - [Phase 59]: Return 404 (not 403) on ownership mismatches — avoids leaking resource existence to potential attackers
 - [Phase 59]: user.sub (not user.id) used for all user_id comparisons — TokenPayload exposes .sub as the UUID field
 - [Phase 59]: Both base and count_q in list_runs() get user_id filter — ensures pagination totals stay accurate
+- [60-01 execution]: Split-visibility RLS uses 2 policies (tenant_read FOR SELECT + owner_write FOR ALL) — cleaner than 4 per-operation policies; tenant members can read meeting metadata, only owner can write
+- [60-01 execution]: current_setting('app.tenant_id', true) with missing_ok=true on meetings table — consistent with 031_user_level_rls pattern
+- [60-01 execution]: idx_meetings_dedup partial unique index WHERE external_id IS NOT NULL — allows multiple manual-upload rows (NULL external_id) while preventing duplicate synced records
 
 ### Pending Todos
 
@@ -112,5 +115,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 59-02-PLAN.md — Phase 59 (Team Privacy Foundation) fully complete; ready for Phase 60
+Stopped at: Completed 60-01-PLAN.md — meetings table + ORM model; ready for Phase 60 Plan 02 (Granola adapter)
 Resume file: None
