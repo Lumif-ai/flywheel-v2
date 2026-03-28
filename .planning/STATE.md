@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 
 ## Current Position
 
-Phase: 64 of 66 (Unified Meetings)
-Plan: 1 of 3 in current phase
-Status: In progress — Plan 01 complete (data layer unification), Plan 02 next (API changes)
-Last activity: 2026-03-28 — 64-01 complete: migration 033, calendar sync rewrite, Granola fuzzy dedup, lifecycle state machine
+Phase: 66 of 66 (Flywheel Ritual)
+Plan: 2 of 2 in current phase (Plan 02 complete)
+Status: Phase 66 complete — all plans delivered. v4.0 milestone complete.
+Last activity: 2026-03-28 — Phase 66 Plan 02: /flywheel subcommands (sync, tasks, prep, process)
 
-Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 1/8 plans
+Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 8/8 plans
 
 ## Performance Metrics
 
@@ -140,6 +140,28 @@ Recent decisions affecting current work:
 - [64-01 execution]: Granola data wins over calendar data -- skip calendar update if existing row has granola_note_id (richer source preserved)
 - [64-01 execution]: Fuzzy dedup uses OR of title-contains and attendee-overlap (not AND) -- maximizes match rate between calendar and Granola
 - [64-01 execution]: get_meeting_prep_suggestions kept on WorkItem for now -- Plan 02 migrates it to query Meeting table
+- [64-02 execution]: processing_status param renamed from 'status' to avoid shadowing fastapi.status import -- no frontend breakage (param was not yet consumed)
+- [64-02 execution]: prep_meeting commits meeting.account_id to DB before SkillRun creation -- ensures account link persists regardless of downstream failure
+- [64-02 execution]: Suggestions response uses meeting_id key (not work_item_id) and adds account_id field -- frontend prep triggering uses these directly
+- [64-03 execution]: ScheduledPrepSection delegates to PrepBriefingPanel when account_id exists -- reuses existing component for steady state after prep
+- [64-03 execution]: PrepTrigger uses useMutation + useState for stream_url handoff -- immediate transition from button to streaming (no blank intermediate)
+- [64-03 execution]: ProcessingFeedback extended to recorded status -- recorded meetings are processable just like pending
+
+- [65-01 execution]: User-level RLS (tasks_user_isolation) for tasks — NOT split-visibility; tasks are personal per research anti-pattern
+- [65-01 execution]: Separate _task_signals_cache keyed by tenant_id:user_id — avoids cold cache per-user on tenant-scoped _signals_cache
+- [65-01 execution]: Removed early return in get_signals() — restructured into Step A (relationship cache)/Step B (task cache)/Step C (merge) so task counts always run
+- [Phase 65]: Summary endpoint defined before /{task_id} to avoid FastAPI path parameter conflict
+- [Phase 65]: Soft-delete via status=dismissed preserves audit trail; completed_at cleared on reopen (dismissed->detected)
+- [Phase 65]: [65-02 execution]: Email tasks forced to trust_level='confirm' via post-processing enforcement -- defense-in-depth; not relying solely on LLM prompt instruction
+- [Phase 65]: [65-02 execution]: Task extraction is best-effort in pipeline -- wrapped in try/except so meeting processing continues even if Haiku call or JSON parsing fails
+- [Phase 65]: [65-02 execution]: extract_tasks receives both transcript AND Stage 4 extracted intelligence -- full context to Haiku without additional LLM cost
+
+- [66-01 execution]: python3 for all JSON parsing in skills (not jq) -- avoids dependency; python3 guaranteed in project env
+- [66-01 execution]: 401 from any API call stops all sections immediately -- token is dead, no point continuing to other sections
+- [66-01 execution]: Outreach section shows "Not configured" for v1 -- CSV tracker is stretch goal; "Not configured" is acceptable default
+- [66-02 execution]: [id:uuid] tags appended to displayed list items for position-to-UUID tracking -- prevents stale-position bugs on re-fetch
+- [66-02 execution]: SSE parsing uses python3 inline (not jq) -- consistent with 66-01 convention
+- [66-02 execution]: Prep defaults to external meetings only -- "prep all" overrides to include internal
 
 ### Pending Todos
 
@@ -153,5 +175,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 64-01-PLAN.md — Migration 033, calendar sync rewrite to Meeting table, Granola fuzzy dedup, lifecycle state machine
+Stopped at: Completed 66-02-PLAN.md — /flywheel subcommands (sync, tasks, prep, process). Phase 66 complete. v4.0 milestone complete.
 Resume file: None
