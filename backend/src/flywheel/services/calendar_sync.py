@@ -20,7 +20,7 @@ from googleapiclient.errors import HttpError
 from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.db.models import Integration, Meeting, SuggestionDismissal, WorkItem
+from flywheel.db.models import Integration, Meeting, SuggestionDismissal
 from flywheel.db.session import get_session_factory
 from flywheel.services.google_calendar import (
     TokenRevokedException,
@@ -281,21 +281,21 @@ async def get_meeting_prep_suggestions(
 ) -> list[dict]:
     """Get meeting prep suggestions for upcoming meetings with external attendees.
 
-    Returns meetings within the next 48 hours that have external attendees
-    and haven't been dismissed by the user.
+    Queries the Meeting table for scheduled meetings within the next 48 hours
+    that have at least one external attendee and haven't been dismissed.
     """
     now = datetime.now(timezone.utc)
     window_end = now + timedelta(hours=SUGGESTION_WINDOW_HOURS)
 
-    # Find upcoming meetings with external attendees in the next 48 hours
+    # Find scheduled meetings within the suggestion window
     result = await db.execute(
-        select(WorkItem).where(
+        select(Meeting).where(
             and_(
-                WorkItem.tenant_id == tenant_id,
-                WorkItem.type == "meeting",
-                WorkItem.status == "upcoming",
-                WorkItem.scheduled_at >= now,
-                WorkItem.scheduled_at <= window_end,
+                Meeting.tenant_id == tenant_id,
+                Meeting.processing_status == "scheduled",
+                Meeting.meeting_date >= now,
+                Meeting.meeting_date <= window_end,
+                Meeting.deleted_at.is_(None),
             )
         )
     )
@@ -303,8 +303,11 @@ async def get_meeting_prep_suggestions(
 
     suggestions = []
     for meeting in meetings:
-        # Filter to meetings with external attendees
-        if not (meeting.data or {}).get("has_external_attendees", False):
+        # Filter to meetings with at least one external attendee
+        has_external = any(
+            a.get("is_external", False) for a in (meeting.attendees or [])
+        )
+        if not has_external:
             continue
 
         # Check if this suggestion has been dismissed
@@ -325,12 +328,13 @@ async def get_meeting_prep_suggestions(
         suggestions.append(
             {
                 "type": "meeting-prep",
-                "work_item_id": str(meeting.id),
+                "meeting_id": str(meeting.id),
                 "title": f"Prepare for {meeting.title}",
-                "scheduled_at": meeting.scheduled_at.isoformat()
-                if meeting.scheduled_at
+                "scheduled_at": meeting.meeting_date.isoformat()
+                if meeting.meeting_date
                 else None,
-                "attendees": (meeting.data or {}).get("attendees", []),
+                "attendees": meeting.attendees,
+                "account_id": str(meeting.account_id) if meeting.account_id else None,
             }
         )
 

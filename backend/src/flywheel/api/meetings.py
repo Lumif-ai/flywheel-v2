@@ -3,9 +3,10 @@
 Endpoints:
 - POST /meetings/sync                -- pull meetings from Granola, dedup, insert new rows
 - POST /meetings/process-pending     -- batch trigger processing for all pending meetings
-- GET  /meetings/                    -- paginated list of meetings (optional status filter)
+- GET  /meetings/                    -- paginated list of meetings (optional status/time filter)
 - GET  /meetings/{id}                -- detail view (owner-only for transcript_url/ai_summary)
 - POST /meetings/{id}/process        -- trigger meeting intelligence processing pipeline
+- POST /meetings/{id}/prep           -- trigger meeting prep and return stream URL
 """
 
 from __future__ import annotations
@@ -13,14 +14,16 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.encryption import decrypt_api_key
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Integration, Meeting, SkillRun
+from flywheel.db.models import Account, Integration, Meeting, SkillRun
+from flywheel.db.session import get_session_factory
+from flywheel.engines.meeting_processor_web import auto_link_meeting_to_account
 from flywheel.services.granola_adapter import RawMeeting, list_meetings as granola_list_meetings
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
@@ -311,14 +314,19 @@ async def process_pending_meetings(
 async def list_meetings(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
-    status: str | None = None,
+    processing_status: str | None = None,
+    time: str | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
     """Return a paginated list of meetings for the authenticated tenant.
 
-    Optionally filter by processing_status. Does NOT include transcript_url
-    or ai_summary (those are owner-only — see GET /{id}).
+    Optionally filter by processing_status and/or time window:
+    - time=upcoming: meeting_date >= now, sorted soonest first (ascending)
+    - time=past: meeting_date < now, sorted most recent first (descending)
+    - time=None: default descending sort by meeting_date
+
+    Does NOT include transcript_url or ai_summary (those are owner-only — see GET /{id}).
 
     Returns:
         items: list of meeting metadata dicts
@@ -326,27 +334,38 @@ async def list_meetings(
         limit: applied limit
         offset: applied offset
     """
-    base_q = select(Meeting).where(
+    now = datetime.now(timezone.utc)
+
+    # Build base filters
+    filters = [
         Meeting.tenant_id == user.tenant_id,
         Meeting.deleted_at.is_(None),
-    )
-    if status is not None:
-        base_q = base_q.where(Meeting.processing_status == status)
+    ]
+    if processing_status is not None:
+        filters.append(Meeting.processing_status == processing_status)
 
-    # Count query
+    # Time-based filter
+    if time == "upcoming":
+        filters.append(Meeting.meeting_date >= now)
+        order = Meeting.meeting_date.asc()
+    elif time == "past":
+        filters.append(Meeting.meeting_date < now)
+        order = Meeting.meeting_date.desc()
+    else:
+        order = Meeting.meeting_date.desc()
+
+    base_q = select(Meeting).where(*filters)
+
+    # Count query (same filters for accurate pagination totals)
     count_q = select(func.count()).select_from(
-        select(Meeting.id).where(
-            Meeting.tenant_id == user.tenant_id,
-            Meeting.deleted_at.is_(None),
-            *([Meeting.processing_status == status] if status is not None else []),
-        ).subquery()
+        select(Meeting.id).where(*filters).subquery()
     )
     total_result = await db.execute(count_q)
     total = total_result.scalar() or 0
 
     # Paginated query
     result = await db.execute(
-        base_q.order_by(Meeting.meeting_date.desc()).limit(limit).offset(offset)
+        base_q.order_by(order).limit(limit).offset(offset)
     )
     meetings = result.scalars().all()
 
@@ -361,6 +380,9 @@ async def list_meetings(
             "processing_status": m.processing_status,
             "account_id": str(m.account_id) if m.account_id else None,
             "summary": m.summary,
+            "provider": m.provider,
+            "location": m.location,
+            "calendar_event_id": m.calendar_event_id,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in meetings
@@ -483,3 +505,92 @@ async def process_meeting(
     await db.commit()
 
     return {"run_id": str(run.id), "meeting_id": str(meeting_id)}
+
+
+@router.post("/{meeting_id}/prep", status_code=status.HTTP_202_ACCEPTED)
+async def prep_meeting(
+    meeting_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Trigger meeting prep for a specific meeting and return a stream URL.
+
+    Auto-links the meeting to an account if not already linked (using attendee
+    domain matching). Creates a SkillRun for the "meeting-prep" skill with
+    Account-ID dispatch prefix.
+
+    Returns:
+        run_id: UUID of the created SkillRun
+        stream_url: SSE endpoint for real-time prep output
+
+    Raises:
+        404 if meeting not found for this tenant
+        400 if no account could be linked
+    """
+    # 1. Load meeting
+    result = await db.execute(
+        select(Meeting).where(
+            Meeting.id == meeting_id,
+            Meeting.tenant_id == user.tenant_id,
+            Meeting.deleted_at.is_(None),
+        ).limit(1)
+    )
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # 2. Resolve account_id — use existing or auto-link
+    account_id = meeting.account_id
+
+    if account_id is None:
+        # auto_link requires a session factory (opens its own sessions internally)
+        linked_id = await auto_link_meeting_to_account(
+            get_session_factory(),
+            tenant_id=user.tenant_id,
+            attendees=meeting.attendees or [],
+            user_id=user.sub,
+            meeting_title=meeting.title or "",
+        )
+        if linked_id:
+            meeting.account_id = linked_id
+            await db.commit()
+            await db.refresh(meeting)
+            account_id = linked_id
+
+    if account_id is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No account could be linked to this meeting. "
+                   "Add attendees with company email addresses.",
+        )
+
+    # 3. Load account name for dispatch prefix
+    acct_result = await db.execute(
+        select(Account).where(Account.id == account_id).limit(1)
+    )
+    account = acct_result.scalar_one_or_none()
+    account_name = account.name if account else "Unknown"
+
+    # 4. Build input_text with Account-ID dispatch prefix
+    input_text = (
+        f"Account-ID: {account_id}\n"
+        f"Account-Name: {account_name}\n"
+        f"Meeting-ID: {meeting_id}"
+    )
+
+    # 5. Create SkillRun
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name="meeting-prep",
+        input_text=input_text,
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    await db.commit()
+
+    return {
+        "run_id": str(run.id),
+        "stream_url": f"/api/v1/skills/runs/{run.id}/stream",
+    }
