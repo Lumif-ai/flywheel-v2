@@ -38,7 +38,7 @@ from sqlalchemy.orm import selectinload
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Account, AccountContact, ContextEntry
+from flywheel.db.models import Account, AccountContact, ContextEntry, Meeting
 from flywheel.services.synthesis_engine import SynthesisEngine
 
 # No prefix — endpoints use full path segments directly
@@ -49,6 +49,18 @@ router = APIRouter(tags=["relationships"])
 # ---------------------------------------------------------------------------
 
 ALLOWED_TYPES: frozenset[str] = frozenset({"prospect", "customer", "advisor", "investor"})
+
+# ContextEntry file_name values from CONTEXT_FILE_MAP in meeting_processor_web.py.
+# These are used to enrich the intel dict in the relationship detail endpoint.
+# "contacts" is intentionally excluded — contact data surfaces via AccountContact (PeopleTab).
+INTEL_FILES: list[str] = [
+    "competitive-intel",
+    "pain-points",
+    "icp-profiles",
+    "insights",
+    "action-items",
+    "product-feedback",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -388,6 +400,32 @@ async def get_relationship(
     )
     timeline_entries = timeline_result.scalars().all()
 
+    # Meeting timeline: last 20 meetings linked to this account
+    meeting_rows = (await db.execute(
+        select(Meeting)
+        .where(
+            Meeting.account_id == id,
+            Meeting.tenant_id == user.tenant_id,
+            Meeting.deleted_at.is_(None),
+        )
+        .order_by(Meeting.meeting_date.desc())
+        .limit(20)
+    )).scalars().all()
+
+    # ContextEntry intel rows from meeting processing (INTEL_FILES file names only)
+    intel_entries_result = await db.execute(
+        select(ContextEntry)
+        .where(
+            ContextEntry.account_id == id,
+            ContextEntry.tenant_id == user.tenant_id,
+            ContextEntry.deleted_at.is_(None),
+            ContextEntry.file_name.in_(INTEL_FILES),
+        )
+        .order_by(ContextEntry.date.desc())
+        .limit(50)
+    )
+    intel_entries = intel_entries_result.scalars().all()
+
     # Serialize contacts
     contacts = [
         {
@@ -405,13 +443,47 @@ async def get_relationship(
     # Serialize timeline with derived direction and contact_name fields
     recent_timeline = [_serialize_timeline_item(e) for e in timeline_entries]
 
+    # Append meeting rows as timeline items.
+    # direction is set directly (not via _derive_direction) because we build the
+    # dict manually rather than going through _serialize_timeline_item().
+    for m in meeting_rows:
+        attendees_list = m.attendees or []
+        tldr = (m.summary or {}).get("tldr") or ""
+        display_content = m.title or "Untitled meeting"
+        if tldr:
+            display_content += f" -- {tldr}"
+        recent_timeline.append({
+            "id": m.id,
+            "source": f"meeting:{m.meeting_type or 'unclassified'}",
+            "content": display_content,
+            "date": m.meeting_date,
+            "created_at": m.created_at,
+            "direction": "bidirectional",
+            "contact_name": f"{len(attendees_list)} attendees" if attendees_list else None,
+        })
+
+    # Sort combined timeline by date desc and cap at 20 entries
+    recent_timeline.sort(
+        key=lambda x: (x.get("date") or x.get("created_at")),
+        reverse=True,
+    )
+    recent_timeline = recent_timeline[:20]
+
+    # Build enriched intel dict.
+    # CRITICAL: existing account.intel values take precedence — meeting intel fills gaps only.
+    intel = dict(account.intel or {})
+    for entry in intel_entries:
+        key = entry.file_name.replace("-", "_")  # "pain-points" -> "pain_points"
+        if key not in intel or not intel[key]:
+            intel[key] = entry.content  # most recent entry wins (query ordered by date desc)
+
     return {
         **_account_to_list_item(account, signal_count, primary_contact_name),
         "ai_summary_updated_at": account.ai_summary_updated_at,
         "contacts": contacts,
         "recent_timeline": recent_timeline,
         "commitments": [],
-        "intel": account.intel or {},
+        "intel": intel,
     }
 
 
