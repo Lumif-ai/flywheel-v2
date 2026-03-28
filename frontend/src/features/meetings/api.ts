@@ -1,5 +1,5 @@
 import { api } from '@/lib/api'
-import type { MeetingListItem, MeetingDetail, SyncResult } from './types/meetings'
+import type { MeetingListItem, MeetingDetail, SyncResult, PrepResult } from './types/meetings'
 
 // ---------------------------------------------------------------------------
 // Query key factory
@@ -8,7 +8,8 @@ import type { MeetingListItem, MeetingDetail, SyncResult } from './types/meeting
 export const queryKeys = {
   meetings: {
     all: ['meetings'] as const,
-    list: (status?: string) => ['meetings', 'list', status ?? 'all'] as const,
+    list: (params?: { status?: string; time?: string }) =>
+      ['meetings', 'list', params?.time ?? 'all', params?.status ?? 'all'] as const,
     detail: (id: string) => ['meetings', 'detail', id] as const,
   },
 }
@@ -28,9 +29,9 @@ export interface MeetingListResponse {
 // API functions
 // ---------------------------------------------------------------------------
 
-export function fetchMeetings(status?: string): Promise<MeetingListResponse> {
+export function fetchMeetings(params?: { status?: string; time?: string }): Promise<MeetingListResponse> {
   return api.get<MeetingListResponse>('/meetings/', {
-    params: status ? { status, limit: 50 } : { limit: 50 },
+    params: { limit: 50, ...params },
   })
 }
 
@@ -44,4 +45,8 @@ export function syncMeetings(): Promise<SyncResult> {
 
 export function processMeeting(id: string): Promise<{ run_id: string }> {
   return api.post<{ run_id: string }>(`/meetings/${id}/process`)
+}
+
+export function prepMeeting(id: string): Promise<PrepResult> {
+  return api.post<PrepResult>(`/meetings/${id}/prep`)
 }

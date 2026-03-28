@@ -1,3 +1,4 @@
+import { useState, useCallback } from 'react'
 import { Link, useParams } from 'react-router'
 import {
   ArrowLeft,
@@ -10,12 +11,17 @@ import {
   CalendarDays,
   Timer,
   ExternalLink,
+  BookOpen,
+  AlertCircle,
 } from 'lucide-react'
+import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { Skeleton } from '@/components/ui/skeleton'
+import { useSSE } from '@/lib/sse'
 import { useMeetingDetail } from '../hooks/useMeetingDetail'
 import { useMeetingProcessing } from '../hooks/useMeetingProcessing'
 import { PrepBriefingPanel } from '@/features/relationships/components/PrepBriefingPanel'
-import type { ProcessingStatus } from '../types/meetings'
+import { prepMeeting, queryKeys } from '../api'
+import type { ProcessingStatus, MeetingDetail } from '../types/meetings'
 
 // ---------------------------------------------------------------------------
 // Badge configs (same as MeetingCard — shared constants)
@@ -30,6 +36,9 @@ const STATUS_CONFIG: Record<
   complete:   { icon: CheckCircle2, color: 'var(--success, #16a34a)', label: 'Complete' },
   failed:     { icon: XCircle,      color: 'var(--error, #dc2626)',   label: 'Failed' },
   skipped:    { icon: Minus,        color: 'var(--secondary-text)', label: 'Skipped' },
+  scheduled:  { icon: CalendarDays, color: '#3B82F6',               label: 'Scheduled' },
+  recorded:   { icon: CheckCircle2, color: '#7c3aed',               label: 'Recorded' },
+  cancelled:  { icon: XCircle,      color: 'var(--secondary-text)', label: 'Cancelled' },
 }
 
 const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -90,7 +99,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 }
 
 // ---------------------------------------------------------------------------
-// ProcessingFeedback — for pending/failed meetings
+// ProcessingFeedback — for pending/failed/recorded meetings
 // ---------------------------------------------------------------------------
 
 function ProcessingFeedback({ meetingId, status }: { meetingId: string; status: ProcessingStatus }) {
@@ -104,7 +113,7 @@ function ProcessingFeedback({ meetingId, status }: { meetingId: string; status: 
       >
         <Loader2 className="size-5 animate-spin shrink-0" style={{ color: '#3B82F6' }} />
         <div>
-          <p className="text-sm font-medium" style={{ color: '#2563eb' }}>Processing meeting…</p>
+          <p className="text-sm font-medium" style={{ color: '#2563eb' }}>Processing meeting...</p>
           {currentStage && (
             <p className="text-xs mt-0.5" style={{ color: 'var(--secondary-text)' }}>{currentStage}</p>
           )}
@@ -169,6 +178,214 @@ function ProcessingFeedback({ meetingId, status }: { meetingId: string; status: 
           style={{ background: 'var(--brand-coral)', color: '#fff' }}
         >
           Process
+        </button>
+      </div>
+    )
+  }
+
+  // idle + recorded — offer to process
+  if (status === 'recorded') {
+    return (
+      <div
+        className="rounded-xl p-6 mb-4 flex items-center justify-between gap-3"
+        style={{ background: 'rgba(124,58,237,0.05)', border: '1px solid rgba(124,58,237,0.2)' }}
+      >
+        <div>
+          <p className="text-sm font-medium" style={{ color: '#7c3aed' }}>
+            Meeting recorded — ready to process
+          </p>
+          <p className="text-xs mt-0.5" style={{ color: 'var(--secondary-text)' }}>
+            Processing extracts insights, action items, and links this meeting to your relationships.
+          </p>
+        </div>
+        <button
+          onClick={startProcessing}
+          className="text-sm px-4 py-1.5 rounded-lg font-medium shrink-0 transition-opacity hover:opacity-80"
+          style={{ background: '#7c3aed', color: '#fff' }}
+        >
+          Process
+        </button>
+      </div>
+    )
+  }
+
+  return null
+}
+
+// ---------------------------------------------------------------------------
+// ScheduledPrepSection — 3-state component for meeting prep on scheduled/recorded
+// ---------------------------------------------------------------------------
+
+function ScheduledPrepSection({ meeting }: { meeting: MeetingDetail }) {
+  // State C: account_id already available — use PrepBriefingPanel directly
+  if (meeting.account_id) {
+    return (
+      <PrepBriefingPanel
+        accountId={meeting.account_id}
+        accountName="this account"
+        meetingId={meeting.id}
+      />
+    )
+  }
+
+  // State A -> B managed by inner component
+  return <PrepTrigger meetingId={meeting.id} />
+}
+
+function PrepTrigger({ meetingId }: { meetingId: string }) {
+  const queryClient = useQueryClient()
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [briefingHtml, setBriefingHtml] = useState<string | null>(null)
+  const [prepPhase, setPrepPhase] = useState<'idle' | 'streaming' | 'done' | 'error'>('idle')
+  const [statusMsg, setStatusMsg] = useState<string | null>(null)
+  const [errorMsg, setErrorMsg] = useState<string | null>(null)
+
+  const handleEvent = useCallback(
+    (event: { type: string; data: Record<string, unknown> }) => {
+      switch (event.type) {
+        case 'stage': {
+          const message = (event.data.message as string) ?? ''
+          if (message) setStatusMsg(message)
+          break
+        }
+        case 'done': {
+          const html =
+            (event.data.rendered_html as string) ??
+            (event.data.output as string) ??
+            ''
+          setBriefingHtml(html)
+          setPrepPhase('done')
+          setStreamUrl(null)
+          // Invalidate meeting detail so account_id refreshes for subsequent page loads
+          queryClient.invalidateQueries({ queryKey: queryKeys.meetings.detail(meetingId) })
+          break
+        }
+        case 'error': {
+          setErrorMsg((event.data.message as string) ?? 'Prep failed')
+          setPrepPhase('error')
+          setStreamUrl(null)
+          break
+        }
+      }
+    },
+    [queryClient, meetingId],
+  )
+
+  useSSE(streamUrl, handleEvent)
+
+  const mutation = useMutation({
+    mutationFn: () => prepMeeting(meetingId),
+    onSuccess: (res) => {
+      // Immediately transition to streaming state with the stream_url from response
+      setPrepPhase('streaming')
+      setStatusMsg(null)
+      setErrorMsg(null)
+      setBriefingHtml(null)
+      setStreamUrl(`/api/v1/skills/runs/${res.run_id}/stream`)
+    },
+    onError: (err: Error) => {
+      // 400 = no account linkable
+      if (err.message?.includes('400') || err.message?.includes('account')) {
+        setErrorMsg('No company account could be linked. Add attendees with company emails.')
+      } else {
+        setErrorMsg(err.message ?? 'Failed to start prep')
+      }
+      setPrepPhase('error')
+    },
+  })
+
+  // State A: idle — show prep trigger button
+  if (prepPhase === 'idle') {
+    return (
+      <div className="mb-4">
+        <button
+          onClick={() => mutation.mutate()}
+          disabled={mutation.isPending}
+          className="inline-flex items-center gap-2 text-sm px-4 py-2 rounded-lg font-medium transition-opacity hover:opacity-85 disabled:opacity-60"
+          style={{ background: 'var(--brand-coral)', color: '#fff' }}
+        >
+          {mutation.isPending ? (
+            <Loader2 className="size-4 animate-spin" />
+          ) : (
+            <BookOpen className="size-4" />
+          )}
+          Prepare for this meeting
+        </button>
+      </div>
+    )
+  }
+
+  // State B: streaming — show briefing as it streams
+  if (prepPhase === 'streaming') {
+    return (
+      <div
+        className="rounded-xl p-5 mb-4 flex items-center gap-3"
+        style={{ background: 'rgba(59,130,246,0.05)', border: '1px solid rgba(59,130,246,0.2)' }}
+      >
+        <Loader2 className="size-5 animate-spin shrink-0" style={{ color: '#3B82F6' }} />
+        <div>
+          <p className="text-sm font-medium" style={{ color: '#2563eb' }}>
+            Preparing meeting briefing...
+          </p>
+          {statusMsg && (
+            <p className="text-xs mt-0.5" style={{ color: 'var(--secondary-text)' }}>
+              {statusMsg}
+            </p>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // State B done: show rendered briefing HTML
+  if (prepPhase === 'done' && briefingHtml) {
+    return (
+      <div
+        className="rounded-xl mb-4 overflow-hidden"
+        style={{ border: '1px solid var(--subtle-border)', boxShadow: '0 1px 3px rgba(0,0,0,0.08)' }}
+      >
+        <div
+          className="flex items-center justify-between px-5 py-3"
+          style={{ background: 'var(--brand-light)', borderBottom: '1px solid rgba(233,77,53,0.15)' }}
+        >
+          <div className="flex items-center gap-2">
+            <BookOpen className="size-4" style={{ color: 'var(--brand-coral)' }} />
+            <span className="text-sm font-semibold" style={{ color: 'var(--heading-text)' }}>
+              Meeting Prep
+            </span>
+          </div>
+        </div>
+        <div className="px-5 py-4" style={{ background: 'var(--card-bg)' }}>
+          <div
+            className="prose prose-sm max-w-none"
+            style={{ color: 'var(--heading-text)', fontSize: '0.875rem', lineHeight: '1.6' }}
+            // eslint-disable-next-line react/no-danger
+            dangerouslySetInnerHTML={{ __html: briefingHtml }}
+          />
+        </div>
+      </div>
+    )
+  }
+
+  // Error state
+  if (prepPhase === 'error') {
+    return (
+      <div
+        className="rounded-xl p-5 mb-4 flex items-center justify-between gap-3"
+        style={{ background: 'rgba(220,38,38,0.05)', border: '1px solid rgba(220,38,38,0.2)' }}
+      >
+        <div className="flex items-center gap-3">
+          <AlertCircle className="size-5 shrink-0" style={{ color: '#dc2626' }} />
+          <p className="text-sm font-medium" style={{ color: '#dc2626' }}>
+            {errorMsg ?? 'Prep failed -- please try again'}
+          </p>
+        </div>
+        <button
+          onClick={() => { setPrepPhase('idle'); mutation.mutate() }}
+          className="text-sm px-4 py-1.5 rounded-lg font-medium shrink-0 transition-opacity hover:opacity-80"
+          style={{ background: 'rgba(220,38,38,0.1)', color: '#dc2626' }}
+        >
+          Retry
         </button>
       </div>
     )
@@ -273,18 +490,14 @@ export function MeetingDetailPage() {
           </div>
         </div>
 
-        {/* Processing feedback (for pending/failed/in-progress) */}
-        {(meeting.processing_status === 'pending' || meeting.processing_status === 'failed') && (
+        {/* Processing feedback (for pending/failed/recorded) */}
+        {(meeting.processing_status === 'pending' || meeting.processing_status === 'failed' || meeting.processing_status === 'recorded') && (
           <ProcessingFeedback meetingId={meeting.id} status={meeting.processing_status} />
         )}
 
-        {/* Meeting Prep — only when linked to an account */}
-        {meeting.account_id && (
-          <PrepBriefingPanel
-            accountId={meeting.account_id}
-            accountName="this account"
-            meetingId={meeting.id}
-          />
+        {/* Meeting Prep — show for scheduled/recorded meetings OR when linked to account */}
+        {(meeting.account_id || meeting.processing_status === 'scheduled' || meeting.processing_status === 'recorded') && (
+          <ScheduledPrepSection meeting={meeting} />
         )}
 
         {/* Attendees section */}

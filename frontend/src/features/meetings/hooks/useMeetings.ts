@@ -3,13 +3,13 @@ import { useAuthStore } from '@/stores/auth'
 import { fetchMeetings, queryKeys } from '../api'
 import type { MeetingListItem } from '../types/meetings'
 
-export function useMeetings(status?: string) {
+export function useMeetings(params?: { status?: string; time?: string }) {
   const user = useAuthStore((s) => s.user)
 
   return useQuery<MeetingListItem[]>({
-    queryKey: queryKeys.meetings.list(status),
+    queryKey: queryKeys.meetings.list(params),
     queryFn: async () => {
-      const res = await fetchMeetings(status)
+      const res = await fetchMeetings(params)
       return res.items
     },
     enabled: !!user,

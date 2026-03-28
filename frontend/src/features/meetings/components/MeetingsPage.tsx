@@ -5,21 +5,22 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useMeetings } from '../hooks/useMeetings'
 import { useSyncMeetings } from '../hooks/useSyncMeetings'
 import { MeetingCard } from './MeetingCard'
-import type { ProcessingStatus } from '../types/meetings'
 
 // ---------------------------------------------------------------------------
-// Status filter options
+// Time-based tabs
 // ---------------------------------------------------------------------------
 
-type FilterTab = 'all' | ProcessingStatus
+type TimeTab = 'upcoming' | 'past'
 
-const FILTER_TABS: Array<{ key: FilterTab; label: string }> = [
-  { key: 'all',      label: 'All' },
-  { key: 'pending',  label: 'Pending' },
-  { key: 'complete', label: 'Complete' },
-  { key: 'skipped',  label: 'Skipped' },
-  { key: 'failed',   label: 'Failed' },
+const TIME_TABS: Array<{ key: TimeTab; label: string }> = [
+  { key: 'upcoming', label: 'Upcoming' },
+  { key: 'past',     label: 'Past' },
 ]
+
+const EMPTY_DESCRIPTIONS: Record<TimeTab, string> = {
+  upcoming: 'No upcoming meetings. Connect Google Calendar in Settings to sync your schedule.',
+  past: 'No past meetings found.',
+}
 
 // ---------------------------------------------------------------------------
 // Skeleton loading cards
@@ -47,18 +48,11 @@ function MeetingSkeleton() {
 // ---------------------------------------------------------------------------
 
 export function MeetingsPage() {
-  const [activeFilter, setActiveFilter] = useState<FilterTab>('all')
-  const { data: meetings, isLoading } = useMeetings()
+  const [activeTab, setActiveTab] = useState<TimeTab>('upcoming')
+  const { data: meetings, isLoading } = useMeetings({ time: activeTab })
   const syncMutation = useSyncMeetings()
 
-  // Sort by meeting_date desc (most recent first), filter by status
-  const filteredMeetings = (meetings ?? [])
-    .filter((m) => activeFilter === 'all' || m.processing_status === activeFilter)
-    .sort((a, b) => {
-      if (!a.meeting_date) return 1
-      if (!b.meeting_date) return -1
-      return new Date(b.meeting_date).getTime() - new Date(a.meeting_date).getTime()
-    })
+  const displayMeetings = meetings ?? []
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: 'var(--page-bg)' }}>
@@ -73,7 +67,7 @@ export function MeetingsPage() {
               Meetings
             </h1>
             <p className="text-sm mt-1" style={{ color: 'var(--secondary-text)' }}>
-              Your meeting intelligence hub
+              Calendar events and meeting notes in one place
             </p>
           </div>
           <button
@@ -94,15 +88,15 @@ export function MeetingsPage() {
           </button>
         </div>
 
-        {/* Status filter tabs */}
+        {/* Time-based tabs */}
         <div className="flex items-center gap-1 mb-6 flex-wrap">
-          {FILTER_TABS.map(({ key, label }) => (
+          {TIME_TABS.map(({ key, label }) => (
             <button
               key={key}
-              onClick={() => setActiveFilter(key)}
+              onClick={() => setActiveTab(key)}
               className="text-sm px-3 py-1.5 rounded-lg font-medium transition-colors"
               style={
-                activeFilter === key
+                activeTab === key
                   ? { background: 'var(--brand-coral)', color: '#fff' }
                   : { background: 'var(--card-bg)', color: 'var(--secondary-text)', border: '1px solid var(--subtle-border)' }
               }
@@ -119,19 +113,15 @@ export function MeetingsPage() {
             <MeetingSkeleton />
             <MeetingSkeleton />
           </div>
-        ) : filteredMeetings.length === 0 ? (
+        ) : displayMeetings.length === 0 ? (
           <EmptyState
             icon={CalendarDays}
-            title="No meetings yet"
-            description={
-              activeFilter !== 'all'
-                ? `No ${activeFilter} meetings found. Try a different filter.`
-                : "Connect Granola in Settings to sync your meetings"
-            }
+            title="No meetings"
+            description={EMPTY_DESCRIPTIONS[activeTab]}
           />
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filteredMeetings.map((meeting) => (
+            {displayMeetings.map((meeting) => (
               <MeetingCard key={meeting.id} meeting={meeting} />
             ))}
           </div>

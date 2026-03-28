@@ -17,7 +17,7 @@ export interface MeetingSummary {
   meeting_type: string | null
 }
 
-export type ProcessingStatus = 'pending' | 'processing' | 'complete' | 'failed' | 'skipped'
+export type ProcessingStatus = 'pending' | 'processing' | 'complete' | 'failed' | 'skipped' | 'scheduled' | 'recorded' | 'cancelled'
 
 export interface MeetingListItem {
   id: string
@@ -27,6 +27,9 @@ export interface MeetingListItem {
   attendees: Attendee[] | null
   meeting_type: string | null        // 'discovery' | 'prospect' | 'advisor' | etc.
   processing_status: ProcessingStatus
+  provider: string                   // "google-calendar" or "granola"
+  location: string | null            // meeting location from calendar
+  calendar_event_id: string | null   // present for calendar-sourced meetings
   account_id: string | null
   summary: MeetingSummary | null     // JSONB: {tldr, key_decisions, action_items, pain_points, attendee_roles, meeting_type}
   created_at: string
@@ -39,6 +42,11 @@ export interface MeetingDetail extends MeetingListItem {
   updated_at: string
   transcript_url?: string | null     // owner-only (absent for non-owners)
   ai_summary?: string | null         // owner-only (absent for non-owners)
+}
+
+export interface PrepResult {
+  run_id: string
+  stream_url: string
 }
 
 export interface SyncResult {

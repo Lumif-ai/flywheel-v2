@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router'
-import { Clock, Loader2, CheckCircle2, XCircle, Minus, Users } from 'lucide-react'
+import { Clock, Loader2, CheckCircle2, XCircle, Minus, Users, CalendarDays } from 'lucide-react'
 import { BrandedCard } from '@/components/ui/branded-card'
 import type { MeetingListItem, ProcessingStatus } from '../types/meetings'
 import { useMeetingProcessing } from '../hooks/useMeetingProcessing'
@@ -17,6 +17,9 @@ const STATUS_CONFIG: Record<
   complete:   { icon: CheckCircle2, color: 'var(--success, #16a34a)', label: 'Complete' },
   failed:     { icon: XCircle,      color: 'var(--error, #dc2626)',   label: 'Failed' },
   skipped:    { icon: Minus,        color: 'var(--secondary-text)', label: 'Skipped' },
+  scheduled:  { icon: CalendarDays, color: '#3B82F6',               label: 'Scheduled' },
+  recorded:   { icon: CheckCircle2, color: '#7c3aed',               label: 'Recorded' },
+  cancelled:  { icon: XCircle,      color: 'var(--secondary-text)', label: 'Cancelled' },
 }
 
 const TYPE_COLORS: Record<string, { bg: string; text: string }> = {
@@ -40,6 +43,22 @@ function formatRelativeDate(dateStr: string | null): string {
   const now = new Date()
   const diffMs = now.getTime() - date.getTime()
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24))
+
+  // Future dates
+  if (diffMs < 0) {
+    const futureDiffMs = Math.abs(diffMs)
+    const futureDiffHours = Math.floor(futureDiffMs / (1000 * 60 * 60))
+    const futureDiffDays = Math.floor(futureDiffMs / (1000 * 60 * 60 * 24))
+
+    if (futureDiffHours < 1) return 'Soon'
+    if (futureDiffHours < 24) return `In ${futureDiffHours} hour${futureDiffHours !== 1 ? 's' : ''}`
+    if (futureDiffDays === 1) return 'Tomorrow'
+    if (futureDiffDays < 7) return `In ${futureDiffDays} days`
+    if (futureDiffDays < 30) return `In ${Math.floor(futureDiffDays / 7)} week${Math.floor(futureDiffDays / 7) === 1 ? '' : 's'}`
+    return `In ${Math.floor(futureDiffDays / 30)} month${Math.floor(futureDiffDays / 30) === 1 ? '' : 's'}`
+  }
+
+  // Past dates
   if (diffDays === 0) return 'Today'
   if (diffDays === 1) return 'Yesterday'
   if (diffDays < 7) return `${diffDays} days ago`
@@ -71,7 +90,7 @@ function ProcessButton({ meetingId, status }: { meetingId: string; status: Proce
         style={{ color: '#3B82F6' }}
       >
         <Loader2 className="size-3 animate-spin" />
-        {currentStage ?? 'Processing…'}
+        {currentStage ?? 'Processing...'}
       </span>
     )
   }
@@ -186,6 +205,16 @@ export function MeetingCard({ meeting }: MeetingCardProps) {
       {(status === 'pending' || status === 'failed') && (
         <div className="mt-1">
           <ProcessButton meetingId={meeting.id} status={status} />
+        </div>
+      )}
+
+      {/* Calendar source badge for scheduled meetings */}
+      {status === 'scheduled' && (
+        <div className="mt-1">
+          <span className="text-xs flex items-center gap-1" style={{ color: '#3B82F6' }}>
+            <CalendarDays className="size-3" />
+            Calendar
+          </span>
         </div>
       )}
     </BrandedCard>
