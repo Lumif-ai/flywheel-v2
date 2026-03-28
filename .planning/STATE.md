@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 60 of 63 (Meeting Data Model and Granola Adapter)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-28 — Phase 60 Plan 01 complete: meetings table with split-visibility RLS and Meeting ORM model
+Last activity: 2026-03-28 — Phase 60 Plan 02 complete: Granola adapter (granola_adapter.py) and POST /integrations/granola/connect with AES-256-GCM key storage
 
-Progress: [█████████████████░░░] 86% (32/42 total plans complete across all milestones)
+Progress: [█████████████████░░░] 87% (33/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -102,6 +102,11 @@ Recent decisions affecting current work:
 - [60-01 execution]: Split-visibility RLS uses 2 policies (tenant_read FOR SELECT + owner_write FOR ALL) — cleaner than 4 per-operation policies; tenant members can read meeting metadata, only owner can write
 - [60-01 execution]: current_setting('app.tenant_id', true) with missing_ok=true on meetings table — consistent with 031_user_level_rls pattern
 - [60-01 execution]: idx_meetings_dedup partial unique index WHERE external_id IS NOT NULL — allows multiple manual-upload rows (NULL external_id) while preventing duplicate synced records
+- [60-02 execution]: GRANOLA_API_BASE = https://public-api.granola.ai/v1 — real URL; spec assumed api.granola.ai (incorrect)
+- [60-02 execution]: test_connection uses GET /v1/notes?page_size=1 — no /v1/me endpoint exists in Granola API
+- [60-02 execution]: list_meetings reads 'notes' key from response (not 'meetings'); maps item["id"]->external_id, item["created_at"]->meeting_date, item.get("summary_text")->ai_summary
+- [60-02 execution]: Upsert on reconnect clears last_synced_at = None — forces full re-sync from scratch on API key change
+- [60-02 execution]: connect endpoint does NOT store last_sync_cursor in settings — Integration.last_synced_at column is the sync cursor
 
 ### Pending Todos
 
@@ -115,5 +120,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 60-01-PLAN.md — meetings table + ORM model; ready for Phase 60 Plan 02 (Granola adapter)
+Stopped at: Completed 60-02-PLAN.md — Granola adapter + connect endpoint; ready for Phase 60 Plan 03 (meetings sync endpoint)
 Resume file: None
