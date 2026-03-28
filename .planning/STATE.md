@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 61 of 63 (Meeting Intelligence Pipeline)
-Plan: 1 of 3 in current phase
+Plan: 2 of 3 in current phase
 Status: In progress
-Last activity: 2026-03-28 — Phase 61 Plan 01 complete: meeting_processor_web.py engine + _execute_meeting_processor() 7-stage pipeline + POST /meetings/{id}/process endpoint
+Last activity: 2026-03-28 — Phase 61 Plan 02 complete: account auto-linking (auto_link_meeting_to_account, auto_create_prospect, upsert_account_contacts) + Stage 5 of meeting pipeline wired to real CRM linking
 
-Progress: [█████████████████░░░] 92% (35/42 total plans complete across all milestones)
+Progress: [█████████████████░░░] 93% (36/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -114,6 +114,11 @@ Recent decisions affecting current work:
 - [61-01 execution]: Stage 5 (account linking) is a deliberate placeholder — Plan 02 replaces with auto_link_meeting_to_account
 - [61-01 execution]: write_context_entries deduplicates on (file_name, source, detail, tenant_id) — safe to re-run without duplicate context entries
 - [61-01 execution]: classify_meeting Layer 2 skipped entirely when tenant.domain IS NULL — logged at DEBUG level (not error)
+- [61-02 execution]: FREE_EMAIL_DOMAINS frozenset at module level in meeting_processor_web.py — never auto-create accounts for gmail/yahoo/hotmail/outlook/icloud/protonmail/aol/live/msn/me
+- [61-02 execution]: auto_link_meeting_to_account returns first created prospect when multiple external domains have no match — one canonical account_id per meeting run
+- [61-02 execution]: Stage 5 preserves existing_account_id when already set on meeting row — manual account assignments are never overridden by auto-discovery
+- [61-02 execution]: upsert_account_contacts deduplicates on (tenant_id, account_id, email) — safe to re-process same meeting without creating duplicate contact rows
+- [61-02 execution]: Multi-match tie-breaking uses outerjoin + group_by + count(AccountContact.id) desc — most-contacts account wins when multiple domains match
 
 ### Pending Todos
 
@@ -127,5 +132,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 61-01-PLAN.md — meeting_processor_web.py engine + 7-stage skill_executor pipeline + POST /meetings/{id}/process endpoint; ready for Plan 02 (account auto-linking)
+Stopped at: Completed 61-02-PLAN.md — account auto-linking (3 helpers in meeting_processor_web.py) + Stage 5 wired in skill_executor; ready for Plan 03 (meeting list API + frontend)
 Resume file: None
