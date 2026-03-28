@@ -1,12 +1,15 @@
 """Meeting processor web engine — async helpers for the meeting intelligence pipeline.
 
-This module provides the 4 core async helpers used by skill_executor's
+This module provides the 7 core async helpers used by skill_executor's
 _execute_meeting_processor() 7-stage pipeline:
 
 - classify_meeting()  — 3-layer classification returning one of 8 meeting types
 - extract_intelligence() — Sonnet extraction into 7 MPP-04 context file types
 - upload_transcript()  — Upload transcript text to Supabase Storage
 - write_context_entries() — Write extracted intelligence to ContextEntry rows
+- auto_link_meeting_to_account() — Match attendee domains to existing accounts
+- auto_create_prospect() — Auto-create prospect account for unknown external domains
+- upsert_account_contacts() — Upsert attendees as AccountContact rows
 
 Important: this is the WEB implementation (async, ORM-based).
 Do NOT import from engines/meeting_processor.py (CLI, sync, storage_backend).
@@ -24,11 +27,11 @@ import json
 import logging
 import os
 import re
-from datetime import date, datetime
+from datetime import date, datetime, timezone
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
@@ -42,6 +45,23 @@ logger = logging.getLogger(__name__)
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
 _SONNET_MODEL = "claude-sonnet-4-20250514"
+
+# Free email provider domains — never auto-create prospect accounts for these
+FREE_EMAIL_DOMAINS: frozenset[str] = frozenset({
+    "gmail.com",
+    "yahoo.com",
+    "hotmail.com",
+    "outlook.com",
+    "icloud.com",
+    "protonmail.com",
+    "aol.com",
+    "live.com",
+    "msn.com",
+    "me.com",
+})
+
+# Mail-related subdomains to strip when extracting the root domain for matching
+_MAIL_SUBDOMAINS = ("mail.", "email.", "smtp.", "mx.", "www.")
 
 # 8 recognized meeting types (returned by classify_meeting)
 MEETING_TYPES = frozenset({
@@ -477,3 +497,269 @@ async def write_context_entries(
         written, meeting_slug, tenant_id,
     )
     return written
+
+
+# ---------------------------------------------------------------------------
+# Account Auto-Linking
+# ---------------------------------------------------------------------------
+
+
+def _normalize_domain(raw_domain: str) -> str:
+    """Strip common mail subdomains and lowercases the result.
+
+    Examples:
+        mail.acme.com  -> acme.com
+        www.acme.com   -> acme.com
+        ACME.COM       -> acme.com
+    """
+    domain = raw_domain.lower().strip()
+    for prefix in _MAIL_SUBDOMAINS:
+        if domain.startswith(prefix):
+            domain = domain[len(prefix):]
+            break
+    return domain
+
+
+def _extract_external_domains(attendees: list[dict]) -> list[str]:
+    """Return unique normalized domains from external attendees.
+
+    Filters out free email providers and any attendees missing an email.
+    Only includes attendees where is_external=True.
+    """
+    domains: dict[str, bool] = {}
+    for a in (attendees or []):
+        if not a.get("is_external"):
+            continue
+        email = (a.get("email") or "").lower().strip()
+        if "@" not in email:
+            continue
+        domain = _normalize_domain(email.split("@", 1)[1])
+        if domain and domain not in FREE_EMAIL_DOMAINS:
+            domains[domain] = True
+    return list(domains.keys())
+
+
+async def upsert_account_contacts(
+    session: AsyncSession,
+    tenant_id: UUID,
+    account_id: UUID,
+    attendees: list[dict],
+    domain: str,
+) -> int:
+    """Upsert external attendees matching domain as AccountContact rows.
+
+    - Filters attendees to those with is_external=True and email ending in @{domain}.
+    - Checks for existing AccountContact by (tenant_id, account_id, email).
+    - Creates new contacts only when not already present.
+    - Returns count of newly created contacts.
+
+    Caller is responsible for setting RLS context and committing the session.
+    """
+    created = 0
+    target_suffix = f"@{domain}"
+
+    for a in (attendees or []):
+        if not a.get("is_external"):
+            continue
+        email = (a.get("email") or "").lower().strip()
+        if not email.endswith(target_suffix):
+            continue
+        name = (a.get("name") or email.split("@")[0]).strip() or email
+
+        existing = (await session.execute(
+            select(AccountContact.id).where(
+                AccountContact.tenant_id == tenant_id,
+                AccountContact.account_id == account_id,
+                AccountContact.email == email,
+            ).limit(1)
+        )).scalar_one_or_none()
+
+        if existing is None:
+            contact = AccountContact(
+                tenant_id=tenant_id,
+                account_id=account_id,
+                name=name,
+                email=email,
+                source="meeting-auto-discovery",
+            )
+            session.add(contact)
+            created += 1
+            logger.debug(
+                "upsert_account_contacts: added contact %s to account %s", email, account_id
+            )
+
+    return created
+
+
+async def auto_create_prospect(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_id: UUID,
+    user_id: UUID | None,
+    domain: str,
+    attendees: list[dict],
+    title: str = "",
+) -> UUID:
+    """Auto-create a prospect Account for an unknown external domain.
+
+    - Derives company name from the domain (e.g. acme.com -> Acme).
+    - Computes normalized_name for dedup check.
+    - Returns existing account.id if the normalized_name already exists.
+    - Creates new Account with all required NOT NULL fields.
+    - Calls upsert_account_contacts() for matching attendees.
+    - Commits and returns the account UUID.
+    """
+    company_name = domain.split(".")[0].title()
+    normalized = re.sub(r"[^a-z0-9]", "", company_name.lower())
+
+    async with factory() as session:
+        await session.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+
+        # Dedup check
+        existing_id = (await session.execute(
+            select(Account.id).where(
+                Account.tenant_id == tenant_id,
+                Account.normalized_name == normalized,
+            ).limit(1)
+        )).scalar_one_or_none()
+
+        if existing_id is not None:
+            logger.info(
+                "auto_create_prospect: account %s already exists for domain %s (tenant=%s)",
+                existing_id, domain, tenant_id,
+            )
+            return existing_id
+
+        account = Account(
+            tenant_id=tenant_id,
+            name=company_name,
+            normalized_name=normalized,
+            domain=domain,
+            source="meeting-auto-discovery",
+            status="prospect",
+            relationship_type=["prospect"],
+            relationship_status="new",
+            pipeline_stage="identified",
+            last_interaction_at=datetime.now(timezone.utc),
+        )
+        session.add(account)
+        await session.flush()  # Populate account.id
+
+        # Upsert contacts for attendees matching this domain
+        await upsert_account_contacts(session, tenant_id, account.id, attendees, domain)
+
+        await session.commit()
+        logger.info(
+            "auto_create_prospect: created prospect '%s' (id=%s) for domain %s (tenant=%s)",
+            company_name, account.id, domain, tenant_id,
+        )
+        return account.id
+
+
+async def auto_link_meeting_to_account(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_id: UUID,
+    attendees: list[dict],
+    user_id: UUID | None = None,
+    meeting_title: str = "",
+) -> UUID | None:
+    """Match meeting attendees to existing accounts by domain, or create prospects.
+
+    Steps:
+    1. Extract unique external domains from attendees (excludes free email providers).
+    2. Query Account.domain for any of those domains in the tenant.
+    3. If single match: return account.id.
+    4. If multiple matches: return account with most AccountContacts (first if tied).
+    5. If no match: for each external domain, call auto_create_prospect().
+       Return the first created account's id.
+    6. If no external domains (all internal): return None.
+
+    Args:
+        factory: async session factory with RLS.
+        tenant_id: Tenant UUID for filtering and RLS.
+        attendees: List of attendee dicts with email, name, is_external keys.
+        user_id: Optional user UUID (passed to auto_create_prospect).
+        meeting_title: Meeting title (passed to auto_create_prospect for context).
+
+    Returns:
+        Account UUID if a match or prospect was created, else None.
+    """
+    external_domains = _extract_external_domains(attendees)
+
+    if not external_domains:
+        logger.debug(
+            "auto_link_meeting_to_account: no external domains found (all internal or free email)"
+        )
+        return None
+
+    # Query for existing accounts matching any of the external domains
+    async with factory() as session:
+        await session.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+        matched_accounts = (await session.execute(
+            select(Account).where(
+                Account.tenant_id == tenant_id,
+                Account.domain.in_(external_domains),
+            )
+        )).scalars().all()
+
+    if len(matched_accounts) == 1:
+        account = matched_accounts[0]
+        logger.info(
+            "auto_link_meeting_to_account: single domain match -> account %s (domain=%s)",
+            account.id, account.domain,
+        )
+        return account.id
+
+    if len(matched_accounts) > 1:
+        # Pick account with most contacts; fall back to first if tied
+        async with factory() as session:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            rows = (await session.execute(
+                select(Account.id, func.count(AccountContact.id).label("contact_count"))
+                .outerjoin(AccountContact, AccountContact.account_id == Account.id)
+                .where(Account.id.in_([a.id for a in matched_accounts]))
+                .group_by(Account.id)
+                .order_by(func.count(AccountContact.id).desc())
+                .limit(1)
+            )).first()
+
+        best_id = rows[0] if rows else matched_accounts[0].id
+        logger.info(
+            "auto_link_meeting_to_account: %d domain matches, picked account %s by contact count",
+            len(matched_accounts), best_id,
+        )
+        return best_id
+
+    # No existing match — auto-create prospect accounts for unknown external domains
+    logger.info(
+        "auto_link_meeting_to_account: no existing accounts for domains %s — creating prospects",
+        external_domains,
+    )
+    first_account_id: UUID | None = None
+    for domain in external_domains:
+        try:
+            account_id = await auto_create_prospect(
+                factory=factory,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                domain=domain,
+                attendees=attendees,
+                title=meeting_title,
+            )
+            if first_account_id is None:
+                first_account_id = account_id
+        except Exception as exc:
+            logger.warning(
+                "auto_link_meeting_to_account: failed to create prospect for domain %s: %s",
+                domain, exc,
+            )
+
+    return first_account_id

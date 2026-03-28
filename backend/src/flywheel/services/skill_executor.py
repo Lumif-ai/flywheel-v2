@@ -1359,7 +1359,7 @@ async def _execute_meeting_processor(
       2. storing    — upload transcript to Supabase Storage, update attendees
       3. classifying — 3-layer meeting type classification
       4. extracting  — Sonnet extraction into 7 MPP-04 context file types
-      5. linking    — account linking placeholder (Plan 02 replaces this)
+      5. linking    — domain-match attendees to accounts, auto-create prospects
       6. writing    — write ContextEntry rows via write_context_entries()
       7. done       — update meeting.summary JSONB, processing_status=complete
 
@@ -1372,6 +1372,8 @@ async def _execute_meeting_processor(
         upload_transcript,
         write_context_entries,
         _make_meeting_slug,
+        auto_link_meeting_to_account,
+        upsert_account_contacts,
     )
     from flywheel.db.models import Integration, Meeting
     from flywheel.auth.encryption import decrypt_api_key
@@ -1528,14 +1530,55 @@ async def _execute_meeting_processor(
         )
 
         # ------------------------------------------------------------------
-        # Stage 5: linking (placeholder — Plan 02 replaces with auto_link_meeting_to_account)
+        # Stage 5: linking — match attendee domains to accounts, auto-create prospects
         # ------------------------------------------------------------------
         await _append_event_atomic(factory, run_id, {
             "event": "stage",
-            "data": {"stage": "linking", "message": "Account linking deferred to Plan 02..."},
+            "data": {"stage": "linking", "message": "Linking meeting to account..."},
         })
-        account_id = existing_account_id  # Use existing if set, otherwise None
-        logger.info("Run %s: account linking deferred to Plan 02 (account_id=%s)", run_id, account_id)
+
+        if existing_account_id:
+            # Meeting already has an account_id set (e.g. manually assigned)
+            account_id = existing_account_id
+            logger.info("Run %s: meeting already linked to account %s", run_id, account_id)
+        else:
+            account_id = await auto_link_meeting_to_account(
+                factory=factory,
+                tenant_id=tenant_id,
+                attendees=content.attendees,
+                user_id=user_id,
+                meeting_title=meeting_title,
+            )
+            if account_id:
+                # Upsert contacts for the matched/created account
+                matched_domain: str | None = None
+                async with factory() as sess:
+                    await sess.execute(
+                        sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                        {"tid": str(tenant_id)},
+                    )
+                    from flywheel.db.models import Account
+                    acct = (await sess.execute(
+                        select(Account).where(Account.id == account_id)
+                    )).scalar_one_or_none()
+                    if acct:
+                        matched_domain = acct.domain
+                if matched_domain:
+                    async with factory() as sess:
+                        await sess.execute(
+                            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                            {"tid": str(tenant_id)},
+                        )
+                        await upsert_account_contacts(
+                            sess, tenant_id, account_id, content.attendees, matched_domain
+                        )
+                        await sess.commit()
+                logger.info(
+                    "Run %s: auto-linked meeting to account %s (domain=%s)",
+                    run_id, account_id, matched_domain,
+                )
+            else:
+                logger.info("Run %s: no account match (all-internal or free-email attendees)", run_id)
 
         # ------------------------------------------------------------------
         # Stage 6: writing
