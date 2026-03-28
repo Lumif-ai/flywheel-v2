@@ -1268,9 +1268,23 @@ class Meeting(Base):
             postgresql_where=text("deleted_at IS NULL"),
         ),
         Index(
-            "idx_meetings_pending",
+            "idx_meetings_processable",
             "tenant_id", "processing_status",
-            postgresql_where=text("processing_status = 'pending'"),
+            postgresql_where=text(
+                "processing_status IN ('pending', 'scheduled', 'recorded')"
+            ),
+        ),
+        Index(
+            "idx_meetings_calendar_dedup",
+            "tenant_id", "calendar_event_id",
+            unique=True,
+            postgresql_where=text("calendar_event_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_meetings_granola_dedup",
+            "tenant_id", "granola_note_id",
+            unique=True,
+            postgresql_where=text("granola_note_id IS NOT NULL"),
         ),
     )
 
@@ -1285,6 +1299,8 @@ class Meeting(Base):
     )
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     external_id: Mapped[str | None] = mapped_column(Text)
+    calendar_event_id: Mapped[str | None] = mapped_column(Text)
+    granola_note_id: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
     meeting_date: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), nullable=False
@@ -1293,6 +1309,8 @@ class Meeting(Base):
     attendees: Mapped[dict | None] = mapped_column(JSONB)
     transcript_url: Mapped[str | None] = mapped_column(Text)
     ai_summary: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(Text)
     summary: Mapped[dict | None] = mapped_column(JSONB)
     meeting_type: Mapped[str | None] = mapped_column(Text)
     account_id: Mapped[UUID | None] = mapped_column(

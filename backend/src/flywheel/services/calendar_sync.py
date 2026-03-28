@@ -2,7 +2,7 @@
 
 Handles:
 - Background sync loop (5-minute interval) polling connected Google Calendar integrations
-- Work item upsert from calendar events (timed + all-day, cancellations)
+- Meeting row upsert from calendar events (timed + all-day, cancellations)
 - Incremental sync with 410 GONE recovery (full re-sync)
 - Token revocation detection (marks integration disconnected)
 - Meeting prep suggestions (external attendees within 48 hours)
@@ -17,12 +17,11 @@ from uuid import UUID
 
 from dateutil.parser import isoparse
 from googleapiclient.errors import HttpError
-from sqlalchemy import and_, select
+from sqlalchemy import and_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.db.models import Integration, MeetingClassification, SuggestionDismissal, WorkItem
+from flywheel.db.models import Integration, Meeting, SuggestionDismissal, WorkItem
 from flywheel.db.session import get_session_factory
-from flywheel.services.meeting_classifier import classify_meeting
 from flywheel.services.google_calendar import (
     TokenRevokedException,
     get_valid_credentials,
@@ -37,28 +36,32 @@ SUGGESTION_WINDOW_HOURS = 48
 
 
 # ---------------------------------------------------------------------------
-# Work item upsert
+# Meeting row upsert (replaces upsert_meeting_work_item)
 # ---------------------------------------------------------------------------
 
 
-async def upsert_meeting_work_item(
+async def upsert_meeting_row(
     db: AsyncSession,
     tenant_id: UUID,
     user_id: UUID,
     event: dict,
 ) -> None:
-    """Create or update a WorkItem from a Google Calendar event.
+    """Create or update a Meeting row from a Google Calendar event.
+
+    Uses calendar_event_id for dedup (not external_id pattern).
+    Sets processing_status='scheduled' for new rows.
+    Skips update if existing row already has Granola data (richer source).
 
     Does NOT commit -- caller is responsible for committing the session.
     """
-    external_id = f"gcal:{event['id']}"
+    cal_event_id = event["id"]
 
-    # Find existing work item by external_id
+    # Find existing meeting by calendar_event_id
     result = await db.execute(
-        select(WorkItem).where(
+        select(Meeting).where(
             and_(
-                WorkItem.tenant_id == tenant_id,
-                WorkItem.external_id == external_id,
+                Meeting.tenant_id == tenant_id,
+                Meeting.calendar_event_id == cal_event_id,
             )
         )
     )
@@ -67,89 +70,68 @@ async def upsert_meeting_work_item(
     # Handle cancelled events
     if event.get("status") == "cancelled":
         if existing is not None:
-            existing.status = "cancelled"
+            # Do NOT cancel if Granola data is attached (richer source)
+            if existing.granola_note_id:
+                return
+            existing.processing_status = "cancelled"
         return
 
-    # Parse scheduled_at -- handle both timed and all-day events
+    # Skip update if existing row has Granola data (richer source wins)
+    if existing is not None and existing.granola_note_id:
+        return
+
+    # Parse meeting_date -- handle both timed and all-day events
     start = event.get("start", {})
     date_time_str = start.get("dateTime")
     date_str = start.get("date")
 
     if date_time_str:
-        scheduled_at = isoparse(date_time_str)
+        meeting_date = isoparse(date_time_str)
     elif date_str:
         # All-day event: set time to 00:00 UTC
-        scheduled_at = datetime.strptime(date_str, "%Y-%m-%d").replace(
+        meeting_date = datetime.strptime(date_str, "%Y-%m-%d").replace(
             tzinfo=timezone.utc
         )
     else:
-        scheduled_at = None
+        meeting_date = datetime.now(timezone.utc)
 
-    # Extract attendees and check for external attendees
+    # Parse attendees into Meeting-compatible format
     attendees_raw = event.get("attendees", [])
-    attendee_emails = [a.get("email", "") for a in attendees_raw]
-    has_external_attendees = any(
-        not a.get("self", False) and not a.get("organizer", False)
+    attendees = [
+        {
+            "email": a.get("email", ""),
+            "name": a.get("displayName", ""),
+            "is_external": not a.get("self", False) and not a.get("organizer", False),
+        }
         for a in attendees_raw
-    )
-
-    # Build data dict
-    data = {
-        "attendees": attendee_emails,
-        "has_external_attendees": has_external_attendees,
-        "description": event.get("description"),
-        "location": event.get("location"),
-        "calendar_link": event.get("htmlLink"),
-    }
+    ]
 
     title = event.get("summary") or "Untitled Meeting"
 
     if existing is not None:
-        # Update existing work item
+        # Update existing meeting row
         existing.title = title
-        existing.scheduled_at = scheduled_at
-        existing.data = data
-        existing.status = "upcoming"  # Re-activate if previously cancelled
-        work_item_ref = existing
+        existing.meeting_date = meeting_date
+        existing.attendees = attendees
+        existing.location = event.get("location")
+        existing.description = event.get("description")
+        existing.processing_status = "scheduled"
     else:
-        # Create new work item
-        work_item_ref = WorkItem(
+        # Create new meeting row
+        meeting = Meeting(
             tenant_id=tenant_id,
             user_id=user_id,
-            type="meeting",
+            provider="google-calendar",
+            external_id=f"gcal:{cal_event_id}",
+            calendar_event_id=cal_event_id,
             title=title,
-            status="upcoming",
-            data=data,
-            source="google-calendar",
-            external_id=external_id,
-            scheduled_at=scheduled_at,
+            meeting_date=meeting_date,
+            attendees=attendees,
+            location=event.get("location"),
+            description=event.get("description"),
+            processing_status="scheduled",
         )
-        db.add(work_item_ref)
-
-    # Classify the meeting and store result in work_item.data
-    await db.flush()  # ensure work_item_ref has an id
-    try:
-        classification = await classify_meeting(db, tenant_id, work_item_ref)
-        updated_data = dict(work_item_ref.data or {})
-        updated_data["classification"] = classification
-        work_item_ref.data = updated_data
-
-        # Record auto-classifications for pattern learning
-        if classification["confidence"] == "high" and classification.get("stream_id"):
-            from uuid import UUID as _UUID
-
-            auto_record = MeetingClassification(
-                tenant_id=tenant_id,
-                user_id=user_id,
-                work_item_id=work_item_ref.id,
-                stream_id=_UUID(classification["stream_id"]) if isinstance(classification["stream_id"], str) else classification["stream_id"],
-                email_domain=None,
-                confidence="high",
-                source=classification["source"],
-            )
-            db.add(auto_record)
-    except Exception:
-        logger.debug("Meeting classification failed for %s", work_item_ref.id, exc_info=True)
+        db.add(meeting)
 
 
 # ---------------------------------------------------------------------------
@@ -162,7 +144,7 @@ async def sync_calendar(
     integration: Integration,
     _retry_count: int = 0,
 ) -> int:
-    """Sync a single Google Calendar integration, upserting work items.
+    """Sync a single Google Calendar integration, upserting Meeting rows.
 
     Returns the number of events processed.
 
@@ -195,10 +177,10 @@ async def sync_calendar(
             return await sync_calendar(db, integration, _retry_count=1)
         raise
 
-    # Upsert each event as a work item
+    # Upsert each event as a Meeting row
     items = response.get("items", [])
     for event in items:
-        await upsert_meeting_work_item(
+        await upsert_meeting_row(
             db, integration.tenant_id, integration.user_id, event
         )
 
@@ -227,6 +209,8 @@ async def calendar_sync_loop() -> None:
     """Infinite loop that syncs all connected Google Calendar integrations.
 
     Uses short-lived DB sessions per cycle to avoid connection pool exhaustion.
+    Sets RLS context (app.tenant_id, app.user_id) before writing Meeting rows
+    to satisfy split-visibility RLS policies.
     """
     while True:
         try:
@@ -245,7 +229,20 @@ async def calendar_sync_loop() -> None:
                 integrations = result.scalars().all()
 
                 for integration in integrations:
+                    if not integration.credentials_encrypted:
+                        logger.debug("Skipping integration %s — no credentials stored", integration.id)
+                        continue
                     try:
+                        # Set RLS context for this integration's tenant/user
+                        await session.execute(
+                            text("SET LOCAL app.tenant_id = :tid"),
+                            {"tid": str(integration.tenant_id)},
+                        )
+                        await session.execute(
+                            text("SET LOCAL app.user_id = :uid"),
+                            {"uid": str(integration.user_id)},
+                        )
+
                         count = await sync_calendar(session, integration)
                         if count > 0:
                             logger.info(

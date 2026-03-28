@@ -10,11 +10,11 @@ Endpoints:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
@@ -70,6 +70,65 @@ def _apply_processing_rules(raw: RawMeeting, rules: dict) -> str:
             return "skipped"
 
     return "pending"
+
+
+async def _find_matching_scheduled(
+    db: AsyncSession,
+    tenant_id: UUID,
+    raw: RawMeeting,
+) -> Meeting | None:
+    """Find a scheduled calendar meeting that matches this Granola meeting.
+
+    Fuzzy dedup: matches on time (+/-30 min), title (case-insensitive contains),
+    or attendee email overlap. Returns first matching candidate or None.
+    """
+    if not raw.meeting_date:
+        return None
+
+    window_start = raw.meeting_date - timedelta(minutes=30)
+    window_end = raw.meeting_date + timedelta(minutes=30)
+
+    result = await db.execute(
+        select(Meeting).where(
+            and_(
+                Meeting.tenant_id == tenant_id,
+                Meeting.processing_status == "scheduled",
+                Meeting.meeting_date >= window_start,
+                Meeting.meeting_date <= window_end,
+            )
+        )
+    )
+    candidates = result.scalars().all()
+
+    if not candidates:
+        return None
+
+    raw_title = (raw.title or "").lower().strip()
+    raw_emails = set()
+    if raw.attendees:
+        for a in raw.attendees:
+            email = a.get("email", "") if isinstance(a, dict) else ""
+            if email:
+                raw_emails.add(email.lower())
+
+    for candidate in candidates:
+        # Title match: case-insensitive contains (either direction)
+        cand_title = (candidate.title or "").lower().strip()
+        if raw_title and cand_title:
+            if raw_title in cand_title or cand_title in raw_title:
+                return candidate
+
+        # Attendee overlap: at least one email in common
+        if raw_emails and candidate.attendees:
+            cand_emails = set()
+            for a in candidate.attendees:
+                email = a.get("email", "") if isinstance(a, dict) else ""
+                if email:
+                    cand_emails.add(email.lower())
+            if raw_emails & cand_emails:
+                return candidate
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -145,12 +204,24 @@ async def sync_meetings(
         if raw.external_id in existing_ids:
             continue
 
+        # Fuzzy dedup: check if a scheduled calendar meeting matches
+        matched = await _find_matching_scheduled(db, user.tenant_id, raw)
+        if matched is not None:
+            # Enrich existing scheduled row with Granola data
+            matched.granola_note_id = raw.external_id
+            matched.ai_summary = raw.ai_summary
+            matched.duration_mins = raw.duration_mins
+            matched.processing_status = "recorded"
+            synced += 1
+            continue
+
         status = _apply_processing_rules(raw, processing_rules)
         meeting = Meeting(
             tenant_id=user.tenant_id,
             user_id=user.sub,
             provider="granola",
             external_id=raw.external_id,
+            granola_note_id=raw.external_id,
             title=raw.title,
             meeting_date=raw.meeting_date,
             duration_mins=raw.duration_mins,
@@ -195,11 +266,11 @@ async def process_pending_meetings(
         queued: count of meetings queued for processing
         run_ids: list of SkillRun UUIDs created
     """
-    # Load all pending meetings for this tenant
+    # Load all pending and recorded meetings for this tenant
     result = await db.execute(
         select(Meeting).where(
             Meeting.tenant_id == user.tenant_id,
-            Meeting.processing_status == "pending",
+            Meeting.processing_status.in_(["pending", "recorded"]),
             Meeting.deleted_at.is_(None),
         )
     )
@@ -388,7 +459,7 @@ async def process_meeting(
         raise HTTPException(
             status_code=409,
             detail=f"Meeting is already in '{meeting.processing_status}' state. "
-                   "Only 'pending' or 'failed' meetings can be reprocessed.",
+                   "Only 'pending', 'recorded', 'scheduled', or 'failed' meetings can be reprocessed.",
         )
 
     # 3. Race condition guard — mark as processing immediately
