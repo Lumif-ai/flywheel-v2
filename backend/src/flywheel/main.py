@@ -14,6 +14,7 @@ logging.basicConfig(
 import sentry_sdk
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from fastapi.responses import JSONResponse
 from slowapi.errors import RateLimitExceeded
 
@@ -46,6 +47,7 @@ from flywheel.api.accounts import router as accounts_router
 from flywheel.api.timeline import router as timeline_router
 from flywheel.api.relationships import router as relationships_router
 from flywheel.api.signals import router as signals_router
+from flywheel.api.meetings import router as meetings_router
 from flywheel.config import settings
 from flywheel.middleware.rate_limit import limiter
 
@@ -61,6 +63,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Startup
     if settings.flywheel_backend == "postgres":
+        # Validate required config before starting background workers
+        missing = []
+        if not settings.encryption_key:
+            missing.append("ENCRYPTION_KEY")
+        if not settings.google_client_id:
+            missing.append("GOOGLE_CLIENT_ID")
+        if not settings.google_client_secret:
+            missing.append("GOOGLE_CLIENT_SECRET")
+        if missing:
+            import logging as _log
+            _log.getLogger(__name__).warning(
+                "Missing env vars: %s — integration OAuth and sync will not work",
+                ", ".join(missing),
+            )
+
         from flywheel.db.engine import get_engine
 
         # Verify DB connection
@@ -119,6 +136,9 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Response compression — applies to all JSON responses > 500 bytes
+    app.add_middleware(GZipMiddleware, minimum_size=500)
+
     # CORS
     app.add_middleware(
         CORSMiddleware,
@@ -176,6 +196,7 @@ def create_app() -> FastAPI:
     app.include_router(timeline_router, prefix="/api/v1")
     app.include_router(relationships_router, prefix="/api/v1")
     app.include_router(signals_router, prefix="/api/v1")
+    app.include_router(meetings_router, prefix="/api/v1")
 
     return app
 
