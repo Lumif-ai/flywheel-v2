@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 60 of 63 (Meeting Data Model and Granola Adapter)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-03-28 — Phase 60 Plan 02 complete: Granola adapter (granola_adapter.py) and POST /integrations/granola/connect with AES-256-GCM key storage
+Plan: 3 of 3 in current phase
+Status: Phase complete
+Last activity: 2026-03-28 — Phase 60 Plan 03 complete: POST /api/v1/meetings/sync endpoint with Granola dedup pipeline, processing rules, last_synced_at cursor
 
-Progress: [█████████████████░░░] 87% (33/42 total plans complete across all milestones)
+Progress: [█████████████████░░░] 90% (34/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -107,6 +107,9 @@ Recent decisions affecting current work:
 - [60-02 execution]: list_meetings reads 'notes' key from response (not 'meetings'); maps item["id"]->external_id, item["created_at"]->meeting_date, item.get("summary_text")->ai_summary
 - [60-02 execution]: Upsert on reconnect clears last_synced_at = None — forces full re-sync from scratch on API key change
 - [60-02 execution]: connect endpoint does NOT store last_sync_cursor in settings — Integration.last_synced_at column is the sync cursor
+- [60-03 execution]: Processing rules sourced from integration.settings["processing_rules"] dict — avoids a separate config table; tenant-configurable via JSONB settings column
+- [60-03 execution]: already_seen count is len(existing_ids) — built during dedup step, no extra DB query
+- [60-03 execution]: _apply_processing_rules() returns "pending" or "skipped" only — exhaustive, no third state
 
 ### Pending Todos
 
@@ -120,5 +123,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 60-02-PLAN.md — Granola adapter + connect endpoint; ready for Phase 60 Plan 03 (meetings sync endpoint)
+Stopped at: Completed 60-03-PLAN.md — Phase 60 complete: Meeting data model + Granola adapter + sync endpoint; ready for Phase 61
 Resume file: None
