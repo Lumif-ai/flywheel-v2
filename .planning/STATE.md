@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 
 ## Current Position
 
-Phase: 60 of 63 (Meeting Data Model and Granola Adapter)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-03-28 — Phase 60 Plan 03 complete: POST /api/v1/meetings/sync endpoint with Granola dedup pipeline, processing rules, last_synced_at cursor
+Phase: 61 of 63 (Meeting Intelligence Pipeline)
+Plan: 1 of 3 in current phase
+Status: In progress
+Last activity: 2026-03-28 — Phase 61 Plan 01 complete: meeting_processor_web.py engine + _execute_meeting_processor() 7-stage pipeline + POST /meetings/{id}/process endpoint
 
-Progress: [█████████████████░░░] 90% (34/42 total plans complete across all milestones)
+Progress: [█████████████████░░░] 92% (35/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -110,6 +110,10 @@ Recent decisions affecting current work:
 - [60-03 execution]: Processing rules sourced from integration.settings["processing_rules"] dict — avoids a separate config table; tenant-configurable via JSONB settings column
 - [60-03 execution]: already_seen count is len(existing_ids) — built during dedup step, no extra DB query
 - [60-03 execution]: _apply_processing_rules() returns "pending" or "skipped" only — exhaustive, no third state
+- [61-01 execution]: Sync Anthropic SDK wrapped in run_in_executor — avoids blocking event loop while keeping simple SDK usage
+- [61-01 execution]: Stage 5 (account linking) is a deliberate placeholder — Plan 02 replaces with auto_link_meeting_to_account
+- [61-01 execution]: write_context_entries deduplicates on (file_name, source, detail, tenant_id) — safe to re-run without duplicate context entries
+- [61-01 execution]: classify_meeting Layer 2 skipped entirely when tenant.domain IS NULL — logged at DEBUG level (not error)
 
 ### Pending Todos
 
@@ -123,5 +127,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 60-03-PLAN.md — Phase 60 complete: Meeting data model + Granola adapter + sync endpoint; ready for Phase 61
+Stopped at: Completed 61-01-PLAN.md — meeting_processor_web.py engine + 7-stage skill_executor pipeline + POST /meetings/{id}/process endpoint; ready for Plan 02 (account auto-linking)
 Resume file: None
