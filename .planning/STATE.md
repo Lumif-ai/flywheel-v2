@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 62 of 63 (Meeting Surfaces and Relationship Enrichment)
-Plan: 2 of 4 in current phase
+Plan: 3 of 4 in current phase
 Status: In progress
-Last activity: 2026-03-28 — Phase 62 Plan 02 complete: GranolaSettings component (connect/disconnect/sync UI) + Settings Integrations tab
+Last activity: 2026-03-28 — Phase 62 Plan 03 complete: Relationship detail endpoint enriched with meeting timeline entries and ContextEntry intel from meeting processing
 
 Progress: [██████████████████░░] 95% (38/42 total plans complete across all milestones)
 
@@ -125,6 +125,10 @@ Recent decisions affecting current work:
 - [61-03 execution]: Post-classification skip preserves meeting_type classification even when status becomes "skipped" — type analytics remain accurate
 - [62-02 execution]: Client-side filter checks provider=granola AND status=connected — a disconnected row may remain in DB from prior connection
 - [62-02 execution]: syncMutation calls POST /meetings/sync (not /integrations/{id}/sync) — meetings endpoint returns synced/skipped/already_seen stats for user feedback
+- [62-03 execution]: Meeting rows serialized as inline dicts (not via _serialize_timeline_item) — direction set directly as "bidirectional" since Meeting doesn't share ContextEntry interface
+- [62-03 execution]: INTEL_FILES excludes "contacts" — contact data surfaces via AccountContact/PeopleTab, not IntelligenceTab
+- [62-03 execution]: Intel gap-fill uses file_name.replace("-", "_") key transformation — aligns with frontend lookupValue() two-pass scan (pain_points matches 'pain' case-insensitive)
+- [62-03 execution]: attendees JSONB field on Meeting is list/dict — len(m.attendees or []) used safely for contact_name attendee count
 
 ### Pending Todos
 
@@ -138,5 +142,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 62-02-PLAN.md — GranolaSettings UI (connect/disconnect/sync controls) + Settings Integrations tab; ready for Phase 62 Plan 03
+Stopped at: Completed 62-03-PLAN.md — relationship detail endpoint enriched with meeting timeline + ContextEntry intel; ready for Phase 62 Plan 04
 Resume file: None
