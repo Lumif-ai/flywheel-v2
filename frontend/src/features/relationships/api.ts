@@ -57,3 +57,17 @@ export function synthesize(id: string): Promise<unknown> {
 export function askRelationship(id: string, question: string): Promise<AskResponse> {
   return api.post<AskResponse>(`/relationships/${id}/ask`, { question })
 }
+
+export interface PrepResponse {
+  run_id: string
+  stream_url: string
+}
+
+export function triggerRelationshipPrep(
+  id: string,
+  meetingId?: string,
+): Promise<PrepResponse> {
+  return api.post<PrepResponse>(`/relationships/${id}/prep`, {
+    meeting_id: meetingId ?? null,
+  })
+}

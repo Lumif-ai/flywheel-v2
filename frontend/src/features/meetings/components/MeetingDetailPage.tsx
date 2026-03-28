@@ -14,6 +14,7 @@ import {
 import { Skeleton } from '@/components/ui/skeleton'
 import { useMeetingDetail } from '../hooks/useMeetingDetail'
 import { useMeetingProcessing } from '../hooks/useMeetingProcessing'
+import { PrepBriefingPanel } from '@/features/relationships/components/PrepBriefingPanel'
 import type { ProcessingStatus } from '../types/meetings'
 
 // ---------------------------------------------------------------------------
@@ -275,6 +276,15 @@ export function MeetingDetailPage() {
         {/* Processing feedback (for pending/failed/in-progress) */}
         {(meeting.processing_status === 'pending' || meeting.processing_status === 'failed') && (
           <ProcessingFeedback meetingId={meeting.id} status={meeting.processing_status} />
+        )}
+
+        {/* Meeting Prep — only when linked to an account */}
+        {meeting.account_id && (
+          <PrepBriefingPanel
+            accountId={meeting.account_id}
+            accountName="this account"
+            meetingId={meeting.id}
+          />
         )}
 
         {/* Attendees section */}

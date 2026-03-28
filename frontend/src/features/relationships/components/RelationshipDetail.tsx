@@ -11,6 +11,7 @@ import { PeopleTab } from './tabs/PeopleTab'
 import { IntelligenceTab } from './tabs/IntelligenceTab'
 import { CommitmentsTab } from './tabs/CommitmentsTab'
 import { RelationshipActionBar } from './RelationshipActionBar'
+import { PrepBriefingPanel } from './PrepBriefingPanel'
 import type { RelationshipType } from '../types/relationships'
 
 // TAB_CONFIG drives all tab rendering — single source of truth
@@ -190,6 +191,12 @@ export function RelationshipDetail() {
                   </TabsTrigger>
                 ))}
               </TabsList>
+
+              {/* Meeting Prep — always visible above tab content */}
+              <PrepBriefingPanel
+                accountId={account.id}
+                accountName={account.name ?? 'Account'}
+              />
 
               <TabsContent value="timeline">
                 <TimelineTab timeline={account.recent_timeline} />
