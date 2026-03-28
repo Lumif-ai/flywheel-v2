@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 
 ## Current Position
 
-Phase: 61 of 63 (Meeting Intelligence Pipeline)
-Plan: 3 of 3 in current phase
-Status: Phase complete
-Last activity: 2026-03-28 — Phase 61 Plan 03 complete: apply_post_classification_rules (MPP-05 rules) + POST /meetings/process-pending + GET /meetings/ + GET /meetings/{id} + pipeline skip check wired between Stage 3 and Stage 4
+Phase: 62 of 63 (Meeting Surfaces and Relationship Enrichment)
+Plan: 2 of 4 in current phase
+Status: In progress
+Last activity: 2026-03-28 — Phase 62 Plan 02 complete: GranolaSettings component (connect/disconnect/sync UI) + Settings Integrations tab
 
-Progress: [██████████████████░░] 95% (37/42 total plans complete across all milestones)
+Progress: [██████████████████░░] 95% (38/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -123,6 +123,8 @@ Recent decisions affecting current work:
 - [61-03 execution]: skip_internal defaults to True when key absent — matches MPP-05 spec (internal-only meetings skip by default)
 - [61-03 execution]: granola_list_meetings alias in meetings.py — avoids collision between granola_adapter.list_meetings import and new GET / endpoint function
 - [61-03 execution]: Post-classification skip preserves meeting_type classification even when status becomes "skipped" — type analytics remain accurate
+- [62-02 execution]: Client-side filter checks provider=granola AND status=connected — a disconnected row may remain in DB from prior connection
+- [62-02 execution]: syncMutation calls POST /meetings/sync (not /integrations/{id}/sync) — meetings endpoint returns synced/skipped/already_seen stats for user feedback
 
 ### Pending Todos
 
@@ -136,5 +138,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 61-03-PLAN.md — Phase 61 complete: apply_post_classification_rules + POST /process-pending + GET /meetings/ + GET /meetings/{id} + pipeline skip check; ready for Phase 62 (meeting intelligence frontend)
+Stopped at: Completed 62-02-PLAN.md — GranolaSettings UI (connect/disconnect/sync controls) + Settings Integrations tab; ready for Phase 62 Plan 03
 Resume file: None
