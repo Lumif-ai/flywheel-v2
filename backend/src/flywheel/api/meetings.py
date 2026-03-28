@@ -1,12 +1,14 @@
 """Meetings endpoints.
 
 Endpoints:
-- POST /meetings/sync  -- pull meetings from Granola, dedup, insert new rows
+- POST /meetings/sync         -- pull meetings from Granola, dedup, insert new rows
+- POST /meetings/{id}/process -- trigger meeting intelligence processing pipeline
 """
 
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
@@ -15,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.encryption import decrypt_api_key
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Integration, Meeting
+from flywheel.db.models import Integration, Meeting, SkillRun
 from flywheel.services.granola_adapter import RawMeeting, list_meetings
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
@@ -172,3 +174,65 @@ async def sync_meetings(
         "already_seen": len(existing_ids),
         "total_from_provider": len(raw_meetings),
     }
+
+
+@router.post("/{meeting_id}/process")
+async def process_meeting(
+    meeting_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Trigger the meeting intelligence processing pipeline for a meeting.
+
+    Creates a SkillRun for the "meeting-processor" skill. The job_queue_loop
+    picks it up and runs the 7-stage pipeline (fetch, store, classify, extract,
+    link, write, done).
+
+    Returns:
+        run_id: UUID of the created SkillRun
+        meeting_id: UUID of the meeting being processed
+
+    Raises:
+        404 if meeting not found for this tenant
+        409 if meeting is already processing or complete
+    """
+    # 1. Load meeting by id + tenant_id
+    result = await db.execute(
+        select(Meeting).where(
+            Meeting.id == meeting_id,
+            Meeting.tenant_id == user.tenant_id,
+        ).limit(1)
+    )
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # 2. Guard against duplicate processing
+    if meeting.processing_status in ("processing", "complete"):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Meeting is already in '{meeting.processing_status}' state. "
+                   "Only 'pending' or 'failed' meetings can be reprocessed.",
+        )
+
+    # 3. Race condition guard — mark as processing immediately
+    meeting.processing_status = "processing"
+
+    # 4. Create SkillRun for the meeting-processor skill
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name="meeting-processor",
+        input_text=str(meeting_id),
+        status="pending",
+    )
+    db.add(run)
+
+    # 5. Flush to get run.id, then link back to meeting
+    await db.flush()
+    meeting.skill_run_id = run.id
+
+    # 6. Commit
+    await db.commit()
+
+    return {"run_id": str(run.id), "meeting_id": str(meeting_id)}

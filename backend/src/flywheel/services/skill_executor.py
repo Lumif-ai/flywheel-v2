@@ -503,7 +503,7 @@ async def execute_run(run: SkillRun) -> None:
         if api_key is None:
             # Fall back to subsidy key for onboarding skills and background engine skills
             from flywheel.config import settings
-            if run.skill_name in ("company-intel", "meeting-prep", "email-scorer") and settings.flywheel_subsidy_api_key:
+            if run.skill_name in ("company-intel", "meeting-prep", "email-scorer", "meeting-processor") and settings.flywheel_subsidy_api_key:
                 api_key = settings.flywheel_subsidy_api_key
             else:
                 raise ValueError(
@@ -572,7 +572,8 @@ async def execute_run(run: SkillRun) -> None:
             is_company_intel = run.skill_name == "company-intel"
             is_meeting_prep = run.skill_name == "meeting-prep"
             is_email_scorer = run.skill_name == "email-scorer"
-            if has_engine or is_company_intel or is_meeting_prep or is_email_scorer:
+            is_meeting_processor = run.skill_name == "meeting-processor"
+            if has_engine or is_company_intel or is_meeting_prep or is_email_scorer or is_meeting_processor:
                 if is_company_intel:
                     output, token_usage, tool_calls = await _execute_company_intel(
                         api_key=api_key,
@@ -600,6 +601,17 @@ async def execute_run(run: SkillRun) -> None:
                     output = "Email scorer engine registered. Direct scoring is handled by gmail_sync.py."
                     token_usage = 0
                     tool_calls = []
+                elif is_meeting_processor:
+                    if not run.input_text:
+                        raise ValueError("meeting-processor requires input_text=meeting_id")
+                    output, token_usage, tool_calls = await _execute_meeting_processor(
+                        factory=factory,
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        user_id=run.user_id,
+                        meeting_id=UUID(run.input_text),
+                        api_key=api_key,
+                    )
                 else:
                     engine_mod = skill_meta["engine_module"] if skill_meta else None
                     raise ValueError(
@@ -1171,6 +1183,53 @@ async def _execute_company_intel(
     source = "company-intel-onboarding"
     write_results = {}
 
+    # Build leadership content from key_people enrichment
+    def _build_leadership_content(data: dict) -> tuple:
+        people = data.get("key_people") or []
+        if not people:
+            return ([], "leadership-team")
+        lines = []
+        for p in people:
+            if isinstance(p, dict):
+                entry = p.get("name", "")
+                if p.get("title"):
+                    entry += f" — {p['title']}"
+                if p.get("linkedin"):
+                    entry += f" ({p['linkedin']})"
+                lines.append(entry)
+            else:
+                lines.append(str(p))
+        return (lines, "leadership-team")
+
+    # Build company details content (HQ, employees, socials, news)
+    def _build_details_content(data: dict) -> tuple:
+        lines = []
+        if data.get("headquarters"):
+            lines.append(f"Headquarters: {data['headquarters']}")
+        if data.get("employees"):
+            lines.append(f"Employees: {data['employees']}")
+        if data.get("funding"):
+            lines.append(f"Funding: {data['funding']}")
+        socials = data.get("social_accounts") or {}
+        if isinstance(socials, dict):
+            for platform, url_val in socials.items():
+                if url_val:
+                    lines.append(f"Social ({platform}): {url_val}")
+        news = data.get("recent_news") or data.get("recent_press") or []
+        for item in news[:5]:
+            if isinstance(item, dict):
+                lines.append(f"News: {item.get('title', '')} ({item.get('date', '')})")
+            else:
+                lines.append(f"News: {item}")
+        return (lines, "company-details")
+
+    # Build tech stack content
+    def _build_tech_content(data: dict) -> tuple:
+        stack = data.get("tech_stack") or []
+        if not stack:
+            return ([], "tech-stack")
+        return ([str(t) for t in stack], "tech-stack")
+
     section_map = {
         "positioning.md": _build_positioning_content(enriched),
         "icp-profiles.md": _build_list_content(
@@ -1185,6 +1244,9 @@ async def _execute_company_intel(
         "market-taxonomy.md": _build_list_content(
             enriched.get("industries", []), "industry-verticals"
         ),
+        "leadership.md": _build_leadership_content(enriched),
+        "company-details.md": _build_details_content(enriched),
+        "tech-stack.md": _build_tech_content(enriched),
     }
 
     # Domain was already saved early (before structure_intelligence).
@@ -1279,6 +1341,292 @@ async def _execute_company_intel(
     # Token usage is approximate (sync client doesn't easily return counts)
     token_usage = {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-20250514"}
 
+    return "\n".join(output_parts), token_usage, tool_calls
+
+
+async def _execute_meeting_processor(
+    factory: async_sessionmaker,
+    run_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID | None,
+    meeting_id: UUID,
+    api_key: str | None = None,
+) -> tuple[str, dict, list]:
+    """Execute the meeting-processor engine: 7-stage intelligence pipeline.
+
+    Stages:
+      1. fetching   — load Meeting row, decrypt Granola API key, fetch transcript
+      2. storing    — upload transcript to Supabase Storage, update attendees
+      3. classifying — 3-layer meeting type classification
+      4. extracting  — Sonnet extraction into 7 MPP-04 context file types
+      5. linking    — account linking placeholder (Plan 02 replaces this)
+      6. writing    — write ContextEntry rows via write_context_entries()
+      7. done       — update meeting.summary JSONB, processing_status=complete
+
+    Returns:
+        Tuple of (output_summary_str, token_usage_dict, tool_calls_list).
+    """
+    from flywheel.engines.meeting_processor_web import (
+        classify_meeting,
+        extract_intelligence,
+        upload_transcript,
+        write_context_entries,
+        _make_meeting_slug,
+    )
+    from flywheel.db.models import Integration, Meeting
+    from flywheel.auth.encryption import decrypt_api_key
+    from flywheel.services.granola_adapter import get_meeting_content
+
+    output_parts: list[str] = []
+    tool_calls: list = []
+    meeting_type = "discovery"
+    account_id = None
+
+    try:
+        # ------------------------------------------------------------------
+        # Stage 1: fetching
+        # ------------------------------------------------------------------
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "fetching", "message": "Fetching meeting content from Granola..."},
+        })
+
+        async with factory() as session:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            if user_id:
+                await session.execute(
+                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                    {"uid": str(user_id)},
+                )
+
+            meeting = (await session.execute(
+                select(Meeting).where(
+                    Meeting.id == meeting_id,
+                    Meeting.tenant_id == tenant_id,
+                )
+            )).scalar_one_or_none()
+
+            if meeting is None:
+                raise ValueError(f"Meeting {meeting_id} not found for tenant {tenant_id}")
+
+            # Load Granola integration for this user/tenant
+            integration = (await session.execute(
+                select(Integration).where(
+                    Integration.tenant_id == tenant_id,
+                    Integration.user_id == (user_id or meeting.user_id),
+                    Integration.provider == "granola",
+                    Integration.status == "connected",
+                ).limit(1)
+            )).scalar_one_or_none()
+
+            if integration is None:
+                raise ValueError("Granola integration not found or not connected")
+
+            if not integration.credentials_encrypted:
+                raise ValueError("Granola integration has no stored credentials")
+
+            granola_key = decrypt_api_key(integration.credentials_encrypted)
+            external_id = meeting.external_id
+            meeting_title = meeting.title or "Untitled"
+            meeting_date = meeting.meeting_date
+            existing_account_id = meeting.account_id
+
+        if not external_id:
+            raise ValueError(f"Meeting {meeting_id} has no external_id — cannot fetch from Granola")
+
+        content = await get_meeting_content(granola_key, external_id)
+
+        if not content or not content.transcript:
+            # Mark as failed and return early
+            async with factory() as session:
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                await session.execute(
+                    update(Meeting)
+                    .where(Meeting.id == meeting_id)
+                    .values(processing_status="failed")
+                )
+                await session.commit()
+            await _append_event_atomic(factory, run_id, {
+                "event": "error",
+                "data": {"message": "No transcript content available from Granola"},
+            })
+            return "Processing failed: no transcript content available.", {}, tool_calls
+
+        # ------------------------------------------------------------------
+        # Stage 2: storing
+        # ------------------------------------------------------------------
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "storing", "message": "Uploading transcript to storage..."},
+        })
+
+        transcript_storage_path = await upload_transcript(tenant_id, meeting_id, content.transcript)
+
+        # Update transcript_url and attendees on meeting row
+        async with factory() as session:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            await session.execute(
+                update(Meeting)
+                .where(Meeting.id == meeting_id)
+                .values(
+                    transcript_url=transcript_storage_path,
+                    attendees=content.attendees,
+                )
+            )
+            await session.commit()
+
+        # ------------------------------------------------------------------
+        # Stage 3: classifying
+        # ------------------------------------------------------------------
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "classifying", "message": "Classifying meeting type..."},
+        })
+
+        meeting_type = await classify_meeting(
+            factory=factory,
+            tenant_id=tenant_id,
+            title=meeting_title,
+            attendees=content.attendees,
+            transcript=content.transcript,
+            ai_summary=content.ai_summary,
+            api_key=api_key,
+        )
+        logger.info("Run %s: classified meeting %s as '%s'", run_id, meeting_id, meeting_type)
+
+        # ------------------------------------------------------------------
+        # Stage 4: extracting
+        # ------------------------------------------------------------------
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "extracting", "message": "Extracting intelligence from transcript..."},
+        })
+
+        # Fetch existing account context if account_id is known
+        existing_context_str = ""
+        if existing_account_id:
+            try:
+                existing_context_str = await preload_tenant_context(factory, tenant_id)
+            except Exception as ctx_err:
+                logger.warning("Run %s: could not load account context: %s", run_id, ctx_err)
+
+        extracted = await extract_intelligence(
+            transcript=content.transcript,
+            ai_summary=content.ai_summary,
+            meeting_type=meeting_type,
+            existing_context_str=existing_context_str,
+            api_key=api_key,
+        )
+
+        # ------------------------------------------------------------------
+        # Stage 5: linking (placeholder — Plan 02 replaces with auto_link_meeting_to_account)
+        # ------------------------------------------------------------------
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "linking", "message": "Account linking deferred to Plan 02..."},
+        })
+        account_id = existing_account_id  # Use existing if set, otherwise None
+        logger.info("Run %s: account linking deferred to Plan 02 (account_id=%s)", run_id, account_id)
+
+        # ------------------------------------------------------------------
+        # Stage 6: writing
+        # ------------------------------------------------------------------
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "writing", "message": "Writing intelligence to context store..."},
+        })
+
+        meeting_slug = _make_meeting_slug(meeting_date, meeting_title)
+        entries_written = await write_context_entries(
+            factory=factory,
+            tenant_id=tenant_id,
+            user_id=user_id or meeting.user_id,
+            account_id=account_id,
+            meeting_date=meeting_date,
+            meeting_slug=meeting_slug,
+            extracted=extracted,
+        )
+
+        # ------------------------------------------------------------------
+        # Stage 7: done
+        # ------------------------------------------------------------------
+        summary_jsonb = {
+            "tldr": extracted.get("tldr", ""),
+            "key_decisions": extracted.get("key_decisions", []),
+            "action_items": extracted.get("action_items", []),
+            "pain_points": extracted.get("pain_points", []),
+            "meeting_type": meeting_type,
+            "attendee_roles": [
+                {"name": a.get("name"), "email": a.get("email")}
+                for a in (content.attendees or [])
+            ],
+        }
+
+        async with factory() as session:
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            await session.execute(
+                update(Meeting)
+                .where(Meeting.id == meeting_id)
+                .values(
+                    summary=summary_jsonb,
+                    processing_status="complete",
+                    processed_at=datetime.now(timezone.utc),
+                    meeting_type=meeting_type,
+                    account_id=account_id,
+                    skill_run_id=run_id,
+                )
+            )
+            await session.commit()
+
+        output_parts.append(
+            f"Meeting processed successfully.\n"
+            f"Type: {meeting_type}\n"
+            f"Context entries written: {entries_written}\n"
+            f"Transcript stored at: {transcript_storage_path}"
+        )
+
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "done", "message": f"Processing complete. {entries_written} context entries written."},
+        })
+
+    except Exception as exc:
+        logger.error("Run %s: meeting-processor failed: %s", run_id, exc, exc_info=True)
+        # Mark meeting as failed
+        try:
+            async with factory() as session:
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                await session.execute(
+                    update(Meeting)
+                    .where(Meeting.id == meeting_id)
+                    .values(processing_status="failed")
+                )
+                await session.commit()
+        except Exception as update_err:
+            logger.error("Run %s: failed to mark meeting as failed: %s", run_id, update_err)
+
+        await _append_event_atomic(factory, run_id, {
+            "event": "error",
+            "data": {"message": f"Processing failed: {exc}"},
+        })
+        raise
+
+    token_usage = {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-20250514"}
     return "\n".join(output_parts), token_usage, tool_calls
 
 
