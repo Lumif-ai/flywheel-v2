@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 
 ## Current Position
 
-Phase: 62 of 63 (Meeting Surfaces and Relationship Enrichment)
-Plan: 3 of 4 in current phase
+Phase: 63 of 63 (Meeting Prep Loop)
+Plan: 1 of 2 in current phase
 Status: In progress
-Last activity: 2026-03-28 — Phase 62 Plan 03 complete: Relationship detail endpoint enriched with meeting timeline entries and ContextEntry intel from meeting processing
+Last activity: 2026-03-28 — Phase 63 Plan 01 complete: POST /relationships/{id}/prep endpoint + _execute_account_meeting_prep engine
 
-Progress: [██████████████████░░] 95% (38/42 total plans complete across all milestones)
+Progress: [████████████████████] 98% (41/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -129,6 +129,10 @@ Recent decisions affecting current work:
 - [62-03 execution]: INTEL_FILES excludes "contacts" — contact data surfaces via AccountContact/PeopleTab, not IntelligenceTab
 - [62-03 execution]: Intel gap-fill uses file_name.replace("-", "_") key transformation — aligns with frontend lookupValue() two-pass scan (pain_points matches 'pain' case-insensitive)
 - [62-03 execution]: attendees JSONB field on Meeting is list/dict — len(m.attendees or []) used safely for contact_name attendee count
+- [63-01 execution]: Account-ID: prefix in SkillRun.input_text is the dispatch discriminator — is_account_meeting_prep checked BEFORE is_meeting_prep; onboarding path completely untouched
+- [63-01 execution]: PREP_CONTEXT_FILES includes "contacts" (8 total: 7 intel files + contacts) — needed for Contacts & Stakeholders briefing section
+- [63-01 execution]: Empty context guard returns friendly HTML via "done" event (not "error") — frontend can render without special-casing empty state
+- [63-01 execution]: Meeting import in _execute_account_meeting_prep is local (not module-level) — matches _execute_meeting_processor pattern; avoids circular import risk
 
 ### Pending Todos
 
@@ -142,5 +146,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 62-03-PLAN.md — relationship detail endpoint enriched with meeting timeline + ContextEntry intel; ready for Phase 62 Plan 04
+Stopped at: Completed 63-01-PLAN.md — account-scoped meeting prep engine + POST /relationships/{id}/prep endpoint; ready for Phase 63 Plan 02
 Resume file: None
