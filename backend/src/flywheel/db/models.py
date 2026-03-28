@@ -1337,3 +1337,73 @@ class Meeting(Base):
 
     account: Mapped["Account | None"] = relationship()
     skill_run: Mapped["SkillRun | None"] = relationship()
+
+
+class Task(Base):
+    """A task or commitment extracted from a meeting or created manually.
+
+    Tasks are personal (user-level RLS isolation). Each user sees only their
+    own tasks. The commitment_direction field captures who made the commitment
+    (yours, theirs, mutual, signal, speculation).
+    """
+
+    __tablename__ = "tasks"
+    __table_args__ = (
+        Index("idx_tasks_user_status", "tenant_id", "user_id", "status"),
+        Index(
+            "idx_tasks_due",
+            "tenant_id", "user_id", "due_date",
+            postgresql_where=text(
+                "due_date IS NOT NULL AND status NOT IN ('done', 'dismissed')"
+            ),
+        ),
+        Index("idx_tasks_meeting", "meeting_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("profiles.id"), nullable=False
+    )
+    meeting_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True
+    )
+    account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    task_type: Mapped[str] = mapped_column(Text, nullable=False)
+    commitment_direction: Mapped[str] = mapped_column(Text, nullable=False)
+    suggested_skill: Mapped[str | None] = mapped_column(Text)
+    skill_context: Mapped[dict | None] = mapped_column(JSONB)
+    trust_level: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'detected'"), nullable=False
+    )
+    priority: Mapped[str] = mapped_column(
+        Text, server_default=text("'medium'"), nullable=False
+    )
+    due_date: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
+    )
+
+    meeting: Mapped["Meeting | None"] = relationship()
+    account: Mapped["Account | None"] = relationship()
