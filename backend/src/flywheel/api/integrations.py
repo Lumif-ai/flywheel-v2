@@ -12,6 +12,7 @@ Endpoints:
 - GET  /integrations/outlook/callback          -- Outlook OAuth callback
 - GET  /integrations/slack/authorize           -- start Slack OAuth install flow
 - GET  /integrations/slack/callback            -- Slack OAuth callback
+- POST /integrations/granola/connect           -- connect Granola via API key
 - DELETE /integrations/{id}                    -- disconnect integration
 - POST /integrations/{id}/sync                 -- trigger immediate calendar sync
 - GET  /integrations/suggestions               -- meeting prep suggestions
@@ -27,6 +28,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
+from flywheel.auth.encryption import encrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Integration
 from flywheel.services.calendar_sync import (
@@ -75,6 +77,7 @@ _PROVIDER_DISPLAY = {
     "gmail-read": "Gmail (Read)",
     "outlook": "Outlook",
     "slack": "Slack",
+    "granola": "Granola",
 }
 
 
@@ -599,6 +602,69 @@ async def slack_callback(
     await db.commit()
 
     return {"status": "connected", "id": str(integration.id)}
+
+
+# ---------------------------------------------------------------------------
+# POST /integrations/granola/connect
+# ---------------------------------------------------------------------------
+
+
+@router.post("/granola/connect")
+async def connect_granola(
+    body: dict,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+):
+    """Connect a Granola account via API key.
+
+    Validates the API key against the Granola API, encrypts it with AES-256-GCM,
+    and upserts an Integration row (updates existing row if the user reconnects).
+
+    Uses user.sub (not user.id) per Phase 59 decision.
+    Does NOT store last_sync_cursor in settings — Integration.last_synced_at
+    column serves as the sync cursor (per Phase 60 research).
+    """
+    api_key = (body.get("api_key") or "").strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key required")
+
+    from flywheel.services.granola_adapter import test_connection
+
+    valid, error = await test_connection(api_key)
+    if not valid:
+        raise HTTPException(status_code=400, detail=error)
+
+    encrypted = encrypt_api_key(api_key)
+
+    # Upsert: update existing Integration row if user reconnects
+    existing = (
+        await db.execute(
+            select(Integration).where(
+                Integration.tenant_id == user.tenant_id,
+                Integration.user_id == user.sub,
+                Integration.provider == "granola",
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        existing.credentials_encrypted = encrypted
+        existing.status = "connected"
+        existing.last_synced_at = None  # Reset cursor on reconnect
+    else:
+        db.add(
+            Integration(
+                tenant_id=user.tenant_id,
+                user_id=user.sub,
+                provider="granola",
+                status="connected",
+                credentials_encrypted=encrypted,
+                settings={"processing_rules": {}},
+            )
+        )
+
+    await db.commit()
+    return {"status": "connected"}
 
 
 # ---------------------------------------------------------------------------
