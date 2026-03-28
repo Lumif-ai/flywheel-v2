@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-27)
 ## Current Position
 
 Phase: 61 of 63 (Meeting Intelligence Pipeline)
-Plan: 2 of 3 in current phase
-Status: In progress
-Last activity: 2026-03-28 — Phase 61 Plan 02 complete: account auto-linking (auto_link_meeting_to_account, auto_create_prospect, upsert_account_contacts) + Stage 5 of meeting pipeline wired to real CRM linking
+Plan: 3 of 3 in current phase
+Status: Phase complete
+Last activity: 2026-03-28 — Phase 61 Plan 03 complete: apply_post_classification_rules (MPP-05 rules) + POST /meetings/process-pending + GET /meetings/ + GET /meetings/{id} + pipeline skip check wired between Stage 3 and Stage 4
 
-Progress: [█████████████████░░░] 93% (36/42 total plans complete across all milestones)
+Progress: [██████████████████░░] 95% (37/42 total plans complete across all milestones)
 
 ## Performance Metrics
 
@@ -119,6 +119,10 @@ Recent decisions affecting current work:
 - [61-02 execution]: Stage 5 preserves existing_account_id when already set on meeting row — manual account assignments are never overridden by auto-discovery
 - [61-02 execution]: upsert_account_contacts deduplicates on (tenant_id, account_id, email) — safe to re-process same meeting without creating duplicate contact rows
 - [61-02 execution]: Multi-match tie-breaking uses outerjoin + group_by + count(AccountContact.id) desc — most-contacts account wins when multiple domains match
+- [61-03 execution]: apply_post_classification_rules lives in meeting_processor_web.py (not api/meetings.py) — avoids circular import; skill_executor imports from engine layer
+- [61-03 execution]: skip_internal defaults to True when key absent — matches MPP-05 spec (internal-only meetings skip by default)
+- [61-03 execution]: granola_list_meetings alias in meetings.py — avoids collision between granola_adapter.list_meetings import and new GET / endpoint function
+- [61-03 execution]: Post-classification skip preserves meeting_type classification even when status becomes "skipped" — type analytics remain accurate
 
 ### Pending Todos
 
@@ -132,5 +136,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 61-02-PLAN.md — account auto-linking (3 helpers in meeting_processor_web.py) + Stage 5 wired in skill_executor; ready for Plan 03 (meeting list API + frontend)
+Stopped at: Completed 61-03-PLAN.md — Phase 61 complete: apply_post_classification_rules + POST /process-pending + GET /meetings/ + GET /meetings/{id} + pipeline skip check; ready for Phase 62 (meeting intelligence frontend)
 Resume file: None
