@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Users, Briefcase, DollarSign } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Users, Briefcase, DollarSign, LogOut, CalendarDays } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
@@ -25,10 +25,14 @@ import { StreamSidebar } from '@/features/streams/components/StreamSidebar'
 export function AppSidebar() {
   const location = useLocation()
 
-  const { state, hasApiKey, isAnonymous } = useLifecycleState()
+  const { state, hasApiKey, isAnonymous: isAnonymousServer } = useLifecycleState()
   const user = useAuthStore((s) => s.user)
+  // Use local auth store as source of truth for anonymous status — the server
+  // lifecycle can lag or return false for anonymous users with leftover tenant data
+  const isAnonymous = user?.is_anonymous ?? isAnonymousServer
   const [oauthLoading, setOauthLoading] = useState<'google' | 'microsoft' | null>(null)
   const { signInWithProvider } = useOAuthSignIn()
+  const logout = useAuthStore((s) => s.logout)
   const { data: signals } = useSignals()
 
   const signalByType = (type: string) =>
@@ -44,6 +48,16 @@ export function AppSidebar() {
 
   // Show API key banner only for S4 (power threshold) and S5 (power user without key -- impossible but safe)
   const showApiKeyBanner = !hasApiKey && (state === 'S4' || state === 'S5')
+
+  const handleSignOut = async () => {
+    const supabase = await (await import('@/lib/supabase')).getSupabase()
+    if (supabase) await supabase.auth.signOut({ scope: 'local' })
+    logout()
+    // Clear persisted React Query cache so stale lifecycle data doesn't survive
+    localStorage.removeItem('flywheel:query-cache')
+    localStorage.removeItem('flywheel-auth')
+    window.location.href = '/'
+  }
 
   const handleGoogleSignin = async () => {
     setOauthLoading('google')
@@ -132,6 +146,16 @@ export function AppSidebar() {
                 >
                   <Mail className="size-4" />
                   <span>Email</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname.startsWith('/meetings')}
+                  render={<NavLink to="/meetings" />}
+                  tooltip="Meetings"
+                >
+                  <CalendarDays className="size-4" />
+                  <span>Meetings</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {/* Accounts kept for backward compatibility */}
@@ -316,9 +340,13 @@ export function AppSidebar() {
                 </Avatar>
                 <span className="text-sm text-muted-foreground truncate max-w-[120px]">{displayName}</span>
               </div>
-              <kbd className="pointer-events-none hidden h-5 select-none items-center gap-1 rounded border border-border px-1.5 font-mono text-[10px] font-medium sm:inline-flex" style={{ backgroundColor: 'var(--brand-tint)', color: 'var(--secondary-text)' }}>
-                <span className="text-xs">&#8984;</span>K
-              </kbd>
+              <button
+                onClick={handleSignOut}
+                className="p-1.5 rounded-md hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+                title="Sign out"
+              >
+                <LogOut className="size-4" />
+              </button>
             </div>
           </>
         )}

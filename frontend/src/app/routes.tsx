@@ -1,15 +1,29 @@
 import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate } from 'react-router'
-import { BriefingPage } from '@/features/briefing/components/BriefingPage'
-import { BriefingFullViewer } from '@/features/briefing/components/BriefingFullViewer'
-import { StreamDetailPage } from '@/features/streams/components/StreamDetailPage'
-import { ActPage } from '@/pages/ActPage'
-import { SettingsPage } from '@/pages/SettingsPage'
-import { OnboardingPage } from '@/pages/OnboardingPage'
-import { InviteAcceptPage } from '@/pages/InviteAcceptPage'
 import { AuthCallback } from '@/app/AuthCallback'
 
-// Lazy-loaded profile page
+// All page components lazy-loaded — keeps main bundle lean
+const BriefingPage = lazy(() =>
+  import('@/features/briefing/components/BriefingPage').then((m) => ({ default: m.BriefingPage }))
+)
+const BriefingFullViewer = lazy(() =>
+  import('@/features/briefing/components/BriefingFullViewer').then((m) => ({ default: m.BriefingFullViewer }))
+)
+const StreamDetailPage = lazy(() =>
+  import('@/features/streams/components/StreamDetailPage').then((m) => ({ default: m.StreamDetailPage }))
+)
+const ActPage = lazy(() =>
+  import('@/pages/ActPage').then((m) => ({ default: m.ActPage }))
+)
+const SettingsPage = lazy(() =>
+  import('@/pages/SettingsPage').then((m) => ({ default: m.SettingsPage }))
+)
+const OnboardingPage = lazy(() =>
+  import('@/pages/OnboardingPage').then((m) => ({ default: m.OnboardingPage }))
+)
+const InviteAcceptPage = lazy(() =>
+  import('@/pages/InviteAcceptPage').then((m) => ({ default: m.InviteAcceptPage }))
+)
 const CompanyProfilePage = lazy(() =>
   import('@/features/profile/components/CompanyProfilePage').then((m) => ({ default: m.CompanyProfilePage }))
 )
@@ -43,6 +57,14 @@ const PipelinePage = lazy(() =>
   import('@/features/pipeline/components/PipelinePage').then((m) => ({ default: m.PipelinePage }))
 )
 
+// Lazy-loaded meetings pages
+const MeetingsPage = lazy(() =>
+  import('@/features/meetings/components/MeetingsPage').then((m) => ({ default: m.MeetingsPage }))
+)
+const MeetingDetailPage = lazy(() =>
+  import('@/features/meetings/components/MeetingDetailPage').then((m) => ({ default: m.MeetingDetailPage }))
+)
+
 // Lazy-loaded relationship pages
 const RelationshipListPage = lazy(() =>
   import('@/features/relationships/components/RelationshipListPage').then((m) => ({ default: m.RelationshipListPage }))
@@ -65,18 +87,20 @@ const SpinnerPreview = lazy(() =>
 export function AppRoutes() {
   return (
     <Routes>
-      {/* Primary routes */}
-      <Route path="/" element={<BriefingPage />} />
-      <Route path="/streams/:id" element={<StreamDetailPage />} />
-      <Route path="/chat" element={<ActPage />} />
+      {/* Primary routes — all lazy-loaded */}
+      <Route path="/" element={<Suspense fallback={null}><BriefingPage /></Suspense>} />
+      <Route path="/streams/:id" element={<Suspense fallback={null}><StreamDetailPage /></Suspense>} />
+      <Route path="/chat" element={<Suspense fallback={null}><ActPage /></Suspense>} />
       <Route path="/email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />
-      <Route path="/settings" element={<SettingsPage />} />
-      <Route path="/briefing/:runId" element={<BriefingFullViewer />} />
-      <Route path="/onboarding" element={<OnboardingPage />} />
+      <Route path="/settings" element={<Suspense fallback={null}><SettingsPage /></Suspense>} />
+      <Route path="/briefing/:runId" element={<Suspense fallback={null}><BriefingFullViewer /></Suspense>} />
+      <Route path="/onboarding" element={<Suspense fallback={null}><OnboardingPage /></Suspense>} />
       <Route path="/auth/callback" element={<AuthCallback />} />
-      <Route path="/invite" element={<InviteAcceptPage />} />
+      <Route path="/invite" element={<Suspense fallback={null}><InviteAcceptPage /></Suspense>} />
       <Route path="/profile" element={<Suspense fallback={null}><CompanyProfilePage /></Suspense>} />
       <Route path="/pipeline" element={<Suspense fallback={null}><PipelinePage /></Suspense>} />
+      <Route path="/meetings" element={<Suspense fallback={null}><MeetingsPage /></Suspense>} />
+      <Route path="/meetings/:id" element={<Suspense fallback={null}><MeetingDetailPage /></Suspense>} />
       <Route path="/relationships/prospects" element={<Suspense fallback={null}><RelationshipListPage type="prospect" /></Suspense>} />
       <Route path="/relationships/customers" element={<Suspense fallback={null}><RelationshipListPage type="customer" /></Suspense>} />
       <Route path="/relationships/advisors" element={<Suspense fallback={null}><RelationshipListPage type="advisor" /></Suspense>} />
