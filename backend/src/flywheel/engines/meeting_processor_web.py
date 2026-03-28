@@ -1,7 +1,7 @@
 """Meeting processor web engine — async helpers for the meeting intelligence pipeline.
 
-This module provides the 7 core async helpers used by skill_executor's
-_execute_meeting_processor() 7-stage pipeline:
+This module provides the core async helpers used by skill_executor's
+_execute_meeting_processor() 8-stage pipeline:
 
 - classify_meeting()  — 3-layer classification returning one of 8 meeting types
 - extract_intelligence() — Sonnet extraction into 7 MPP-04 context file types
@@ -11,6 +11,8 @@ _execute_meeting_processor() 7-stage pipeline:
 - auto_create_prospect() — Auto-create prospect account for unknown external domains
 - upsert_account_contacts() — Upsert attendees as AccountContact rows
 - apply_post_classification_rules() — Post-classification skip check (MPP-05 rules)
+- extract_tasks() — Haiku-based commitment classification from transcripts
+- write_task_rows() — Create Task ORM rows from extracted task dicts
 
 Important: this is the WEB implementation (async, ORM-based).
 Do NOT import from engines/meeting_processor.py (CLI, sync, storage_backend).
@@ -36,7 +38,7 @@ from sqlalchemy import func, select
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from flywheel.db.models import Account, AccountContact, ContextEntry, Tenant
+from flywheel.db.models import Account, AccountContact, ContextEntry, Task, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -827,3 +829,184 @@ async def auto_link_meeting_to_account(
             )
 
     return first_account_id
+
+
+# ---------------------------------------------------------------------------
+# Task Extraction Prompt
+# ---------------------------------------------------------------------------
+
+TASK_EXTRACTION_PROMPT = """\
+You are a task extraction engine. Given a meeting transcript and extracted intelligence,
+identify all commitments, action items, and follow-ups.
+
+For each task, classify:
+1. commitment_direction: "yours" (the user/founder committed), "theirs" (other party committed),
+   "mutual" (both sides), "signal" (implicit need, nobody committed), "speculation" (might need later)
+2. task_type: "followup" (reach back out), "deliverable" (create something), "introduction" (connect people),
+   "research" (investigate), "other"
+3. suggested_skill: if the task maps to a known skill, suggest it. Known skills:
+   - "email-drafter" for follow-up emails
+   - "sales-collateral" for one-pagers, decks, proposals
+   - "investor-update" for investor updates
+   - null if no skill applies
+4. trust_level: "auto" (safe to execute without review), "review" (needs user review before execution),
+   "confirm" (MUST be explicitly confirmed -- use for ALL email-related tasks)
+5. priority: "high" (time-sensitive or explicitly urgent), "medium" (standard), "low" (nice-to-have)
+6. due_date: ISO 8601 datetime if mentioned or inferrable, null otherwise
+
+CRITICAL: Any task with suggested_skill containing "email" MUST have trust_level="confirm".
+
+Respond with a JSON array of task objects. Each object:
+{
+  "title": "short action title",
+  "description": "detailed description with context",
+  "commitment_direction": "yours|theirs|mutual|signal|speculation",
+  "task_type": "followup|deliverable|introduction|research|other",
+  "suggested_skill": "skill-name" or null,
+  "skill_context": {} or null,
+  "trust_level": "auto|review|confirm",
+  "priority": "high|medium|low",
+  "due_date": "ISO datetime" or null
+}
+
+Return an empty array [] if no tasks are found.
+"""
+
+
+# ---------------------------------------------------------------------------
+# Task Extraction (Haiku LLM)
+# ---------------------------------------------------------------------------
+
+
+async def extract_tasks(
+    transcript: str,
+    extracted: dict,
+    meeting_type: str,
+    api_key: str | None = None,
+) -> list[dict]:
+    """Extract commitments and tasks from a meeting transcript using Haiku.
+
+    Calls Haiku with TASK_EXTRACTION_PROMPT, parses JSON response, and
+    enforces the hard safety rule: email-related tasks always get
+    trust_level='confirm'.
+
+    Returns a list of task dicts ready for write_task_rows(), or an empty
+    list on parse failure (logs warning, does not crash pipeline).
+    """
+    user_prompt = (
+        f"Meeting type: {meeting_type}\n\n"
+        f"Transcript:\n{(transcript or '')[:12000]}\n\n"
+        f"Extracted intelligence:\n{json.dumps(extracted, indent=2, default=str)[:4000]}\n\n"
+        "Extract all tasks and commitments from this meeting."
+    )
+
+    def _call_haiku() -> str:
+        import anthropic
+        client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+        msg = client.messages.create(
+            model=_HAIKU_MODEL,
+            max_tokens=2048,
+            system=TASK_EXTRACTION_PROMPT,
+            messages=[{"role": "user", "content": user_prompt}],
+        )
+        return msg.content[0].text.strip()
+
+    loop = asyncio.get_event_loop()
+    raw = await loop.run_in_executor(None, _call_haiku)
+
+    # Strip markdown code fences if present (same cleanup as extract_intelligence)
+    if raw.startswith("```"):
+        raw = re.sub(r"^```(?:json)?\s*", "", raw)
+        raw = re.sub(r"\s*```$", "", raw)
+        raw = raw.strip()
+
+    try:
+        tasks = json.loads(raw)
+    except json.JSONDecodeError as e:
+        logger.warning("extract_tasks: JSON parse error: %s -- raw: %.200s", e, raw)
+        return []
+
+    if not isinstance(tasks, list):
+        logger.warning("extract_tasks: expected list, got %s", type(tasks).__name__)
+        return []
+
+    # Post-processing enforcement: email tasks MUST have trust_level='confirm'
+    for task in tasks:
+        suggested = (task.get("suggested_skill") or "")
+        if "email" in suggested.lower():
+            task["trust_level"] = "confirm"
+
+    return tasks
+
+
+# ---------------------------------------------------------------------------
+# Task Row Writer
+# ---------------------------------------------------------------------------
+
+
+async def write_task_rows(
+    factory: async_sessionmaker[AsyncSession],
+    tenant_id: UUID,
+    user_id: UUID,
+    meeting_id: UUID,
+    account_id: UUID | None,
+    tasks: list[dict],
+) -> int:
+    """Create Task ORM rows from extracted task dicts.
+
+    Sets RLS context (app.tenant_id and app.user_id) on the session before
+    writing. Returns count of tasks created.
+    """
+    if not tasks:
+        return 0
+
+    created = 0
+
+    async with factory() as session:
+        # CRITICAL: set both tenant and user RLS context (Pitfall 2)
+        await session.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+        await session.execute(
+            sa_text("SELECT set_config('app.user_id', :uid, true)"),
+            {"uid": str(user_id)},
+        )
+
+        for t in tasks:
+            # Parse due_date if present
+            parsed_due: datetime | None = None
+            raw_due = t.get("due_date")
+            if raw_due:
+                try:
+                    parsed_due = datetime.fromisoformat(raw_due.replace("Z", "+00:00"))
+                except (ValueError, AttributeError):
+                    logger.debug("write_task_rows: could not parse due_date %r", raw_due)
+
+            task = Task(
+                tenant_id=tenant_id,
+                user_id=user_id,
+                meeting_id=meeting_id,
+                account_id=account_id,
+                source="meeting-processor",
+                title=t.get("title", "Untitled task"),
+                description=t.get("description"),
+                task_type=t.get("task_type", "other"),
+                commitment_direction=t.get("commitment_direction", "signal"),
+                suggested_skill=t.get("suggested_skill"),
+                skill_context=t.get("skill_context"),
+                trust_level=t.get("trust_level", "review"),
+                priority=t.get("priority", "medium"),
+                due_date=parsed_due,
+            )
+            session.add(task)
+            created += 1
+
+        await session.flush()
+        await session.commit()
+
+    logger.info(
+        "write_task_rows: created %d tasks for meeting %s (tenant=%s, user=%s)",
+        created, meeting_id, tenant_id, user_id,
+    )
+    return created

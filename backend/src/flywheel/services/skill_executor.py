@@ -1366,16 +1366,17 @@ async def _execute_meeting_processor(
     meeting_id: UUID,
     api_key: str | None = None,
 ) -> tuple[str, dict, list]:
-    """Execute the meeting-processor engine: 7-stage intelligence pipeline.
+    """Execute the meeting-processor engine: 8-stage intelligence pipeline.
 
     Stages:
-      1. fetching   — load Meeting row, decrypt Granola API key, fetch transcript
-      2. storing    — upload transcript to Supabase Storage, update attendees
-      3. classifying — 3-layer meeting type classification
-      4. extracting  — Sonnet extraction into 7 MPP-04 context file types
-      5. linking    — domain-match attendees to accounts, auto-create prospects
-      6. writing    — write ContextEntry rows via write_context_entries()
-      7. done       — update meeting.summary JSONB, processing_status=complete
+      1. fetching          — load Meeting row, decrypt Granola API key, fetch transcript
+      2. storing           — upload transcript to Supabase Storage, update attendees
+      3. classifying       — 3-layer meeting type classification
+      4. extracting        — Sonnet extraction into 7 MPP-04 context file types
+      5. linking           — domain-match attendees to accounts, auto-create prospects
+      6. writing           — write ContextEntry rows via write_context_entries()
+      7. extracting_tasks  — Haiku commitment classification, create Task rows
+      8. done              — update meeting.summary JSONB, processing_status=complete
 
     Returns:
         Tuple of (output_summary_str, token_usage_dict, tool_calls_list).
@@ -1383,8 +1384,10 @@ async def _execute_meeting_processor(
     from flywheel.engines.meeting_processor_web import (
         classify_meeting,
         extract_intelligence,
+        extract_tasks,
         upload_transcript,
         write_context_entries,
+        write_task_rows,
         _make_meeting_slug,
         auto_link_meeting_to_account,
         upsert_account_contacts,
@@ -1681,7 +1684,45 @@ async def _execute_meeting_processor(
         )
 
         # ------------------------------------------------------------------
-        # Stage 7: done
+        # Stage 7: task extraction (best-effort — failures do not crash pipeline)
+        # ------------------------------------------------------------------
+        try:
+            await _append_event_atomic(factory, run_id, {
+                "event": "stage",
+                "data": {"stage": "extracting_tasks", "message": "Extracting commitments and tasks..."},
+            })
+
+            tasks = await extract_tasks(
+                transcript=content.transcript,
+                extracted=extracted,
+                meeting_type=meeting_type,
+                api_key=api_key,
+            )
+
+            tasks_created = 0
+            if tasks:
+                tasks_created = await write_task_rows(
+                    factory=factory,
+                    tenant_id=tenant_id,
+                    user_id=user_id or meeting.user_id,
+                    meeting_id=meeting_id,
+                    account_id=account_id,
+                    tasks=tasks,
+                )
+
+            await _append_event_atomic(factory, run_id, {
+                "event": "stage",
+                "data": {"stage": "extracting_tasks", "message": f"Extracted {tasks_created} task(s)"},
+            })
+            logger.info("Run %s: extracted %d tasks from meeting %s", run_id, tasks_created, meeting_id)
+        except Exception as task_exc:
+            logger.warning(
+                "Run %s: task extraction failed (non-fatal): %s", run_id, task_exc, exc_info=True
+            )
+            tasks_created = 0
+
+        # ------------------------------------------------------------------
+        # Stage 8: done
         # ------------------------------------------------------------------
         summary_jsonb = {
             "tldr": extracted.get("tldr", ""),
@@ -1718,12 +1759,13 @@ async def _execute_meeting_processor(
             f"Meeting processed successfully.\n"
             f"Type: {meeting_type}\n"
             f"Context entries written: {entries_written}\n"
+            f"Tasks extracted: {tasks_created}\n"
             f"Transcript stored at: {transcript_storage_path}"
         )
 
         await _append_event_atomic(factory, run_id, {
             "event": "stage",
-            "data": {"stage": "done", "message": f"Processing complete. {entries_written} context entries written."},
+            "data": {"stage": "done", "message": f"Processing complete. {entries_written} context entries, {tasks_created} tasks extracted."},
         })
 
     except Exception as exc:
