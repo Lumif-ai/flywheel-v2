@@ -526,7 +526,7 @@ def apply_post_classification_rules(
     This is a pure function — no DB access, no async needed.
     """
     if not processing_rules:
-        return "pending"
+        processing_rules = {}
 
     # Rule 1: skip_meetings (manually skipped by external_id)
     manually_skipped = processing_rules.get("manually_skipped", [])
