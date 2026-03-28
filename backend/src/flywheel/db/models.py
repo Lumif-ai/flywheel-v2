@@ -5,7 +5,7 @@ Schema matches V2-PRODUCT-SPEC.md. Tables are divided into:
 - Tenant-scoped tables (9 tables) -- all have tenant_id FK, RLS enforced
 - Focus tables (2 tables) -- focus/lens scoping for context
 - Context graph tables (3 tables) -- entity graph layer on top of context_entries
-- CRM tables (3 tables) -- accounts, contacts, outreach activities for v2.0 GTM CRM
+- CRM tables (4 tables) -- accounts, contacts, outreach activities, meetings for v2.0 GTM CRM
 """
 
 from __future__ import annotations
@@ -1240,3 +1240,82 @@ class OutreachActivity(Base):
 
     account: Mapped["Account"] = relationship(back_populates="outreach_activities")
     contact: Mapped["AccountContact | None"] = relationship()
+
+
+class Meeting(Base):
+    """A meeting ingested from an external source (Granola, Fathom, etc.)
+    or uploaded manually. First-class entity in the CRM data model.
+
+    Privacy model: metadata is tenant-visible, transcript is user-scoped.
+    """
+
+    __tablename__ = "meetings"
+    __table_args__ = (
+        Index(
+            "idx_meetings_dedup",
+            "tenant_id", "provider", "external_id",
+            unique=True,
+            postgresql_where=text("external_id IS NOT NULL"),
+        ),
+        Index(
+            "idx_meetings_account",
+            "account_id", text("meeting_date DESC"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_meetings_user",
+            "tenant_id", "user_id", text("meeting_date DESC"),
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index(
+            "idx_meetings_pending",
+            "tenant_id", "processing_status",
+            postgresql_where=text("processing_status = 'pending'"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("profiles.id"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(Text, nullable=False)
+    external_id: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    meeting_date: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False
+    )
+    duration_mins: Mapped[int | None] = mapped_column(Integer)
+    attendees: Mapped[dict | None] = mapped_column(JSONB)
+    transcript_url: Mapped[str | None] = mapped_column(Text)
+    ai_summary: Mapped[str | None] = mapped_column(Text)
+    summary: Mapped[dict | None] = mapped_column(JSONB)
+    meeting_type: Mapped[str | None] = mapped_column(Text)
+    account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    skill_run_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("skill_runs.id"), nullable=True
+    )
+    processed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    processing_status: Mapped[str] = mapped_column(
+        Text, server_default=text("'pending'"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+
+    account: Mapped["Account | None"] = relationship()
+    skill_run: Mapped["SkillRun | None"] = relationship()
