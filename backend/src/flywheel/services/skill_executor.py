@@ -571,11 +571,25 @@ async def execute_run(run: SkillRun) -> None:
             has_engine = bool(skill_meta and skill_meta["engine_module"])
             is_company_intel = run.skill_name == "company-intel"
             is_meeting_prep = run.skill_name == "meeting-prep"
+            is_account_meeting_prep = (
+                run.skill_name == "meeting-prep"
+                and run.input_text
+                and run.input_text.startswith("Account-ID:")
+            )
             is_email_scorer = run.skill_name == "email-scorer"
             is_meeting_processor = run.skill_name == "meeting-processor"
             if has_engine or is_company_intel or is_meeting_prep or is_email_scorer or is_meeting_processor:
                 if is_company_intel:
                     output, token_usage, tool_calls = await _execute_company_intel(
+                        api_key=api_key,
+                        input_text=run.input_text or "",
+                        factory=factory,
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        user_id=run.user_id,
+                    )
+                elif is_account_meeting_prep:
+                    output, token_usage, tool_calls = await _execute_account_meeting_prep(
                         api_key=api_key,
                         input_text=run.input_text or "",
                         factory=factory,
@@ -660,8 +674,8 @@ async def execute_run(run: SkillRun) -> None:
 
         # Render HTML output
         rendered_html = None
-        if is_meeting_prep:
-            # Meeting-prep engine returns HTML directly as output
+        if is_meeting_prep or is_account_meeting_prep:
+            # Both meeting-prep paths return HTML directly as output
             rendered_html = output
         else:
             try:
@@ -2509,6 +2523,323 @@ async def _execute_meeting_prep(
     }
 
     return html_briefing, token_usage, tool_calls
+
+
+# ---------------------------------------------------------------------------
+# Account-scoped meeting prep engine (Phase 63)
+# ---------------------------------------------------------------------------
+
+PREP_CONTEXT_FILES = [
+    "contacts",
+    "competitive-intel",
+    "pain-points",
+    "icp-profiles",
+    "insights",
+    "action-items",
+    "product-feedback",
+]
+
+
+async def _execute_account_meeting_prep(
+    api_key: str,
+    input_text: str,
+    factory: async_sessionmaker,
+    run_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID | None = None,
+) -> tuple[str, dict, list]:
+    """Execute account-scoped meeting prep: read CRM intelligence and generate HTML briefing.
+
+    Unlike _execute_meeting_prep (which does live web research), this function reads
+    intelligence accumulated in the context store by meeting processing (Phases 60-62)
+    and generates a structured HTML briefing from that data.
+
+    Input text format:
+        Account-ID: <uuid>
+        Account-Name: <name>
+        Meeting-ID: <uuid>  (optional)
+
+    Args:
+        api_key: Anthropic API key (BYOK or subsidy).
+        input_text: Account-ID-prefixed text as created by POST /relationships/{id}/prep.
+        factory: Session factory for event logging and context reads.
+        run_id: SkillRun UUID for event logging.
+        tenant_id: Tenant UUID for RLS context and context store reads.
+        user_id: Optional user UUID.
+
+    Returns:
+        Tuple of (html_output, token_usage_dict, tool_calls_list).
+    """
+    import anthropic
+
+    # ------------------------------------------------------------------
+    # Stage 1: Parse input
+    # ------------------------------------------------------------------
+    account_id_str = ""
+    account_name = "the account"
+    meeting_id_str = ""
+
+    for line in input_text.strip().split("\n"):
+        if ":" in line:
+            key, _, val = line.partition(":")
+            key = key.strip()
+            val = val.strip()
+            if key == "Account-ID":
+                account_id_str = val
+            elif key == "Account-Name":
+                account_name = val
+            elif key == "Meeting-ID":
+                meeting_id_str = val
+
+    account_id: UUID | None = None
+    try:
+        account_id = UUID(account_id_str)
+    except (ValueError, AttributeError):
+        logger.error("_execute_account_meeting_prep: invalid Account-ID %r", account_id_str)
+        error_html = (
+            f"<p>Invalid account reference in prep request.</p>"
+        )
+        await _append_event_atomic(factory, run_id, {
+            "event": "error",
+            "data": {"message": "Invalid Account-ID in input"},
+        })
+        return error_html, {}, []
+
+    meeting_id: UUID | None = None
+    if meeting_id_str:
+        try:
+            meeting_id = UUID(meeting_id_str)
+        except (ValueError, AttributeError):
+            logger.warning("_execute_account_meeting_prep: invalid Meeting-ID %r — ignoring", meeting_id_str)
+
+    # ------------------------------------------------------------------
+    # Stage 2: Read account context from ContextEntry (with RLS)
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "reading", "message": f"Reading intelligence for {account_name}..."},
+    })
+
+    by_file: dict[str, list[str]] = {}
+    try:
+        async with factory() as session:
+            # Set RLS context (Pitfall 2 from research — mandatory for account-scoped queries)
+            await session.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            if user_id:
+                await session.execute(
+                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                    {"uid": str(user_id)},
+                )
+
+            rows = (await session.execute(
+                select(ContextEntry)
+                .where(
+                    ContextEntry.account_id == account_id,
+                    ContextEntry.tenant_id == tenant_id,
+                    ContextEntry.deleted_at.is_(None),
+                    ContextEntry.file_name.in_(PREP_CONTEXT_FILES),
+                )
+                .order_by(ContextEntry.date.desc())
+                .limit(100)
+            )).scalars().all()
+
+            for row in rows:
+                if row.content:
+                    by_file.setdefault(row.file_name, []).append(row.content)
+    except Exception as e:
+        logger.error("_execute_account_meeting_prep: context query failed: %s", e)
+        error_html = (
+            f"<p>Could not read intelligence for {account_name}. "
+            f"Please try again in a moment.</p>"
+        )
+        await _append_event_atomic(factory, run_id, {
+            "event": "error",
+            "data": {"message": f"Context read failed: {e}"},
+        })
+        return error_html, {}, []
+
+    # ------------------------------------------------------------------
+    # Stage 3: Empty context guard
+    # ------------------------------------------------------------------
+    if len(by_file) == 0:
+        friendly_html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><style>
+body {{font-family: Inter, Arial, sans-serif; max-width: 680px; margin: 2rem auto; color: #121212; padding: 0 1rem;}}
+.card {{background: #fff; border: 1px solid #E5E7EB; border-radius: 12px; padding: 2rem; text-align: center;}}
+h2 {{color: #E94D35; margin-bottom: 0.5rem;}}
+p {{color: #6B7280; line-height: 1.6;}}
+</style></head>
+<body>
+<div class="card">
+  <h2>Not enough context yet</h2>
+  <p>No intelligence has been collected for <strong>{account_name}</strong> yet.</p>
+  <p>Process some meetings with this account first to build intelligence, then try again.</p>
+</div>
+</body></html>"""
+
+        await _append_event_atomic(factory, run_id, {
+            "event": "done",
+            "data": {"rendered_html": friendly_html, "message": "No context available"},
+        })
+        return friendly_html, {}, []
+
+    # ------------------------------------------------------------------
+    # Stage 4: Optional meeting context
+    # ------------------------------------------------------------------
+    meeting_context = ""
+    if meeting_id is not None:
+        try:
+            async with factory() as session:
+                await session.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                from flywheel.db.models import Meeting
+                meeting_row = (await session.execute(
+                    select(Meeting).where(
+                        Meeting.id == meeting_id,
+                        Meeting.tenant_id == tenant_id,
+                        Meeting.deleted_at.is_(None),
+                    )
+                )).scalar_one_or_none()
+
+                if meeting_row is not None:
+                    date_str = str(meeting_row.meeting_date) if meeting_row.meeting_date else "TBD"
+                    summary_dict = meeting_row.summary or {}
+                    tldr = summary_dict.get("tldr", "")
+                    meeting_context = (
+                        f"- Upcoming meeting: {meeting_row.title or 'Untitled'} on {date_str}"
+                    )
+                    if tldr:
+                        meeting_context += f"\n- Meeting notes: {tldr[:300]}"
+        except Exception as e:
+            logger.warning("_execute_account_meeting_prep: meeting context lookup failed: %s", e)
+
+    # ------------------------------------------------------------------
+    # Stage 5: Build LLM prompt
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "generating", "message": f"Generating briefing for {account_name}..."},
+    })
+
+    def _fmt_section(items: list[str], max_items: int, fallback: str) -> str:
+        if not items:
+            return fallback
+        return "\n".join(f"- {item.strip()[:400]}" for item in items[:max_items])
+
+    user_message = f"""Generate a meeting prep briefing for {account_name}.
+
+## Account Summary
+- Name: {account_name}
+{meeting_context}
+
+## Known Pain Points
+{_fmt_section(by_file.get("pain-points", []), 8, "No pain points recorded yet.")}
+
+## Open Action Items
+{_fmt_section(by_file.get("action-items", []), 8, "No action items recorded yet.")}
+
+## Competitive Intel
+{_fmt_section(by_file.get("competitive-intel", []), 8, "No competitive intel recorded yet.")}
+
+## Contact Intelligence
+{_fmt_section(by_file.get("contacts", []), 8, "No contacts recorded yet.")}
+
+## ICP Fit Signals
+{_fmt_section(by_file.get("icp-profiles", []), 5, "No ICP data recorded yet.")}
+
+## Meeting Insights
+{_fmt_section(by_file.get("insights", []), 8, "No meeting insights recorded yet.")}
+
+## Product Feedback
+{_fmt_section(by_file.get("product-feedback", []), 5, "No product feedback recorded yet.")}
+"""
+
+    # Load system prompt: DB first, filesystem fallback (same pattern as _execute_meeting_prep)
+    skill_meta = await _load_skill_from_db(factory, "meeting-prep")
+    base_system_prompt = (skill_meta or {}).get("system_prompt") or ""
+    if not base_system_prompt:
+        # Filesystem fallback
+        skill_dir = Path(__file__).parent.parent.parent.parent.parent / "skills" / "meeting-prep"
+        skill_file = skill_dir / "SKILL.md"
+        if skill_file.exists():
+            try:
+                base_system_prompt = skill_file.read_text()
+            except Exception:
+                base_system_prompt = ""
+
+    account_system_prompt = (
+        "You are generating a meeting prep briefing from the user's CRM intelligence store. "
+        "All context has already been collected — do NOT suggest web research. "
+        "Generate a structured HTML briefing with these sections: "
+        "Relationship Summary, Known Pain Points, Open Action Items, "
+        "Competitive Landscape, Contacts & Stakeholders, Suggested Questions. "
+        "Use clean inline-styled HTML (no external CSS). "
+        "Use the brand coral color #E94D35 for section headers."
+    )
+    system_prompt = (
+        f"{account_system_prompt}\n\n{base_system_prompt}".strip()
+        if base_system_prompt
+        else account_system_prompt
+    )
+
+    # ------------------------------------------------------------------
+    # Stage 6: Call LLM (sync client in executor to avoid blocking event loop)
+    # ------------------------------------------------------------------
+    total_input_tokens = 0
+    total_output_tokens = 0
+
+    def _call_llm() -> tuple[str, int, int]:
+        client = anthropic.Anthropic(api_key=api_key)
+        response = client.messages.create(
+            model="claude-sonnet-4-20250514",
+            max_tokens=4096,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+        text_parts = [
+            block.text for block in response.content if hasattr(block, "text")
+        ]
+        html_text = "\n".join(text_parts)
+        in_tok = response.usage.input_tokens if response.usage else 0
+        out_tok = response.usage.output_tokens if response.usage else 0
+        return html_text, in_tok, out_tok
+
+    try:
+        loop = asyncio.get_event_loop()
+        html_output, total_input_tokens, total_output_tokens = await loop.run_in_executor(
+            None, _call_llm
+        )
+    except Exception as e:
+        logger.error("_execute_account_meeting_prep: LLM call failed: %s", e)
+        error_html = (
+            f"<p>Failed to generate briefing for {account_name}: {e}</p>"
+        )
+        await _append_event_atomic(factory, run_id, {
+            "event": "error",
+            "data": {"message": f"LLM call failed: {e}"},
+        })
+        return error_html, {}, []
+
+    # ------------------------------------------------------------------
+    # Stage 7: Emit done event and return
+    # ------------------------------------------------------------------
+    await _append_event_atomic(factory, run_id, {
+        "event": "done",
+        "data": {"rendered_html": html_output, "message": f"Briefing ready for {account_name}"},
+    })
+
+    token_usage = {
+        "input_tokens": total_input_tokens,
+        "output_tokens": total_output_tokens,
+        "model": "claude-sonnet-4-20250514",
+    }
+    return html_output, token_usage, []
 
 
 def _append_skipped_steps_note(

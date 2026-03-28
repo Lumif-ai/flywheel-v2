@@ -38,7 +38,7 @@ from sqlalchemy.orm import selectinload
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Account, AccountContact, ContextEntry, Meeting
+from flywheel.db.models import Account, AccountContact, ContextEntry, Meeting, SkillRun
 from flywheel.services.synthesis_engine import SynthesisEngine
 
 # No prefix — endpoints use full path segments directly
@@ -195,6 +195,10 @@ class AskResponse(BaseModel):
     answer: str
     sources: list[dict]
     insufficient_context: bool
+
+
+class PrepRequest(BaseModel):
+    meeting_id: str | None = None  # optional — enriches prompt with meeting-specific context
 
 
 # ---------------------------------------------------------------------------
@@ -834,3 +838,65 @@ async def ask_relationship(
 
     result_dict = await SynthesisEngine.ask(db, account, body.question)
     return AskResponse(**result_dict)
+
+
+# ---------------------------------------------------------------------------
+# RAPI-09: Trigger meeting prep briefing generation
+# ---------------------------------------------------------------------------
+
+
+@router.post("/relationships/{id}/prep", status_code=status.HTTP_202_ACCEPTED)
+async def prep_relationship(
+    id: UUID,
+    body: PrepRequest | None = None,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+) -> dict:
+    """Create a SkillRun for account-scoped meeting prep and return a stream URL.
+
+    Follows the same pattern as POST /meetings/{id}/process: creates a pending
+    SkillRun and returns run_id + stream_url for SSE consumption.
+
+    PARTITION CONTRACT: graduated_at IS NOT NULL enforced.
+    Returns 404 for non-existent or non-graduated accounts (never 403).
+    """
+    # Fetch account — PARTITION PREDICATE enforced
+    result = await db.execute(
+        select(Account).where(
+            Account.id == id,
+            Account.tenant_id == user.tenant_id,
+            Account.graduated_at.isnot(None),
+        )
+    )
+    account = result.scalar_one_or_none()
+    if account is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Relationship not found",
+        )
+
+    # Build input_text with Account-ID prefix so skill_executor dispatches to
+    # _execute_account_meeting_prep (not the onboarding _execute_meeting_prep)
+    input_lines = [
+        f"Account-ID: {id}",
+        f"Account-Name: {account.name}",
+    ]
+    meeting_id = (body.meeting_id if body else None)
+    if meeting_id:
+        input_lines.append(f"Meeting-ID: {meeting_id}")
+
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name="meeting-prep",
+        input_text="\n".join(input_lines),
+        status="pending",
+    )
+    db.add(run)
+    await db.flush()
+    await db.commit()
+
+    return {
+        "run_id": str(run.id),
+        "stream_url": f"/api/v1/skills/runs/{run.id}/stream",
+    }
