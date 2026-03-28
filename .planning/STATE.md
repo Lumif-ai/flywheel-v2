@@ -2,19 +2,19 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-03-27)
+See: .planning/PROJECT.md (updated 2026-03-28)
 
-**Core value:** Founders never lose track of an account again — single screen with all contacts, timeline, commitments, intel, next actions, all auto-populated from skill runs
-**Current focus:** Milestone v3.0 — Intelligence Flywheel (Phases 59–63)
+**Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
+**Current focus:** Milestone v4.0 — Flywheel OS (Phases 64–66)
 
 ## Current Position
 
-Phase: 63 of 63 (Meeting Prep Loop)
-Plan: 2 of 2 in current phase
-Status: Complete
-Last activity: 2026-03-28 — Phase 63 Plan 02 complete: PrepBriefingPanel + useRelationshipPrep hook + dual surface integration (RelationshipDetail + MeetingDetailPage)
+Phase: 64 of 66 (Unified Meetings)
+Plan: 1 of 3 in current phase
+Status: In progress — Plan 01 complete (data layer unification), Plan 02 next (API changes)
+Last activity: 2026-03-28 — 64-01 complete: migration 033, calendar sync rewrite, Granola fuzzy dedup, lifecycle state machine
 
-Progress: [████████████████████] 100% (42/42 total plans complete across all milestones)
+Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 1/8 plans
 
 ## Performance Metrics
 
@@ -136,6 +136,10 @@ Recent decisions affecting current work:
 - [63-02 execution]: MeetingDetail type has no account_name field — "this account" fallback passed to PrepBriefingPanel; backend resolves name from DB
 - [63-02 execution]: PrepBriefingPanel does NOT reuse MeetingPrepRenderer — different prop interface; renders dangerouslySetInnerHTML directly in styled container
 - [63-02 execution]: done event handler checks rendered_html then output keys for compatibility with different SkillRun response shapes
+- [64-01 execution]: calendar_event_id used for dedup (not external_id prefix pattern) -- cleaner partial unique index
+- [64-01 execution]: Granola data wins over calendar data -- skip calendar update if existing row has granola_note_id (richer source preserved)
+- [64-01 execution]: Fuzzy dedup uses OR of title-contains and attendee-overlap (not AND) -- maximizes match rate between calendar and Granola
+- [64-01 execution]: get_meeting_prep_suggestions kept on WorkItem for now -- Plan 02 migrates it to query Meeting table
 
 ### Pending Todos
 
@@ -149,5 +153,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-28
-Stopped at: Completed 63-02-PLAN.md — PrepBriefingPanel + useRelationshipPrep SSE hook + dual surface integration; Phase 63 and Intelligence Flywheel v3.0 milestone COMPLETE
+Stopped at: Completed 64-01-PLAN.md — Migration 033, calendar sync rewrite to Meeting table, Granola fuzzy dedup, lifecycle state machine
 Resume file: None
