@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-29)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** Planning next milestone
+**Current focus:** Email-to-tasks extraction pipeline
 
 ## Current Position
 
 Milestone: v1.0 CRM Redesign — Intelligence-First Relationships
-Phase: 67-tasks-ui (Tasks UI)
-Current Plan: 7 of 7
-Status: Phase 67 complete — all 7 plans executed
+Phase: 68-email-to-tasks (Email to Tasks)
+Current Plan: 3 of 3
+Status: Phase 68 complete — all plans done
 
-Progress: [████████████████████] 100% — Phase 67: 7/7 plans complete
+Progress: [████████████████████] 100% — Phase 68: 3/3 plans complete
 
 ## Performance Metrics
 
@@ -37,6 +37,14 @@ Progress: [████████████████████] 100% �
 All v1.0-v4.0 decisions archived in milestone ROADMAP archives.
 See: .planning/milestones/v4.0-ROADMAP.md for full history.
 
+- 68-01: resolution_source_id has no FK (polymorphic reference to email or meeting)
+- 68-01: All new task columns nullable for backwards-compatibility
+- 68-02: Used 'completed' (not 'complete') for SkillRun status in last_ritual_at query -- matches actual DB values
+- 68-02: No existing entity-to-account helper; implemented _resolve_entity_to_account from scratch
+- 68-02: Extractor is pure data function; all SSE emission handled by ritual wrapper only
+- 68-03: Detected Tasks section placed between Processing and Prep sections (Section 2.5)
+- 68-03: Source badge color-coded pills (email=blue, slack=green, other=gray)
+- 68-03: resolved_by validates against {user, system} enum set
 - 67-01: UUIDs typed as string in TypeScript (JSON-serialized from backend)
 - 67-01: 30s stale time for task queries (frequent changes during triage)
 - 67-01: Optimistic removal from filtered list on status transition
@@ -74,6 +82,6 @@ All v1.0-v4.0 roadmap evolution archived. Clean slate for next milestone.
 
 ## Session Continuity
 
-Last session: 2026-03-29
-Stopped at: Completed 67-07-PLAN.md (Should Have Features — Skill Execution, Search, Animations)
+Last session: 2026-03-30
+Stopped at: Completed 68-03-PLAN.md (Brief Integration + Task API) — Phase 68 complete
 Resume file: None
