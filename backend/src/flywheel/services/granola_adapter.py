@@ -86,7 +86,7 @@ async def list_meetings(
     """
     params: dict = {"page_size": limit}
     if since:
-        params["created_after"] = since.isoformat()
+        params["created_after"] = since.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     async with httpx.AsyncClient(timeout=30) as client:
         resp = await client.get(
