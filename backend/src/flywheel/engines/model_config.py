@@ -77,11 +77,12 @@ async def get_engine_model(
                 if model and isinstance(model, str) and model.strip():
                     if not model.startswith("claude-"):
                         logger.warning(
-                            "Tenant %s engine %s configured with non-Claude model: %s",
+                            "Tenant %s engine %s configured with non-Claude model: %s — falling back to default",
                             tenant_id,
                             engine_key,
                             model,
                         )
+                        return ENGINE_DEFAULTS.get(engine_key, default)
                     return model.strip()
 
         return ENGINE_DEFAULTS.get(engine_key, default)
