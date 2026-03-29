@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 
 ## Current Position
 
-Phase: 66 of 66 (Flywheel Ritual)
-Plan: 2 of 2 in current phase (Plan 02 complete)
-Status: Phase 66 complete — all plans delivered. v4.0 milestone complete.
-Last activity: 2026-03-28 — Phase 66 Plan 02: /flywheel subcommands (sync, tasks, prep, process)
+Phase: 66 of 66 (Flywheel Ritual — Rearchitect)
+Plan: 3 of 4 in current phase (Plan 03 complete)
+Status: Executing Phase 66 rearchitect plans
+Last activity: 2026-03-29 — Phase 66 Plan 03: Stage 4 LLM-powered task execution
 
-Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 8/8 plans
+Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 11/12 plans
 
 ## Performance Metrics
 
@@ -154,6 +154,10 @@ Recent decisions affecting current work:
 - [Phase 65]: Soft-delete via status=dismissed preserves audit trail; completed_at cleared on reopen (dismissed->detected)
 - [Phase 65]: [65-02 execution]: Email tasks forced to trust_level='confirm' via post-processing enforcement -- defense-in-depth; not relying solely on LLM prompt instruction
 - [Phase 65]: [65-02 execution]: Task extraction is best-effort in pipeline -- wrapped in try/except so meeting processing continues even if Haiku call or JSON parsing fails
+- [66-03 execution]: LLM formulation uses Haiku (cheap/fast) -- actual skill execution uses whatever model the skill needs
+- [66-03 execution]: Task status transitions confirmed -> in_review (matching spec ORCH-12); VALID_TRANSITIONS updated in tasks.py
+- [66-03 execution]: trust_level='confirm' tasks produce deliverables but engine does NOT auto-send -- founder reviews everything
+- [66-03 execution]: Local imports for create_registry/RunContext/RunBudget inside _stage_4_execute -- matches existing pattern in skill_executor.py
 - [Phase 65]: [65-02 execution]: extract_tasks receives both transcript AND Stage 4 extracted intelligence -- full context to Haiku without additional LLM cost
 
 - [66-01 execution]: python3 for all JSON parsing in skills (not jq) -- avoids dependency; python3 guaranteed in project env
@@ -162,6 +166,11 @@ Recent decisions affecting current work:
 - [66-02 execution]: [id:uuid] tags appended to displayed list items for position-to-UUID tracking -- prevents stale-position bugs on re-fetch
 - [66-02 execution]: SSE parsing uses python3 inline (not jq) -- consistent with 66-01 convention
 - [66-02 execution]: Prep defaults to external meetings only -- "prep all" overrides to include internal
+- [66-01 rearchitect]: sync_granola_meetings opens its own session via factory() with RLS context -- fully self-contained for both API and engine use
+- [66-01 rearchitect]: _find_matching_scheduled kept module-level with explicit session param (not nested) -- cleaner for testing and reuse
+- [66-01 rearchitect]: HTTPException raised from inside sync function for API compatibility -- caller is always endpoint or engine
+- [Phase 66]: Refactored flywheel ritual stages into private async functions for readability and testability
+- [Phase 66]: NULL title meetings treated as unprepped without querying skill_runs -- prevents contains('') matching all completed preps
 
 ### Pending Todos
 
@@ -174,6 +183,6 @@ None yet.
 
 ## Session Continuity
 
-Last session: 2026-03-28
-Stopped at: Completed 66-02-PLAN.md — /flywheel subcommands (sync, tasks, prep, process). Phase 66 complete. v4.0 milestone complete.
+Last session: 2026-03-29
+Stopped at: Completed 66-03-PLAN.md — Stage 4 LLM-powered task execution
 Resume file: None
