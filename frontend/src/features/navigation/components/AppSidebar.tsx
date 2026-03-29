@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Users, Briefcase, DollarSign, LogOut, CalendarDays } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Users, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
@@ -156,6 +156,16 @@ export function AppSidebar() {
                 >
                   <CalendarDays className="size-4" />
                   <span>Meetings</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton
+                  isActive={location.pathname.startsWith('/tasks')}
+                  render={<NavLink to="/tasks" />}
+                  tooltip="Tasks"
+                >
+                  <CheckSquare className="size-4" />
+                  <span>Tasks</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
               {/* Accounts kept for backward compatibility */}

@@ -74,6 +74,12 @@
     --brand-tint-warmest: rgba(233,77,53,0.04);
     --transition-fast: 150ms ease;
     --row-height-grid: 56px;
+    --task-triage-bg: rgba(233,77,53,0.03);
+    --task-confirm-flash: rgba(34,197,94,0.15);
+    --task-dismiss-flash: rgba(239,68,68,0.08);
+    --task-overdue-text: #EF4444;
+    --task-overdue-dot: #EF4444;
+    --task-ontrack-dot: #22C55E;
     --success: #22C55E;
     --warning: #F59E0B;
     --error: #EF4444;
@@ -112,6 +118,12 @@
 }
 
 .dark {
+    --task-triage-bg: rgba(233,77,53,0.06);
+    --task-confirm-flash: rgba(34,197,94,0.2);
+    --task-dismiss-flash: rgba(239,68,68,0.12);
+    --task-overdue-text: #F87171;
+    --task-overdue-dot: #F87171;
+    --task-ontrack-dot: #4ADE80;
     --page-bg: #111111;
     --card-bg: #1a1a1a;
     --skeleton-bg: var(--shimmer-base);
@@ -219,6 +231,38 @@
   }
   .animate-slide-out-right {
     animation: slide-out-right 300ms ease-out forwards;
+  }
+  @keyframes task-exit-confirm {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(100px); }
+  }
+  @keyframes task-exit-dismiss {
+    from { opacity: 1; transform: translateX(0); }
+    to { opacity: 0; transform: translateX(-100px); }
+  }
+  @keyframes task-exit-later {
+    from { opacity: 1; transform: translateY(0); }
+    to { opacity: 0; transform: translateY(20px); }
+  }
+  .task-exit-confirm {
+    animation: task-exit-confirm 150ms ease-in forwards;
+  }
+  .task-exit-dismiss {
+    animation: task-exit-dismiss 150ms ease-in forwards;
+  }
+  .task-exit-later {
+    animation: task-exit-later 150ms ease-in forwards;
+  }
+}
+
+@media (max-width: 767px) {
+  .task-triage-card-responsive {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  .task-triage-card-responsive .task-triage-actions {
+    justify-content: flex-start;
   }
 }
 

@@ -65,6 +65,11 @@ const MeetingDetailPage = lazy(() =>
   import('@/features/meetings/components/MeetingDetailPage').then((m) => ({ default: m.MeetingDetailPage }))
 )
 
+// Lazy-loaded tasks page
+const TasksPage = lazy(() =>
+  import('@/features/tasks/components/TasksPage').then((m) => ({ default: m.TasksPage }))
+)
+
 // Lazy-loaded relationship pages
 const RelationshipListPage = lazy(() =>
   import('@/features/relationships/components/RelationshipListPage').then((m) => ({ default: m.RelationshipListPage }))
@@ -101,6 +106,7 @@ export function AppRoutes() {
       <Route path="/pipeline" element={<Suspense fallback={null}><PipelinePage /></Suspense>} />
       <Route path="/meetings" element={<Suspense fallback={null}><MeetingsPage /></Suspense>} />
       <Route path="/meetings/:id" element={<Suspense fallback={null}><MeetingDetailPage /></Suspense>} />
+      <Route path="/tasks" element={<Suspense fallback={null}><TasksPage /></Suspense>} />
       <Route path="/relationships/prospects" element={<Suspense fallback={null}><RelationshipListPage type="prospect" /></Suspense>} />
       <Route path="/relationships/customers" element={<Suspense fallback={null}><RelationshipListPage type="customer" /></Suspense>} />
       <Route path="/relationships/advisors" element={<Suspense fallback={null}><RelationshipListPage type="advisor" /></Suspense>} />
