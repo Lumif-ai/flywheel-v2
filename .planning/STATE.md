@@ -11,10 +11,10 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 
 Milestone: v1.0 CRM Redesign — Intelligence-First Relationships
 Phase: 67-tasks-ui (Tasks UI)
-Current Plan: 4 of 7
-Status: Executing phase 67 — plan 03 complete
+Current Plan: 7 of 7
+Status: Executing phase 67 — plan 06 complete
 
-Progress: [████████░░░░░░░░░░░░] 43% — Phase 67: 3/7 plans complete
+Progress: [█████████████████░░░] 86% — Phase 67: 6/7 plans complete
 
 ## Performance Metrics
 
@@ -44,6 +44,15 @@ See: .planning/milestones/v4.0-ROADMAP.md for full history.
 - 67-02: Exit animations via CSS class toggle + 150ms setTimeout (more reliable than onTransitionEnd)
 - 67-03: Account name from task.metadata.account_name (denormalized by backend)
 - 67-03: Follow-up creation tracked in component-local Set state (session-level only)
+- 67-04: Sheet component with showCloseButton=false for custom header layout in detail panel
+- 67-04: Description auto-saves on blur with 500ms debounce (not keystroke)
+- 67-04: Quick-add account field uses plain text input (no API search) for V1
+- 67-05: Focus mode uses Zustand for ephemeral UI state, React Query for task data/mutations
+- 67-05: Card exit animations use CSS class toggle + 250ms setTimeout with directional transforms
+- 67-05: Focus trap via Tab key interception rather than external library
+- 67-06: Widget uses shared React Query cache (no extra API calls for briefing)
+- 67-06: Keyboard nav uses data-task-id DOM querying across section components
+- 67-06: Widget shows confirm/dismiss only (no "later") for compact form
 
 ### Pending Todos
 
@@ -63,5 +72,5 @@ All v1.0-v4.0 roadmap evolution archived. Clean slate for next milestone.
 ## Session Continuity
 
 Last session: 2026-03-29
-Stopped at: Completed 67-03-PLAN.md (My Commitments + Promises to Me)
+Stopped at: Completed 67-06-PLAN.md (Briefing Widget & Keyboard Navigation)
 Resume file: None
