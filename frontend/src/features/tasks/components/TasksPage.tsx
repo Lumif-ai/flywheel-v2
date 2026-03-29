@@ -7,10 +7,14 @@ import { Button } from '@/components/ui/button'
 import { TriageInbox } from './TriageInbox'
 import { MyCommitments } from './MyCommitments'
 import { PromisesToMe } from './PromisesToMe'
+import { DoneSection } from './DoneSection'
+import { TaskQuickAdd } from './TaskQuickAdd'
+import { TaskDetailPanel } from './TaskDetailPanel'
 
 export function TasksPage() {
   const { data: summary, isLoading } = useTaskSummary()
   const [showQuickAdd, setShowQuickAdd] = useState(false)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   // Derive counts from summary
   const activeCount = (summary?.confirmed ?? 0) + (summary?.in_progress ?? 0) + (summary?.in_review ?? 0)
@@ -19,9 +23,6 @@ export function TasksPage() {
     ? summary.detected + summary.in_review + summary.confirmed + summary.in_progress + summary.done + summary.blocked + summary.dismissed + summary.deferred
     : 0
   const isCompletelyEmpty = !isLoading && summary && totalAll === 0
-
-  // Suppress unused-variable warning — QuickAdd component comes in plan 04
-  void showQuickAdd
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: 'var(--page-bg)' }}>
@@ -82,13 +83,28 @@ export function TasksPage() {
             {/* Section slots with 48px gap between them */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
               <TriageInbox />
-              <MyCommitments onSelect={() => {/* Detail panel wired in plan 04 */}} />
+
+              {/* Quick-add form above My Commitments */}
+              <div>
+                <TaskQuickAdd
+                  isOpen={showQuickAdd}
+                  onClose={() => setShowQuickAdd(false)}
+                />
+                <MyCommitments onSelect={(id) => setSelectedTaskId(id)} />
+              </div>
+
               <PromisesToMe />
-              {/* DoneSection placeholder */}
+              <DoneSection />
             </div>
           </>
         )}
       </div>
+
+      {/* Detail panel */}
+      <TaskDetailPanel
+        taskId={selectedTaskId}
+        onClose={() => setSelectedTaskId(null)}
+      />
     </div>
   )
 }
