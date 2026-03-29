@@ -14,16 +14,16 @@ export function useUpdateTaskStatus() {
       // Cancel outgoing refetches so they don't overwrite our optimistic update
       await queryClient.cancelQueries({ queryKey: queryKeys.tasks.all })
 
-      // Snapshot previous task lists for rollback
-      const previousQueries = queryClient.getQueriesData<TasksListResponse>({
-        queryKey: queryKeys.tasks.all,
+      // Snapshot previous task list for rollback (only list queries, NOT summary)
+      const previousList = queryClient.getQueriesData<TasksListResponse>({
+        queryKey: ['tasks', 'list'],
       })
 
-      // Optimistically remove the task from current filtered list
+      // Optimistically remove the task from task list queries
       queryClient.setQueriesData<TasksListResponse>(
-        { queryKey: queryKeys.tasks.all },
+        { queryKey: ['tasks', 'list'] },
         (old) => {
-          if (!old) return old
+          if (!old?.tasks) return old
           return {
             ...old,
             tasks: old.tasks.filter((t) => t.id !== id),
@@ -32,13 +32,13 @@ export function useUpdateTaskStatus() {
         },
       )
 
-      return { previousQueries }
+      return { previousList }
     },
 
     onError: (_error, _variables, context) => {
       // Rollback to snapshot
-      if (context?.previousQueries) {
-        for (const [key, data] of context.previousQueries) {
+      if (context?.previousList) {
+        for (const [key, data] of context.previousList) {
           queryClient.setQueryData(key, data)
         }
       }
