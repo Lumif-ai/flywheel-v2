@@ -1,5 +1,7 @@
-import { useEffect, useState, useCallback } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { useQuery } from '@tanstack/react-query'
+import { useAuthStore } from '@/stores/auth'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { Toast } from '@/components/ui/toast-notification'
 import { DocumentCard } from './DocumentCard'
@@ -101,44 +103,41 @@ const PAGE_SIZE = 20
 
 export function DocumentLibrary() {
   const navigate = useNavigate()
-  const [documents, setDocuments] = useState<DocumentListItem[]>([])
-  const [total, setTotal] = useState(0)
-  const [loading, setLoading] = useState(true)
+  const user = useAuthStore((s) => s.user)
   const [filter, setFilter] = useState<FilterType>('all')
-  const [offset, setOffset] = useState(0)
+  const [extraPages, setExtraPages] = useState<DocumentListItem[]>([])
   const [shareToast, setShareToast] = useState<string | null>(null)
 
-  const loadDocuments = useCallback(
-    async (currentFilter: FilterType, currentOffset: number, append = false) => {
-      setLoading(true)
-      try {
-        const params: { document_type?: string; limit: number; offset: number } = {
-          limit: PAGE_SIZE,
-          offset: currentOffset,
-        }
-        if (currentFilter !== 'all') params.document_type = currentFilter
+  const queryParams = {
+    limit: PAGE_SIZE,
+    offset: 0,
+    ...(filter !== 'all' ? { document_type: filter } : {}),
+  }
 
-        const res = await fetchDocuments(params)
-        setDocuments((prev) => (append ? [...prev, ...res.documents] : res.documents))
-        setTotal(res.total)
-      } catch (err) {
-        console.error('Failed to load documents:', err)
-      } finally {
-        setLoading(false)
-      }
-    },
-    [],
-  )
+  const { data, isLoading: loading } = useQuery({
+    queryKey: ['documents', filter],
+    queryFn: () => fetchDocuments(queryParams),
+    enabled: !!user,
+  })
 
-  useEffect(() => {
-    setOffset(0)
-    loadDocuments(filter, 0)
-  }, [filter, loadDocuments])
+  const firstPageDocs = data?.documents ?? []
+  const total = data?.total ?? 0
+  const documents = [...firstPageDocs, ...extraPages]
 
-  const handleLoadMore = () => {
-    const newOffset = offset + PAGE_SIZE
-    setOffset(newOffset)
-    loadDocuments(filter, newOffset, true)
+  const handleFilterChange = (f: FilterType) => {
+    setFilter(f)
+    setExtraPages([])
+  }
+
+  const handleLoadMore = async () => {
+    const newOffset = documents.length
+    try {
+      const params = { limit: PAGE_SIZE, offset: newOffset, ...(filter !== 'all' ? { document_type: filter } : {}) }
+      const res = await fetchDocuments(params)
+      setExtraPages((prev) => [...prev, ...res.documents])
+    } catch (err) {
+      console.error('Failed to load more documents:', err)
+    }
   }
 
   const handleShare = async (doc: DocumentListItem) => {
@@ -189,7 +188,7 @@ export function DocumentLibrary() {
           <button
             key={f.key}
             type="button"
-            onClick={() => setFilter(f.key)}
+            onClick={() => handleFilterChange(f.key)}
             className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200"
             style={
               filter === f.key

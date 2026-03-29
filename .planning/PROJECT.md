@@ -8,22 +8,27 @@ An AI-powered work intelligence platform that compounds knowledge from meetings,
 
 Founders never lose track of an account again. Every company they're engaging with — prospects, active deals, customers — has a single screen showing all contacts, interaction timeline, commitments, intel, and next actions. All populated automatically from skill runs.
 
-## Current Milestone: v2.1 CRM Redesign — Intelligence-First Relationships
+## Current Milestone: v4.0 Flywheel OS — Intelligence Operating System for Founders
 
-**Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
+**Goal:** Transform the intelligence layer into a founder's daily operating system. Conversations automatically become tracked commitments and executed deliverables. Unified meetings timeline (Google Calendar + Granola), automatic task extraction from transcripts, and a `/flywheel` CLI ritual that ties everything together.
 
-**Target features:**
-- Data model evolution: relationship_type array, entity_level (company/person), relationship_status separation
-- Pipeline as Airtable-style configurable data grid (column management, filters, saved views, inline actions)
-- Four relationship surfaces with type-driven rendering (shared detail component, five configurations)
-- AI context panel per relationship (synthesis, Q&A, note capture, file attachments)
-- Premium design system (two-layer shadows, translucent badges, 56px rows, avatars, warm tints, micro-interactions)
-- Signal layer with sidebar badge counts
-- Graduation flow with type assignment modal
+**Three-layer architecture:**
+- **Layer 1 (Intelligence):** Exists — meetings, emails, context store (v1.0-v3.0)
+- **Layer 2 (Autopilot):** NEW — detect commitments from conversations, map to skills, confirm before executing
+- **Layer 3 (Ritual):** NEW — `/flywheel` CLI + `/brief` web page as daily cockpit
+
+**Target features (Phases A-C):**
+- Unified meetings table: Google Calendar events + Granola transcripts in one timeline with dedup
+- Task extraction: Stage 7 in meeting processor, 5-category commitment classification via Haiku
+- Tasks CRUD API with status state machine and trust ladder
+- `/flywheel` CLI skill with 5 subcommands (full brief, sync, tasks, prep, process)
+- Meetings page redesign: Upcoming + Past tabs
 
 **Shipped milestones:**
 - **v1.0 Email Copilot** (2026-03-25) — Gmail sync, 5-tier scoring, voice-learned drafts, review UI, feedback loop
 - **v2.0 AI-Native CRM** (2026-03-27) — Accounts/Pipeline/Pulse surfaces, REST APIs, seed CLI, auto-graduation
+- **v2.1 CRM Redesign** (2026-03-27) — Pipeline grid, 4 relationship surfaces, AI synthesis, signal badges
+- **v3.0 Intelligence Flywheel** (2026-03-28) — Team privacy, Granola adapter, meeting intelligence pipeline, prep loop
 
 **Codebase:** FastAPI + React, 206 seeded accounts from GTM stack
 
@@ -64,31 +69,28 @@ Founders never lose track of an account again. Every company they're engaging wi
 
 ### Active
 
-<!-- v2.1 CRM Redesign scope -->
+<!-- v4.0 Flywheel OS scope (Phases A-C) -->
 
-- [ ] Data model: relationship_type array, entity_level, relationship_status on accounts
-- [ ] Relationships API: list/detail/type-change/graduate/notes/files/synthesize/ask/signals
-- [ ] Pipeline grid: Airtable-style configurable data grid with column management
-- [ ] Relationship surfaces: Prospects, Customers, Advisors, Investors as sidebar sections
-- [ ] Relationship detail: type-driven tabs, AI panel, commitments, action bar
-- [ ] AI synthesis: cached narrative summaries with graceful degradation
-- [ ] AI Q&A: ask questions about a relationship with RAG context
-- [ ] Quick-add: notes + file attachments on every relationship page
-- [ ] Signal layer: sidebar badge counts, computed signals per relationship type
-- [ ] Premium design system: shadows, badges, avatars, transitions, emotional registers
-- [ ] Sidebar redesign: RELATIONSHIPS section with 4 type links + badge counts
+- [ ] Unified meetings: Calendar sync writes Meeting rows, dedup with Granola, lifecycle status (UNI-01 through UNI-08)
+- [ ] Tasks table: ORM model, RLS, 7-status state machine, commitment_direction, trust_level (TASK-01)
+- [ ] Task extraction: Stage 7 in meeting processor, Haiku 5-category classification (TASK-02)
+- [ ] Tasks CRUD API: paginated list, filters, status transitions, confirm/dismiss shortcuts (TASK-03)
+- [ ] Task signals: counts in signals endpoint for sidebar badges (TASK-04)
+- [ ] /flywheel CLI: daily brief, sync, tasks, prep, process subcommands (FLY-01 through FLY-06)
+- [ ] Meetings page redesign: Upcoming + Past tabs (UNI-05)
 
 ### Out of Scope
 
-- Custom pipeline stages — fixed: scored → sent → awaiting → replied → graduated
-- Calendar integration for auto-detecting meetings with accounts
-- Email sync / passive inbox capture — only skill-generated outreach
+- Auto-skill execution of detected tasks — Phase E (v4.0 detects only, doesn't execute)
+- Task extraction from emails — Phase F
+- Task extraction from Slack — deferred
+- Contact discovery (web research for unknown attendees) — Phase D
+- GTM outreach integration in /flywheel — Phase G
+- Web UI for /brief and /tasks pages — Phase H
+- Auto-send / YOLO mode — email sending NEVER automatic (hard constraint)
+- Multi-user task assignment — tasks are Zone 1 (user-private)
 - Mobile-optimized views
-- Slack/email notification delivery for Pulse signals
-- Kanban drag-and-drop for Pipeline — table view only
-- Bulk outreach sending from Pipeline UI
-- Account merge/dedup UI — handled by normalization in seed command
-- Auto-send / YOLO mode — trust must be earned first (v1.0 decision)
+- Granola webhook/polling sync — remains on-demand
 
 ## Context
 
@@ -103,11 +105,13 @@ Founders never lose track of an account again. Every company they're engaging wi
 - AI synthesis is the product differentiator, not just the UI
 
 **Specs:**
-- `.planning/SPEC-ai-native-crm.md` (v2.0 — original)
-- `.planning/SPEC-crm-redesign.md` (v2.1 — current)
+- `.planning/SPEC-ai-native-crm.md` (v2.0)
+- `.planning/SPEC-crm-redesign.md` (v2.1)
+- `.planning/SPEC-flywheel-os.md` (v4.0 — current, reviewed)
 **Concept briefs:**
 - `.planning/CONCEPT-BRIEF-ai-native-crm.md` (v2.0)
-- `.planning/CONCEPT-BRIEF-crm-redesign.md` (v2.1 — 5-round brainstorm + design advisory)
+- `.planning/CONCEPT-BRIEF-crm-redesign.md` (v2.1)
+- `.planning/CONCEPT-BRIEF-flywheel-os.md` (v4.0 — 4-round brainstorm, 14 advisors)
 
 ## Constraints
 
@@ -143,4 +147,4 @@ Founders never lose track of an account again. Every company they're engaging wi
 | Interactive AI panel | Chat + notes + files in one panel per relationship | — Pending |
 
 ---
-*Last updated: 2026-03-27 after v2.1 milestone initialization*
+*Last updated: 2026-03-28 after v4.0 Flywheel OS milestone initialization*

@@ -140,9 +140,10 @@ def deserialize_credentials(encrypted: bytes) -> Credentials:
     expiry = None
     if data.get("expiry"):
         expiry = datetime.fromisoformat(data["expiry"])
-        # Ensure timezone-aware (Google API expects UTC)
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
+        # Google's Credentials.valid compares expiry against a naive UTC datetime,
+        # so strip timezone info to avoid "can't compare offset-naive and offset-aware" errors.
+        if expiry.tzinfo is not None:
+            expiry = expiry.replace(tzinfo=None)
 
     return Credentials(
         token=data["token"],

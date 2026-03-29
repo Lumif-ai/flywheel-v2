@@ -1,10 +1,11 @@
-import { useEffect, useState, useRef } from 'react'
+import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router'
 import { ArrowLeft, Share2, Download, ChevronDown } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { fetchDocument, shareDocument } from '../api'
 import type { DocumentDetail } from '../api'
 import { getTypeLabel, formatDate, relativeTime } from '../utils'
+import { SkillRenderer } from './renderers'
 
 // ---------------------------------------------------------------------------
 // Component
@@ -13,10 +14,8 @@ import { getTypeLabel, formatDate, relativeTime } from '../utils'
 export function DocumentViewer() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const iframeRef = useRef<HTMLIFrameElement>(null)
 
   const [document, setDocument] = useState<DocumentDetail | null>(null)
-  const [htmlContent, setHtmlContent] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [shareToast, setShareToast] = useState(false)
@@ -27,23 +26,8 @@ export function DocumentViewer() {
     setError(null)
 
     fetchDocument(id)
-      .then(async (doc) => {
-        setDocument(doc)
-        // Prefer fetching HTML content for srcDoc to avoid signed URL expiry
-        try {
-          const res = await fetch(doc.content_url)
-          if (res.ok) {
-            const text = await res.text()
-            setHtmlContent(text)
-          }
-        } catch {
-          // Fallback: use content_url directly as iframe src
-          console.warn('Could not fetch content via URL, using src fallback')
-        }
-      })
-      .catch((err) => {
-        setError(err.message || 'Failed to load document')
-      })
+      .then((doc) => setDocument(doc))
+      .catch((err) => setError(err.message || 'Failed to load document'))
       .finally(() => setLoading(false))
   }, [id])
 
@@ -64,25 +48,29 @@ export function DocumentViewer() {
     navigate('/documents')
   }
 
-  // Auto-resize iframe to fit content
-  const handleIframeLoad = () => {
-    if (iframeRef.current?.contentDocument) {
-      const height = iframeRef.current.contentDocument.body.scrollHeight
-      iframeRef.current.style.height = `${height + 32}px`
-    }
-  }
-
   // Loading state
   if (loading) {
     return (
       <div
-        className="mx-auto w-full"
-        style={{ maxWidth: spacing.maxReading, padding: `${spacing.section} ${spacing.pageDesktop}` }}
+        className="mx-auto w-full page-enter"
+        style={{ maxWidth: spacing.maxBriefing, padding: `${spacing.section} ${spacing.pageDesktop}` }}
       >
         <div className="h-4 w-32 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-8" />
         <div className="h-8 w-3/4 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-4" />
         <div className="h-4 w-1/4 rounded animate-shimmer bg-[var(--skeleton-bg)] mb-8" />
-        <div className="h-96 rounded-xl animate-shimmer bg-[var(--skeleton-bg)]" />
+        <div className="space-y-3">
+          {Array.from({ length: 6 }).map((_, i) => (
+            <div
+              key={i}
+              className="rounded animate-shimmer bg-[var(--skeleton-bg)]"
+              style={{
+                height: '16px',
+                width: `${60 + Math.random() * 35}%`,
+                animationDelay: `${i * 80}ms`,
+              }}
+            />
+          ))}
+        </div>
       </div>
     )
   }
@@ -92,7 +80,7 @@ export function DocumentViewer() {
     return (
       <div
         className="mx-auto w-full text-center py-16"
-        style={{ maxWidth: spacing.maxReading, padding: `${spacing.section} ${spacing.pageDesktop}` }}
+        style={{ maxWidth: spacing.maxBriefing, padding: `${spacing.section} ${spacing.pageDesktop}` }}
       >
         <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
           {error || 'Document not found'}
@@ -103,12 +91,12 @@ export function DocumentViewer() {
           className="mt-4 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
           style={{ color: colors.brandCoral }}
         >
-          Back to Documents
+          Back to Library
         </button>
         <button
           type="button"
           onClick={() => window.location.reload()}
-          className="mt-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+          className="mt-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors block mx-auto"
           style={{ color: colors.brandCoral }}
         >
           Try again
@@ -124,7 +112,7 @@ export function DocumentViewer() {
     <div
       className="mx-auto w-full page-enter"
       style={{
-        maxWidth: spacing.maxReading,
+        maxWidth: spacing.maxBriefing,
         padding: `${spacing.section} ${spacing.pageDesktop}`,
       }}
     >
@@ -136,7 +124,7 @@ export function DocumentViewer() {
         style={{ color: colors.secondaryText }}
       >
         <ArrowLeft size={16} />
-        Back to Documents
+        Back to Library
       </button>
 
       {/* Title + badge + time */}
@@ -177,7 +165,7 @@ export function DocumentViewer() {
           }}
         >
           {companies.length > 0 && companies.join(', ')}
-          {companies.length > 0 && contacts.length > 0 && ' -- '}
+          {companies.length > 0 && contacts.length > 0 && ' \u2014 '}
           {contacts.length > 0 && contacts.join(', ')}
         </p>
       )}
@@ -220,23 +208,16 @@ export function DocumentViewer() {
         </div>
       </div>
 
-      {/* Content area */}
-      <div className="rounded-xl overflow-hidden border border-[var(--subtle-border)] bg-[var(--card-bg)]">
-        <iframe
-          ref={iframeRef}
-          title={document.title}
-          srcDoc={htmlContent ?? undefined}
-          src={!htmlContent ? document.content_url : undefined}
-          onLoad={handleIframeLoad}
-          className="w-full border-0"
-          style={{ minHeight: '400px' }}
-          sandbox="allow-same-origin"
-        />
-      </div>
+      {/* Native skill output rendering */}
+      <SkillRenderer
+        skillType={document.document_type}
+        output={document.output}
+        renderedHtml={document.rendered_html}
+      />
 
       {/* Footer */}
       <p
-        className="mt-6 text-center"
+        className="mt-8 text-center"
         style={{
           fontSize: typography.caption.size,
           color: colors.secondaryText,

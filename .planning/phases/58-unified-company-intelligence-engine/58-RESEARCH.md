@@ -65,30 +65,31 @@ No new libraries are needed. All dependencies are already installed and in use.
 ### Pattern 1: URL vs. Document Text Discriminator in `_execute_company_intel`
 
 The function currently takes `input_text: str` and treats it as a URL. The extension adds a
-discriminator: if `input_text` starts with `DOCUMENT:` (a sentinel prefix), skip the crawl stage
-and treat the rest as pre-extracted document text. Otherwise, treat as URL.
+discriminator: if `input_text` starts with `DOCUMENT_FILE:` (a sentinel prefix with a file UUID reference), skip the crawl stage
+and fetch the document text from `UploadedFile.extracted_text`. Otherwise, treat as URL.
 
 **What:** Single entrypoint that handles both inputs without overloading the signature.
 **When to use:** Any time `_execute_company_intel` is called — engine decides internally.
 
 ```python
 # In _execute_company_intel
-DOCUMENT_PREFIX = "DOCUMENT:"
+DOCUMENT_FILE_PREFIX = "DOCUMENT_FILE:"
 
 async def _execute_company_intel(
     api_key: str,
-    input_text: str,           # URL or "DOCUMENT:<extracted_text>"
+    input_text: str,           # URL or "DOCUMENT_FILE:{uuid}"
     factory: async_sessionmaker,
     run_id: UUID,
     tenant_id: UUID,
     user_id: UUID | None = None,
 ) -> tuple[str, dict, list]:
-    url = input_text.strip()
-    is_document = url.startswith(DOCUMENT_PREFIX)
+    lines = input_text.strip().split("\n")
+    primary = lines[0].strip()
+    is_document = primary.startswith(DOCUMENT_FILE_PREFIX)
 
     if is_document:
-        # Skip Stage 1 (crawl), go straight to Stage 2 (structure)
-        raw_text = url[len(DOCUMENT_PREFIX):]
+        # Skip Stage 1 (crawl), fetch text from DB, go straight to Stage 2 (structure)
+        file_id = primary[len(DOCUMENT_FILE_PREFIX):]
         pages_crawled = 0
         await _append_event_atomic(factory, run_id, {
             "event": "stage",
@@ -158,12 +159,12 @@ async def analyze_document(
     uploaded = ...
     extracted_text = uploaded.extracted_text
 
-    # Create SkillRun with DOCUMENT: prefix sentinel
+    # Create SkillRun with DOCUMENT_FILE: prefix sentinel (reference by file ID)
     run = SkillRun(
         tenant_id=user.tenant_id,
         user_id=user.sub,
         skill_name="company-intel",
-        input_text=f"DOCUMENT:{extracted_text}",
+        input_text=f"DOCUMENT_FILE:{body.file_id}",
         status="pending",
     )
     db.add(run)

@@ -64,6 +64,8 @@ export function AuthCallback() {
         if (providerNormalized) {
           // Call promote-oauth to set up company/domain on the existing tenant
           // and create Integration rows if provider_token is available
+          console.log('[AuthCallback] provider_token present:', !!session.provider_token)
+          console.log('[AuthCallback] provider_refresh_token present:', !!session.provider_refresh_token)
           try {
             await api.post('/onboarding/promote-oauth', {
               provider: providerNormalized,
@@ -71,9 +73,14 @@ export function AuthCallback() {
               provider_refresh_token: session.provider_refresh_token ?? null,
               email: session.user?.email ?? '',
             })
-          } catch (err) {
-            // If promote-oauth fails (e.g., user already promoted), log and continue
-            console.warn('promote-oauth failed, user may already be promoted:', err)
+          } catch (err: any) {
+            const detail = err?.response?.data?.detail ?? err?.message ?? String(err)
+            if (detail?.includes('integration setup failed')) {
+              console.error('[AuthCallback] Integration setup failed:', detail)
+            } else {
+              // Non-integration errors (e.g., user already promoted) are non-fatal
+              console.warn('[AuthCallback] promote-oauth failed:', detail)
+            }
           }
 
           // Re-fetch user to get potentially updated metadata

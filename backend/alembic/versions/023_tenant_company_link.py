@@ -31,10 +31,8 @@ def upgrade() -> None:
     op.create_index("idx_tenants_company", "tenants", ["company_id"])
 
     # Drop the Phase 46-01 domain unique index (domain now lives on companies table)
-    try:
-        op.drop_index("uq_tenants_domain", table_name="tenants")
-    except Exception:
-        pass  # Index may not exist in some environments
+    # Use raw SQL with IF EXISTS since try/except breaks the alembic transaction
+    op.execute(sa.text("DROP INDEX IF EXISTS uq_tenants_domain"))
 
 
 def downgrade() -> None:

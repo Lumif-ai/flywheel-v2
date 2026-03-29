@@ -18,11 +18,39 @@ from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from sqlalchemy import select
+
 from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.auth.anonymous import ensure_provisioned
+from flywheel.db.models import UserTenant
 from flywheel.db.session import get_db, get_session_factory, get_tenant_session
 
 _bearer = HTTPBearer(auto_error=False)
+
+# Cache resolved tenant IDs for authenticated users (per process lifetime)
+_user_tenant_cache: dict[str, str] = {}
+
+
+async def _resolve_tenant_for_user(user_id) -> str | None:
+    """Look up tenant_id from user_tenants for an authenticated user."""
+    uid = str(user_id)
+    if uid in _user_tenant_cache:
+        return _user_tenant_cache[uid]
+
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(UserTenant.tenant_id).where(
+                UserTenant.user_id == user_id,
+                UserTenant.active == True,
+            ).limit(1)
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            tid = str(row)
+            _user_tenant_cache[uid] = tid
+            return tid
+    return None
 
 
 async def get_current_user(
@@ -32,6 +60,9 @@ async def get_current_user(
 
     For anonymous Supabase users, auto-provisions Profile + Tenant + UserTenant
     rows on first API call so downstream endpoints don't hit FK violations.
+
+    For authenticated users without tenant_id in JWT (e.g., freshly OAuth'd),
+    looks up their tenant from user_tenants table.
     """
     if cred is None:
         raise HTTPException(
@@ -46,6 +77,12 @@ async def get_current_user(
         tenant_id = await ensure_provisioned(token.sub, is_anonymous=True)
         if tenant_id and token.tenant_id is None:
             # Patch app_metadata so downstream sees the tenant
+            token.app_metadata["tenant_id"] = str(tenant_id)
+    elif token.tenant_id is None:
+        # Authenticated user without tenant_id in JWT (post-OAuth).
+        # Look up their tenant from the DB.
+        tenant_id = await _resolve_tenant_for_user(token.sub)
+        if tenant_id:
             token.app_metadata["tenant_id"] = str(tenant_id)
 
     return token

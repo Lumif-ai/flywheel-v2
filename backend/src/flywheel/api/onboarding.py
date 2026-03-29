@@ -17,6 +17,7 @@ import asyncio
 import json
 import logging
 import re
+from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
 from uuid import UUID
 
@@ -464,18 +465,18 @@ async def promote_oauth(
     try:
         from flywheel.auth.encryption import encrypt_api_key
 
-        # Encrypt the refresh token (needed for long-lived API access)
-        encrypted_creds = None
-        if body.provider_refresh_token:
-            import json as _json
-            import time as _time
-            creds_data = {
-                "access_token": body.provider_token,
-                "refresh_token": body.provider_refresh_token,
-                "token_type": "Bearer",
-                "expires_at": _time.time() + 3600,
-            }
-            encrypted_creds = encrypt_api_key(_json.dumps(creds_data))
+        # Encrypt OAuth credentials in the format expected by google_calendar.deserialize_credentials
+        import json as _json
+        from flywheel.config import settings as _settings
+        creds_data = {
+            "token": body.provider_token,
+            "refresh_token": body.provider_refresh_token or "",
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "client_id": _settings.google_client_id,
+            "client_secret": _settings.google_client_secret,
+            "expiry": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        }
+        encrypted_creds = encrypt_api_key(_json.dumps(creds_data))
 
         if body.provider == "google":
             # Google uses separate providers for calendar and email
@@ -526,10 +527,13 @@ async def promote_oauth(
                     credentials_encrypted=encrypted_creds,
                 ))
 
-    except Exception:
-        # Integration creation failed -- don't block the promote.
-        # User can reconnect from Settings later.
+    except Exception as exc:
         logger.exception("Failed to create integrations during OAuth promote for user=%s", user.sub)
+        await db.commit()  # Commit tenant/profile even if integrations fail
+        raise HTTPException(
+            status_code=500,
+            detail=f"Account promoted but integration setup failed: {type(exc).__name__}: {exc}",
+        )
 
     await db.commit()
 

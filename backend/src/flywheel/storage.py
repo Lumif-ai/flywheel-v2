@@ -130,14 +130,19 @@ async def append_entry(
         focus_id = fid_value if fid_value else None
 
     # Evidence dedup: check for existing entry with same tenant+file+source+detail
+    # Explicit tenant_id filter required because superuser roles bypass RLS
+    dedup_filters = [
+        ContextEntry.file_name == file,
+        ContextEntry.source == source,
+        ContextEntry.deleted_at.is_(None),
+        func.lower(func.coalesce(ContextEntry.detail, "")) == normalized_detail,
+    ]
+    if tenant_id:
+        from uuid import UUID as _UUID
+        dedup_filters.append(ContextEntry.tenant_id == _UUID(tenant_id))
     dedup_stmt = (
         select(ContextEntry)
-        .where(
-            ContextEntry.file_name == file,
-            ContextEntry.source == source,
-            ContextEntry.deleted_at.is_(None),
-            func.lower(func.coalesce(ContextEntry.detail, "")) == normalized_detail,
-        )
+        .where(*dedup_filters)
         .with_for_update()
     )
     dedup_result = await session.execute(dedup_stmt)

@@ -17,6 +17,8 @@ export interface DocumentListItem {
 
 export interface DocumentDetail extends DocumentListItem {
   content_url: string
+  output: string | null
+  rendered_html: string | null
 }
 
 export interface DocumentListResponse {
@@ -38,7 +40,7 @@ export async function fetchDocuments(params?: {
   limit?: number
   offset?: number
 }): Promise<DocumentListResponse> {
-  return api.get<DocumentListResponse>('/documents', { params })
+  return api.get<DocumentListResponse>('/documents/', { params })
 }
 
 export async function fetchDocument(id: string): Promise<DocumentDetail> {

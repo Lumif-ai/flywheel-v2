@@ -81,7 +81,8 @@ def upgrade() -> None:
         ),
         sa.Column("deleted_at", sa.TIMESTAMP(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
-        sa.ForeignKeyConstraint(["user_id"], ["profiles.id"]),
+        # No FK on user_id — profiles table is managed by Supabase Auth;
+        # user isolation enforced via RLS (app.user_id setting)
         sa.ForeignKeyConstraint(
             ["account_id"], ["accounts.id"], ondelete="SET NULL"
         ),

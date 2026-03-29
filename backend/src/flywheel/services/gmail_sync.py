@@ -431,6 +431,7 @@ async def _full_sync(
 
     count = 0
     new_email_ids: list[UUID] = []
+    synced_gmail_ids: set[str] = set()
     page_token: str | None = None
 
     while True:
@@ -443,6 +444,7 @@ async def _full_sync(
         messages = response.get("messages", [])
 
         for stub in messages:
+            synced_gmail_ids.add(stub["id"])
             msg = await get_message_headers(creds, stub["id"])
             email_id = await upsert_email(
                 db, integration.tenant_id, integration.user_id, msg
@@ -454,6 +456,28 @@ async def _full_sync(
         page_token = response.get("nextPageToken")
         if not page_token:
             break
+
+    # Reconcile: remove emails in our DB that are no longer in Gmail INBOX.
+    # Compare DB gmail_message_ids against the set we just synced.
+    all_db_result = await db.execute(
+        select(Email.id, Email.gmail_message_id).where(
+            Email.tenant_id == integration.tenant_id,
+            Email.user_id == integration.user_id,
+        )
+    )
+    stale_ids = [
+        row[0] for row in all_db_result.fetchall()
+        if row[1] not in synced_gmail_ids
+    ]
+    if stale_ids:
+        await db.execute(EmailDraft.__table__.delete().where(EmailDraft.email_id.in_(stale_ids)))
+        await db.execute(EmailScore.__table__.delete().where(EmailScore.email_id.in_(stale_ids)))
+        await db.execute(Email.__table__.delete().where(Email.id.in_(stale_ids)))
+        logger.info(
+            "Full sync: removed %d stale emails for integration %s",
+            len(stale_ids),
+            integration.id,
+        )
 
     # Store checkpoint historyId from BEFORE pagination
     settings = dict(integration.settings or {})
@@ -550,18 +574,20 @@ async def sync_gmail(
     new_email_ids: list[UUID] = []
 
     for record in history_records:
+        # --- Handle new messages (only if they're in INBOX) ---
         for added_entry in record.get("messagesAdded", []):
             message_stub = added_entry.get("message", {})
             message_id = message_stub.get("id")
             if not message_id:
                 continue
+            # Only sync messages with INBOX label (skip sent, drafts, spam)
+            stub_labels = message_stub.get("labelIds", [])
+            if "INBOX" not in stub_labels:
+                continue
             msg = await get_message_headers(creds, message_id)
             email_id = await upsert_email(
                 db, integration.tenant_id, integration.user_id, msg
             )
-            # FEED-03: New messages in existing threads arrive as messagesAdded events.
-            # Their email_ids go into new_email_ids -> _score_new_emails -> individual EmailScore rows.
-            # Thread priority auto-updates via get_thread_priority() MAX query at read time.
             new_email_ids.append(email_id)
             count += 1
             logger.debug(
@@ -569,6 +595,40 @@ async def sync_gmail(
                 message_id,
                 integration.id,
             )
+
+        # --- Handle label removals (archive, trash, delete remove INBOX label) ---
+        for removed_entry in record.get("labelsRemoved", []):
+            removed_labels = removed_entry.get("labelIds", [])
+            if "INBOX" not in removed_labels:
+                continue
+            message_stub = removed_entry.get("message", {})
+            message_id = message_stub.get("id")
+            if not message_id:
+                continue
+            # Delete the email row (cascade will remove scores/drafts via FK)
+            result = await db.execute(
+                select(Email.id).where(
+                    Email.tenant_id == integration.tenant_id,
+                    Email.gmail_message_id == message_id,
+                )
+            )
+            email_row_id = result.scalar_one_or_none()
+            if email_row_id:
+                # Delete child rows first (no FK cascade on email_id)
+                await db.execute(
+                    EmailDraft.__table__.delete().where(EmailDraft.email_id == email_row_id)
+                )
+                await db.execute(
+                    EmailScore.__table__.delete().where(EmailScore.email_id == email_row_id)
+                )
+                await db.execute(
+                    Email.__table__.delete().where(Email.id == email_row_id)
+                )
+                logger.debug(
+                    "incremental sync: removed message_id=%s (INBOX label removed) for integration %s",
+                    message_id,
+                    integration.id,
+                )
 
     # Advance historyId checkpoint
     new_history_id = response.get("historyId")
@@ -895,7 +955,10 @@ async def email_sync_loop() -> None:
                         )
                     )
                 )
-                integrations = result.scalars().all()
+                integrations = [
+                    i for i in result.scalars().all()
+                    if i.credentials_encrypted is not None
+                ]
 
             if not integrations:
                 await asyncio.sleep(SYNC_INTERVAL)

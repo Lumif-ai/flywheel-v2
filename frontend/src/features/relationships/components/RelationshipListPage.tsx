@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router'
 import { Users, TrendingUp, Briefcase, DollarSign } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useRelationships } from '../hooks/useRelationships'
 import { RelationshipCard } from './RelationshipCard'
 import { EmptyState } from '@/components/ui/empty-state'
@@ -11,7 +12,7 @@ const TYPE_CONFIG: Record<
   RelationshipType,
   {
     label: string
-    icon: React.ComponentType<{ className?: string }>
+    icon: LucideIcon
     emptyDescription: string
   }
 > = {

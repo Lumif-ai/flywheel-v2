@@ -1,0 +1,1089 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ebraheem Al Samadi — Deep Research Dossier</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+
+  :root {
+    --accent: #E94D35;
+    --accent-light: rgba(233,77,53,0.08);
+    --accent-border: rgba(233,77,53,0.2);
+    --heading: #121212;
+    --body: #374151;
+    --muted: #6B7280;
+    --bg: #FAFAFA;
+    --card: #FFFFFF;
+    --border: #E5E7EB;
+    --green: #22C55E;
+    --blue: #3B82F6;
+    --purple: #A855F7;
+    --orange: #F97316;
+    --teal: #14B8A6;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--body);
+    line-height: 1.6;
+    font-size: 15px;
+  }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 32px 24px; }
+
+  /* Header */
+  .hero {
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 50%, #0f3460 100%);
+    padding: 56px 0 48px;
+    color: white;
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute;
+    top: 0; right: 0; bottom: 0; left: 0;
+    background: radial-gradient(ellipse at 80% 20%, rgba(233,77,53,0.15) 0%, transparent 60%);
+  }
+  .hero .container { position: relative; z-index: 1; }
+  .hero-badge {
+    display: inline-block;
+    background: rgba(233,77,53,0.2);
+    border: 1px solid rgba(233,77,53,0.4);
+    color: #ff8a75;
+    padding: 4px 14px;
+    border-radius: 20px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    margin-bottom: 16px;
+  }
+  .hero h1 {
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    margin-bottom: 4px;
+  }
+  .hero h1 span { color: var(--accent); }
+  .hero .arabic-name {
+    font-size: 22px;
+    font-weight: 300;
+    opacity: 0.6;
+    margin-bottom: 16px;
+  }
+  .hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 24px;
+    margin-top: 20px;
+  }
+  .hero-meta-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    opacity: 0.85;
+  }
+  .hero-meta-item .icon { font-size: 16px; }
+
+  /* Quick stats bar */
+  .stats-bar {
+    background: var(--card);
+    border-bottom: 1px solid var(--border);
+    padding: 20px 0;
+  }
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 16px;
+  }
+  .stat-item { text-align: center; }
+  .stat-value {
+    font-size: 24px;
+    font-weight: 800;
+    color: var(--heading);
+  }
+  .stat-value.accent { color: var(--accent); }
+  .stat-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--muted);
+    font-weight: 600;
+    margin-top: 2px;
+  }
+
+  /* Sections */
+  .section { margin-top: 40px; }
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 20px;
+    padding-bottom: 12px;
+    border-bottom: 2px solid var(--border);
+  }
+  .section-number {
+    width: 36px;
+    height: 36px;
+    background: var(--accent);
+    color: white;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 15px;
+    flex-shrink: 0;
+  }
+  .section-title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--heading);
+  }
+
+  /* Cards */
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: box-shadow 0.2s;
+  }
+  .card:hover { box-shadow: 0 4px 20px rgba(0,0,0,0.06); }
+  .card-title {
+    font-size: 16px;
+    font-weight: 700;
+    color: var(--heading);
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* Bio grid */
+  .bio-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .bio-item {
+    display: flex;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--accent-light);
+    border-radius: 8px;
+    font-size: 14px;
+  }
+  .bio-label {
+    font-weight: 600;
+    color: var(--heading);
+    white-space: nowrap;
+    min-width: 100px;
+  }
+
+  /* Timeline */
+  .timeline { position: relative; padding-left: 28px; }
+  .timeline::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 4px;
+    bottom: 4px;
+    width: 2px;
+    background: linear-gradient(to bottom, var(--accent), var(--blue), var(--green));
+    border-radius: 2px;
+  }
+  .timeline-item {
+    position: relative;
+    padding-bottom: 24px;
+  }
+  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-dot {
+    position: absolute;
+    left: -24px;
+    top: 4px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    border: 3px solid var(--card);
+    box-shadow: 0 0 0 2px var(--accent);
+  }
+  .timeline-item:nth-child(even) .timeline-dot { background: var(--blue); box-shadow: 0 0 0 2px var(--blue); }
+  .timeline-item:nth-child(3n) .timeline-dot { background: var(--green); box-shadow: 0 0 0 2px var(--green); }
+  .timeline-year {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .timeline-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--heading);
+    margin: 2px 0 4px;
+  }
+  .timeline-desc {
+    font-size: 13px;
+    color: var(--muted);
+    line-height: 1.5;
+  }
+  .timeline-metric {
+    display: inline-block;
+    background: rgba(34,197,94,0.1);
+    color: #16a34a;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  /* Portfolio table */
+  .portfolio-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+    gap: 12px;
+  }
+  .portfolio-item {
+    background: var(--accent-light);
+    border: 1px solid var(--accent-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+  }
+  .portfolio-name {
+    font-weight: 700;
+    color: var(--heading);
+    font-size: 14px;
+  }
+  .portfolio-cat {
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+  .portfolio-origin {
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 600;
+    margin-top: 4px;
+  }
+
+  /* Financial table */
+  table.fin-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14px;
+  }
+  table.fin-table th {
+    background: var(--accent-light);
+    text-align: left;
+    padding: 10px 14px;
+    font-weight: 600;
+    color: var(--heading);
+    border-bottom: 2px solid var(--accent-border);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+  }
+  table.fin-table td {
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+  }
+  table.fin-table tr:hover { background: rgba(233,77,53,0.03); }
+  .money { font-weight: 700; color: var(--green); }
+  .caveat {
+    background: #FEF3C7;
+    border: 1px solid #FDE68A;
+    border-radius: 8px;
+    padding: 14px 18px;
+    font-size: 13px;
+    color: #92400E;
+    margin-top: 16px;
+    line-height: 1.6;
+  }
+  .caveat strong { color: #78350F; }
+
+  /* Philanthropy */
+  .cause-card {
+    display: flex;
+    gap: 16px;
+    padding: 18px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 12px;
+  }
+  .cause-icon {
+    width: 44px;
+    height: 44px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 22px;
+    flex-shrink: 0;
+  }
+  .cause-title { font-weight: 700; color: var(--heading); font-size: 15px; }
+  .cause-desc { font-size: 13px; color: var(--muted); margin-top: 4px; line-height: 1.5; }
+
+  /* Quote */
+  .quote-block {
+    background: linear-gradient(135deg, var(--accent-light), rgba(59,130,246,0.05));
+    border-left: 4px solid var(--accent);
+    border-radius: 0 10px 10px 0;
+    padding: 20px 24px;
+    margin: 16px 0;
+    font-style: italic;
+    color: var(--heading);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+  .quote-attr {
+    font-style: normal;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 8px;
+    font-weight: 600;
+  }
+
+  /* Social media */
+  .social-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+  .social-item {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 16px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    text-decoration: none;
+    color: inherit;
+    transition: all 0.2s;
+  }
+  .social-item:hover {
+    border-color: var(--accent);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(233,77,53,0.1);
+  }
+  .social-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    flex-shrink: 0;
+  }
+  .social-platform { font-weight: 600; color: var(--heading); font-size: 14px; }
+  .social-handle { font-size: 12px; color: var(--accent); }
+  .social-followers { font-size: 11px; color: var(--muted); }
+
+  /* Interesting facts */
+  .fact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .fact-item {
+    display: flex;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.5;
+  }
+  .fact-emoji { font-size: 20px; flex-shrink: 0; }
+
+  /* Sources */
+  .source-list { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .source-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 13px;
+  }
+  .source-item a {
+    color: var(--blue);
+    text-decoration: none;
+    font-weight: 500;
+  }
+  .source-item a:hover { text-decoration: underline; }
+  .source-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+  }
+  .badge-business { background: rgba(59,130,246,0.1); color: var(--blue); }
+  .badge-profile { background: rgba(168,85,247,0.1); color: var(--purple); }
+  .badge-wealth { background: rgba(34,197,94,0.1); color: #16a34a; }
+  .badge-advocacy { background: rgba(249,115,22,0.1); color: var(--orange); }
+
+  /* Verification */
+  .verify-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .verify-card {
+    padding: 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    line-height: 1.6;
+  }
+  .verify-confirmed {
+    background: rgba(34,197,94,0.08);
+    border: 1px solid rgba(34,197,94,0.2);
+  }
+  .verify-unconfirmed {
+    background: rgba(249,115,22,0.08);
+    border: 1px solid rgba(249,115,22,0.2);
+  }
+  .verify-card h4 { font-size: 14px; color: var(--heading); margin-bottom: 8px; }
+  .verify-card ul { padding-left: 18px; }
+  .verify-card li { margin-bottom: 4px; }
+
+  /* Contact */
+  .contact-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .contact-item {
+    padding: 14px 18px;
+    background: var(--accent-light);
+    border-radius: 10px;
+    font-size: 14px;
+  }
+  .contact-item strong { color: var(--heading); display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 0.3px; margin-bottom: 4px; }
+  .contact-item a { color: var(--accent); text-decoration: none; font-weight: 500; }
+  .contact-item a:hover { text-decoration: underline; }
+
+  /* Responsive */
+  @media (max-width: 768px) {
+    .hero h1 { font-size: 28px; }
+    .bio-grid, .fact-grid, .source-list, .verify-grid, .contact-grid { grid-template-columns: 1fr; }
+    .stats-grid { grid-template-columns: repeat(3, 1fr); }
+  }
+
+  /* Print */
+  @media print {
+    .hero { background: #1a1a2e !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .card:hover { box-shadow: none; }
+    body { font-size: 12px; }
+  }
+
+  .footer {
+    margin-top: 48px;
+    padding: 24px 0;
+    border-top: 2px solid var(--border);
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+
+<!-- HERO -->
+<div class="hero">
+  <div class="container">
+    <div class="hero-badge">Deep Research Dossier</div>
+    <h1>Ebraheem <span>Al Samadi</span></h1>
+    <div class="arabic-name">&#1575;&#1576;&#1585;&#1575;&#1607;&#1610;&#1605; &#1575;&#1604;&#1589;&#1605;&#1575;&#1583;&#1610;</div>
+    <div class="hero-meta">
+      <div class="hero-meta-item"><span class="icon">&#127758;</span> Dubai, UAE</div>
+      <div class="hero-meta-item"><span class="icon">&#127942;</span> CEO & Founder, Al Samadi Group</div>
+      <div class="hero-meta-item"><span class="icon">&#127801;</span> Forever Rose London</div>
+      <div class="hero-meta-item"><span class="icon">&#127909;</span> Netflix Dubai Bling</div>
+      <div class="hero-meta-item"><span class="icon">&#128197;</span> Compiled: March 28, 2026</div>
+    </div>
+  </div>
+</div>
+
+<!-- STATS BAR -->
+<div class="stats-bar">
+  <div class="container">
+    <div class="stats-grid">
+      <div class="stat-item">
+        <div class="stat-value accent">$50M+</div>
+        <div class="stat-label">Self-Claimed Net Worth</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">14+</div>
+        <div class="stat-label">Brands in Portfolio</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">$21M</div>
+        <div class="stat-label">Forever Rose Revenue</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">150+</div>
+        <div class="stat-label">Employees</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">1M+</div>
+        <div class="stat-label">Instagram Followers</div>
+      </div>
+      <div class="stat-item">
+        <div class="stat-value">3</div>
+        <div class="stat-label">Netflix Seasons</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- 1. PERSONAL BIOGRAPHY -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">1</div>
+      <div class="section-title">Personal Biography</div>
+    </div>
+
+    <div class="bio-grid">
+      <div class="bio-item"><span class="bio-label">Full Name</span> Ebraheem Husni Al Samadi</div>
+      <div class="bio-item"><span class="bio-label">Date of Birth</span> January 15, 1988 (Age 38)</div>
+      <div class="bio-item"><span class="bio-label">Nationality</span> Kuwaiti-American (dual)</div>
+      <div class="bio-item"><span class="bio-label">Born</span> Kuwait &mdash; fled during Gulf War at age 2</div>
+      <div class="bio-item"><span class="bio-label">Raised</span> Florida, USA (near Disney World)</div>
+      <div class="bio-item"><span class="bio-label">Current Base</span> Dubai, UAE (since 2010)</div>
+      <div class="bio-item"><span class="bio-label">Father</span> Husni Al Samadi &mdash; Kuwaiti hotelier</div>
+      <div class="bio-item"><span class="bio-label">Mother</span> Khadejah Dowd &mdash; American (converted to Islam)</div>
+      <div class="bio-item"><span class="bio-label">Siblings</span> Youngest of 5-6: Aisha, Mariam, Abdullah, Zainab, Halima</div>
+      <div class="bio-item"><span class="bio-label">Marital Status</span> Divorced (3 marriages; latest 2023, divorced 2024)</div>
+      <div class="bio-item"><span class="bio-label">Education</span> HS diploma (16), Business Admin (Mid Florida Tech), MBA (Aberdeen)</div>
+      <div class="bio-item"><span class="bio-label">Self-Identifier</span> "The Blooming Man"</div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">&#128214; Origin Story</div>
+      <p style="font-size:14px;line-height:1.7;">
+        Father Husni traveled to Miami to study, where he met Khadejah Dowd &mdash; an 18-year-old American orphan who had recently converted to Islam &mdash; outside a mosque. They married and moved to Kuwait. The family <strong>fled Kuwait on the brink of the Gulf War</strong> when Ebraheem was two, relocating to Florida.
+      </p>
+      <p style="font-size:14px;line-height:1.7;margin-top:8px;">
+        When his parents separated (age 13), Ebraheem was the <strong>only son who chose to leave the family's luxury villa</strong> to live with his mother in a modest one-bedroom apartment. He became the sole provider for his mother at 13 &mdash; the driving motivation behind all his early entrepreneurship.
+      </p>
+      <div class="quote-block" style="margin-top:16px;">
+        "I believe if I have the blessings of mothers, then I will continue to always be successful."
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128141; Marriage History</div>
+      <p style="font-size:14px;line-height:1.7;">
+        <strong>1st (age 17):</strong> Forced by conservative father after being caught holding hands at a mall. Married in Morocco, separated shortly after.<br>
+        <strong>2nd (~2016):</strong> Limited details disclosed.<br>
+        <strong>3rd (March 2023):</strong> Married Hamda Al Hamly in a lavish <strong>AED 2M (~$545K) wedding</strong> at Rixos Premium Saadiyat Island, Abu Dhabi. Featured in Dubai Bling S2. Divorced in 2024 &mdash; became a major S3 storyline.
+      </p>
+    </div>
+  </div>
+
+  <!-- 2. CAREER TIMELINE -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">2</div>
+      <div class="section-title">Professional History & Career Timeline</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128640; Phase 1: Teen Entrepreneur (Florida, Ages 13&ndash;18)</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">~2001 &middot; Age 13</div>
+          <div class="timeline-title">eBay Resale Empire</div>
+          <div class="timeline-desc">Started selling personal clothing from mother's apartment. First sale: Levi's jeans ($10 &rarr; $20). Named one of eBay's first 1,000 PowerSellers.</div>
+          <span class="timeline-metric">$40K revenue in 2 years</span>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">~2003 &middot; Age 15</div>
+          <div class="timeline-title">Accelerated High School Diploma</div>
+          <div class="timeline-desc">Petitioned Florida Senator to fast-track studies. Graduated before 16th birthday with score of 480/500.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">~2004 &middot; Age 16</div>
+          <div class="timeline-title">Hustle Phase</div>
+          <div class="timeline-desc">Rose-seller at medieval attraction, lifeguard, department store assistant buyer. Worked 80+ hours/week.</div>
+          <span class="timeline-metric">$90K saved by age 17</span>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">~2005 &middot; Age 17</div>
+          <div class="timeline-title">EHA LLC / Wheelies Shoes</div>
+          <div class="timeline-desc">Founded first company. Children's shoes with rollers &mdash; imported from China at $7.50, sold at $79. Opened 9 stores. Heelys sued for $2.5M; settled for just $800.</div>
+          <span class="timeline-metric">$2M revenue in Year 1</span>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">~2006 &middot; Age 18</div>
+          <div class="timeline-title">Self-Made Millionaire</div>
+          <div class="timeline-desc">Achieved millionaire status before 18th birthday. Also ran used car dealership and mobile phone franchise with father.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#127961; Phase 2: Dubai & Al Samadi Group (2010&ndash;Present)</div>
+      <div class="timeline">
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2010</div>
+          <div class="timeline-title">Moved to Dubai &mdash; Founded Al Samadi Group</div>
+          <div class="timeline-desc">Joined family business as CEO of Retail. Merged retail operations with father's hospitality firm. First UAE venture: Amika haircare in Deira City Centre.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2014</div>
+          <div class="timeline-title">Acquired Forever Rose London</div>
+          <div class="timeline-desc">Discovered preserved roses on a trip to China. Acquired UK-based artisan florist (supplied royal palaces in UK &amp; Belgium).</div>
+          <span class="timeline-metric">Acquired for ~$1.36M</span>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2015&ndash;2016</div>
+          <div class="timeline-title">Forever Rose Explosion</div>
+          <div class="timeline-desc">Grew from $1.2M revenue to $21M in 18 months. Revenue growth exceeding 300% annually (1,080% cumulative).</div>
+          <span class="timeline-metric">1,080% growth</span>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2018</div>
+          <div class="timeline-title">Group Revenues Peak &amp; Refused Buyout</div>
+          <div class="timeline-desc">Al Samadi Group revenues reported at $22.5M (audited). Refused $23M acquisition offer for Forever Rose.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2020</div>
+          <div class="timeline-title">Forever Rose Caf&eacute;</div>
+          <div class="timeline-desc">Launched UAE's first 2D cafe (black-and-white interiors). Won "Most Instagrammable Cafe" award. Revenue sustained 5+ years without decline.</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2022</div>
+          <div class="timeline-title">Forever Oud + Netflix Dubai Bling</div>
+          <div class="timeline-desc">Launched luxury fragrance line. Cast in Netflix's Dubai Bling Season 1 (premiered Oct 27, 2022).</div>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">2025</div>
+          <div class="timeline-title">Franchise Expansion &amp; New Ventures</div>
+          <div class="timeline-desc">Launched Call Your Mother Cakes. Announced Besties Caf&eacute;. Partnered with Francorp ME for global franchising. "Habibi Ebraheem" YouTube show announced.</div>
+          <span class="timeline-metric">20+ franchises sold, targeting 100</span>
+        </div>
+        <div class="timeline-item">
+          <div class="timeline-dot"></div>
+          <div class="timeline-year">Future</div>
+          <div class="timeline-title">Forever Rose Hotel &amp; Luxury Villas</div>
+          <div class="timeline-desc">Planning branded hotel and luxury villa community. Creative business consultancy. Hints at $200M company offers.</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#127970; Al Samadi Group &mdash; Full Brand Portfolio</div>
+      <div class="portfolio-grid">
+        <div class="portfolio-item"><div class="portfolio-name">Forever Rose London</div><div class="portfolio-cat">Luxury preserved roses &amp; gifting</div><div class="portfolio-origin">UK (acquired 2014)</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Forever Rose Caf&eacute;</div><div class="portfolio-cat">Hospitality / F&amp;B</div><div class="portfolio-origin">Dubai, Abu Dhabi</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Forever Oud</div><div class="portfolio-cat">Luxury fragrance</div><div class="portfolio-origin">Dubai (2022)</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Call Your Mother Cakes</div><div class="portfolio-cat">Custom cakes</div><div class="portfolio-origin">Dubai (Jan 2025)</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Besties Caf&eacute;</div><div class="portfolio-cat">Hospitality / F&amp;B</div><div class="portfolio-origin">Al Seef, Dubai</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Big Smoke Burger</div><div class="portfolio-cat">Restaurant chain</div><div class="portfolio-origin">Canada (imported)</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">The Chickery</div><div class="portfolio-cat">Restaurant chain</div><div class="portfolio-origin">Canada (imported)</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Amika</div><div class="portfolio-cat">Hairstyling products</div><div class="portfolio-origin">New York</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Juicy</div><div class="portfolio-cat">Haircare</div><div class="portfolio-origin">&mdash;</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Wired Up</div><div class="portfolio-cat">Custom jewelry</div><div class="portfolio-origin">&mdash;</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">My Imenso</div><div class="portfolio-cat">Jewelry</div><div class="portfolio-origin">&mdash;</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">My Trends</div><div class="portfolio-cat">Jewelry (sister brand)</div><div class="portfolio-origin">&mdash;</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Nablus</div><div class="portfolio-cat">Restaurant</div><div class="portfolio-origin">Middle East</div></div>
+        <div class="portfolio-item"><div class="portfolio-name">Rogue Coffee</div><div class="portfolio-cat">Coffee</div><div class="portfolio-origin">&mdash;</div></div>
+      </div>
+      <p style="font-size:13px;color:var(--muted);margin-top:12px;">Also operated all <strong>17 food carts</strong> at The Walk at JBR, Dubai. Forever Rose has <strong>7 stores</strong> across UAE, Saudi Arabia, Qatar, and London.</p>
+    </div>
+  </div>
+
+  <!-- 3. NET WORTH -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">3</div>
+      <div class="section-title">Net Worth &amp; Financial Profile</div>
+    </div>
+
+    <div class="card">
+      <table class="fin-table">
+        <thead>
+          <tr><th>Metric</th><th>Figure</th><th>Source / Context</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Self-claimed net worth</td><td class="money">$50M+</td><td>Arabian Business (self-reported)</td></tr>
+          <tr><td>Aggregator estimates (2025)</td><td class="money">$50&ndash;60M</td><td>Multiple celebrity net worth sites</td></tr>
+          <tr><td>Al Samadi Group portfolio</td><td class="money">$70M+</td><td>Global Citizen Magazine</td></tr>
+          <tr><td>Group annual turnover</td><td class="money">AED 80M (~$21.7M)</td><td>Arabian Business</td></tr>
+          <tr><td>Forever Rose revenue (2016)</td><td class="money">$21M</td><td>18 months post-acquisition</td></tr>
+          <tr><td>Forever Rose acquisition cost</td><td>~$1.36M</td><td>2014 purchase price</td></tr>
+          <tr><td>Declined acquisition offer</td><td>$23M</td><td>Refused to sell Forever Rose</td></tr>
+          <tr><td>Hinted future valuation</td><td class="money">Up to $200M</td><td>Entrepreneur ME (2025, unverified)</td></tr>
+          <tr><td>Self-made millionaire</td><td>Before age 18</td><td>Multiple sources</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128176; Liquidity Events &amp; Deals</div>
+      <ul style="font-size:14px;padding-left:20px;line-height:2;">
+        <li><strong>Wheelies exit</strong> &mdash; $2M revenue Y1, shut down after Heelys lawsuit (settled $800)</li>
+        <li><strong>Forever Rose acquisition (2014)</strong> &mdash; bought for ~$1.36M, grew to $21M revenue</li>
+        <li><strong>Franchise expansion (2025)</strong> &mdash; 20+ sold via Francorp ME; targeting 100 globally</li>
+        <li><strong>No public IPO, VC rounds, or angel investments</strong> found in reputable sources</li>
+        <li><strong>Planned exit:</strong> stated plans to eventually sell; hints at $200M offers</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128142; Luxury Assets</div>
+      <ul style="font-size:14px;padding-left:20px;line-height:2;">
+        <li><strong>Cars:</strong> Mercedes G63 2022 (~$270K), BMW, Lamborghini</li>
+        <li><strong>Watch collection:</strong> ~$500K; first Rolex bought independently at age 17</li>
+        <li><strong>Travel:</strong> Amalfi, Portofino, Milan</li>
+        <li><strong>Hobbies:</strong> Horseback riding (A3yan Stables), fitness (Oxygen Gym O2), fashion, photography</li>
+      </ul>
+    </div>
+
+    <div class="caveat">
+      <strong>&#9888; Verification Note:</strong> Most net worth figures are self-reported or from celebrity aggregators. <strong>No Forbes profile, Bloomberg listing, SEC filings, or Crunchbase profile exists.</strong> The $22.5M revenue figure is the only audited number (per Arabian Business). Property holdings are not independently verified.
+    </div>
+  </div>
+
+  <!-- 4. PHILANTHROPY -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">4</div>
+      <div class="section-title">Philanthropy &amp; Causes</div>
+    </div>
+
+    <div class="cause-card">
+      <div class="cause-icon" style="background:rgba(233,77,53,0.1);">&#127987;</div>
+      <div>
+        <div class="cause-title">Palestine / Gaza Advocacy (Primary Cause)</div>
+        <div class="cause-desc">Flew to London for solidarity. Organized <strong>"Fitness for Palestine"</strong> fundraising events. Active on TikTok/Instagram spreading awareness. Advocates boycotts. Took family to Umrah for Palestine, Sudan, Congo. Told Grazia: <em>"Being an Arab, it was my duty to speak out."</em></div>
+      </div>
+    </div>
+
+    <div class="cause-card">
+      <div class="cause-icon" style="background:rgba(59,130,246,0.1);">&#127919;</div>
+      <div>
+        <div class="cause-title">Serve the City (Dubai)</div>
+        <div class="cause-desc">Active with this organization supporting people who fall through the cracks &mdash; struggling domestic workers, people facing employer difficulties without legal resources, domestic problems.</div>
+      </div>
+    </div>
+
+    <div class="cause-card">
+      <div class="cause-icon" style="background:rgba(168,85,247,0.1);">&#127909;</div>
+      <div>
+        <div class="cause-title">"Habibi Ebraheem" YouTube Series (Announced Jan 2025)</div>
+        <div class="cause-desc">Inspired by Oprah + MrBeast. 15-minute episodes combining entertainment with philanthropy &mdash; shopping sprees, "golden ticket" giveaways, reuniting families, helping people travel. <em>"This project is about making people happy."</em></div>
+      </div>
+    </div>
+
+    <div class="cause-card">
+      <div class="cause-icon" style="background:rgba(34,197,94,0.1);">&#127891;</div>
+      <div>
+        <div class="cause-title">Mentorship &amp; Education</div>
+        <div class="cause-desc">Advisory firm for young entrepreneurs launching in 2025. Dreams of a formal charity focused on education and empowerment. Also supports education initiatives for underprivileged children, healthcare projects, and women's empowerment.</div>
+      </div>
+    </div>
+
+    <div class="cause-card">
+      <div class="cause-icon" style="background:rgba(20,184,166,0.1);">&#127962;</div>
+      <div>
+        <div class="cause-title">UAE Local Economy Advocacy</div>
+        <div class="cause-desc">Publicly called on UAE residents to "keep spending local" during economic uncertainty (Gulf News, 2025). Frames local spending as community responsibility.</div>
+      </div>
+    </div>
+
+    <div class="quote-block">
+      "In every endeavor I undertake, my aim is not just to succeed but to weave threads of compassion and understanding across communities."
+      <div class="quote-attr">&mdash; SHE Magazine USA</div>
+    </div>
+
+    <div class="caveat">
+      <strong>&#9888; Note:</strong> Specific dollar amounts of charitable giving are not documented in any reputable source. Activities are primarily advocacy, awareness, and announced initiatives rather than quantified donations.
+    </div>
+  </div>
+
+  <!-- 5. INTERESTING FACTS -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">5</div>
+      <div class="section-title">Interesting Facts &amp; Talking Points</div>
+    </div>
+
+    <div class="fact-grid">
+      <div class="fact-item"><span class="fact-emoji">&#128118;</span><div><strong>Fled Gulf War as toddler</strong><br>Family escaped Kuwait when Ebraheem was 2, on the brink of the Iraqi invasion.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#127891;</span><div><strong>Petitioned a Senator at 15</strong><br>Appealed to Florida's Senator to take HS exams early. Graduated before 16 with 480/500.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#128091;</span><div><strong>eBay PowerSeller as a teen</strong><br>One of eBay's first 1,000 PowerSellers. Made $40K by age 15 selling thrift shop finds.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#128176;</span><div><strong>Millionaire before 18</strong><br>Wheelies shoes: $7.50 import &rarr; $79 retail. 9 stores, $2M revenue in Year 1.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#9878;</span><div><strong>Won a $2.5M lawsuit for $800</strong><br>Heelys sued over Wheelies. Settled for just $800 &mdash; essentially won.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#128148;</span><div><strong>Forced marriage at 17</strong><br>Father caught him holding hands at a mall and demanded he marry the girl. Wedding in Morocco.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#127801;</span><div><strong>Royal rose supplier</strong><br>Forever Rose originally supplied Buckingham Palace and Brussels' Egmont Palace before he pivoted to Gulf.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#128200;</span><div><strong>1,080% growth</strong><br>Took Forever Rose from $1.2M to $21M in just 18 months.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#127856;</span><div><strong>Business for his mom</strong><br>"Call Your Mother Cakes" was created specifically as a business for his mother Khadejah Dowd.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#127917;</span><div><strong>Monopolized JBR food carts</strong><br>Held all 17 food cart slots at The Walk at JBR, one of Dubai's busiest promenades.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#128123;</span><div><strong>Dubai Bling's villain</strong><br>Bought trademark rights to co-star Zeina Khoury's company name. Sent "You're not the company" hoodie.</div></div>
+      <div class="fact-item"><span class="fact-emoji">&#128171;</span><div><strong>Walt Disney is his idol</strong><br><em>"He sold dreams &mdash; and to do that you have to have imagination."</em></div></div>
+    </div>
+
+    <div class="card" style="margin-top:16px;border-left:4px solid var(--blue);">
+      <div class="card-title">&#10060; Shark Tank &mdash; NOT Involved</div>
+      <p style="font-size:14px;">Despite search confusion, there is <strong>no evidence</strong> Ebraheem has appeared on Shark Tank (US or any regional version). He is sometimes mentioned alongside "Shark Tank Dubai" but is not connected to the franchise.</p>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128240; Notable Controversies</div>
+      <ul style="font-size:14px;padding-left:20px;line-height:2;">
+        <li>Feud with Zeina Khoury &mdash; trademark acquisition + anonymous "You're not the company" package</li>
+        <li>Public clash with Farhana Bodi over social media</li>
+        <li>Messy divorce from Hamda Al Hamly played out on Dubai Bling S3</li>
+        <li>Sexuality rumors (publicly denied on TikTok)</li>
+        <li>"Producer plant" accusations from fans/media</li>
+        <li>Taking legal action against those spreading false information</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#127942; Awards &amp; Recognition</div>
+      <ul style="font-size:14px;padding-left:20px;line-height:2;">
+        <li>eBay 1,000 PowerSellers (age ~15)</li>
+        <li>Cosmopolitan ME &mdash; Bachelor of the Year (2017)</li>
+        <li>Esquire ME &mdash; Best Dressed Men (2018)</li>
+        <li>Forever Rose Caf&eacute; &mdash; "Most Instagrammable Cafe" award</li>
+        <li>MRF 2019 &amp; 2025 &mdash; Featured speaker</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- 6. MEDIA -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">6</div>
+      <div class="section-title">Media Appearances</div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128250; Television</div>
+      <table class="fin-table">
+        <thead><tr><th>Show</th><th>Platform</th><th>Seasons</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Dubai Bling</strong></td><td>Netflix</td><td>S1 (Oct 2022), S2 (Dec 2023), S3 (Jan 2025)</td><td><span style="color:var(--green);font-weight:600;">S4 Confirmed</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#127897; Podcast Appearances</div>
+      <ul style="font-size:14px;padding-left:20px;line-height:2;">
+        <li><strong>The Alpha Talks</strong> &mdash; Life, business, and success</li>
+        <li><strong>noBSness Podcast</strong> &mdash; Forever Rose hotel/villa plans</li>
+        <li><strong>Recipe To Success</strong> (Humza Zahoor) &mdash; No-filter Dubai Bling discussion</li>
+        <li><strong>Spill the Tea with Gulf Buzz</strong> &mdash; Behind-the-scenes of casting</li>
+        <li><strong>Dariush Soudi Podcast</strong> (Ep. 50) &mdash; Personal values, family, finding love</li>
+        <li><strong>&#1605;&#1593; &#1606;&#1608;&#1585; &#1575;&#1604;&#1583;&#1610;&#1606;</strong> &mdash; Arabic-language podcast</li>
+      </ul>
+    </div>
+
+    <div class="card">
+      <div class="card-title">&#128240; Press Coverage (Major Publications)</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:13px;">
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Arabian Business</strong> &mdash; Revenue reporting, Rich List</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Entrepreneur ME</strong> &mdash; Author profile + features</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>South China Morning Post</strong> &mdash; Wealth &amp; lifestyle</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Grazia Middle East</strong> &mdash; Personal life, advocacy</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Gulf News</strong> &mdash; Economic commentary</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Haute Living</strong> &mdash; "What's On His Desk" (2016)</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>The National (UAE)</strong> &mdash; "Money &amp; Me"</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>SHE Magazine USA</strong> &mdash; Advocate for Peace</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Global Citizen Magazine</strong> &mdash; Career retrospective</div>
+        <div style="padding:6px 10px;background:var(--accent-light);border-radius:6px;"><strong>Cosmopolitan ME</strong> &mdash; Casting story</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. SOCIAL MEDIA -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">7</div>
+      <div class="section-title">Social Media Handles</div>
+    </div>
+
+    <div class="social-grid">
+      <a href="https://www.instagram.com/thebloomingman/" target="_blank" class="social-item">
+        <div class="social-icon" style="background:linear-gradient(45deg,#f09433,#e6683c,#dc2743,#cc2366,#bc1888);">&#128247;</div>
+        <div>
+          <div class="social-platform">Instagram</div>
+          <div class="social-handle">@thebloomingman</div>
+          <div class="social-followers">1M+ followers</div>
+        </div>
+      </a>
+      <a href="https://www.tiktok.com/@thebloomingman" target="_blank" class="social-item">
+        <div class="social-icon" style="background:#010101;color:white;font-size:18px;">&#9836;</div>
+        <div>
+          <div class="social-platform">TikTok</div>
+          <div class="social-handle">@thebloomingman</div>
+          <div class="social-followers">Active &mdash; advocacy &amp; lifestyle</div>
+        </div>
+      </a>
+      <a href="https://twitter.com/thebloomingmen" target="_blank" class="social-item">
+        <div class="social-icon" style="background:#1DA1F2;color:white;">&#120143;</div>
+        <div>
+          <div class="social-platform">X (Twitter)</div>
+          <div class="social-handle">@TheBloomingMen</div>
+          <div class="social-followers">Note: ends in "Men" not "Man"</div>
+        </div>
+      </a>
+      <a href="https://www.facebook.com/ealsamadi/" target="_blank" class="social-item">
+        <div class="social-icon" style="background:#1877F2;color:white;">f</div>
+        <div>
+          <div class="social-platform">Facebook</div>
+          <div class="social-handle">/ealsamadi</div>
+        </div>
+      </a>
+      <a href="https://www.snapchat.com/@thebloomingman" target="_blank" class="social-item">
+        <div class="social-icon" style="background:#FFFC00;">&#128123;</div>
+        <div>
+          <div class="social-platform">Snapchat</div>
+          <div class="social-handle">@thebloomingman</div>
+        </div>
+      </a>
+      <a href="https://www.imdb.com/name/nm14204242/" target="_blank" class="social-item">
+        <div class="social-icon" style="background:#F5C518;color:#000;font-weight:800;font-size:12px;">IMDb</div>
+        <div>
+          <div class="social-platform">IMDb</div>
+          <div class="social-handle">nm14204242</div>
+        </div>
+      </a>
+    </div>
+  </div>
+
+  <!-- 8. CONTACT -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">8</div>
+      <div class="section-title">Business Contact Information</div>
+    </div>
+
+    <div class="contact-grid">
+      <div class="contact-item"><strong>Forever Rose Website</strong><a href="https://myforeverrose.com" target="_blank">myforeverrose.com</a></div>
+      <div class="contact-item"><strong>Forever Rose UAE</strong><a href="https://uae.myforeverrose.com" target="_blank">uae.myforeverrose.com</a></div>
+      <div class="contact-item"><strong>Franchise Inquiries</strong><a href="mailto:franchise@MyForeverRose.com">franchise@MyForeverRose.com</a></div>
+      <div class="contact-item"><strong>Franchise Partner</strong><a href="https://www.francorpme.com/franchise/forever-rose-cafe-franchise-opportunity/" target="_blank">Francorp ME</a></div>
+      <div class="contact-item"><strong>Al Samadi Group (Dhow)</strong><a href="https://dhow.com/organization-profile/3372/samadi-group/" target="_blank">dhow.com profile</a></div>
+      <div class="contact-item"><strong>Entrepreneur ME</strong><a href="https://www.entrepreneur.com/en-ae/author/ebraheem-al-samadi" target="_blank">Author page</a></div>
+      <div class="contact-item"><strong>Office Location</strong>Dubai, UAE (exact address not public)</div>
+      <div class="contact-item"><strong>RocketReach</strong>r******@yahoo.com (masked)</div>
+    </div>
+  </div>
+
+  <!-- 9. SOURCES -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">9</div>
+      <div class="section-title">Source Index (Reputable Publications)</div>
+    </div>
+
+    <div class="source-list">
+      <div class="source-item"><span class="source-badge badge-business">Business</span><a href="https://www.arabianbusiness.com/lifestyle/scent-of-success-forever-rose-s-ebraheem-al-samadi-644293" target="_blank">Arabian Business &mdash; "Scent of Success"</a></div>
+      <div class="source-item"><span class="source-badge badge-wealth">Wealth</span><a href="https://www.arabianbusiness.com/industries/media/im-worth-more-than-50mn-says-dubai-bling-star" target="_blank">Arabian Business &mdash; "$50M+ Claim"</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://mena.entrepreneur.com/business-news/unmasking-brilliance-ebraheem-alsamadi-founder-and-owner/489814" target="_blank">Entrepreneur ME &mdash; "Unmasking Brilliance"</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://global-citizen.com/business/entrepreneurship/entrepreneur-ebraheem-al-samadi/" target="_blank">Global Citizen &mdash; "Wheeler Dealer"</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://graziamagazine.com/me/articles/ebraheem-al-samadi-dubai-bling-netflix/" target="_blank">Grazia ME &mdash; Personal Life</a></div>
+      <div class="source-item"><span class="source-badge badge-advocacy">Advocacy</span><a href="https://graziamagazine.com/me/articles/ebraheem-al-samadi-talks-about-advocating-for-palestine/" target="_blank">Grazia ME &mdash; Palestine Advocacy</a></div>
+      <div class="source-item"><span class="source-badge badge-business">Business</span><a href="https://gulfnews.com/uae/united-in-strength/go-local-dubai-bling-star-businessman-and-uae-entrepreneurs-urge-residents-to-support-community-economy-1.500470692" target="_blank">Gulf News &mdash; "Keep Spending Local"</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://hauteliving.com/2016/08/whats-on-his-desk-ebraheem-al-samadi-ceo-of-forever-rose/619420/" target="_blank">Haute Living &mdash; "What's On His Desk"</a></div>
+      <div class="source-item"><span class="source-badge badge-advocacy">Advocacy</span><a href="https://shemagazineusa.com/ebraheem-al-samadi-entrepreneur-fashion-icon-and-advocate-for-peace/" target="_blank">SHE Magazine &mdash; Advocate for Peace</a></div>
+      <div class="source-item"><span class="source-badge badge-wealth">Wealth</span><a href="https://www.scmp.com/magazines/style/celebrity/article/3199005/who-dubai-blings-richest-cast-member-ebraheem-al-samadi-he-made-us40000-ebay-resales-age-15-and" target="_blank">SCMP &mdash; Richest Cast Member</a></div>
+      <div class="source-item"><span class="source-badge badge-business">Business</span><a href="https://www.thenationalnews.com/business/money-me-forever-rose-chief-executive-honed-business-acumen-from-an-early-age-1.191399" target="_blank">The National &mdash; "Money & Me"</a></div>
+      <div class="source-item"><span class="source-badge badge-business">Business</span><a href="https://www.factmagazines.com/entertainment/dubai-blings-ebraheem-al-samadi-on-forever-rose-hotel-and-residences" target="_blank">Fact Magazines &mdash; Hotel Plans</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://www.cosmopolitanme.com/celebs/ebraheem-al-samadi-dubai-bling" target="_blank">Cosmopolitan ME &mdash; Casting</a></div>
+      <div class="source-item"><span class="source-badge badge-business">Business</span><a href="https://middleeastretailforum.com/team-showcase/ebraheem-al-samadi/" target="_blank">Middle East Retail Forum &mdash; Speaker</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://connector.ae/home-and-garden/11364/in-conversation-with-ebraheem-al-samadi-from-14-year-old-founder-to-dubais-business-icon" target="_blank">Connector Dubai &mdash; Interview</a></div>
+      <div class="source-item"><span class="source-badge badge-profile">Profile</span><a href="https://www.famousbirthdays.com/people/ebraheem-al-samadi.html" target="_blank">Famous Birthdays &mdash; Bio Page</a></div>
+    </div>
+  </div>
+
+  <!-- 10. VERIFICATION -->
+  <div class="section">
+    <div class="section-header">
+      <div class="section-number">10</div>
+      <div class="section-title">Verification Notes &amp; Caveats</div>
+    </div>
+
+    <div class="verify-grid">
+      <div class="verify-card verify-confirmed">
+        <h4 style="color:#16a34a;">&#9989; Well-Sourced</h4>
+        <ul>
+          <li>Career timeline &amp; origin story (corroborated across 5+ reputable outlets)</li>
+          <li>Forever Rose acquisition &amp; revenue growth to $21M (Arabian Business, audited)</li>
+          <li>Dubai Bling participation &amp; seasons (Netflix, IMDb)</li>
+          <li>Palestine advocacy (Grazia ME, Lovin Dubai, TikTok)</li>
+          <li>Social media handles (directly verifiable)</li>
+          <li>Franchise expansion with Francorp ME (announced publicly)</li>
+        </ul>
+      </div>
+      <div class="verify-card verify-unconfirmed">
+        <h4 style="color:#ea580c;">&#9888; Requires Further Verification</h4>
+        <ul>
+          <li><strong>Net worth $50M+</strong> &mdash; self-reported; no Forbes/Bloomberg listing</li>
+          <li><strong>$70M portfolio</strong> &mdash; Global Citizen Mag; sourcing unclear</li>
+          <li><strong>$200M offers</strong> &mdash; Entrepreneur ME; no buyer named</li>
+          <li><strong>Philanthropy $$</strong> &mdash; no quantified giving documented</li>
+          <li><strong>Real estate</strong> &mdash; displayed on socials; not independently verified</li>
+          <li><strong>MBA (Aberdeen)</strong> &mdash; mentioned in profiles; not prominently verified</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">&#128269; Where to Dig Deeper</div>
+      <ul style="font-size:14px;padding-left:20px;line-height:2;">
+        <li><strong>Dubai DED / DIFC</strong> &mdash; business registry for Al Samadi Group entity details</li>
+        <li><strong>UK Companies House</strong> &mdash; Forever Rose London Ltd filings</li>
+        <li><strong>Crunchbase / PitchBook</strong> &mdash; no current profile; worth checking periodically</li>
+        <li><strong>LinkedIn</strong> &mdash; profile exists but details not surfaced in public search</li>
+        <li><strong>Francorp ME</strong> &mdash; franchise deal specifics and valuation indicators</li>
+      </ul>
+    </div>
+  </div>
+
+</div>
+
+<div class="footer">
+  <div class="container">
+    Deep Research Dossier &middot; Compiled March 28, 2026 &middot; 16 reputable sources indexed &middot; Not for redistribution
+  </div>
+</div>
+
+</body>
+</html>

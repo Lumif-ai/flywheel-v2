@@ -185,6 +185,26 @@ export function MomentArrive({ onComplete, cacheChecking }: MomentArriveProps) {
       >
         Try: acme.com, stripe.com, or your company's website
       </p>
+
+      <p
+        style={{
+          color: 'var(--secondary-text)',
+          fontSize: '13px',
+          marginTop: '24px',
+        }}
+      >
+        Already have an account?{' '}
+        <a
+          href="/settings"
+          style={{
+            color: colors.brandCoral,
+            textDecoration: 'none',
+            fontWeight: 500,
+          }}
+        >
+          Sign in
+        </a>
+      </p>
     </div>
   )
 }

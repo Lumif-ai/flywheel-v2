@@ -486,12 +486,12 @@ def enrich_with_web_research(
     def _skip(key: str) -> str:
         return "(SKIP - already have) " if key in epk else ""
 
-    item1_prefix = _skip("leadership.md")
-    item2_prefix = _skip("company-details.md")
-    item4_prefix = _skip("company-details.md")
-    item5_prefix = _skip("competitive-intel.md")
-    item6_prefix = _skip("tech-stack.md")
-    item10_prefix = _skip("leadership.md")
+    item1_prefix = _skip("leadership.md")       # key people / executives
+    item2_prefix = _skip("company-details.md")   # company size / HQ
+    item4_prefix = _skip("company-details.md")   # headquarters
+    item5_prefix = _skip("competitive-intel.md") # competitors
+    item6_prefix = _skip("tech-stack.md")        # tech stack
+    item10_prefix = _skip("leadership.md")       # people LinkedIn
 
     # Build gap notice when profile already has populated categories
     gap_notice = ""
@@ -541,10 +541,8 @@ def enrich_with_web_research(
         item5_prefix, item6_prefix, item10_prefix,
     )
 
-    # Reduce web search budget when more than half the categories are already populated
-    # (saves API credits on refresh scenarios)
-    _total_profile_files = 5  # positioning, icp-profiles, competitive-intel, product-modules, market-taxonomy
-    max_web_searches = 3 if len(epk) > (_total_profile_files // 2) else 5
+    # Always use full web search budget — refresh means the user wants fresh data
+    max_web_searches = 5
 
     try:
         client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()

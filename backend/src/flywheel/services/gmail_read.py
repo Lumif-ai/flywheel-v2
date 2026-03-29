@@ -152,8 +152,10 @@ def deserialize_credentials(encrypted: bytes) -> Credentials:
     expiry = None
     if data.get("expiry"):
         expiry = datetime.fromisoformat(data["expiry"])
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
+        # Google's Credentials.valid compares expiry against a naive UTC datetime,
+        # so strip timezone info to avoid comparison errors.
+        if expiry.tzinfo is not None:
+            expiry = expiry.replace(tzinfo=None)
 
     return Credentials(
         token=data["token"],
@@ -405,16 +407,17 @@ async def list_sent_messages(
 async def get_history(creds: Credentials, start_history_id: str) -> dict:
     """Fetch Gmail history changes since a given historyId.
 
-    Used by Phase 2 sync worker to detect new inbox messages incrementally.
-    Caller is responsible for handling HttpError 404 (stale historyId),
-    which requires falling back to a full re-sync.
+    Used by sync worker to detect new inbox messages and label changes
+    (archive, trash, delete) incrementally. Caller is responsible for
+    handling HttpError 404 (stale historyId) with a full re-sync fallback.
 
     Args:
         creds: Valid Gmail OAuth2 credentials.
         start_history_id: History ID from a previous sync (or initial profile).
 
     Returns:
-        Raw API response dict with history records for messageAdded events.
+        Raw API response dict with history records for messageAdded and
+        labelRemoved events.
     """
     def _get():
         service = build("gmail", "v1", credentials=creds)
@@ -424,7 +427,7 @@ async def get_history(creds: Credentials, start_history_id: str) -> dict:
             .list(
                 userId="me",
                 startHistoryId=start_history_id,
-                historyTypes=["messageAdded"],
+                historyTypes=["messageAdded", "labelRemoved"],
             )
             .execute()
         )

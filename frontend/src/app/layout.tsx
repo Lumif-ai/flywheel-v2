@@ -24,6 +24,51 @@ const queryClient = new QueryClient({
   },
 })
 
+// ---------------------------------------------------------------------------
+// React Query cache persistence — returning users see instant renders
+// ---------------------------------------------------------------------------
+
+const CACHE_KEY = 'flywheel:query-cache'
+const CACHE_MAX_AGE = 24 * 60 * 60 * 1000 // 24 hours
+
+// Hydrate from localStorage on startup (before first render)
+try {
+  const persisted = localStorage.getItem(CACHE_KEY)
+  if (persisted) {
+    const { timestamp, data } = JSON.parse(persisted) as { timestamp: number; data: Array<{ queryKey: unknown; state: unknown }> }
+    if (Date.now() - timestamp < CACHE_MAX_AGE) {
+      const VOLATILE_PREFIXES = ['email-threads', 'email-digest', 'thread-detail', 'meetings']
+      for (const entry of data) {
+        const key = (entry.queryKey as string[])?.[0] ?? ''
+        if (VOLATILE_PREFIXES.some((p) => key.startsWith?.(p))) continue
+        queryClient.setQueryData(entry.queryKey as string[], entry.state)
+      }
+    } else {
+      localStorage.removeItem(CACHE_KEY)
+    }
+  }
+} catch {
+  // Corrupted cache — ignore
+}
+
+// Persist cache to localStorage on page unload
+if (typeof window !== 'undefined') {
+  window.addEventListener('beforeunload', () => {
+    try {
+      const cache = queryClient.getQueryCache().getAll()
+      // Exclude frequently-changing data (email, meetings) from persistence
+      const VOLATILE_PREFIXES = ['email-threads', 'email-digest', 'thread-detail', 'meetings']
+      const data = cache
+        .filter((q) => q.state.status === 'success' && q.state.data != null)
+        .filter((q) => !VOLATILE_PREFIXES.some((p) => (q.queryKey[0] as string)?.startsWith?.(p)))
+        .map((q) => ({ queryKey: q.queryKey, state: q.state.data }))
+      localStorage.setItem(CACHE_KEY, JSON.stringify({ timestamp: Date.now(), data }))
+    } catch {
+      // Quota exceeded or serialization error — skip
+    }
+  })
+}
+
 // Routes that render as standalone pages (no sidebar, no tenant-dependent fetches)
 const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy', '/briefing', '/auth']
 

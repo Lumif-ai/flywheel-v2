@@ -318,6 +318,7 @@ async def lifecycle(
                 Integration.tenant_id == user.tenant_id,
                 Integration.provider.in_(("google-calendar",)),
                 Integration.status == "connected",
+                Integration.credentials_encrypted.isnot(None),
             ).limit(1)
         )
         has_calendar = cal_result.scalar_one_or_none() is not None
@@ -327,6 +328,7 @@ async def lifecycle(
                 Integration.tenant_id == user.tenant_id,
                 Integration.provider.in_(("gmail-read", "microsoft-outlook")),
                 Integration.status == "connected",
+                Integration.credentials_encrypted.isnot(None),
             ).limit(1)
         )
         has_email = email_result.scalar_one_or_none() is not None

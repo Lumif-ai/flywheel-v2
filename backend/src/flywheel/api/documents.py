@@ -49,6 +49,8 @@ class DocumentListItem(BaseModel):
 
 class DocumentDetail(DocumentListItem):
     content_url: str
+    output: str | None = None
+    rendered_html: str | None = None
 
 
 class DocumentListResponse(BaseModel):
@@ -251,10 +253,25 @@ async def get_document(
     else:
         content_url = f"/api/v1/documents/{doc.id}/content"
 
+    # Fetch skill run output for native frontend rendering
+    run_output: str | None = None
+    run_html: str | None = None
+    if doc.skill_run_id:
+        run_result = await db.execute(
+            select(SkillRun.output, SkillRun.rendered_html).where(
+                SkillRun.id == doc.skill_run_id
+            )
+        )
+        run_row = run_result.one_or_none()
+        if run_row:
+            run_output, run_html = run_row
+
     item = _doc_to_list_item(doc)
     return DocumentDetail(
         **item.model_dump(),
         content_url=content_url,
+        output=run_output,
+        rendered_html=run_html,
     )
 
 
