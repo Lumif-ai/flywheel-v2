@@ -43,7 +43,7 @@ VALID_STATUSES = {
 VALID_TRANSITIONS: dict[str, set[str]] = {
     "detected":    {"in_review", "confirmed", "dismissed"},
     "in_review":   {"confirmed", "dismissed"},
-    "confirmed":   {"in_progress", "dismissed"},
+    "confirmed":   {"in_review", "in_progress", "dismissed"},
     "in_progress": {"done", "blocked", "dismissed"},
     "blocked":     {"in_progress", "dismissed"},
     "done":        set(),

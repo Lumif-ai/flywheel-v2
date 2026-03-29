@@ -1,7 +1,7 @@
-"""Flywheel ritual engine -- Stages 1-3: Granola sync, meeting processing, meeting prep.
+"""Flywheel ritual engine -- Stages 1-4: Granola sync, meeting processing, meeting prep, task execution.
 
-The core orchestrator that sequences sync, process, and prep stages.
-Stage 4 (task execution) and Stage 5 (HTML brief) are added in Plans 03 and 04.
+The core orchestrator that sequences sync, process, prep, and execute stages.
+Stage 5 (HTML brief) is added in Plan 04.
 
 Public API:
     execute_flywheel_ritual(factory, run_id, tenant_id, user_id, api_key)
@@ -10,21 +10,26 @@ Public API:
 
 from __future__ import annotations
 
+import json
 import logging
-from datetime import date
+from datetime import date, datetime, timezone
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+import anthropic
+from sqlalchemy import func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from flywheel.db.models import Meeting, SkillRun
+from flywheel.db.models import Meeting, SkillRun, Task
 from flywheel.services.meeting_sync import sync_granola_meetings
 from flywheel.services.skill_executor import (
     _append_event_atomic,
     _execute_account_meeting_prep,
     _execute_meeting_prep,
     _execute_meeting_processor,
+    _execute_with_tools,
+    _load_skill_from_db,
+    preload_tenant_context,
 )
 
 logger = logging.getLogger("flywheel.engines.flywheel_ritual")
@@ -68,7 +73,11 @@ async def execute_flywheel_ritual(
         total_token_usage, all_tool_calls, stage_results,
     )
 
-    # --- Stage 4: Task Execution (Plan 03 adds this) ---
+    # --- Stage 4: Execute Pending Tasks (ORCH-12) ---
+    await _stage_4_execute(
+        factory, run_id, tenant_id, user_id, api_key,
+        total_token_usage, all_tool_calls, stage_results,
+    )
 
     # --- Stage 5: Compose HTML Brief (Plan 04 adds this) ---
     # For now, return a placeholder
@@ -336,6 +345,239 @@ async def _stage_3_prep(
         "data": {
             "stage": "prepping",
             "message": f"Prepared {prepped_count}/{total_to_prep} meeting briefs.",
+        },
+    })
+
+
+# ---------------------------------------------------------------------------
+# Stage 4 -- Execute Pending Tasks (ORCH-12)
+# ---------------------------------------------------------------------------
+
+
+async def _stage_4_execute(
+    factory: async_sessionmaker,
+    run_id: UUID,
+    tenant_id: UUID,
+    user_id: UUID | None,
+    api_key: str | None,
+    total_token_usage: dict,
+    all_tool_calls: list,
+    stage_results: dict,
+) -> None:
+    """Execute confirmed tasks that have a suggested_skill.
+
+    For each task: gather context, formulate input via LLM (Haiku),
+    invoke the target skill, store the deliverable, and transition
+    the task to ``in_review``.  Individual failures are logged and
+    skipped -- they never block other tasks.
+    """
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "executing", "message": "Checking for confirmed tasks..."},
+    })
+
+    # Query confirmed tasks with a suggested skill
+    async with factory() as session:
+        await _set_rls_context(session, tenant_id, user_id)
+        result = await session.execute(
+            select(Task).where(
+                Task.tenant_id == tenant_id,
+                Task.user_id == user_id,
+                Task.status == "confirmed",
+                Task.suggested_skill.isnot(None),
+            )
+        )
+        executable_tasks = result.scalars().all()
+
+    total_tasks = len(executable_tasks)
+    executed_count = 0
+    task_failures = 0
+
+    for task in executable_tasks:
+        try:
+            await _append_event_atomic(factory, run_id, {
+                "event": "stage",
+                "data": {
+                    "stage": "executing",
+                    "message": f"Executing task: {task.title} via {task.suggested_skill}...",
+                },
+            })
+
+            # Step 1: Gather context for input formulation
+            context_parts: list[str] = []
+            context_parts.append(f"Task: {task.title}")
+            if task.description:
+                context_parts.append(f"Description: {task.description}")
+            if task.skill_context:
+                # skill_context is JSONB with additional context from extraction
+                context_parts.append(f"Context: {json.dumps(task.skill_context)}")
+
+            # Load tenant context (all context entries for the tenant)
+            if task.account_id:
+                try:
+                    tenant_context = await preload_tenant_context(factory, tenant_id)
+                    if tenant_context:
+                        context_parts.append(f"Account Intelligence:\n{tenant_context}")
+                except Exception as ctx_err:
+                    logger.warning(
+                        "Failed to load tenant context for task %s: %s",
+                        task.id, ctx_err,
+                    )
+
+            # Load meeting summary if task has meeting_id
+            if task.meeting_id:
+                try:
+                    async with factory() as session:
+                        await _set_rls_context(session, tenant_id, user_id)
+                        mtg_result = await session.execute(
+                            select(Meeting.title, Meeting.ai_summary).where(
+                                Meeting.id == task.meeting_id,
+                            )
+                        )
+                        mtg_row = mtg_result.first()
+                        if mtg_row:
+                            context_parts.append(f"Meeting: {mtg_row.title}")
+                            if mtg_row.ai_summary:
+                                context_parts.append(
+                                    f"Meeting Summary: {mtg_row.ai_summary}"
+                                )
+                except Exception as mtg_err:
+                    logger.warning(
+                        "Failed to load meeting context for task %s: %s",
+                        task.id, mtg_err,
+                    )
+
+            # Step 2: Formulate input_text using LLM (Haiku -- cheap and fast)
+            formulation_prompt = (
+                f"You are formulating the input for the '{task.suggested_skill}' skill.\n\n"
+                f"Based on the following task and context, write a clear, actionable input "
+                f"that the skill can use to produce a high-quality deliverable.\n\n"
+                + "\n".join(context_parts)
+                + "\n\n"
+                f"Write the input_text for the '{task.suggested_skill}' skill. "
+                f"Be specific, include relevant names, dates, and context. "
+                f"Return ONLY the input text, no explanation."
+            )
+
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+            formulation_response = await client.messages.create(
+                model="claude-haiku-4-20250514",
+                max_tokens=1024,
+                messages=[{"role": "user", "content": formulation_prompt}],
+            )
+            formulated_input = formulation_response.content[0].text
+            total_token_usage["input_tokens"] += formulation_response.usage.input_tokens
+            total_token_usage["output_tokens"] += formulation_response.usage.output_tokens
+
+            # Step 3: Invoke the target skill
+            if task.suggested_skill == "meeting-prep" and task.account_id:
+                output, usage, calls = await _execute_account_meeting_prep(
+                    api_key=api_key,
+                    input_text=f"Account-ID:{task.account_id}",
+                    factory=factory,
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            elif task.suggested_skill == "meeting-prep":
+                output, usage, calls = await _execute_meeting_prep(
+                    api_key=api_key,
+                    input_text=formulated_input,
+                    factory=factory,
+                    run_id=run_id,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                )
+            else:
+                # Generic skill invocation via _execute_with_tools
+                from flywheel.tools import create_registry
+                from flywheel.tools.budget import RunBudget
+                from flywheel.tools.registry import RunContext
+
+                registry = create_registry()
+                run_context = RunContext(
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    run_id=run_id,
+                    budget=RunBudget(),
+                    session_factory=factory,
+                    focus_id=None,
+                )
+                skill_meta = await _load_skill_from_db(factory, task.suggested_skill)
+                system_prompt = skill_meta["system_prompt"] if skill_meta else None
+
+                if system_prompt is None:
+                    logger.warning(
+                        "Skill '%s' not found in DB, skipping task %s",
+                        task.suggested_skill, task.id,
+                    )
+                    raise ValueError(
+                        f"Skill '{task.suggested_skill}' not found in skill_definitions"
+                    )
+
+                output, usage, calls = await _execute_with_tools(
+                    api_key=api_key,
+                    skill_name=task.suggested_skill,
+                    input_text=formulated_input,
+                    registry=registry,
+                    context=run_context,
+                    factory=factory,
+                    run_id=run_id,
+                    agent_connected=False,
+                    system_prompt_override=system_prompt,
+                )
+
+            _accumulate_usage(total_token_usage, usage)
+            all_tool_calls.extend(calls or [])
+
+            # Step 4: Update task status -- confirmed -> in_review (per spec ORCH-12)
+            async with factory() as session:
+                await _set_rls_context(session, tenant_id, user_id)
+                await session.execute(
+                    update(Task).where(Task.id == task.id).values(
+                        status="in_review",
+                        updated_at=datetime.now(timezone.utc),
+                    )
+                )
+                await session.commit()
+
+            executed_count += 1
+            stage_results["tasks"].append({
+                "task_id": str(task.id),
+                "title": task.title,
+                "suggested_skill": task.suggested_skill,
+                "output": output,
+                "trust_level": task.trust_level,
+                "success": True,
+            })
+        except Exception as e:
+            logger.error(
+                "Stage 4 failed for task %s (%s): %s", task.id, task.title, e,
+            )
+            task_failures += 1
+            stage_results["tasks"].append({
+                "task_id": str(task.id),
+                "title": task.title,
+                "suggested_skill": task.suggested_skill,
+                "error": str(e),
+                "success": False,
+            })
+            await _append_event_atomic(factory, run_id, {
+                "event": "stage",
+                "data": {
+                    "stage": "executing",
+                    "message": f"Task failed: {task.title} -- {e}",
+                },
+            })
+
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {
+            "stage": "executing",
+            "message": (
+                f"Executed {executed_count}/{total_tasks} tasks. "
+                f"{task_failures} failed."
+            ),
         },
     })
 
