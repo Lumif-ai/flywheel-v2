@@ -503,7 +503,7 @@ async def execute_run(run: SkillRun) -> None:
         if api_key is None:
             # Fall back to subsidy key for onboarding skills and background engine skills
             from flywheel.config import settings
-            if run.skill_name in ("company-intel", "meeting-prep", "email-scorer", "meeting-processor") and settings.flywheel_subsidy_api_key:
+            if run.skill_name in ("company-intel", "meeting-prep", "email-scorer", "meeting-processor", "flywheel") and settings.flywheel_subsidy_api_key:
                 api_key = settings.flywheel_subsidy_api_key
             else:
                 raise ValueError(
@@ -578,7 +578,8 @@ async def execute_run(run: SkillRun) -> None:
             )
             is_email_scorer = run.skill_name == "email-scorer"
             is_meeting_processor = run.skill_name == "meeting-processor"
-            if has_engine or is_company_intel or is_meeting_prep or is_email_scorer or is_meeting_processor:
+            is_flywheel = run.skill_name == "flywheel"
+            if has_engine or is_company_intel or is_meeting_prep or is_email_scorer or is_meeting_processor or is_flywheel:
                 if is_company_intel:
                     output, token_usage, tool_calls = await _execute_company_intel(
                         api_key=api_key,
@@ -624,6 +625,15 @@ async def execute_run(run: SkillRun) -> None:
                         tenant_id=run.tenant_id,
                         user_id=run.user_id,
                         meeting_id=UUID(run.input_text),
+                        api_key=api_key,
+                    )
+                elif is_flywheel:
+                    from flywheel.engines.flywheel_ritual import execute_flywheel_ritual
+                    output, token_usage, tool_calls = await execute_flywheel_ritual(
+                        factory=factory,
+                        run_id=run.id,
+                        tenant_id=run.tenant_id,
+                        user_id=run.user_id,
                         api_key=api_key,
                     )
                 else:
@@ -674,8 +684,8 @@ async def execute_run(run: SkillRun) -> None:
 
         # Render HTML output
         rendered_html = None
-        if is_meeting_prep or is_account_meeting_prep:
-            # Both meeting-prep paths return HTML directly as output
+        if is_meeting_prep or is_account_meeting_prep or is_flywheel:
+            # meeting-prep and flywheel paths return HTML directly as output
             rendered_html = output
         else:
             try:

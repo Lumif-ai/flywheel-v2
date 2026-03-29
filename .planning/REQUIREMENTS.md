@@ -57,9 +57,64 @@ Requirements for the CRM redesign milestone. Each maps to roadmap phases.
 - [ ] **DS-03**: Empty states for all five surfaces with type-specific illustration, explanatory text, and warm coral CTA button
 - [ ] **DS-04**: Skeleton loading states with shimmer animation matching component shapes for grid rows, cards, and detail page sections
 
+---
+
+## v4.0 Requirements — Flywheel OS (Phases A-C)
+
+**Defined:** 2026-03-28
+**Core Value:** When a founder says "we'll send a one-pager" in a meeting, that commitment appears in their `/flywheel` task list without any manual entry.
+**Spec:** `.planning/SPEC-flywheel-os.md` (reviewed, 16 findings addressed)
+
+### Phase A: Unified Meetings
+
+- [ ] **UNI-01**: Alembic migration 033 adds `calendar_event_id`, `granola_note_id`, `location`, `description` to meetings table. Calendar sync creates Meeting rows with `processing_status='scheduled'` instead of WorkItems.
+- [ ] **UNI-02**: Granola sync dedup — fuzzy match by time window (±30min) + title match/attendee overlap against `scheduled` rows. Matched rows enriched with Granola data, status→`'recorded'`.
+- [ ] **UNI-03**: Lifecycle status machine: `scheduled` → `recorded` → `processing` → `complete` | `skipped` | `cancelled`. `process-pending` queries both `'pending'` and `'recorded'`.
+- [ ] **UNI-04**: `upsert_meeting_row()` replaces `upsert_meeting_work_item()` in calendar_sync.py. Skips rows with `granola_note_id` set.
+- [ ] **UNI-05**: Meetings page Upcoming + Past tabs. Backend `GET /meetings/` gains `time=upcoming|past` query param.
+- [ ] **UNI-06**: `POST /meetings/{id}/prep` — auto-links account if possible, delegates to account prep engine. Response: `{run_id, stream_url}`.
+- [ ] **UNI-08**: `get_meeting_prep_suggestions()` migrated from WorkItem to meetings table queries.
+
+### Phase B: Task Intelligence
+
+- [ ] **TASK-01**: `tasks` table via Alembic with 20 columns, user-level RLS, 3 indexes. ORM model with `source`, `task_type`, `commitment_direction`, `suggested_skill`, `trust_level`, `status` (7 values), `priority`.
+- [ ] **TASK-02**: Stage 7 "Task Extraction" in meeting processor. Haiku classifies commitments into 5 categories (your/their/mutual/signal/speculation). Creates Task rows with `suggested_skill`, `skill_context`, `trust_level`, `due_date`. Email tasks always `trust_level='confirm'`.
+- [ ] **TASK-03**: Tasks CRUD API at `/api/v1/tasks` — 7 endpoints with response formats, status transition validation, user-scoped.
+- [ ] **TASK-04**: Task counts (`tasks_detected`, `tasks_in_review`, `tasks_overdue`) added to `GET /signals/`.
+
+### Phase C: /flywheel CLI Ritual
+
+- [~] **FLY-01**: Superseded by backend-engine rearchitect (SPEC-flywheel-ritual-rearchitect.md). Now ORCH-01/ORCH-06.
+- [~] **FLY-02**: Superseded — now Stage 1 of flywheel engine (ORCH-03).
+- [~] **FLY-03**: Superseded — now Stage 4 of flywheel engine (ORCH-12).
+- [~] **FLY-04**: Superseded — now Stage 3 of flywheel engine (ORCH-05).
+- [~] **FLY-05**: Superseded — now Stage 2 of flywheel engine (ORCH-04).
+- [~] **FLY-06**: Superseded — auth via MCP JWT session, no FLYWHEEL_API_TOKEN needed.
+
+### Phase A-C: Should Have
+
+- [ ] **UNI-07**: Auto-archive stale calendar events (>7 days, no Granola data) → `processing_status='cancelled'`
+- [ ] **TASK-05**: "Their commitments" surface in relationship detail Commitments tab
+- [ ] **TASK-06**: Task extraction prompt with 8-10 few-shot examples covering 6 commitment patterns
+- [ ] **FLY-07**: Outreach section in `/flywheel` (reads GTM tracker CSV, shows quota)
+- [ ] **FLY-08**: "Run all" smart defaults (sync + process + confirm, never outreach)
+
+### Phase A-C: Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Auto-skill execution of detected tasks | Phase E — v4.0 is visibility, not automation |
+| Task extraction from emails | Phase F — same pipeline, different source |
+| Task extraction from Slack | Deferred — both DMs and channels, later phase |
+| Contact discovery (web research for unknowns) | Phase D |
+| GTM outreach in /flywheel | Phase G |
+| Web UI for /brief and /tasks pages | Phase H |
+| Auto-send emails | NEVER — hard constraint from founder |
+| Multi-user task assignment | Deferred — Zone 1 only for now |
+
 ## Future Requirements
 
-Deferred beyond v2.1.
+Deferred beyond v2.1/v4.0.
 
 ### Pipeline Enhancements
 - **GRID-F01**: AI-extracted custom columns (define a column, LLM populates from context)
@@ -128,11 +183,32 @@ Deferred beyond v2.1.
 | REL-08 | Phase 57 | Pending |
 | REL-09 | Phase 57 | Pending |
 
+| UNI-01 | Phase 64 | Pending |
+| UNI-02 | Phase 64 | Pending |
+| UNI-03 | Phase 64 | Pending |
+| UNI-04 | Phase 64 | Pending |
+| UNI-05 | Phase 64 | Pending |
+| UNI-06 | Phase 64 | Pending |
+| UNI-08 | Phase 64 | Pending |
+| TASK-01 | Phase 65 | Pending |
+| TASK-02 | Phase 65 | Pending |
+| TASK-03 | Phase 65 | Pending |
+| TASK-04 | Phase 65 | Pending |
+| FLY-01 | Phase 66 | Superseded (Phase 66 rearchitect) |
+| FLY-02 | Phase 66 | Superseded (Phase 66 rearchitect) |
+| FLY-03 | Phase 66 | Superseded (Phase 66 rearchitect) |
+| FLY-04 | Phase 66 | Superseded (Phase 66 rearchitect) |
+| FLY-05 | Phase 66 | Superseded (Phase 66 rearchitect) |
+| FLY-06 | Phase 66 | Superseded (Phase 66 rearchitect) |
+
+*FLY-01 through FLY-06 superseded by backend-engine rearchitect. See SPEC-flywheel-ritual-rearchitect.md for replacement requirements ORCH-01 through ORCH-12.*
+
 **Coverage:**
-- v2.1 requirements: 32 total
-- Mapped to phases: 32
+- v2.1 requirements: 32 total (all complete)
+- v4.0 requirements: 17 Must Have + 5 Should Have = 22 total
+- Mapped to phases: 54
 - Unmapped: 0
 
 ---
 *Requirements defined: 2026-03-27*
-*Last updated: 2026-03-27 — traceability mapped after roadmap creation*
+*Last updated: 2026-03-28 — v4.0 Flywheel OS requirements added*
