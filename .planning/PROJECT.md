@@ -2,35 +2,24 @@
 
 ## What This Is
 
-An AI-powered work intelligence platform that compounds knowledge from meetings, companies, projects, and relationships — then surfaces it through action-oriented channels. Ships an email copilot (Gmail sync, scoring, draft replies) and a company-centric CRM that turns accumulated GTM intelligence into Accounts, Pipeline, and Pulse views. All data is populated automatically from skill runs — zero manual entry.
+An AI-powered intelligence operating system for founders. Compounds knowledge from meetings, emails, companies, and relationships — then acts on it. Conversations automatically become tracked commitments and executed deliverables via a daily flywheel ritual. Ships email copilot, intelligence-first CRM, meeting intelligence pipeline, task extraction, and an automated daily operating loop.
 
 ## Core Value
 
-Founders never lose track of an account again. Every company they're engaging with — prospects, active deals, customers — has a single screen showing all contacts, interaction timeline, commitments, intel, and next actions. All populated automatically from skill runs.
+Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system.
 
-## Current Milestone: v4.0 Flywheel OS — Intelligence Operating System for Founders
+## Current State
 
-**Goal:** Transform the intelligence layer into a founder's daily operating system. Conversations automatically become tracked commitments and executed deliverables. Unified meetings timeline (Google Calendar + Granola), automatic task extraction from transcripts, and a `/flywheel` CLI ritual that ties everything together.
-
-**Three-layer architecture:**
-- **Layer 1 (Intelligence):** Exists — meetings, emails, context store (v1.0-v3.0)
-- **Layer 2 (Autopilot):** NEW — detect commitments from conversations, map to skills, confirm before executing
-- **Layer 3 (Ritual):** NEW — `/flywheel` CLI + `/brief` web page as daily cockpit
-
-**Target features (Phases A-C):**
-- Unified meetings table: Google Calendar events + Granola transcripts in one timeline with dedup
-- Task extraction: Stage 7 in meeting processor, 5-category commitment classification via Haiku
-- Tasks CRUD API with status state machine and trust ladder
-- `/flywheel` CLI skill with 5 subcommands (full brief, sync, tasks, prep, process)
-- Meetings page redesign: Upcoming + Past tabs
+All four milestones shipped. The platform is functionally complete for single-founder dogfooding.
 
 **Shipped milestones:**
 - **v1.0 Email Copilot** (2026-03-25) — Gmail sync, 5-tier scoring, voice-learned drafts, review UI, feedback loop
 - **v2.0 AI-Native CRM** (2026-03-27) — Accounts/Pipeline/Pulse surfaces, REST APIs, seed CLI, auto-graduation
 - **v2.1 CRM Redesign** (2026-03-27) — Pipeline grid, 4 relationship surfaces, AI synthesis, signal badges
 - **v3.0 Intelligence Flywheel** (2026-03-28) — Team privacy, Granola adapter, meeting intelligence pipeline, prep loop
+- **v4.0 Flywheel OS** (2026-03-29) — Unified meetings, task extraction, flywheel ritual engine, stabilization
 
-**Codebase:** FastAPI + React, 206 seeded accounts from GTM stack
+**Codebase:** FastAPI + React, ~20K LOC backend, ~15K LOC frontend
 
 ## Requirements
 
@@ -66,30 +55,33 @@ Founders never lose track of an account again. Every company they're engaging wi
 - ✓ Pipeline page at /pipeline — v2.0 Phase 53
 - ✓ Sidebar navigation updates (Accounts, Pipeline) — v2.0 Phase 53
 - ✓ Pulse feed component on Briefing page — v2.0 Phase 53
+- ✓ Data model evolution (relationship_type, entity_level, ai_summary) — v2.1 Phase 54
+- ✓ Relationships API with partition predicate + rate limiting — v2.1 Phase 55
+- ✓ Pipeline grid (AG Grid, filters, saved views, graduation) — v2.1 Phase 56
+- ✓ Four relationship surfaces with AI context panel — v2.1 Phase 57
+- ✓ Unified Company Intelligence Engine — v2.1 Phase 58
+- ✓ Team Privacy Foundation (user-level RLS) — v3.0 Phase 59
+- ✓ Meeting data model + Granola adapter — v3.0 Phase 60
+- ✓ Meeting Intelligence Pipeline (9 insight types, auto-linking) — v3.0 Phase 61
+- ✓ Meeting surfaces + relationship enrichment — v3.0 Phase 62
+- ✓ Meeting Prep Loop (context-aware briefings) — v3.0 Phase 63
+- ✓ Unified meetings (calendar + Granola dedup) — v4.0 Phase 64
+- ✓ Task intelligence (extraction, API, signals) — v4.0 Phase 65
+- ✓ Flywheel ritual engine (5-stage daily loop) — v4.0 Phase 66
+- ✓ Flywheel stabilization (18 issues fixed) — v4.0 Phase 66.1
 
 ### Active
 
-<!-- v4.0 Flywheel OS scope (Phases A-C) -->
+<!-- Next milestone scope — TBD -->
 
-- [ ] Unified meetings: Calendar sync writes Meeting rows, dedup with Granola, lifecycle status (UNI-01 through UNI-08)
-- [ ] Tasks table: ORM model, RLS, 7-status state machine, commitment_direction, trust_level (TASK-01)
-- [ ] Task extraction: Stage 7 in meeting processor, Haiku 5-category classification (TASK-02)
-- [ ] Tasks CRUD API: paginated list, filters, status transitions, confirm/dismiss shortcuts (TASK-03)
-- [ ] Task signals: counts in signals endpoint for sidebar badges (TASK-04)
-- [ ] /flywheel CLI: daily brief, sync, tasks, prep, process subcommands (FLY-01 through FLY-06)
-- [ ] Meetings page redesign: Upcoming + Past tabs (UNI-05)
+(No active requirements — next milestone not yet defined)
 
 ### Out of Scope
 
-- Auto-skill execution of detected tasks — Phase E (v4.0 detects only, doesn't execute)
-- Task extraction from emails — Phase F
-- Task extraction from Slack — deferred
-- Contact discovery (web research for unknown attendees) — Phase D
-- GTM outreach integration in /flywheel — Phase G
-- Web UI for /brief and /tasks pages — Phase H
 - Auto-send / YOLO mode — email sending NEVER automatic (hard constraint)
 - Multi-user task assignment — tasks are Zone 1 (user-private)
 - Mobile-optimized views
+- Task extraction from Slack — deferred
 - Granola webhook/polling sync — remains on-demand
 
 ## Context
@@ -138,13 +130,18 @@ Founders never lose track of an account again. Every company they're engaging wi
 | Correlated subquery for contact_count | Avoids left join complexity when counting | ✓ Good |
 | 3-source timeline merged in Python | Simpler than UNION ALL with mismatched column shapes | ✓ Good |
 | ActionBar buttons as toast stubs | Skill integration deferred — keep UI shippable now | — Pending |
-| Five separate relationship surfaces | Different JTBD and emotional registers per type | — Pending |
-| Advisors are people-first | Advisors/angels are individuals, not company-level | — Pending |
-| Multi-type relationships | A person/company can hold multiple types simultaneously | — Pending |
-| AI synthesis from day one | 8-10 relationships have deep data; graceful degradation for sparse | — Pending |
-| Auto-materialization for prospects | Reply/meeting signal promotes from Pipeline | — Pending |
-| Pipeline as Airtable grid | 200+ companies need spreadsheet-density triage | — Pending |
-| Interactive AI panel | Chat + notes + files in one panel per relationship | — Pending |
+| Five separate relationship surfaces | Different JTBD and emotional registers per type | ✓ Good |
+| Advisors are people-first | Advisors/angels are individuals, not company-level | ✓ Good |
+| Multi-type relationships | A person/company can hold multiple types simultaneously | ✓ Good |
+| AI synthesis from day one | 8-10 relationships have deep data; graceful degradation for sparse | ✓ Good |
+| Auto-materialization for prospects | Reply/meeting signal promotes from Pipeline | ✓ Good |
+| Pipeline as Airtable grid | 200+ companies need spreadsheet-density triage | ✓ Good |
+| Interactive AI panel | Chat + notes + files in one panel per relationship | ✓ Good |
+| Unified meetings table | Calendar + Granola in one table with fuzzy dedup | ✓ Good |
+| Task extraction via Haiku | Cheap/fast classification, full context from transcript + intel | ✓ Good |
+| Flywheel as backend engine | Same architecture as meeting-prep/processor, not standalone CLI | ✓ Good |
+| trust_level='confirm' for all tasks | Founder reviews everything, no auto-execution | ✓ Good |
+| Execution caps (20 process, 15 prep) | Prevents MCP timeout on large batches | ✓ Good |
 
 ---
-*Last updated: 2026-03-28 after v4.0 Flywheel OS milestone initialization*
+*Last updated: 2026-03-29 after v4.0 Flywheel OS milestone completion*

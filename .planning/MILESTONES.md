@@ -41,22 +41,57 @@
 
 ---
 
-## v2.1 — CRM Redesign: Intelligence-First Relationships 🚧
+## v2.1 — CRM Redesign: Intelligence-First Relationships ✓
 
-**Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
+**Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts.
 
 **Started:** 2026-03-27
-**Completed:** —
-**Phases:** 54-57 (4 phases, 13 plans)
-**Last phase number:** 57 (planned)
+**Completed:** 2026-03-27
+**Phases:** 54-58 (5 phases, 16 plans)
+**Last phase number:** 58
 
 **Key deliverables:**
-- Data model evolution — relationship_type array + GIN index, entity_level, relationship_status separation, ai_summary cache fields
-- Relationships API — list/detail/type-change/graduate/notes/files/synthesize/ask endpoints with partition predicate + rate limiting
-- Signal layer — per-type badge counts from stale detection, overdue follow-ups, and reply signals
-- Pipeline grid — Airtable-style configurable grid with AG Grid, filter bar, saved view tabs, graduation modal
-- Design system — two-layer shadows, translucent badges, avatar component, emotional register variants, skeleton states
-- Four relationship surfaces — card-grid list pages + shared detail with type-driven tabs
-- AI context panel — cached synthesis display, note capture, Q&A with source attribution per relationship
+- Data model evolution — relationship_type array + GIN index, entity_level, ai_summary cache fields, two-phase status rename
+- Relationships & Signals APIs — partition predicate, rate-limited AI synthesis, badge counts
+- Pipeline grid — AG Grid with filters, saved view tabs, graduation modal
+- Four relationship surfaces — card-grid list + shared detail with type-driven tabs, AI context panel
+- Unified Company Intelligence Engine — single skill engine for document uploads and URL crawls
+- Design system tokens — shadows, badges, avatars, transitions
 
 ---
+
+## v3.0 — Intelligence Flywheel ✓
+
+**Goal:** Conversations automatically become CRM intelligence. Meetings sync from Granola, get classified and processed into 9 insight types across 7 context files, auto-link to accounts, and feed back into meeting prep briefings.
+
+**Started:** 2026-03-28
+**Completed:** 2026-03-28
+**Phases:** 59-63 (5 phases, 13 plans)
+**Last phase number:** 63
+
+**Key deliverables:**
+- Team Privacy Foundation — user-level RLS for emails, integrations, calendar, skill runs
+- Meeting data model — split-visibility RLS, Granola adapter with encrypted API key, dedup sync
+- Meeting Intelligence Pipeline — 8-type classification, 9 insight types, 7 context files, auto account linking
+- Meeting surfaces — list/detail pages, timeline enrichment, intelligence tabs, contact discovery
+- Meeting Prep Loop — context-aware briefings for upcoming meetings, closing the intelligence flywheel
+
+---
+
+## v4.0 — Flywheel OS ✓
+
+**Goal:** Intelligence operating system for founders — unified meetings, task extraction from transcripts, and a single daily ritual that syncs, processes, preps, executes, and briefs.
+
+**Started:** 2026-03-28
+**Completed:** 2026-03-29
+**Phases:** 64-66.1 (4 phases, 13 plans)
+**Last phase number:** 66.1
+
+**Key deliverables:**
+- Unified meetings data layer — calendar events and Granola transcripts in one table with fuzzy dedup and lifecycle status
+- Task intelligence — Stage 7 extracts commitments (yours/theirs/mutual) from transcripts, maps to executable skills
+- Flywheel ritual engine — single MCP invocation runs 5 stages: sync → process → prep → execute → compose HTML brief
+- Stabilization — 18 issues fixed (env var mismatch, migration FK, UTC timezone, N+1 query, Stage 4 guards, execution caps, optimistic lock, MCP timeout)
+
+---
+
