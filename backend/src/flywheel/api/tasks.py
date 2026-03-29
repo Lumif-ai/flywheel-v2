@@ -37,17 +37,18 @@ VALID_TRUST_LEVELS = {"auto", "review", "confirm"}
 VALID_PRIORITIES = {"high", "medium", "low"}
 VALID_STATUSES = {
     "detected", "in_review", "confirmed", "in_progress",
-    "done", "blocked", "dismissed",
+    "done", "blocked", "dismissed", "deferred",
 }
 
 VALID_TRANSITIONS: dict[str, set[str]] = {
-    "detected":    {"in_review", "confirmed", "dismissed"},
-    "in_review":   {"confirmed", "dismissed"},
-    "confirmed":   {"in_review", "in_progress", "dismissed"},
+    "detected":    {"in_review", "confirmed", "dismissed", "deferred"},
+    "in_review":   {"confirmed", "dismissed", "deferred"},
+    "confirmed":   {"in_review", "in_progress", "done", "dismissed"},
     "in_progress": {"done", "blocked", "dismissed"},
     "blocked":     {"in_progress", "dismissed"},
     "done":        set(),
     "dismissed":   {"detected"},
+    "deferred":    {"in_review"},
 }
 
 
@@ -172,6 +173,7 @@ class TaskSummaryResponse(BaseModel):
     done: int = 0
     blocked: int = 0
     dismissed: int = 0
+    deferred: int = 0
     overdue: int = 0
 
 
@@ -290,6 +292,7 @@ async def task_summary(
         done=counts.get("done", 0),
         blocked=counts.get("blocked", 0),
         dismissed=counts.get("dismissed", 0),
+        deferred=counts.get("deferred", 0),
         overdue=overdue,
     )
 
