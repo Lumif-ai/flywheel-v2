@@ -1358,6 +1358,8 @@ class Task(Base):
             ),
         ),
         Index("idx_tasks_meeting", "meeting_id"),
+        Index("idx_tasks_email", "email_id"),
+        Index("idx_tasks_source", "tenant_id", "user_id", "source"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -1374,6 +1376,9 @@ class Task(Base):
     )
     account_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    email_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("emails.id", ondelete="SET NULL"), nullable=True
     )
     title: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
@@ -1398,6 +1403,9 @@ class Task(Base):
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, server_default=text("'{}'::jsonb"), nullable=False
     )
+    resolved_by: Mapped[str | None] = mapped_column(Text, nullable=True)
+    resolution_source_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    resolution_note: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()"), nullable=False
     )
@@ -1407,3 +1415,4 @@ class Task(Base):
 
     meeting: Mapped["Meeting | None"] = relationship()
     account: Mapped["Account | None"] = relationship()
+    email: Mapped["Email | None"] = relationship()
