@@ -43,12 +43,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.config import settings
 from flywheel.db.models import ContextEntry, ContextEntity, Email, EmailScore
 from flywheel.engines.email_dismiss_tracker import get_dismiss_signal
+from flywheel.engines.model_config import get_engine_model
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
 logger = logging.getLogger(__name__)
 
@@ -536,11 +535,12 @@ async def score_email(
         )
         valid_entry_ids: set[str] = {str(e.id) for e in context_entries}
 
-        # Step 4: Call Haiku
+        # Step 4: Call scoring model (configurable per tenant)
+        model = await get_engine_model(db, tenant_id, "scoring")
         effective_api_key = api_key or settings.flywheel_subsidy_api_key
         client = anthropic.AsyncAnthropic(api_key=effective_api_key)
         response = await client.messages.create(
-            model=_HAIKU_MODEL,
+            model=model,
             max_tokens=500,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],

@@ -29,10 +29,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.config import settings
 from flywheel.db.models import EmailVoiceProfile
+from flywheel.engines.model_config import get_engine_model
 
 logger = logging.getLogger(__name__)
-
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
 _UPDATE_VOICE_SYSTEM = """\
 You are updating a writing voice profile based on how a user edited an AI-generated email draft.
@@ -177,10 +176,11 @@ Analyze what the edits reveal about the user's actual voice preferences.
 Return ONLY the fields that should change as a JSON object.
 """
 
-        # Call Haiku
+        # Call voice learning model (configurable per tenant)
+        model = await get_engine_model(db, tenant_id, "voice_learning")
         client = anthropic.AsyncAnthropic(api_key=settings.flywheel_subsidy_api_key)
         response = await client.messages.create(
-            model=_HAIKU_MODEL,
+            model=model,
             max_tokens=300,
             system=_UPDATE_VOICE_SYSTEM,
             messages=[{"role": "user", "content": user_message}],

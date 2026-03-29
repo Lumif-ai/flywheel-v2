@@ -50,13 +50,12 @@ from flywheel.db.models import (
     EmailScore,
     EmailVoiceProfile,
 )
+from flywheel.engines.model_config import get_engine_model
 from flywheel.services.gmail_read import get_message_body, get_valid_credentials
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-
-_SONNET_MODEL = "claude-sonnet-4-6"
 
 logger = logging.getLogger(__name__)
 
@@ -452,11 +451,12 @@ async def draft_email(
             email, body_text, voice_profile, context_block
         )
 
-        # Step 7: Call Sonnet for draft generation
+        # Step 7: Call drafting model (configurable per tenant)
+        model = await get_engine_model(db, tenant_id, "drafting")
         effective_api_key = api_key or settings.flywheel_subsidy_api_key
         client = anthropic.AsyncAnthropic(api_key=effective_api_key)
         response = await client.messages.create(
-            model=_SONNET_MODEL,
+            model=model,
             max_tokens=1000,
             system=system_prompt,
             messages=[{"role": "user", "content": user_message}],

@@ -34,6 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.config import settings
 from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile, Integration
 from flywheel.engines.email_drafter import draft_email
+from flywheel.engines.model_config import get_engine_model
 from flywheel.engines.email_scorer import score_email
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
@@ -756,8 +757,6 @@ Return a JSON object with exactly these fields:
 Return only the JSON object, no other text.\
 """
 
-_HAIKU_MODEL = "claude-haiku-4-5-20251001"
-
 # Auto-reply / calendar / OOO patterns (case-insensitive match against body)
 _AUTO_REPLY_PATTERNS = [
     "out of office",
@@ -801,14 +800,15 @@ def _is_substantive(body: str | None) -> bool:
     return len(real_sentences) >= 3
 
 
-async def _extract_voice_profile(bodies: list[str]) -> dict:
-    """Call Haiku to extract a voice profile from a list of email bodies.
+async def _extract_voice_profile(bodies: list[str], model: str = "claude-sonnet-4-6") -> dict:
+    """Call the voice extraction model to extract a voice profile from email bodies.
 
     Uses the same AsyncAnthropic + json.loads + regex-fallback pattern as
     onboarding_streams.py.
 
     Args:
         bodies: List of substantive email body strings to analyze.
+        model: Claude model identifier (resolved by caller via get_engine_model).
 
     Returns:
         Parsed dict with keys: tone, avg_length, sign_off, phrases,
@@ -819,7 +819,7 @@ async def _extract_voice_profile(bodies: list[str]) -> dict:
     """
     client = anthropic.AsyncAnthropic(api_key=settings.flywheel_subsidy_api_key)
     response = await client.messages.create(
-        model=_HAIKU_MODEL,
+        model=model,
         max_tokens=1000,
         system=VOICE_SYSTEM_PROMPT,
         messages=[{"role": "user", "content": "\n\n---\n\n".join(bodies)}],
@@ -889,8 +889,11 @@ async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool
         )
         return False
 
+    # Resolve voice extraction model for this tenant
+    model = await get_engine_model(db, integration.tenant_id, "voice_extraction")
+
     # Send only the 20 most recent bodies to control token cost
-    profile_data = await _extract_voice_profile(substantive_bodies[:20])
+    profile_data = await _extract_voice_profile(substantive_bodies[:20], model=model)
 
     samples_count = profile_data.get("samples_analyzed", len(substantive_bodies[:20]))
 
