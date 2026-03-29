@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 ## Current Position
 
 Phase: 66.1 (Flywheel Stabilization — INSERTED)
-Plan: 2 of 3 in current phase
-Status: Executing Phase 66.1 — Plans 01 and 02 complete
-Last activity: 2026-03-29 — Plan 01 complete (infra blockers), Plan 02 complete (engine correctness)
+Plan: 3 of 3 in current phase (COMPLETE)
+Status: Phase 66.1 complete — all 3 plans executed
+Last activity: 2026-03-29 — Plan 03 complete (robustness hardening)
 
-Progress: [██████████████████░░] 92% (42/42 plans complete across v1.0-v3.0) | v4.0: 12/15 plans
+Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 15/15 plans
 
 ## Performance Metrics
 
@@ -180,6 +180,9 @@ Recent decisions affecting current work:
 - [66.1-02 execution]: Removed date import entirely -- only datetime.now(timezone.utc).date() used for UTC-explicit dates
 - [66.1-02 execution]: Issue 6 (title matching false positives) intentionally deferred -- requires schema change (meeting_id on SkillRun), out of scope for stabilization
 - [66.1-02 execution]: _filter_unprepped batch query fetches all completed prep input_texts in one round-trip, filters in Python
+- [Phase 66.1-03]: MAX_MEETINGS_TO_PROCESS=20, MAX_MEETINGS_TO_PREP=15 -- empirical caps balancing completeness vs timeout
+- [Phase 66.1-03]: Optimistic lock via WHERE status=confirmed + rowcount check (not SELECT FOR UPDATE)
+- [Phase 66.1-03]: Private import coupling documented as tech debt -- defer refactor to post-stabilization
 
 ### Pending Todos
 
@@ -197,5 +200,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-29
-Stopped at: Completed 66.1-01-PLAN.md and 66.1-02-PLAN.md
+Stopped at: Completed 66.1-03-PLAN.md (Phase 66.1 complete)
 Resume file: None

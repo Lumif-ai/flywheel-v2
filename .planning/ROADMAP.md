@@ -557,9 +557,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 66.1-01-PLAN.md — Infrastructure & Migrations: env var fix, migration 034 rewrite, migration chain, updated_at triggers
-- [ ] 66.1-02-PLAN.md — Engine Correctness: timezone fix, N+1 batch query, user_id None guard, Stage 4 error guard, compose guards, Haiku model constant
-- [ ] 66.1-03-PLAN.md — Robustness & Architecture: append_event_atomic COALESCE, execution caps, optimistic lock, private import docs, MCP timeout
+- [x] 66.1-01-PLAN.md — Infrastructure & Migrations: env var fix, migration 034 rewrite, migration chain, updated_at triggers ✓
+- [x] 66.1-02-PLAN.md — Engine Correctness: timezone fix, N+1 batch query, user_id None guard, Stage 4 error guard, compose guards, Haiku model constant ✓
+- [x] 66.1-03-PLAN.md — Robustness & Architecture: append_event_atomic COALESCE, execution caps, optimistic lock, private import docs, MCP timeout ✓
 
 ---
 
@@ -595,7 +595,7 @@ Plans:
 | 64. Unified Meetings | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
 | 65. Task Intelligence | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
 | 66. /flywheel Ritual (Rearchitected) | v4.0 | 4/4 | ✓ Complete | 2026-03-29 |
-| 66.1 Flywheel Stabilization (INSERTED) | v4.0 | 0/3 | ○ Pending | — |
+| 66.1 Flywheel Stabilization (INSERTED) | v4.0 | 3/3 | ✓ Complete | 2026-03-29 |
 
 ---
 *Roadmap created: 2026-03-24*
