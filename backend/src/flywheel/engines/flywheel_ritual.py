@@ -20,6 +20,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flywheel.db.models import Meeting, SkillRun, Task
+from flywheel.engines.channel_task_extractor import extract_channel_tasks
 from flywheel.services.meeting_sync import sync_granola_meetings
 # NOTE: These underscore-prefixed imports create tight coupling with
 # skill_executor.py internals. Tracked as tech debt -- do not refactor
@@ -64,6 +65,7 @@ async def execute_flywheel_ritual(
         "processed": [],
         "prepped": [],
         "tasks": [],  # Stage 4 in Plan 03
+        "channel_tasks": None,  # Channel task extraction results (ETL-01)
     }
 
     # --- Stage 1: Granola Sync ---
@@ -74,6 +76,30 @@ async def execute_flywheel_ritual(
         factory, run_id, tenant_id, user_id, api_key,
         total_token_usage, all_tool_calls, stage_results,
     )
+
+    # --- Channel Task Extraction (ETL-01) ---
+    try:
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "extracting_channel_tasks", "message": "Extracting tasks from email..."},
+        })
+        channel_summary = await extract_channel_tasks(factory, tenant_id, user_id)
+        stage_results["channel_tasks"] = channel_summary
+        created = channel_summary.get("tasks_created", 0)
+        dupes = channel_summary.get("duplicates_found", 0)
+        msg = f"Extracted {created} task(s) from email"
+        if dupes:
+            msg += f" ({dupes} possible duplicate(s))"
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "extracting_channel_tasks", "message": msg},
+        })
+    except Exception as e:
+        logger.error("Channel task extraction failed: %s", e)
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "extracting_channel_tasks", "message": f"Channel task extraction skipped: {e}"},
+        })
 
     # --- Stage 3: Prep Today's Meetings ---
     await _stage_3_prep(
@@ -704,6 +730,7 @@ def _compose_daily_brief(stage_results: dict) -> str:
         or len(processed) > 0
         or len(prepped) > 0
         or len(tasks) > 0
+        or stage_results.get("channel_tasks")
     )
 
     if not has_content:
