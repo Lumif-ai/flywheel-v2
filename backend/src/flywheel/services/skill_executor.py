@@ -3207,7 +3207,7 @@ async def _append_event_atomic(
         await session.execute(
             sa_text("""
                 UPDATE skill_runs
-                SET events_log = events_log || CAST(:event AS jsonb)
+                SET events_log = COALESCE(events_log, '[]'::jsonb) || CAST(:event AS jsonb)
                 WHERE id = :run_id
             """),
             {"run_id": str(run_id), "event": json.dumps([event_dict])},

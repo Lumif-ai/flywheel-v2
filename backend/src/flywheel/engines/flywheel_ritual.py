@@ -21,6 +21,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flywheel.db.models import Meeting, SkillRun, Task
 from flywheel.services.meeting_sync import sync_granola_meetings
+# NOTE: These underscore-prefixed imports create tight coupling with
+# skill_executor.py internals. Tracked as tech debt -- do not refactor
+# during stabilization (too risky). A future phase should expose a
+# public API from skill_executor for engine consumption.
 from flywheel.services.skill_executor import (
     _append_event_atomic,
     _execute_account_meeting_prep,
@@ -34,6 +38,9 @@ from flywheel.services.skill_executor import (
 logger = logging.getLogger("flywheel.engines.flywheel_ritual")
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
+
+MAX_MEETINGS_TO_PROCESS = 20
+MAX_MEETINGS_TO_PREP = 15
 
 
 async def execute_flywheel_ritual(
@@ -184,6 +191,20 @@ async def _stage_2_process(
         )
         unprocessed = result.scalars().all()
 
+    if len(unprocessed) > MAX_MEETINGS_TO_PROCESS:
+        logger.info(
+            "Capping processing at %d (total unprocessed: %d)",
+            MAX_MEETINGS_TO_PROCESS, len(unprocessed),
+        )
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {
+                "stage": "processing",
+                "message": f"Processing {MAX_MEETINGS_TO_PROCESS} of {len(unprocessed)} unprocessed meetings (capped).",
+            },
+        })
+        unprocessed = unprocessed[:MAX_MEETINGS_TO_PROCESS]
+
     total_to_process = len(unprocessed)
     processed_count = 0
     process_failures = 0
@@ -285,6 +306,20 @@ async def _stage_3_prep(
 
     # Determine which meetings still need prep
     unprepped = await _filter_unprepped(factory, tenant_id, todays_meetings)
+
+    if len(unprepped) > MAX_MEETINGS_TO_PREP:
+        logger.info(
+            "Capping prep at %d (total unprepped: %d)",
+            MAX_MEETINGS_TO_PREP, len(unprepped),
+        )
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {
+                "stage": "prepping",
+                "message": f"Prepping {MAX_MEETINGS_TO_PREP} of {len(unprepped)} meetings (capped).",
+            },
+        })
+        unprepped = unprepped[:MAX_MEETINGS_TO_PREP]
 
     total_to_prep = len(unprepped)
     prepped_count = 0
@@ -571,12 +606,17 @@ async def _stage_4_execute(
             # Step 4: Update task status -- confirmed -> in_review (per spec ORCH-12)
             async with factory() as session:
                 await _set_rls_context(session, tenant_id, user_id)
-                await session.execute(
-                    update(Task).where(Task.id == task.id).values(
+                result = await session.execute(
+                    update(Task).where(
+                        Task.id == task.id,
+                        Task.status == "confirmed",  # Optimistic lock -- only update if still confirmed
+                    ).values(
                         status="in_review",
                         updated_at=datetime.now(timezone.utc),
                     )
                 )
+                if result.rowcount == 0:
+                    logger.warning("Task %s status changed before update (race condition averted)", task.id)
                 await session.commit()
 
             executed_count += 1

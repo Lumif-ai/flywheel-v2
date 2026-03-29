@@ -38,7 +38,7 @@ def flywheel_run_skill(
             return f"Skill run started but no run_id returned: {result}"
 
         # Poll with exponential backoff: 3s, 5s, 8s, then 10s intervals
-        intervals = [3, 5, 8] + [10] * 27  # ~5 min total
+        intervals = [3, 5, 8] + [10] * 57  # ~10 min total
         elapsed = 0
         for wait in intervals:
             time.sleep(wait)
