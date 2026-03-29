@@ -9,12 +9,17 @@ import { TaskWatchlistItem } from './TaskWatchlistItem'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
+import { animationClasses, staggerDelay } from '@/lib/animations'
 import type { Task } from '../types/tasks'
 
 const EXCLUDED_STATUSES = new Set(['done', 'dismissed'])
 const PROMISE_DIRECTIONS = new Set(['theirs', 'mutual'])
 
-export function PromisesToMe() {
+interface PromisesToMeProps {
+  searchFilter?: string
+}
+
+export function PromisesToMe({ searchFilter }: PromisesToMeProps) {
   const { data, isLoading } = useTasks()
   const createTask = useCreateTask()
   const [followUpCreated, setFollowUpCreated] = useState<Set<string>>(new Set())
@@ -35,7 +40,8 @@ export function PromisesToMe() {
     .filter(
       (t: Task) =>
         PROMISE_DIRECTIONS.has(t.commitment_direction) &&
-        !EXCLUDED_STATUSES.has(t.status)
+        !EXCLUDED_STATUSES.has(t.status) &&
+        (!searchFilter || t.title.toLowerCase().includes(searchFilter.toLowerCase()))
     )
     .sort((a: Task, b: Task) => {
       // Overdue items first
@@ -52,11 +58,24 @@ export function PromisesToMe() {
     return (
       <section>
         <TaskSectionHeader title="Promises to Me" count={0} />
-        <EmptyState
-          icon={Handshake}
-          title="No outstanding promises"
-          description="Commitments others have made to you will appear here for tracking."
-        />
+        {searchFilter ? (
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--secondary-text)',
+              padding: '16px 0',
+              textAlign: 'center',
+            }}
+          >
+            No tasks matching &lsquo;{searchFilter}&rsquo;
+          </p>
+        ) : (
+          <EmptyState
+            icon={Handshake}
+            title="No outstanding promises"
+            description="Commitments others have made to you will appear here for tracking."
+          />
+        )}
       </section>
     )
   }
@@ -89,13 +108,18 @@ export function PromisesToMe() {
           className="divide-y"
           style={{ borderColor: 'var(--subtle-border)' }}
         >
-          {promises.map((task: Task) => (
-            <TaskWatchlistItem
+          {promises.map((task: Task, index: number) => (
+            <div
               key={task.id}
-              task={task}
-              onCreateFollowUp={handleCreateFollowUp}
-              hasFollowUp={followUpCreated.has(task.id)}
-            />
+              className={animationClasses.fadeSlideUp}
+              style={{ animationDelay: staggerDelay(index) }}
+            >
+              <TaskWatchlistItem
+                task={task}
+                onCreateFollowUp={handleCreateFollowUp}
+                hasFollowUp={followUpCreated.has(task.id)}
+              />
+            </div>
           ))}
         </div>
       </BrandedCard>

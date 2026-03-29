@@ -7,6 +7,9 @@ import {
   MapPin,
   Zap,
   ArrowUpRight,
+  Loader2,
+  RefreshCw,
+  ExternalLink,
 } from 'lucide-react'
 import { formatDistanceToNow } from 'date-fns'
 import { toast } from 'sonner'
@@ -22,6 +25,7 @@ import { useUpdateTask } from '../hooks/useUpdateTask'
 import { useUpdateTaskStatus } from '../hooks/useUpdateTaskStatus'
 import { TaskStatusBadge } from './TaskStatusBadge'
 import { TaskSkillChip } from './TaskSkillChip'
+import { useSkillExecution } from '../hooks/useSkillExecution'
 import { VALID_TRANSITIONS, PRIORITIES } from '../types/tasks'
 import type { TaskStatus, Priority } from '../types/tasks'
 
@@ -40,6 +44,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
   const { data: task, isLoading } = useTask(taskId)
   const updateTask = useUpdateTask()
   const updateStatus = useUpdateTaskStatus()
+  const skillExecution = useSkillExecution()
 
   // Editable title state
   const [isEditingTitle, setIsEditingTitle] = useState(false)
@@ -634,35 +639,114 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                       {JSON.stringify(task.skill_context).length > 100 ? '...' : ''}
                     </p>
                   )}
-                  <Button
-                    variant="default"
-                    size="sm"
-                    disabled
-                    title="Coming soon"
-                    className="mt-3 w-full"
-                  >
-                    <Zap className="size-3.5" data-icon="inline-start" />
-                    Generate Deliverable
-                  </Button>
-                  {Boolean(task.metadata?.generated_output) && (
+
+                  {/* Generate / Regenerate button */}
+                  {(task.status === 'confirmed' || task.status === 'in_progress') && (
+                    <Button
+                      variant="default"
+                      size="sm"
+                      disabled={skillExecution.isExecuting}
+                      onClick={() =>
+                        skillExecution.execute(
+                          task.suggested_skill!,
+                          task.skill_context ?? {},
+                        )
+                      }
+                      className="mt-3 w-full"
+                    >
+                      {skillExecution.isExecuting ? (
+                        <>
+                          <Loader2 className="size-3.5 animate-spin" data-icon="inline-start" />
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <Zap className="size-3.5" data-icon="inline-start" />
+                          {task.metadata?.generated_output
+                            ? 'Regenerate Deliverable'
+                            : 'Generate Deliverable'}
+                        </>
+                      )}
+                    </Button>
+                  )}
+
+                  {/* Error state with Retry */}
+                  {skillExecution.error && (
                     <div
+                      className="flex items-center justify-between gap-2"
                       style={{
                         marginTop: '12px',
+                        padding: '10px 12px',
+                        background: 'rgba(239,68,68,0.06)',
+                        borderRadius: '8px',
                         fontSize: '13px',
-                        color: 'var(--body-text)',
+                        color: '#EF4444',
                       }}
                     >
-                      <span style={{ fontWeight: 500 }}>Generated Output:</span>{' '}
+                      <span>{skillExecution.error}</span>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          skillExecution.execute(
+                            task.suggested_skill!,
+                            task.skill_context ?? {},
+                          )
+                        }
+                        style={{ color: '#EF4444', padding: '2px 8px' }}
+                      >
+                        <RefreshCw className="size-3" />
+                        Retry
+                      </Button>
+                    </div>
+                  )}
+
+                  {/* Success result */}
+                  {skillExecution.result && (
+                    <div
+                      className="flex items-center gap-2"
+                      style={{
+                        marginTop: '12px',
+                        padding: '10px 12px',
+                        background: 'rgba(34,197,94,0.06)',
+                        borderRadius: '8px',
+                        fontSize: '13px',
+                        color: '#22C55E',
+                      }}
+                    >
+                      <ExternalLink className="size-3.5 shrink-0" />
                       <a
-                        href={String(task.metadata!.generated_output)}
+                        href={`/skills/runs/${skillExecution.result.run_id}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        style={{ color: 'var(--brand-coral)' }}
+                        style={{ color: '#22C55E', fontWeight: 500 }}
                       >
-                        View output
+                        View generated output
                       </a>
                     </div>
                   )}
+
+                  {/* Previously generated output from metadata */}
+                  {!skillExecution.result &&
+                    Boolean(task.metadata?.generated_output) && (
+                      <div
+                        style={{
+                          marginTop: '12px',
+                          fontSize: '13px',
+                          color: 'var(--body-text)',
+                        }}
+                      >
+                        <span style={{ fontWeight: 500 }}>Generated Output:</span>{' '}
+                        <a
+                          href={String(task.metadata!.generated_output)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          style={{ color: 'var(--brand-coral)' }}
+                        >
+                          View output
+                        </a>
+                      </div>
+                    )}
                 </div>
               )}
             </div>

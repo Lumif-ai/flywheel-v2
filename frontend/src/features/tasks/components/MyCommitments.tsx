@@ -6,9 +6,11 @@ import { TaskSectionHeader } from './TaskSectionHeader'
 import { TaskCommitmentCard } from './TaskCommitmentCard'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
+import { animationClasses, staggerDelay } from '@/lib/animations'
 
 interface MyCommitmentsProps {
   onSelect: (id: string) => void
+  searchFilter?: string
 }
 
 const GROUP_ORDER: { key: keyof GroupedTasks; label: string }[] = [
@@ -21,7 +23,7 @@ const GROUP_ORDER: { key: keyof GroupedTasks; label: string }[] = [
 
 const COMMITMENT_STATUSES = new Set(['confirmed', 'in_progress', 'blocked'])
 
-export function MyCommitments({ onSelect }: MyCommitmentsProps) {
+export function MyCommitments({ onSelect, searchFilter }: MyCommitmentsProps) {
   const { data, isLoading } = useTasks()
 
   if (isLoading) {
@@ -37,23 +39,42 @@ export function MyCommitments({ onSelect }: MyCommitmentsProps) {
   }
 
   const filteredTasks = (data?.tasks ?? []).filter(
-    (t: Task) => t.commitment_direction === 'yours' && COMMITMENT_STATUSES.has(t.status)
+    (t: Task) =>
+      t.commitment_direction === 'yours' &&
+      COMMITMENT_STATUSES.has(t.status) &&
+      (!searchFilter || t.title.toLowerCase().includes(searchFilter.toLowerCase()))
   )
 
   if (filteredTasks.length === 0) {
     return (
       <section>
         <TaskSectionHeader title="My Commitments" count={0} />
-        <EmptyState
-          icon={Target}
-          title="No active commitments"
-          description="Confirmed tasks assigned to you will appear here, grouped by due date."
-        />
+        {searchFilter ? (
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--secondary-text)',
+              padding: '16px 0',
+              textAlign: 'center',
+            }}
+          >
+            No tasks matching &lsquo;{searchFilter}&rsquo;
+          </p>
+        ) : (
+          <EmptyState
+            icon={Target}
+            title="No active commitments"
+            description="Confirmed tasks assigned to you will appear here, grouped by due date."
+          />
+        )}
       </section>
     )
   }
 
   const groups = groupTasksByDueDate(filteredTasks)
+
+  // Track global card index for stagger animation across groups
+  let cardIndex = 0
 
   return (
     <section>
@@ -82,13 +103,21 @@ export function MyCommitments({ onSelect }: MyCommitmentsProps) {
 
               {/* Task cards */}
               <div className="flex flex-col gap-3">
-                {groupTasks.map((task: Task) => (
-                  <TaskCommitmentCard
-                    key={task.id}
-                    task={task}
-                    onSelect={onSelect}
-                  />
-                ))}
+                {groupTasks.map((task: Task) => {
+                  const idx = cardIndex++
+                  return (
+                    <div
+                      key={task.id}
+                      className={animationClasses.fadeSlideUp}
+                      style={{ animationDelay: staggerDelay(idx) }}
+                    >
+                      <TaskCommitmentCard
+                        task={task}
+                        onSelect={onSelect}
+                      />
+                    </div>
+                  )
+                })}
               </div>
             </div>
           )

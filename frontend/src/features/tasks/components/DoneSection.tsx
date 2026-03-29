@@ -4,7 +4,11 @@ import { formatDistanceToNow, isAfter, subDays } from 'date-fns'
 import { useTasks } from '../hooks/useTasks'
 import type { Task } from '../types/tasks'
 
-export function DoneSection() {
+interface DoneSectionProps {
+  searchFilter?: string
+}
+
+export function DoneSection({ searchFilter }: DoneSectionProps) {
   const [isExpanded, setIsExpanded] = useState(false)
   const { data } = useTasks()
 
@@ -14,7 +18,8 @@ export function DoneSection() {
     .filter(
       (t: Task) =>
         t.status === 'done' &&
-        isAfter(new Date(t.completed_at || t.updated_at), sevenDaysAgo)
+        isAfter(new Date(t.completed_at || t.updated_at), sevenDaysAgo) &&
+        (!searchFilter || t.title.toLowerCase().includes(searchFilter.toLowerCase()))
     )
     .sort((a: Task, b: Task) => {
       const aDate = new Date(a.completed_at || a.updated_at)

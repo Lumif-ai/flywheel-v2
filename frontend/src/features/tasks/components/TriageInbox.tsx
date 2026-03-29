@@ -39,7 +39,11 @@ function TriageSkeleton() {
   )
 }
 
-export function TriageInbox() {
+interface TriageInboxProps {
+  searchFilter?: string
+}
+
+export function TriageInbox({ searchFilter }: TriageInboxProps) {
   const { data, isLoading } = useTasks()
   const statusMutation = useUpdateTaskStatus()
   const [focusModeOpen, setFocusModeOpen] = useState(false)
@@ -47,6 +51,10 @@ export function TriageInbox() {
   // Filter to triage-eligible tasks, sorted by priority then created_at
   const triageTasks = (data?.tasks ?? [])
     .filter((t) => TRIAGE_STATUSES.has(t.status))
+    .filter((t) =>
+      !searchFilter ||
+      t.title.toLowerCase().includes(searchFilter.toLowerCase())
+    )
     .sort((a, b) => {
       const priDiff = (PRIORITY_ORDER[a.priority] ?? 1) - (PRIORITY_ORDER[b.priority] ?? 1)
       if (priDiff !== 0) return priDiff
@@ -109,13 +117,26 @@ export function TriageInbox() {
           <TriageSkeleton />
         </div>
       ) : triageTasks.length === 0 ? (
-        <div
-          className="flex items-center justify-center gap-2 py-8"
-          style={{ color: 'var(--secondary-text)', fontSize: '14px' }}
-        >
-          <CheckCircle className="size-5" />
-          <span>All caught up</span>
-        </div>
+        searchFilter ? (
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--secondary-text)',
+              padding: '16px 0',
+              textAlign: 'center',
+            }}
+          >
+            No tasks matching &lsquo;{searchFilter}&rsquo;
+          </p>
+        ) : (
+          <div
+            className="flex items-center justify-center gap-2 py-8"
+            style={{ color: 'var(--secondary-text)', fontSize: '14px' }}
+          >
+            <CheckCircle className="size-5" />
+            <span>All caught up</span>
+          </div>
+        )
       ) : (
         <div className="flex flex-col gap-3" role="list">
           {triageTasks.map((task, index) => (

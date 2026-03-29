@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { CheckSquare, Plus } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { CheckSquare, Plus, Search, X } from 'lucide-react'
 import { useTaskSummary } from '../hooks/useTaskSummary'
 import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -16,6 +16,14 @@ export function TasksPage() {
   const { data: summary, isLoading } = useTaskSummary()
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  // Debounce search input at 300ms
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
   // Keyboard navigation
   useTaskKeyboardNav({
@@ -81,15 +89,66 @@ export function TasksPage() {
                   {activeCount} active &middot; {needReviewCount} need review
                 </p>
               </div>
-              <Button variant="default" size="sm" onClick={() => setShowQuickAdd(true)}>
-                <Plus className="size-3.5" data-icon="inline-start" />
-                Add
-              </Button>
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex items-center"
+                  style={{
+                    background: 'var(--card-bg)',
+                    border: '1px solid var(--subtle-border)',
+                    borderRadius: '8px',
+                    padding: '0 10px',
+                    height: '32px',
+                    minWidth: '180px',
+                  }}
+                >
+                  <Search
+                    className="size-3.5 shrink-0"
+                    style={{ color: 'var(--secondary-text)' }}
+                  />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder="Search tasks..."
+                    className="bg-transparent outline-none flex-1"
+                    style={{
+                      border: 'none',
+                      fontSize: '13px',
+                      color: 'var(--body-text)',
+                      padding: '0 8px',
+                      lineHeight: '32px',
+                    }}
+                  />
+                  {searchQuery && (
+                    <button
+                      onClick={() => setSearchQuery('')}
+                      className="shrink-0 hover:opacity-80 transition-opacity"
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        padding: 0,
+                        display: 'flex',
+                        alignItems: 'center',
+                      }}
+                    >
+                      <X
+                        className="size-3.5"
+                        style={{ color: 'var(--secondary-text)' }}
+                      />
+                    </button>
+                  )}
+                </div>
+                <Button variant="default" size="sm" onClick={() => setShowQuickAdd(true)}>
+                  <Plus className="size-3.5" data-icon="inline-start" />
+                  Add
+                </Button>
+              </div>
             </div>
 
             {/* Section slots with 48px gap between them */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
-              <TriageInbox />
+              <TriageInbox searchFilter={debouncedSearch} />
 
               {/* Quick-add form above My Commitments */}
               <div>
@@ -97,11 +156,11 @@ export function TasksPage() {
                   isOpen={showQuickAdd}
                   onClose={() => setShowQuickAdd(false)}
                 />
-                <MyCommitments onSelect={(id) => setSelectedTaskId(id)} />
+                <MyCommitments onSelect={(id) => setSelectedTaskId(id)} searchFilter={debouncedSearch} />
               </div>
 
-              <PromisesToMe />
-              <DoneSection />
+              <PromisesToMe searchFilter={debouncedSearch} />
+              <DoneSection searchFilter={debouncedSearch} />
             </div>
           </>
         )}
