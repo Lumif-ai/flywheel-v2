@@ -5,7 +5,8 @@
 - ✅ **v1.0 Email Copilot** — Phases 1–6 + patches 48, 49, 49.1 (shipped 2026-03-25)
 - ✅ **v2.0 AI-Native CRM** — Phases 50–53 (shipped 2026-03-27)
 - ✅ **v2.1 CRM Redesign** — Phases 54–58 (shipped 2026-03-27)
-- 🚧 **v3.0 Intelligence Flywheel** — Phases 59–63 (in progress)
+- ✅ **v3.0 Intelligence Flywheel** — Phases 59–63 (shipped 2026-03-28)
+- ✅ **v4.0 Flywheel OS** — Phases 64–66 (shipped 2026-03-28)
 
 ## Phases
 
@@ -328,7 +329,7 @@ Plans:
 
 ---
 
-### 🚧 v3.0 Intelligence Flywheel — Conversations Become CRM Intelligence (In Progress)
+### ✅ v3.0 Intelligence Flywheel — Conversations Become CRM Intelligence (Shipped 2026-03-28)
 
 **Milestone Goal:** Every conversation source (meetings, emails, Slack) flows through a unified intelligence pipeline that extracts structured insights, auto-links to accounts/contacts, and enriches relationship surfaces. The flywheel loop: Ingest → Enrich → Prepare. User-level privacy ensures raw content stays private while extracted intelligence benefits the whole team.
 
@@ -374,9 +375,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 60-01-PLAN.md — Alembic migration: meetings table with split-visibility RLS, ORM model, indexes
-- [ ] 60-02-PLAN.md — Granola adapter: IntelligenceSource interface, GranolaAdapter (list_meetings, get_meeting_content, test_connection), Integration flow (API key encrypt/store/validate)
-- [ ] 60-03-PLAN.md — Sync endpoint: POST /meetings/sync, dedup logic, meeting row creation, auto-filter with processing rules from Integration settings
+- [x] 60-01-PLAN.md — Alembic migration: meetings table with split-visibility RLS, ORM model, indexes ✓
+- [x] 60-02-PLAN.md — Granola adapter: GranolaAdapter (list_meetings, get_meeting_content, test_connection), Integration flow (API key encrypt/store/validate) ✓
+- [x] 60-03-PLAN.md — Sync endpoint: POST /meetings/sync, dedup logic, meeting row creation, auto-filter with processing rules from Integration settings ✓
 
 ---
 
@@ -399,9 +400,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 61-01-PLAN.md — Meeting processor engine: _execute_meeting_processor() in skill_executor.py with 7-stage pipeline (fetch → store → classify → extract → context write → update meeting → emit events), web-adapted SKILL.md copy
-- [ ] 61-02-PLAN.md — Account auto-linking: domain matching (attendee email → accounts.domain), contact discovery (attendee → AccountContact), prospect auto-creation for unknown domains
-- [ ] 61-03-PLAN.md — Processing rules: auto-filter engine reading Integration settings JSONB, skip rules (internal, domain, type, specific meeting), processing_status state machine
+- [x] 61-01-PLAN.md — Meeting processor engine: 7-stage pipeline (fetch → store → classify → extract → link → write → done), meeting_processor_web.py helpers ✓
+- [x] 61-02-PLAN.md — Account auto-linking: domain matching, contact upsert, prospect auto-creation for unknown domains ✓
+- [x] 61-03-PLAN.md — Processing rules: skip_internal/skip_domains/skip_types/skip_meetings + batch/list/detail endpoints ✓
 
 ---
 
@@ -424,9 +425,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 62-01-PLAN.md — Meetings page: list view with meeting cards, status badges, sync button, processing SSE feedback; meeting detail view with privacy enforcement (transcript owner-only)
-- [ ] 62-02-PLAN.md — Granola settings: API key input in SettingsPage, connection status indicator, test/disconnect flow, sync controls
-- [ ] 62-03-PLAN.md — Relationship enrichment: meeting entries in timeline tab, intelligence tab data from meeting context entries, people tab contacts from meeting attendees, signal badge integration
+- [x] 62-01-PLAN.md — Meetings page: list view with meeting cards, status badges, sync button, processing SSE feedback; meeting detail view with privacy enforcement (transcript owner-only) ✓
+- [x] 62-02-PLAN.md — Granola settings: API key input in SettingsPage, connection status indicator, test/disconnect flow, sync controls ✓
+- [x] 62-03-PLAN.md — Relationship enrichment: meeting entries in timeline tab, intelligence tab data from meeting context entries, people tab contacts from meeting attendees, signal badge integration ✓
 
 ---
 
@@ -448,14 +449,98 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 63-01-PLAN.md — Meeting prep engine: web-adapted prep skill, context reader (account-scoped entries from 7 files), LLM briefing generation, HTML rendering
-- [ ] 63-02-PLAN.md — Prep frontend: trigger from meetings page and relationship page, SSE streaming during generation, briefing viewer
+- [x] 63-01-PLAN.md — Meeting prep engine: web-adapted prep skill, context reader (account-scoped entries from 7 files), LLM briefing generation, HTML rendering ✓
+- [x] 63-02-PLAN.md — Prep frontend: trigger from meetings page and relationship page, SSE streaming during generation, briefing viewer ✓
+
+---
+
+### 🚧 v4.0 Flywheel OS — Intelligence Operating System for Founders (In Progress)
+
+**Milestone Goal:** Transform the intelligence layer into a founder's daily operating system. Conversations automatically become tracked commitments. Unified meetings timeline (Calendar + Granola), automatic task extraction from transcripts, and a `/flywheel` CLI ritual. The flywheel closes: better prep → richer meetings → more detected tasks → auto-executed deliverables.
+
+---
+
+### Phase 64: Unified Meetings
+
+**Goal:** Google Calendar events and Granola transcripts live in one table with dedup and lifecycle status. The meetings page shows upcoming and past meetings in a unified timeline. Calendar sync writes to the meetings table instead of WorkItems.
+
+**Depends on:** Phase 63
+
+**Requirements:** UNI-01, UNI-02, UNI-03, UNI-04, UNI-05, UNI-06, UNI-08
+
+**Success Criteria** (what must be TRUE):
+  1. Calendar sync creates Meeting rows with `processing_status='scheduled'` — no new WorkItems created for calendar events
+  2. A meeting that exists in both Google Calendar and Granola appears as ONE row (dedup by time+title+attendees)
+  3. Meetings page shows Upcoming and Past tabs, with calendar events in Upcoming and processed meetings in Past
+  4. User can trigger prep from a scheduled meeting that has a linked account
+  5. `get_meeting_prep_suggestions()` queries the meetings table (not WorkItems)
+
+**Plans:** 3 plans ✓ **COMPLETE** (2026-03-28)
+
+Plans:
+- [x] 64-01-PLAN.md — Migration 033 + calendar sync rewrite + Granola fuzzy dedup + lifecycle state machine
+- [x] 64-02-PLAN.md — Time-based listing API + meeting prep endpoint + suggestions migration
+- [x] 64-03-PLAN.md — Frontend Upcoming/Past tabs + new status values + scheduled meeting prep trigger
+
+
+---
+
+### Phase 65: Task Intelligence ✅ (completed 2026-03-28)
+
+**Goal:** Meeting transcripts automatically produce task rows. The intelligence pipeline gains a Stage 7 that classifies commitments (yours/theirs/mutual) and maps them to executable skills. A tasks API exposes the full lifecycle. Signal counts reflect pending tasks.
+
+**Depends on:** Phase 64
+
+**Requirements:** TASK-01, TASK-02, TASK-03, TASK-04
+
+**Success Criteria** (what must be TRUE):
+  1. After processing a meeting where the founder says "we'll send a one-pager", a Task row exists with `suggested_skill='sales-collateral'` and `trust_level='review'`
+  2. After processing a meeting where the other party says "I'll send the requirements", a Task row exists with `commitment_direction='theirs'`
+  3. `GET /tasks/` returns detected tasks with full CRUD, status transition validation, and user-scoped privacy
+  4. `GET /signals/` includes `tasks_detected`, `tasks_in_review`, `tasks_overdue` counts
+  5. All tasks with email-related skills have `trust_level='confirm'` (NEVER auto-send)
+
+**Plans:** 3 plans — all verified (17/17 must-haves passed)
+
+Plans:
+- [x] 65-01-PLAN.md — Tasks table migration (20 cols, 3 indexes, user-level RLS), Task ORM model, signal counts extension (tasks_detected, tasks_in_review, tasks_overdue) ✓
+- [x] 65-02-PLAN.md — Stage 7 task extraction in meeting processor: Haiku commitment classification, extract_tasks() + write_task_rows() helpers, pipeline insertion ✓
+- [x] 65-03-PLAN.md — Tasks CRUD API: 7 endpoints (list, summary, detail, create, update, status transition, delete), status validation, router registration ✓
+
+---
+
+### Phase 66: /flywheel Ritual (Rearchitected)
+
+**Goal:** The flywheel ritual is a backend orchestrator engine — same architecture as meeting-prep and meeting-processor. One MCP invocation syncs meetings from Granola, processes unprocessed recordings into intelligence, prepares briefings for upcoming external meetings, and returns a rich HTML daily brief. Invoked via `flywheel_run_skill("flywheel")` — no separate installation, no env vars, no curl.
+
+**Depends on:** Phase 65
+
+**Requirements:** FLY-01, FLY-02, FLY-03, FLY-04, FLY-05, FLY-06
+
+**Spec:** `.planning/SPEC-flywheel-ritual-rearchitect.md` (reviewed, 14 findings addressed)
+
+**Success Criteria** (what must be TRUE):
+  1. `flywheel_run_skill("flywheel")` via MCP creates a SkillRun, job queue dispatches to the dedicated engine, and returns a link to the HTML daily brief in the document library
+  2. Engine Stage 1 syncs from Granola using extracted shared `sync_granola_meetings()` function (same dedup logic as POST /meetings/sync)
+  3. Engine Stage 2 processes up to 5 unprocessed meetings by calling `_execute_meeting_processor()` directly (function call, not HTTP)
+  4. Engine Stage 3 preps up to 3 upcoming external meetings by calling `_execute_meeting_prep()` directly
+  5. HTML daily brief contains 5 sections (sync summary, processing summary, prep cards, pending tasks read-only, remaining items) and renders in the document library
+  6. All SSE events stream to the parent run's events_log — one run, one stream
+  7. SKILL.md has `engine: flywheel_ritual` and `web_tier: 1` frontmatter, seeded to `skill_definitions` table
+
+**Plans:** 4 plans (replanned from spec — includes task execution)
+
+Plans:
+- [x] 66-01-PLAN.md — Extract sync logic, replace SKILL.md with engine frontmatter, add dispatch ✓
+- [x] 66-02-PLAN.md — Flywheel ritual engine Stages 1-3 (sync, process, prep) ✓
+- [x] 66-03-PLAN.md — Stage 4: LLM-powered task execution (context + web search + invoke skills) ✓
+- [x] 66-04-PLAN.md — HTML daily brief, MCP update, wiring ✓
 
 ---
 
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -478,10 +563,13 @@ Plans:
 | 57. Relationship Surfaces | v2.1 | 5/5 | ✓ Complete | 2026-03-27 |
 | 58. Unified Company Intelligence Engine | v2.1 | 3/3 | ✓ Complete | 2026-03-27 |
 | 59. Team Privacy Foundation | v3.0 | 2/2 | ✓ Complete | 2026-03-28 |
-| 60. Meeting Data Model and Granola Adapter | v3.0 | 0/3 | Not started | — |
-| 61. Meeting Intelligence Pipeline | v3.0 | 0/3 | Not started | — |
-| 62. Meeting Surfaces and Relationship Enrichment | v3.0 | 0/3 | Not started | — |
-| 63. Meeting Prep Loop | v3.0 | 0/2 | Not started | — |
+| 60. Meeting Data Model and Granola Adapter | v3.0 | 3/3 | ✓ Complete | 2026-03-28 |
+| 61. Meeting Intelligence Pipeline | v3.0 | 3/3 | ✓ Complete | 2026-03-28 |
+| 62. Meeting Surfaces and Relationship Enrichment | v3.0 | 3/3 | ✓ Complete | 2026-03-28 |
+| 63. Meeting Prep Loop | v3.0 | 2/2 | ✓ Complete | 2026-03-28 |
+| 64. Unified Meetings | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
+| 65. Task Intelligence | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
+| 66. /flywheel Ritual (Rearchitected) | v4.0 | 4/4 | ✓ Complete | 2026-03-29 |
 
 ---
 *Roadmap created: 2026-03-24*
@@ -490,3 +578,4 @@ Plans:
 *v2.1 milestone added: 2026-03-27*
 *v2.1 shipped: 2026-03-27*
 *v3.0 milestone added: 2026-03-28*
+*v4.0 milestone added: 2026-03-28*
