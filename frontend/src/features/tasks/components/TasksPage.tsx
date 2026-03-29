@@ -5,6 +5,8 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { TriageInbox } from './TriageInbox'
+import { MyCommitments } from './MyCommitments'
+import { PromisesToMe } from './PromisesToMe'
 
 export function TasksPage() {
   const { data: summary, isLoading } = useTaskSummary()
@@ -80,8 +82,8 @@ export function TasksPage() {
             {/* Section slots with 48px gap between them */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
               <TriageInbox />
-              {/* MyCommitments placeholder */}
-              {/* PromisesToMe placeholder */}
+              <MyCommitments onSelect={() => {/* Detail panel wired in plan 04 */}} />
+              <PromisesToMe />
               {/* DoneSection placeholder */}
             </div>
           </>
