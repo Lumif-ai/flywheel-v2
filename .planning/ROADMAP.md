@@ -6,8 +6,10 @@
 - ✅ **v2.0 AI-Native CRM** — Phases 50–53 (shipped 2026-03-27)
 - ✅ **v2.1 CRM Redesign** — Phases 54–58 (shipped 2026-03-27)
 - ✅ **v3.0 Intelligence Flywheel** — Phases 59–63 (shipped 2026-03-28)
-- ✅ **v4.0 Flywheel OS** — Phases 64–66 (shipped 2026-03-28)
-- **v5.0 Tasks UI** — Phase 67 (active)
+- ✅ **v4.0 Flywheel OS** — Phases 64–66.1 (shipped 2026-03-29)
+- ✅ **v5.0 Tasks UI** — Phase 67 (shipped 2026-03-29)
+- ✅ **v6.0 Email-to-Tasks** — Phase 68 (shipped 2026-03-29)
+- 🚧 **v7.0 Email Voice & Intelligence Overhaul** — Phases 69–75 (in progress)
 
 ## Phases
 
@@ -204,405 +206,229 @@ Plans:
 
 ---
 
-### ✅ v2.1 CRM Redesign — Intelligence-First Relationships (Shipped 2026-03-27)
+<details>
+<summary>✅ v2.1 CRM Redesign (Phases 54–58) — SHIPPED 2026-03-27</summary>
 
-**Milestone Goal:** Replace the flat accounts table with five distinct surfaces (Pipeline grid + Prospects/Customers/Advisors/Investors relationship pages), each with AI synthesis, interactive context panels, premium UI/UX, and a signal layer with badge counts. The product should feel like a $10M intelligence tool, not a database viewer.
+- [x] Phase 54: Data Model Foundation (2/2 plans) — completed 2026-03-27
+- [x] Phase 55: Relationships and Signals APIs (3/3 plans) — completed 2026-03-27
+- [x] Phase 56: Pipeline Grid (3/3 plans) — completed 2026-03-27
+- [x] Phase 57: Relationship Surfaces (5/5 plans) — completed 2026-03-27
+- [x] Phase 58: Unified Company Intelligence Engine (3/3 plans) — completed 2026-03-27
+
+</details>
 
 ---
 
-### Phase 54: Data Model Foundation
+<details>
+<summary>✅ v3.0 Intelligence Flywheel (Phases 59–63) — SHIPPED 2026-03-28</summary>
 
-**Goal:** The schema evolution is complete and safely deployed — new relationship columns exist with correct indexes, the two-phase status rename is underway with zero API outage, and AI synthesis cache fields are in place. Every subsequent phase builds on a stable schema.
+- [x] Phase 59: Team Privacy Foundation (2/2 plans) — completed 2026-03-28
+- [x] Phase 60: Meeting Data Model and Granola Adapter (3/3 plans) — completed 2026-03-28
+- [x] Phase 61: Meeting Intelligence Pipeline (3/3 plans) — completed 2026-03-28
+- [x] Phase 62: Meeting Surfaces and Relationship Enrichment (3/3 plans) — completed 2026-03-28
+- [x] Phase 63: Meeting Prep Loop (3/3 plans) — completed 2026-03-28
 
-**Depends on:** Phase 53
+</details>
 
-**Requirements:** DM-01, DM-02, DM-03, DM-04
+---
+
+<details>
+<summary>✅ v4.0 Flywheel OS (Phases 64–66.1) — SHIPPED 2026-03-29</summary>
+
+- [x] Phase 64: Unified Meetings (3/3 plans) — completed 2026-03-28
+- [x] Phase 65: Task Intelligence (3/3 plans) — completed 2026-03-28
+- [x] Phase 66: /flywheel Ritual Rearchitected (4/4 plans) — completed 2026-03-29
+- [x] Phase 66.1: Flywheel Stabilization (3/3 plans) — completed 2026-03-29
+
+</details>
+
+---
+
+<details>
+<summary>✅ v5.0 Tasks UI (Phase 67) — SHIPPED 2026-03-29</summary>
+
+- [x] Phase 67: Tasks UI (7/7 plans) — completed 2026-03-29
+
+</details>
+
+---
+
+<details>
+<summary>✅ v6.0 Email-to-Tasks (Phase 68) — SHIPPED 2026-03-29</summary>
+
+- [x] Phase 68: Email-to-Tasks Layer A (3/3 plans) — completed 2026-03-29
+
+</details>
+
+---
+
+### v7.0 Email Voice & Intelligence Overhaul (In Progress)
+
+**Milestone Goal:** Transform email from a siloed draft engine into a bidirectional intelligence source that sounds like the user, shares voice across all skills, and feeds relationship/deal/contact intelligence back into the context store. Three tracks: (A) voice profile overhaul, (B) voice as shared context store asset, (C) email as context store source.
+
+---
+
+### Phase 69: Model Configuration Foundation
+
+**Goal:** Every email engine reads its LLM model from a configurable setting rather than hardcoded constants. This is the foundation that all subsequent voice and extraction work builds on — switching from Haiku to Sonnet must be a config change, not a code change.
+
+**Depends on:** Phase 68
+
+**Requirements:** MODEL-01, MODEL-02
 
 **Success Criteria** (what must be TRUE):
-  1. Developer runs migration and confirms `relationship_type text[]` column exists on accounts with GIN index — `WHERE 'advisor' = ANY(relationship_type)` uses index scan (verifiable via EXPLAIN)
-  2. All 206 existing accounts have `relationship_type = '{prospect}'` after migration — no accounts lost or corrupted
-  3. `entity_level` column exists with `DEFAULT 'company'` — existing accounts unaffected, no null values present
-  4. Phase A of status rename complete: `relationship_status` and `pipeline_stage` columns exist alongside old `status` column, data copied — APIs still read `status` without error
-  5. `ai_summary` and `ai_summary_updated_at` columns exist on accounts — detail endpoint returns null summary without triggering any LLM call
+  1. Calling `_get_engine_model(db, tenant_id, "voice_extraction")` returns the configured model string, or `claude-sonnet-4-6` when no config exists
+  2. All 5 email engine files (scorer, voice extraction, voice learning, drafter, context extraction placeholder) use the shared helper — no `_HAIKU_MODEL` or `_SONNET_MODEL` module-level constants remain
+  3. Changing the model config for a specific engine takes effect on the next sync cycle without requiring a server restart
+  4. An invalid model string in config logs a warning and falls back to the default model — the sync loop does not crash
 
-**Plans:** 5 plans
+**Plans:** 1 plan
 
 Plans:
-- [x] 54-01-PLAN.md — Alembic migrations: relationship_type array + GIN index (DM-01), entity_level (DM-02), ai_summary fields (DM-04), ORM model updates ✓
-- [x] 54-02-PLAN.md — Two-phase status rename Phase A: add relationship_status + pipeline_stage, copy data from status (DM-03) ✓
+- [x] 69-01-PLAN.md — Shared get_engine_model() helper + migrate all 5 engine files to configurable models ✓
 
 ---
 
-### Phase 55: Relationships and Signals APIs
+### Phase 70: Voice Profile Overhaul
 
-**Goal:** The backend API surface is complete — every relationship surface and signal badge has a stable endpoint. The partition predicate preventing accounts from leaking across Pipeline and Relationships surfaces is enforced at the query level. AI synthesis is rate-limited and never auto-triggered.
+**Goal:** The voice profile captures 10 fields from 50 emails instead of 4 fields from 20, and both initial extraction and incremental learning use Sonnet. Drafts sound noticeably more like the user because the system knows their formality, greeting style, paragraph patterns, and emoji habits — not just tone and sign-off.
 
-**Depends on:** Phase 54
+**Depends on:** Phase 69
 
-**Requirements:** RAPI-01, RAPI-02, RAPI-03, RAPI-04, RAPI-05, RAPI-06, RAPI-07, RAPI-08, SIG-01, SIG-02
+**Requirements:** VOICE-02, VOICE-01, VOICE-03, VOICE-04
 
 **Success Criteria** (what must be TRUE):
-  1. `GET /api/v1/relationships/?type=advisor` returns only graduated advisor accounts — a prospect account with no `graduated_at` does not appear even if it has `advisor` in `relationship_type`
-  2. `POST /api/v1/relationships/{id}/synthesize` called twice within 5 minutes returns 429 on the second call — the LLM is not invoked; called with null `ai_summary` returns cached null, not a new LLM invocation
-  3. `POST /api/v1/relationships/{id}/ask` returns an answer with at least one source attribution citing the specific context entry — does not call LLM when account has fewer than 3 context entries
-  4. `GET /api/v1/signals/` returns per-type badge counts (prospects/customers/advisors/investors separately) — counts are non-zero when stale accounts or overdue follow-ups exist
-  5. `PATCH /api/v1/relationships/{id}/type` rejects an empty type array and rejects unknown type values — minimum-one-type validation enforced at API layer
+  1. After running voice extraction, the `email_voice_profiles` row has all 10 fields populated (4 existing + 6 new: formality_level, greeting_style, question_style, paragraph_pattern, emoji_usage, avg_sentences)
+  2. A draft reply for a user whose profile shows `formality_level: "casual"` and `greeting_style: "Hey,"` starts with "Hey" and uses informal language — visibly different from a formal profile's draft
+  3. After editing and approving a draft, the incremental voice updater can update any of the 10 fields (not just the original 4) based on what the edit reveals
+  4. Existing voice profiles (with only 4 fields) receive column defaults from the migration and continue to work for drafting without re-extraction
+  5. Voice extraction analyzes 50 substantive sent emails (up from 20) — verified by checking `samples_analyzed` value on a fresh profile
 
 **Plans:** 3 plans
 
 Plans:
-- [x] 55-01-PLAN.md — Relationships router: GET list (filtered + partition predicate), GET detail (contacts + timeline + cached summary), PATCH type, POST graduate ✓
-- [x] 55-02-PLAN.md — SynthesisEngine service: generate, cache (24h TTL), rate-limit (5-min DB-level), graceful degradation for sparse data; POST synthesize + POST ask endpoints ✓
-- [x] 55-03-PLAN.md — Notes, files, and signals: POST notes (ContextEntry link), POST files (Supabase Storage), GET signals (per-type badge counts + SIG-02 signal taxonomy) ✓
+- [ ] 70-01-PLAN.md — Alembic migration: 6 new columns on email_voice_profiles with defaults
+- [ ] 70-02-PLAN.md — Expanded voice extraction (50 samples, 10-field prompt, parser updates)
+- [ ] 70-03-PLAN.md — Updated draft system prompt using all 10 fields + incremental updater expansion
 
 ---
 
-### Phase 56: Pipeline Grid
+### Phase 71: Voice Settings UI
 
-**Goal:** The Pipeline page is a configurable Airtable-style data grid with filters, saved view tabs, and a graduation flow. The design system tokens powering this phase are also established here — shadows, badges, avatars, transitions — so Phase 57 inherits them without rework.
+**Goal:** Users can see what the system learned about their writing voice and make targeted corrections. The Settings page gains a Voice Profile tab that mirrors all 10 fields as read-only descriptive text, with tone and sign-off editable inline. Reset & Relearn provides a trust mechanism.
 
-**Depends on:** Phase 55
+**Depends on:** Phase 70
 
-**Requirements:** DS-01, DS-02, DS-03, DS-04, GRID-01, GRID-02, GRID-03, GRID-04, GRID-05
+**Requirements:** SETTINGS-04, SETTINGS-01, SETTINGS-02, SETTINGS-03
 
 **Success Criteria** (what must be TRUE):
-  1. Design tokens are applied globally — card shadows render without borders, translucent badge opacity-10 style is visible, avatar component renders initials at 32px and 48px, interactive elements transition in 150ms, skeleton shimmer loading states appear on initial grid load
-  2. Pipeline grid loads with 8 default columns at 56px row height, columns are resizable and reorderable, column visibility state persists across page navigations (localStorage)
-  3. Filter bar narrows the grid in real time — Fit Tier multi-select, Outreach Status multi-select, and text search all reduce visible rows within 300ms debounce; "Stale" saved view tab shows only accounts with >14 days since last action
-  4. Stale rows render with warm tint background, new replies float to top with coral accent — both visible without any filter interaction
-  5. Clicking "Graduate" on a row opens the type-selection modal, submitting the modal calls the graduate API, the row slides out with animation, and the sidebar badge count for the selected type increments
+  1. Opening Settings and clicking "Voice Profile" tab shows all 10 learned voice fields as descriptive text with "Learned from N emails" header
+  2. User can edit tone and sign_off inline, click Save, and the changes persist — refreshing the page shows the updated values
+  3. Clicking "Reset & Relearn" shows a confirmation dialog, then deletes the existing profile and re-extracts from sent emails using the expanded 10-field, 50-sample prompt
+  4. When no voice profile exists (new user, pre-Gmail-connect), the tab shows "No voice profile yet. Connect Gmail to get started."
+  5. All three API endpoints respond correctly: GET returns profile, PATCH updates tone/sign_off only, POST reset triggers re-extraction
 
-**Plans:** 3 plans
+**Plans:** TBD
 
 Plans:
-- [x] 56-01-PLAN.md — Design system: token updates (shadows, badges, avatar component, status dots, transitions), skeleton shimmer component, empty state component; emotional register CSS for Pipeline vs Relationships ✓
-- [x] 56-02-PLAN.md — AG Grid pipeline page: column definitions (Company+avatar, Contact+title, Email, LinkedIn, Fit Tier badge, Outreach Status dot, Last Action, Days Stale), column resize/reorder/visibility, localStorage state persistence ✓
-- [x] 56-03-PLAN.md — Filter bar + saved view tabs + pagination (25/50/100), stale row tint, reply float-to-top, graduation modal with type selection + slide-out animation + sidebar badge increment ✓
+- [ ] 71-01-PLAN.md — Three API endpoints: GET/PATCH/POST voice-profile (user-scoped)
+- [ ] 71-02-PLAN.md — VoiceProfileSettings component + Settings tab integration
 
 ---
 
-### Phase 57: Relationship Surfaces
+### Phase 72: Draft Enhancements
 
-**Goal:** All four relationship surfaces are live — Prospects, Customers, Advisors, and Investors each have a card-grid list page and a shared detail page with type-driven tabs, an AI context panel, and a full action bar. The sidebar shows badge counts. A founder can open any relationship and immediately understand the full state.
+**Goal:** Users can see exactly how their voice profile influenced each draft and quickly adjust drafts without editing the persistent voice profile. The draft review experience goes from "approve or edit" to "approve, regenerate with quick adjustments, or edit."
 
-**Depends on:** Phase 56
+**Depends on:** Phase 71
 
-**Requirements:** REL-01, REL-02, REL-03, REL-04, REL-05, REL-06, REL-07, REL-08, REL-09
+**Requirements:** DRAFT-03, DRAFT-01, DRAFT-02
 
 **Success Criteria** (what must be TRUE):
-  1. Sidebar shows RELATIONSHIPS section with Prospects, Customers, Advisors, Investors links — each has a coral badge count reflecting the signal count for that type; Pipeline appears below the four relationship links
-  2. Each relationship type list page renders as a card grid (3-col desktop) — cards are sorted by urgency, warm tint background visible; empty state with type-specific illustration and CTA appears when no relationships of that type exist
-  3. Clicking a card opens the detail page — left AI panel (320px) shows cached AI summary (or graceful placeholder when null), input accepts both notes (saved as ContextEntry) and Q&A questions (calls ask API); source citations appear with Q&A answers
-  4. Detail page tab set is type-driven: Prospects and Customers show an Intelligence tab with labeled data points (Pain, Budget, Competition, Champion, Blocker, Fit Reasoning); Advisors and Investors do not show this tab
-  5. Commitments tab shows two-column layout (What You Owe / What They Owe) with overdue entries highlighted; Timeline tab shows annotated entries with icon, direction, contact, and time-ago; People tab shows contact cards with 48px avatars, role badges, and last-contacted date
+  1. Each pending draft shows a collapsible "Voice applied" section (collapsed by default) listing tone, greeting style, sign-off, avg_length, and characteristic phrases that influenced the draft
+  2. Expanding the "Voice applied" section reveals all 10 voice fields used for that specific draft
+  3. Clicking "Regenerate" dropdown shows four quick actions (shorter, longer, more casual, more formal) — selecting one regenerates the draft with a loading spinner and replaces the original body
+  4. After regenerating with "More casual," the draft voice annotation shows the overridden values — but visiting Voice Profile settings confirms the persistent profile is unchanged
+  5. A custom override option allows the user to type free-form tone instructions for regeneration
 
-**Plans:** 5 plans
+**Plans:** TBD
 
 Plans:
-- [x] 57-01-PLAN.md — Sidebar redesign: RELATIONSHIPS section header, four type links with badge counts (React Query from signals endpoint), Pipeline repositioned below; query key factory (queryKeys.ts) for cross-surface invalidation ✓
-- [x] 57-02-PLAN.md — Relationship list pages: card grid component (3-col/2-col/1-col responsive), type-specific card content, urgency sort, warm tint register, empty states per type ✓
-- [x] 57-03-PLAN.md — Shared RelationshipDetail page: fromType URL param routing, left AI panel + main area layout, header card with avatar + type badges, tab navigation with type-driven config map ✓
-- [x] 57-04-PLAN.md — Detail tabs: Timeline (annotated entries, expandable, paginated), People (contact cards), Intelligence (Prospects/Customers only — labeled data points, editable), Commitments (two-column, overdue highlight), action bar (type-specific buttons with toast stubs) ✓
-- [x] 57-05-PLAN.md — AI context panel: cached summary display, skeleton on load, note capture (ContextEntry POST), Q&A input (ask endpoint), source attribution display, graceful degradation for thin context ✓
+- [ ] 72-01-PLAN.md — POST /email/drafts/{draft_id}/regenerate endpoint + voice snapshot in context_used
+- [ ] 72-02-PLAN.md — Voice annotation component + Regenerate dropdown on DraftReview
 
 ---
 
-### Phase 58: Unified Company Intelligence Engine
+### Phase 73: Voice as Context Store Asset
 
-**Goal:** Document uploads and URL crawls flow through a single skill engine with intelligence-driven enrichment. The document upload parallel path is eliminated. Founders can refresh or reset their company profile from the profile page.
+**Goal:** The voice profile is written to `sender-voice.md` in the context store, making it a shared asset that any skill can read. Outreach drafts, social posts, meeting prep summaries — anything that generates text can match the user's voice without re-learning it.
 
-**Depends on:** Phase 57
+**Depends on:** Phase 72
+
+**Requirements:** CTX-01
 
 **Success Criteria** (what must be TRUE):
-  1. `_execute_company_intel()` accepts both URLs and document text — document text skips crawl, goes straight to structuring
-  2. `POST /profile/analyze-document` creates a SkillRun and routes through the existing company-intel engine — no more background enrichment side path
-  3. Enrichment prompt reads existing profile entries and focuses research on gaps — not the same 10 generic searches every time
-  4. `POST /profile/refresh` re-runs the skill with tenant URL + all linked document content, dedup merges with existing data
-  5. `POST /profile/reset` soft-deletes all `company-intel-onboarding` entries, then runs the same refresh flow
-  6. Frontend profile page shows Refresh and Reset buttons — both display the existing SSE discovery streaming UI during execution
+  1. After initial voice extraction completes, `sender-voice.md` exists in the context store with all 10 voice fields in standard context entry format
+  2. After an incremental voice update (user edits and approves a draft), `sender-voice.md` is updated with the revised profile
+  3. Other skills can read `sender-voice.md` via `flywheel_read_context` and get the current voice profile
+  4. The file follows standard context store entry format with source, date, confidence, and evidence count
 
-**Plans:** 3 plans
+**Plans:** TBD
 
 Plans:
-- [x] 58-01-PLAN.md — Engine extension: detect URL vs document text input, skip crawl for documents, gap-aware enrichment prompt that reads existing profile before researching ✓
-- [x] 58-02-PLAN.md — Route document uploads through skill engine: POST /profile/analyze-document creates SkillRun, remove background enrichment path; add POST /profile/refresh and POST /profile/reset endpoints ✓
-- [x] 58-03-PLAN.md — Frontend: Refresh and Reset buttons on CompanyProfilePage, confirmation modal for reset, SSE streaming reuse from onboarding ✓
+- [ ] 73-01-PLAN.md — Voice-to-context-store writer + hook into extraction and incremental update paths
 
 ---
 
-### ✅ v3.0 Intelligence Flywheel — Conversations Become CRM Intelligence (Shipped 2026-03-28)
+### Phase 74: Email Context Extractor and Shared Writer
 
-**Milestone Goal:** Every conversation source (meetings, emails, Slack) flows through a unified intelligence pipeline that extracts structured insights, auto-links to accounts/contacts, and enriches relationship surfaces. The flywheel loop: Ingest → Enrich → Prepare. User-level privacy ensures raw content stays private while extracted intelligence benefits the whole team.
+**Goal:** The system can extract intelligence from email bodies (contacts, topics, deals, relationships, action items) and write it to the context store through a shared writer that handles dedup, evidence counting, and format compliance. This creates the infrastructure for emails to feed the same intelligence loop that meetings already power.
 
----
+**Depends on:** Phase 73
 
-### Phase 59: Team Privacy Foundation
-
-**Goal:** User-level RLS policies enforce that personal data (emails, integrations, calendar, skill runs) is invisible to other team members. This is the security prerequisite for any multi-user or team feature.
-
-**Depends on:** Phase 58
-
-**Requirements:** PRIV-01, PRIV-02, PRIV-03, PRIV-04, PRIV-05, PRIV-06, PRIV-07
+**Requirements:** CTX-02, CTX-03
 
 **Success Criteria** (what must be TRUE):
-  1. User B in the same tenant calls `GET /email/threads` and gets zero results (not User A's emails)
-  2. User B calls `DELETE /integrations/{user_a_id}` and gets 404 Not Found (avoids leaking resource existence)
-  3. User B calls `GET /skills/runs` and sees only their own runs
-  4. All 7 tables have user-level RLS policies enforced at the database level
-  5. Existing single-user functionality is unaffected
+  1. `extract_email_context()` processes a priority-3+ email and returns structured data with contacts, topics, deal_signals, relationship_signals, and action_items
+  2. The shared context store writer writes to contacts.md, insights.md, and action-items.md using standard entry format — duplicate entries (same source + detail_tag + date) are skipped, not appended
+  3. When the same insight is corroborated by a second email, the evidence count on the existing entry increments rather than creating a duplicate
+  4. Backend engines call the writer directly (no MCP dependency during sync), while Claude Code skills can invoke the same writer via MCP tool — both paths use identical write/dedup logic
+  5. Email bodies are fetched on-demand and discarded after extraction — never stored in the database (PII posture unchanged)
 
-**Plans:** 2 plans
+**Plans:** TBD
 
 Plans:
-- [x] 59-01-PLAN.md — Alembic migration: user-level RLS policies on emails, email_scores, email_drafts, email_voice_profiles, integrations, work_items, skill_runs ✓
-- [x] 59-02-PLAN.md — API-level ownership guards: email endpoint user_id filters, integration DELETE/sync ownership checks, skill_runs list user scoping ✓
+- [ ] 74-01-PLAN.md — context_store_writer.py: write_contact, write_insight, write_action_item, write_deal_signal with dedup + evidence
+- [ ] 74-02-PLAN.md — email_context_extractor.py: extraction prompt, structured parsing, confidence assignment
 
 ---
 
-### Phase 60: Meeting Data Model and Granola Adapter
+### Phase 75: Context Extraction Pipeline
 
-**Goal:** The meetings table exists with split-visibility RLS, Granola is connected as an integration with encrypted API key, and meetings can be synced from Granola into the database with dedup. No processing yet — just the data foundation and sync pipeline.
+**Goal:** Email context extraction is live in production — wired into the gmail sync loop with confidence-based routing, a human review queue for low-confidence extractions, daily caps, and tracking to prevent re-extraction. The context store steadily enriches with every sync cycle.
 
-**Depends on:** Phase 59
+**Depends on:** Phase 74
 
-**Requirements:** MDE-01, MDE-02, GRA-01, GRA-02, GRA-03
+**Requirements:** CTX-04, CTX-05
 
 **Success Criteria** (what must be TRUE):
-  1. `meetings` table exists with tenant-level RLS for metadata, transcript stored in Supabase Storage with user-level access
-  2. User can connect Granola via API key in Settings — key is encrypted in Integration table
-  3. `POST /meetings/sync` pulls meetings from Granola, dedup by external_id, creates meeting rows with `processing_status='pending'`
-  4. Synced meetings show title, date, attendees, provider — no processing yet
+  1. After a gmail sync cycle, priority-3+ emails have `context_extracted_at` set — subsequent sync cycles skip these emails (no re-extraction)
+  2. High and medium confidence extractions appear in context store files immediately after sync
+  3. Low confidence extractions appear in `email_context_reviews` table with status "pending" — they do NOT auto-write to the context store
+  4. Approving a review via `POST /email/context-reviews/{id}/approve` writes the extraction to the context store and sets status to "approved"
+  5. Context extraction respects the 200/day per-tenant cap — the 201st eligible email in a day is skipped with a log message
 
-**Plans:** 3 plans
-
-Plans:
-- [x] 60-01-PLAN.md — Alembic migration: meetings table with split-visibility RLS, ORM model, indexes ✓
-- [x] 60-02-PLAN.md — Granola adapter: GranolaAdapter (list_meetings, get_meeting_content, test_connection), Integration flow (API key encrypt/store/validate) ✓
-- [x] 60-03-PLAN.md — Sync endpoint: POST /meetings/sync, dedup logic, meeting row creation, auto-filter with processing rules from Integration settings ✓
-
----
-
-### Phase 61: Meeting Intelligence Pipeline
-
-**Goal:** Synced meetings are automatically processed — classified by type, intelligence extracted across 9 insight types, written to 7 context store files, and auto-linked to accounts and contacts. The extraction step transforms private transcripts into shared team intelligence.
-
-**Depends on:** Phase 60
-
-**Requirements:** MPP-01, MPP-02, MPP-03, MPP-04, MPP-05, AAL-01, AAL-02, AAL-03
-
-**Success Criteria** (what must be TRUE):
-  1. `_execute_meeting_processor()` fetches transcript, classifies type (8 types via Haiku), extracts insights (9 types via Sonnet), writes to context store
-  2. After processing, meeting row has `summary` JSONB populated with tldr, key_decisions, action_items, and `processing_status='complete'`
-  3. Attendee email domains auto-match to existing accounts — `meeting.account_id` is set
-  4. Unknown attendee domains auto-create prospect accounts with contacts
-  5. Processing rules (skip internal, skip by domain, skip by type) correctly filter meetings to `processing_status='skipped'`
-  6. SSE events stream during processing (reuses existing SkillRun event pattern)
-
-**Plans:** 3 plans
+**Plans:** TBD
 
 Plans:
-- [x] 61-01-PLAN.md — Meeting processor engine: 7-stage pipeline (fetch → store → classify → extract → link → write → done), meeting_processor_web.py helpers ✓
-- [x] 61-02-PLAN.md — Account auto-linking: domain matching, contact upsert, prospect auto-creation for unknown domains ✓
-- [x] 61-03-PLAN.md — Processing rules: skip_internal/skip_domains/skip_types/skip_meetings + batch/list/detail endpoints ✓
-
----
-
-### Phase 62: Meeting Surfaces and Relationship Enrichment
-
-**Goal:** Meetings have a dedicated page with list/detail views. Processed meetings enrich relationship surfaces — timeline shows meeting entries, intelligence tabs show extracted insights, people tabs show discovered contacts, signal badges reflect meeting activity. The CRM surfaces built in v2.1 now fill with real conversation intelligence.
-
-**Depends on:** Phase 61
-
-**Requirements:** FE-01, FE-02, FE-03, FE-04, RSE-01, RSE-02, RSE-03
-
-**Success Criteria** (what must be TRUE):
-  1. Meetings page shows synced meetings with status badges (pending/processing/complete/skipped), sync button triggers Granola pull
-  2. Meeting detail shows metadata for all team members, transcript only for the meeting owner (403 for others)
-  3. Granola API key connection in Settings page with test/disconnect flow
-  4. Relationship timeline tab shows meeting entries with date, type badge, attendees, tldr
-  5. Relationship intelligence tab includes pain points, buying signals, competitor mentions extracted from meetings
-  6. Sidebar signal badges increment when new meetings are processed for an account
-
-**Plans:** 3 plans
-
-Plans:
-- [x] 62-01-PLAN.md — Meetings page: list view with meeting cards, status badges, sync button, processing SSE feedback; meeting detail view with privacy enforcement (transcript owner-only) ✓
-- [x] 62-02-PLAN.md — Granola settings: API key input in SettingsPage, connection status indicator, test/disconnect flow, sync controls ✓
-- [x] 62-03-PLAN.md — Relationship enrichment: meeting entries in timeline tab, intelligence tab data from meeting context entries, people tab contacts from meeting attendees, signal badge integration ✓
-
----
-
-### Phase 63: Meeting Prep Loop
-
-**Goal:** The flywheel closes — meeting prep reads the enriched context store and produces intelligence briefings for upcoming meetings. A founder preparing for a call with Acme sees full relationship history, known pain points, open action items, and competitive positioning. The prep makes the meeting more productive, which produces richer intelligence for next time.
-
-**Depends on:** Phase 62
-
-**Requirements:** PREP-01, PREP-02
-
-**Success Criteria** (what must be TRUE):
-  1. User can trigger meeting prep from meetings page or relationship page — "Prep for meeting with Acme"
-  2. Prep reads context store entries linked to the account (pain points, competitor intel, action items, contacts, timeline)
-  3. Briefing is rendered as HTML with structured sections (relationship summary, known pain points, open action items, competitive landscape, suggested questions)
-  4. Prep is user-initiated only (no auto-trigger in v1)
-  5. Briefing is private to the requesting user (Zone 1)
-
-**Plans:** 2 plans
-
-Plans:
-- [x] 63-01-PLAN.md — Meeting prep engine: web-adapted prep skill, context reader (account-scoped entries from 7 files), LLM briefing generation, HTML rendering ✓
-- [x] 63-02-PLAN.md — Prep frontend: trigger from meetings page and relationship page, SSE streaming during generation, briefing viewer ✓
-
----
-
-### 🚧 v4.0 Flywheel OS — Intelligence Operating System for Founders (In Progress)
-
-**Milestone Goal:** Transform the intelligence layer into a founder's daily operating system. Conversations automatically become tracked commitments. Unified meetings timeline (Calendar + Granola), automatic task extraction from transcripts, and a `/flywheel` CLI ritual. The flywheel closes: better prep → richer meetings → more detected tasks → auto-executed deliverables.
-
----
-
-### Phase 64: Unified Meetings
-
-**Goal:** Google Calendar events and Granola transcripts live in one table with dedup and lifecycle status. The meetings page shows upcoming and past meetings in a unified timeline. Calendar sync writes to the meetings table instead of WorkItems.
-
-**Depends on:** Phase 63
-
-**Requirements:** UNI-01, UNI-02, UNI-03, UNI-04, UNI-05, UNI-06, UNI-08
-
-**Success Criteria** (what must be TRUE):
-  1. Calendar sync creates Meeting rows with `processing_status='scheduled'` — no new WorkItems created for calendar events
-  2. A meeting that exists in both Google Calendar and Granola appears as ONE row (dedup by time+title+attendees)
-  3. Meetings page shows Upcoming and Past tabs, with calendar events in Upcoming and processed meetings in Past
-  4. User can trigger prep from a scheduled meeting that has a linked account
-  5. `get_meeting_prep_suggestions()` queries the meetings table (not WorkItems)
-
-**Plans:** 3 plans ✓ **COMPLETE** (2026-03-28)
-
-Plans:
-- [x] 64-01-PLAN.md — Migration 033 + calendar sync rewrite + Granola fuzzy dedup + lifecycle state machine
-- [x] 64-02-PLAN.md — Time-based listing API + meeting prep endpoint + suggestions migration
-- [x] 64-03-PLAN.md — Frontend Upcoming/Past tabs + new status values + scheduled meeting prep trigger
-
-
----
-
-### Phase 65: Task Intelligence ✅ (completed 2026-03-28)
-
-**Goal:** Meeting transcripts automatically produce task rows. The intelligence pipeline gains a Stage 7 that classifies commitments (yours/theirs/mutual) and maps them to executable skills. A tasks API exposes the full lifecycle. Signal counts reflect pending tasks.
-
-**Depends on:** Phase 64
-
-**Requirements:** TASK-01, TASK-02, TASK-03, TASK-04
-
-**Success Criteria** (what must be TRUE):
-  1. After processing a meeting where the founder says "we'll send a one-pager", a Task row exists with `suggested_skill='sales-collateral'` and `trust_level='review'`
-  2. After processing a meeting where the other party says "I'll send the requirements", a Task row exists with `commitment_direction='theirs'`
-  3. `GET /tasks/` returns detected tasks with full CRUD, status transition validation, and user-scoped privacy
-  4. `GET /signals/` includes `tasks_detected`, `tasks_in_review`, `tasks_overdue` counts
-  5. All tasks with email-related skills have `trust_level='confirm'` (NEVER auto-send)
-
-**Plans:** 3 plans — all verified (17/17 must-haves passed)
-
-Plans:
-- [x] 65-01-PLAN.md — Tasks table migration (20 cols, 3 indexes, user-level RLS), Task ORM model, signal counts extension (tasks_detected, tasks_in_review, tasks_overdue) ✓
-- [x] 65-02-PLAN.md — Stage 7 task extraction in meeting processor: Haiku commitment classification, extract_tasks() + write_task_rows() helpers, pipeline insertion ✓
-- [x] 65-03-PLAN.md — Tasks CRUD API: 7 endpoints (list, summary, detail, create, update, status transition, delete), status validation, router registration ✓
-
----
-
-### Phase 66: /flywheel Ritual (Rearchitected)
-
-**Goal:** The flywheel ritual is a backend orchestrator engine — same architecture as meeting-prep and meeting-processor. One MCP invocation syncs meetings from Granola, processes unprocessed recordings into intelligence, prepares briefings for upcoming external meetings, and returns a rich HTML daily brief. Invoked via `flywheel_run_skill("flywheel")` — no separate installation, no env vars, no curl.
-
-**Depends on:** Phase 65
-
-**Requirements:** FLY-01, FLY-02, FLY-03, FLY-04, FLY-05, FLY-06
-
-**Spec:** `.planning/SPEC-flywheel-ritual-rearchitect.md` (reviewed, 14 findings addressed)
-
-**Success Criteria** (what must be TRUE):
-  1. `flywheel_run_skill("flywheel")` via MCP creates a SkillRun, job queue dispatches to the dedicated engine, and returns a link to the HTML daily brief in the document library
-  2. Engine Stage 1 syncs from Granola using extracted shared `sync_granola_meetings()` function (same dedup logic as POST /meetings/sync)
-  3. Engine Stage 2 processes up to 5 unprocessed meetings by calling `_execute_meeting_processor()` directly (function call, not HTTP)
-  4. Engine Stage 3 preps up to 3 upcoming external meetings by calling `_execute_meeting_prep()` directly
-  5. HTML daily brief contains 5 sections (sync summary, processing summary, prep cards, pending tasks read-only, remaining items) and renders in the document library
-  6. All SSE events stream to the parent run's events_log — one run, one stream
-  7. SKILL.md has `engine: flywheel_ritual` and `web_tier: 1` frontmatter, seeded to `skill_definitions` table
-
-**Plans:** 4 plans (replanned from spec — includes task execution)
-
-Plans:
-- [x] 66-01-PLAN.md — Extract sync logic, replace SKILL.md with engine frontmatter, add dispatch ✓
-- [x] 66-02-PLAN.md — Flywheel ritual engine Stages 1-3 (sync, process, prep) ✓
-- [x] 66-03-PLAN.md — Stage 4: LLM-powered task execution (context + web search + invoke skills) ✓
-- [x] 66-04-PLAN.md — HTML daily brief, MCP update, wiring ✓
-
----
-
-### Phase 66.1: Flywheel Stabilization (INSERTED)
-
-**Goal:** Fix all 18 issues discovered during Phase 66 end-to-end testing. The flywheel engine code is structurally complete but cannot run successfully due to: (1) env var naming mismatch blocking all Supabase Storage operations, (2) migration 034 FK failure preventing tasks table creation, (3) timezone bugs causing wrong-day prep, (4) title matching false positives, (5) unguarded error paths that crash the engine, and (6) architecture issues creating fragility under load.
-
-**Depends on:** Phase 66
-
-**Success Criteria** (what must be TRUE):
-  1. `flywheel_run_skill("flywheel")` completes all 5 stages without crashing — sync, process, prep, execute, compose — and returns an HTML daily brief
-  2. Meeting processing successfully uploads transcripts to Supabase Storage (env var naming fixed)
-  3. `alembic upgrade head` succeeds — migrations 033 and 034 both apply cleanly
-  4. Stage 3 preps the correct day's meetings regardless of server timezone
-  5. Stage 4 gracefully handles missing tasks table, None user_id, and DB errors
-  6. `_compose_daily_brief()` never crashes the engine — all render helpers tolerate None/empty inputs
-  7. `_filter_unprepped()` uses a single batch query (no N+1)
-  8. Meeting processing has a configurable cap to prevent runaway execution
-
-**Plans:** 3 plans
-
-Plans:
-- [x] 66.1-01-PLAN.md — Infrastructure & Migrations: env var fix, migration 034 rewrite, migration chain, updated_at triggers ✓
-- [x] 66.1-02-PLAN.md — Engine Correctness: timezone fix, N+1 batch query, user_id None guard, Stage 4 error guard, compose guards, Haiku model constant ✓
-- [x] 66.1-03-PLAN.md — Robustness & Architecture: append_event_atomic COALESCE, execution caps, optimistic lock, private import docs, MCP timeout ✓
-
----
-
-### v5.0 Tasks UI — Commitment Accountability System
-
-**Milestone Goal:** Build a frontend Tasks page and Briefing widget that surfaces AI-extracted commitments for triage, tracks active commitments grouped by due date, and monitors promises others have made — with dual triage modes (list + Tinder-style focus), skill execution, and a slide-in detail panel.
-
----
-
-### Phase 67: Tasks UI
-
-**Goal:** Build the complete Tasks frontend — page at `/tasks`, Briefing widget, triage inbox with focus mode, My Commitments grouped list, Promises to Me watchlist, detail side panel, quick-add, and one backend extension (add `deferred` status + `confirmed→done` shortcut to task state machine).
-
-**Depends on:** Phase 66.1
-
-**Requirements:** TASK-01 through TASK-16 (see .planning/SPEC-tasks-ui.md)
-
-**Success Criteria** (what must be TRUE):
-  1. Navigating to `/tasks` renders the full Tasks page with four vertically stacked sections: Triage Inbox, My Commitments, Promises to Me, Done (collapsed)
-  2. "Review All" opens Tinder-style focus mode — founder processes 8 tasks with arrow keys (→ confirm, ← dismiss, ↓ later) in under 60 seconds
-  3. My Commitments shows `yours` tasks grouped by due date (Overdue/Today/This Week/Next Week/Later) with rich provenance (meeting source, account, priority, skill chip)
-  4. Promises to Me shows `theirs`/`mutual` tasks as a lightweight watchlist with overdue flagging and one-click "Create Follow-up"
-  5. Clicking any task opens a 480px slide-in detail panel with editable fields, status transitions, and "Generate Deliverable" skill execution
-  6. Briefing page shows a Tasks widget (BrandedCard) with top 3 triage items and overdue promises count, linking to `/tasks`
-  7. `PATCH /tasks/{id}/status` accepts `deferred` from `detected`/`in_review`, and `done` from `confirmed`
-
-**Plans:** 7 plans
-
-Plans:
-- [ ] 67-01-PLAN.md — Backend state machine extension + types + React Query hooks
-- [ ] 67-02-PLAN.md — Tasks page shell, routing, sidebar, Triage Inbox
-- [ ] 67-03-PLAN.md — My Commitments grouped list + Promises to Me watchlist
-- [ ] 67-04-PLAN.md — Task Detail Panel + Quick Add + Done Section
-- [ ] 67-05-PLAN.md — Focus Mode (Tinder-style triage overlay)
-- [ ] 67-06-PLAN.md — Briefing widget + keyboard navigation
-- [ ] 67-07-PLAN.md — Skill execution + search + staggered animations
+- [ ] 75-01-PLAN.md — email_context_reviews table migration + context_extracted_at column + confidence routing logic
+- [ ] 75-02-PLAN.md — Sync loop wiring: extract after score, daily cap, review API endpoints (list/approve/reject)
 
 ---
 
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -633,7 +459,15 @@ Plans:
 | 65. Task Intelligence | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
 | 66. /flywheel Ritual (Rearchitected) | v4.0 | 4/4 | ✓ Complete | 2026-03-29 |
 | 66.1 Flywheel Stabilization (INSERTED) | v4.0 | 3/3 | ✓ Complete | 2026-03-29 |
-| 67. Tasks UI | v5.0 | 0/7 | ○ Planned | — |
+| 67. Tasks UI | v5.0 | 7/7 | ✓ Complete | 2026-03-29 |
+| 68. Email-to-Tasks (Layer A) | v6.0 | 3/3 | ✓ Complete | 2026-03-29 |
+| 69. Model Configuration Foundation | v7.0 | 1/1 | ✓ Complete | 2026-03-30 |
+| 70. Voice Profile Overhaul | v7.0 | 0/3 | Not started | - |
+| 71. Voice Settings UI | v7.0 | 0/2 | Not started | - |
+| 72. Draft Enhancements | v7.0 | 0/2 | Not started | - |
+| 73. Voice as Context Store Asset | v7.0 | 0/1 | Not started | - |
+| 74. Email Context Extractor and Shared Writer | v7.0 | 0/2 | Not started | - |
+| 75. Context Extraction Pipeline | v7.0 | 0/2 | Not started | - |
 
 ---
 *Roadmap created: 2026-03-24*
@@ -643,3 +477,6 @@ Plans:
 *v2.1 shipped: 2026-03-27*
 *v3.0 milestone added: 2026-03-28*
 *v4.0 milestone added: 2026-03-28*
+*v5.0 milestone added: 2026-03-29*
+*v6.0 milestone added: 2026-03-29*
+*v7.0 milestone added: 2026-03-29 — Email Voice & Intelligence Overhaul (7 phases, 18 requirements)*
