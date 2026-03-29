@@ -10,9 +10,9 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 ## Current Position
 
 Phase: 66.1 (Flywheel Stabilization — INSERTED)
-Plan: 0 of 3 in current phase (not yet planned)
-Status: Phase 66.1 inserted — 18 issues found during Phase 66 E2E testing
-Last activity: 2026-03-29 — Phase 66.1 inserted after Phase 66
+Plan: 2 of 3 in current phase
+Status: Executing Phase 66.1 — Plan 02 complete (engine correctness fixes)
+Last activity: 2026-03-29 — Plan 02 complete
 
 Progress: [██████████████████░░] 92% (42/42 plans complete across v1.0-v3.0) | v4.0: 12/15 plans
 
@@ -174,6 +174,9 @@ Recent decisions affecting current work:
 - [66-01 rearchitect]: HTTPException raised from inside sync function for API compatibility -- caller is always endpoint or engine
 - [Phase 66]: Refactored flywheel ritual stages into private async functions for readability and testability
 - [Phase 66]: NULL title meetings treated as unprepped without querying skill_runs -- prevents contains('') matching all completed preps
+- [66.1-02 execution]: Removed date import entirely -- only datetime.now(timezone.utc).date() used for UTC-explicit dates
+- [66.1-02 execution]: Issue 6 (title matching false positives) intentionally deferred -- requires schema change (meeting_id on SkillRun), out of scope for stabilization
+- [66.1-02 execution]: _filter_unprepped batch query fetches all completed prep input_texts in one round-trip, filters in Python
 
 ### Pending Todos
 
@@ -191,5 +194,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-29
-Stopped at: Phase 66.1 inserted. Needs /gsd:plan-phase 66.1 next.
+Stopped at: Completed 66.1-02-PLAN.md
 Resume file: None
