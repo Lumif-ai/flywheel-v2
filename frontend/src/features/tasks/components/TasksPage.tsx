@@ -49,34 +49,28 @@ export function TasksPage() {
           paddingBottom: '48px',
         }}
       >
-        {/* Page header */}
+        {/* Page header — always visible */}
         {isLoading ? (
           <div className="mb-12">
             <Skeleton className="h-8 w-32 mb-2" />
             <Skeleton className="h-4 w-48" />
           </div>
-        ) : isCompletelyEmpty ? (
-          <EmptyState
-            icon={CheckSquare}
-            title="No tasks yet"
-            description="Tasks will appear here after your meetings are processed"
-          />
         ) : (
-          <>
-            <div className="flex items-start justify-between" style={{ marginBottom: '48px' }}>
-              <div>
-                <h1
-                  style={{
-                    fontSize: '28px',
-                    fontWeight: 700,
-                    lineHeight: '1.2',
-                    letterSpacing: '-0.02em',
-                    color: 'var(--heading-text)',
-                    margin: 0,
-                  }}
-                >
-                  Tasks
-                </h1>
+          <div className="flex items-start justify-between" style={{ marginBottom: '48px' }}>
+            <div>
+              <h1
+                style={{
+                  fontSize: '28px',
+                  fontWeight: 700,
+                  lineHeight: '1.2',
+                  letterSpacing: '-0.02em',
+                  color: 'var(--heading-text)',
+                  margin: 0,
+                }}
+              >
+                Tasks
+              </h1>
+              {!isCompletelyEmpty && (
                 <p
                   style={{
                     fontSize: '13px',
@@ -88,8 +82,10 @@ export function TasksPage() {
                 >
                   {activeCount} active &middot; {needReviewCount} need review
                 </p>
-              </div>
-              <div className="flex items-center gap-3">
+              )}
+            </div>
+            <div className="flex items-center gap-3">
+              {!isCompletelyEmpty && (
                 <div
                   className="flex items-center"
                   style={{
@@ -139,31 +135,38 @@ export function TasksPage() {
                     </button>
                   )}
                 </div>
-                <Button variant="default" size="sm" onClick={() => setShowQuickAdd(true)}>
-                  <Plus className="size-3.5" data-icon="inline-start" />
-                  Add
-                </Button>
-              </div>
+              )}
+              <Button variant="default" size="sm" onClick={() => setShowQuickAdd(true)}>
+                <Plus className="size-3.5" data-icon="inline-start" />
+                Add
+              </Button>
             </div>
-
-            {/* Section slots with 48px gap between them */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
-              <TriageInbox searchFilter={debouncedSearch} />
-
-              {/* Quick-add form above My Commitments */}
-              <div>
-                <TaskQuickAdd
-                  isOpen={showQuickAdd}
-                  onClose={() => setShowQuickAdd(false)}
-                />
-                <MyCommitments onSelect={(id) => setSelectedTaskId(id)} searchFilter={debouncedSearch} />
-              </div>
-
-              <PromisesToMe searchFilter={debouncedSearch} />
-              <DoneSection searchFilter={debouncedSearch} />
-            </div>
-          </>
+          </div>
         )}
+
+        {/* Quick-add form — always available */}
+        {!isLoading && (
+          <TaskQuickAdd
+            isOpen={showQuickAdd}
+            onClose={() => setShowQuickAdd(false)}
+          />
+        )}
+
+        {/* Content — sections or empty state */}
+        {!isLoading && isCompletelyEmpty && !showQuickAdd ? (
+          <EmptyState
+            icon={CheckSquare}
+            title="No tasks yet"
+            description="Tasks will appear here after your meetings are processed, or add one manually"
+          />
+        ) : !isLoading && !isCompletelyEmpty ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
+            <TriageInbox searchFilter={debouncedSearch} />
+            <MyCommitments onSelect={(id) => setSelectedTaskId(id)} searchFilter={debouncedSearch} />
+            <PromisesToMe searchFilter={debouncedSearch} />
+            <DoneSection searchFilter={debouncedSearch} />
+          </div>
+        ) : null}
       </div>
 
       {/* Detail panel */}

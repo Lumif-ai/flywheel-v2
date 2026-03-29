@@ -152,11 +152,9 @@ export interface GroupedTasks {
 export function groupTasksByDueDate(tasks: Task[]): GroupedTasks {
   const now = new Date()
   const todayStart = startOfDay(now)
-  const todayEnd = startOfDay(addWeeks(now, 0)) // end of today = start of tomorrow
   const tomorrowStart = new Date(todayStart)
   tomorrowStart.setDate(tomorrowStart.getDate() + 1)
   const weekEnd = endOfWeek(now, { weekStartsOn: 1 })
-  const nextWeekStart = startOfWeek(addWeeks(now, 1), { weekStartsOn: 1 })
   const nextWeekEnd = endOfWeek(addWeeks(now, 1), { weekStartsOn: 1 })
 
   const groups: GroupedTasks = {
