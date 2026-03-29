@@ -108,6 +108,9 @@ class TaskUpdate(BaseModel):
     due_date: datetime.datetime | None = None
     suggested_skill: str | None = None
     trust_level: str | None = None
+    resolved_by: str | None = None
+    resolution_source_id: UUID | None = None
+    resolution_note: str | None = None
 
     @field_validator("priority")
     @classmethod
@@ -121,6 +124,13 @@ class TaskUpdate(BaseModel):
     def validate_trust_level(cls, v: str | None) -> str | None:
         if v is not None and v not in VALID_TRUST_LEVELS:
             raise ValueError(f"trust_level must be one of {sorted(VALID_TRUST_LEVELS)}")
+        return v
+
+    @field_validator("resolved_by")
+    @classmethod
+    def validate_resolved_by(cls, v: str | None) -> str | None:
+        if v is not None and v not in {"user", "system"}:
+            raise ValueError("resolved_by must be 'user' or 'system'")
         return v
 
 
@@ -141,6 +151,7 @@ class TaskResponse(BaseModel):
     user_id: UUID
     meeting_id: UUID | None
     account_id: UUID | None
+    email_id: UUID | None = None
     title: str
     description: str | None
     source: str
@@ -153,6 +164,9 @@ class TaskResponse(BaseModel):
     priority: str
     due_date: datetime.datetime | None
     completed_at: datetime.datetime | None
+    resolved_by: str | None = None
+    resolution_source_id: UUID | None = None
+    resolution_note: str | None = None
     metadata: dict | None
     created_at: datetime.datetime
     updated_at: datetime.datetime
@@ -190,6 +204,7 @@ def _task_to_response(t: Task) -> dict:
         "user_id": t.user_id,
         "meeting_id": t.meeting_id,
         "account_id": t.account_id,
+        "email_id": t.email_id,
         "title": t.title,
         "description": t.description,
         "source": t.source,
@@ -202,6 +217,9 @@ def _task_to_response(t: Task) -> dict:
         "priority": t.priority,
         "due_date": t.due_date,
         "completed_at": t.completed_at,
+        "resolved_by": t.resolved_by,
+        "resolution_source_id": t.resolution_source_id,
+        "resolution_note": t.resolution_note,
         "metadata": t.metadata_,
         "created_at": t.created_at,
         "updated_at": t.updated_at,
@@ -222,6 +240,7 @@ async def list_tasks(
     priority: str | None = Query(None),
     meeting_id: UUID | None = Query(None),
     account_id: UUID | None = Query(None),
+    source: str | None = Query(None),
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
@@ -240,6 +259,8 @@ async def list_tasks(
         base = base.where(Task.meeting_id == meeting_id)
     if account_id is not None:
         base = base.where(Task.account_id == account_id)
+    if source is not None:
+        base = base.where(Task.source == source)
 
     # Count
     count_stmt = select(func.count()).select_from(base.subquery())
@@ -386,6 +407,12 @@ async def update_task(
         task.suggested_skill = body.suggested_skill
     if body.trust_level is not None:
         task.trust_level = body.trust_level
+    if body.resolved_by is not None:
+        task.resolved_by = body.resolved_by
+    if body.resolution_source_id is not None:
+        task.resolution_source_id = body.resolution_source_id
+    if body.resolution_note is not None:
+        task.resolution_note = body.resolution_note
 
     task.updated_at = datetime.datetime.now(datetime.timezone.utc)
     await db.commit()

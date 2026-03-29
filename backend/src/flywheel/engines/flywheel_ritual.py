@@ -713,6 +713,10 @@ def _compose_daily_brief(stage_results: dict) -> str:
     processed = stage_results.get("processed", [])
     sections.append(_render_processed_section(processed))
 
+    # Section 2.5: Detected Tasks (channel extraction)
+    channel_tasks = stage_results.get("channel_tasks")
+    sections.append(_render_detected_tasks_section(channel_tasks))
+
     # Section 3: Prep Summaries
     prepped = stage_results.get("prepped", [])
     sections.append(_render_prep_section(prepped))
@@ -812,6 +816,90 @@ def _render_processed_section(processed: list) -> str:
       <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">Processing</h2>
       <p style="color: #6B7280; font-size: 13px; margin: 0 0 12px 0;">{summary}</p>
       {"".join(cards)}
+    </section>'''
+
+
+def _render_detected_tasks_section(channel_tasks: dict | None) -> str:
+    """Render Detected Tasks section from channel task extraction results."""
+    # If the stage didn't run or failed, don't render anything
+    if channel_tasks is None:
+        return ''
+
+    tasks_detail = channel_tasks.get("tasks_detail", [])
+    is_first_run = channel_tasks.get("is_first_run", False)
+    total_scored = channel_tasks.get("total_scored", 0)
+
+    parts = []
+
+    # Section header
+    parts.append(
+        '<h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Detected Tasks</h2>'
+    )
+
+    # First-run message
+    if is_first_run:
+        parts.append(
+            f'<div style="background: rgba(59,130,246,0.08); border-radius: 12px; padding: 12px 16px; margin-bottom: 12px;">'
+            f'<p style="color: #3B82F6; margin: 0; font-size: 13px; font-style: italic;">'
+            f'Found {total_scored} actionable emails from the last 7 days. Showing top 15 by priority.'
+            f'</p></div>'
+        )
+
+    # Empty state
+    if not tasks_detail:
+        parts.append(
+            '<p style="color: #6B7280; font-size: 14px;">No new email tasks</p>'
+        )
+    else:
+        # Task rows
+        for task in tasks_detail:
+            title = _escape(task.get("title", "Untitled"))
+            sender = _escape(task.get("sender_name", ""))
+            source = task.get("source", "email")
+            priority = task.get("priority", "medium")
+            duplicate_of = task.get("duplicate_of_title")
+
+            # Source badge colors
+            source_colors = {
+                "email": "#3B82F6",
+                "slack": "#22C55E",
+            }
+            badge_bg = source_colors.get(source, "#6B7280")
+
+            # Priority dot colors
+            priority_dot = ""
+            if priority == "high":
+                priority_dot = '<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #E94D35; margin-right: 6px; vertical-align: middle;"></span>'
+            elif priority == "medium":
+                priority_dot = '<span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #F97316; margin-right: 6px; vertical-align: middle;"></span>'
+
+            # Duplicate label
+            duplicate_html = ""
+            if duplicate_of:
+                duplicate_html = (
+                    f'<div style="margin-top: 4px;">'
+                    f'<span style="background: rgba(249,115,22,0.1); color: #F97316; padding: 2px 8px; '
+                    f'border-radius: 99px; font-size: 11px;">possible duplicate of: {_escape(duplicate_of)}</span>'
+                    f'</div>'
+                )
+
+            parts.append(
+                f'<div style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 8px; '
+                f'box-shadow: 0 1px 3px rgba(0,0,0,0.08);">'
+                f'<div style="display: flex; align-items: center; gap: 8px;">'
+                f'{priority_dot}'
+                f'<p style="font-weight: 600; color: #121212; margin: 0; font-size: 14px; flex: 1;">{title}</p>'
+                f'<span style="background: {badge_bg}; color: white; padding: 2px 10px; '
+                f'border-radius: 99px; font-size: 11px; white-space: nowrap;">{_escape(source)}</span>'
+                f'</div>'
+                f'<p style="color: #6B7280; margin: 4px 0 0 0; font-size: 13px;">{sender}</p>'
+                f'{duplicate_html}'
+                f'</div>'
+            )
+
+    return f'''
+    <section id="detected-tasks" style="margin-bottom: 24px;">
+      {"".join(parts)}
     </section>'''
 
 
