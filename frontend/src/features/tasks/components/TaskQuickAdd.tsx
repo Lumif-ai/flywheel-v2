@@ -33,7 +33,7 @@ export function TaskQuickAdd({ isOpen, onClose, prefill }: TaskQuickAddProps) {
   const dateRef = useRef<HTMLDivElement>(null)
   const accountRef = useRef<HTMLDivElement>(null)
 
-  // Fetch accounts for searchable dropdown
+  // Fetch accounts for searchable dropdown (client-side filtering)
   const { data: accountsData } = useAccounts({ limit: 100 })
 
   // Filter accounts by search query
