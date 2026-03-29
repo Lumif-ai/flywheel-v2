@@ -1072,6 +1072,24 @@ class EmailVoiceProfile(Base):
     phrases: Mapped[list] = mapped_column(
         JSONB, server_default=text("'[]'::jsonb")
     )
+    formality_level: Mapped[str | None] = mapped_column(
+        Text, server_default=text("'conversational'")
+    )
+    greeting_style: Mapped[str | None] = mapped_column(
+        Text, server_default=text("'Hi {name},'")
+    )
+    question_style: Mapped[str | None] = mapped_column(
+        Text, server_default=text("'direct'")
+    )
+    paragraph_pattern: Mapped[str | None] = mapped_column(
+        Text, server_default=text("'short single-line'")
+    )
+    emoji_usage: Mapped[str | None] = mapped_column(
+        Text, server_default=text("'never'")
+    )
+    avg_sentences: Mapped[int | None] = mapped_column(
+        Integer, server_default=text("3")
+    )
     samples_analyzed: Mapped[int] = mapped_column(
         Integer, server_default=text("0")
     )
