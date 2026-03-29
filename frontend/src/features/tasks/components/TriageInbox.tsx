@@ -1,10 +1,11 @@
-import { useCallback } from 'react'
+import { useCallback, useState } from 'react'
 import { CheckCircle } from 'lucide-react'
 import { toast } from 'sonner'
 import { useTasks } from '../hooks/useTasks'
 import { useUpdateTaskStatus } from '../hooks/useUpdateTaskStatus'
 import { TaskSectionHeader } from './TaskSectionHeader'
 import { TaskTriageCard } from './TaskTriageCard'
+import { FocusMode } from './FocusMode'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Button } from '@/components/ui/button'
 import { staggerDelay } from '@/lib/animations'
@@ -41,6 +42,7 @@ function TriageSkeleton() {
 export function TriageInbox() {
   const { data, isLoading } = useTasks()
   const statusMutation = useUpdateTaskStatus()
+  const [focusModeOpen, setFocusModeOpen] = useState(false)
 
   // Filter to triage-eligible tasks, sorted by priority then created_at
   const triageTasks = (data?.tasks ?? [])
@@ -92,9 +94,11 @@ export function TriageInbox() {
         title="Triage Inbox"
         count={triageTasks.length}
         action={
-          <Button variant="ghost" size="sm" disabled>
-            Review All &rarr;
-          </Button>
+          triageTasks.length > 0 ? (
+            <Button variant="ghost" size="sm" onClick={() => setFocusModeOpen(true)}>
+              Review All &rarr;
+            </Button>
+          ) : undefined
         }
       />
 
@@ -130,6 +134,12 @@ export function TriageInbox() {
           ))}
         </div>
       )}
+
+      <FocusMode
+        tasks={triageTasks}
+        isOpen={focusModeOpen}
+        onClose={() => setFocusModeOpen(false)}
+      />
     </section>
   )
 }
