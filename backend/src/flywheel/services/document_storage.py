@@ -13,11 +13,12 @@ Public API:
 from __future__ import annotations
 
 import logging
-import os
 import re
 from datetime import date
 
 import httpx
+
+from flywheel.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +33,8 @@ async def upload_document(
     mime_type: str = "text/html",
 ) -> str:
     """Upload content to Supabase Storage and return the storage path."""
-    supabase_url = os.environ["SUPABASE_URL"]
-    service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    supabase_url = settings.supabase_url
+    service_key = settings.supabase_service_key
 
     storage_path = f"{tenant_id}/{document_type}/{document_id}.html"
     url = f"{supabase_url}/storage/v1/object/{BUCKET}/{storage_path}"
@@ -55,8 +56,8 @@ async def upload_document(
 
 async def get_document_url(storage_path: str, expires_in: int = 3600) -> str:
     """Generate a signed URL for a document in Supabase Storage."""
-    supabase_url = os.environ["SUPABASE_URL"]
-    service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    supabase_url = settings.supabase_url
+    service_key = settings.supabase_service_key
 
     url = f"{supabase_url}/storage/v1/object/sign/{BUCKET}/{storage_path}"
 

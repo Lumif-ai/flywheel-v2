@@ -79,7 +79,7 @@ def upgrade() -> None:
             nullable=False,
         ),
         sa.ForeignKeyConstraint(["tenant_id"], ["tenants.id"]),
-        sa.ForeignKeyConstraint(["user_id"], ["profiles.id"]),
+        # No FK on user_id -- profiles table is managed by Supabase Auth (same as meetings table)
         sa.ForeignKeyConstraint(
             ["meeting_id"], ["meetings.id"], ondelete="SET NULL"
         ),
@@ -131,8 +131,27 @@ def upgrade() -> None:
             )
     """)
 
+    # 5. Auto-update updated_at on row modification
+    op.execute("""
+        CREATE OR REPLACE FUNCTION update_tasks_updated_at()
+        RETURNS TRIGGER AS $$
+        BEGIN
+            NEW.updated_at = now();
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql
+    """)
+    op.execute("""
+        CREATE TRIGGER tasks_updated_at_trigger
+        BEFORE UPDATE ON tasks
+        FOR EACH ROW
+        EXECUTE FUNCTION update_tasks_updated_at()
+    """)
+
 
 def downgrade() -> None:
+    op.execute("DROP TRIGGER IF EXISTS tasks_updated_at_trigger ON tasks")
+    op.execute("DROP FUNCTION IF EXISTS update_tasks_updated_at()")
     op.execute("DROP POLICY IF EXISTS tasks_user_isolation ON tasks")
     op.drop_index("idx_tasks_meeting", table_name="tasks")
     op.drop_index("idx_tasks_due", table_name="tasks")

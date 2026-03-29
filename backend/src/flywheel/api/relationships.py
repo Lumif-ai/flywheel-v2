@@ -25,7 +25,6 @@ RATE-LIMIT CONTRACT: POST /synthesize enforces a 5-minute rate limit via
 from __future__ import annotations
 
 import datetime
-import os
 import re
 from uuid import UUID
 
@@ -712,8 +711,9 @@ async def upload_relationship_file(
         )
 
     # Upload to Supabase Storage using httpx (matches existing document_storage.py pattern)
-    supabase_url = os.environ["SUPABASE_URL"]
-    service_key = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
+    from flywheel.config import settings
+    supabase_url = settings.supabase_url
+    service_key = settings.supabase_service_key
     storage_path = f"relationships/{user.tenant_id}/{account.id}/{file.filename}"
     upload_url = (
         f"{supabase_url}/storage/v1/object/{_STORAGE_BUCKET}/{storage_path}"

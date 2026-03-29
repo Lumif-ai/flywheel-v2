@@ -28,7 +28,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import os
 import re
 from datetime import date, datetime, timezone
 from uuid import UUID
@@ -364,8 +363,9 @@ async def upload_transcript(
     Stores at: uploads/transcripts/{tenant_id}/{meeting_id}.txt
     Returns the storage path string.
     """
-    supabase_url = os.environ.get("SUPABASE_URL", "")
-    service_role_key = os.environ.get("SUPABASE_SERVICE_ROLE_KEY", "")
+    from flywheel.config import settings
+    supabase_url = settings.supabase_url
+    service_role_key = settings.supabase_service_key
 
     storage_path = f"transcripts/{tenant_id}/{meeting_id}.txt"
     upload_url = f"{supabase_url}/storage/v1/object/uploads/{storage_path}"

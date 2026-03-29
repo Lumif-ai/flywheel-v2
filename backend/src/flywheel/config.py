@@ -1,5 +1,6 @@
 """Environment-driven configuration using Pydantic Settings."""
 
+from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings
 
 
@@ -13,7 +14,14 @@ class Settings(BaseSettings):
 
     # Supabase
     supabase_url: str = ""
-    supabase_service_key: str = ""
+    supabase_service_key: str = Field(
+        "",
+        validation_alias=AliasChoices(
+            "SUPABASE_SERVICE_KEY",
+            "SUPABASE_SERVICE_ROLE_KEY",
+            "supabase_service_key",
+        ),
+    )
     supabase_jwt_secret: str = ""
 
     # BYOK encryption (base64-encoded 32-byte AES-256 key)
