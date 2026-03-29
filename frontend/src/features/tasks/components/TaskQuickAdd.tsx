@@ -38,7 +38,7 @@ export function TaskQuickAdd({ isOpen, onClose, prefill }: TaskQuickAddProps) {
 
   // Filter accounts by search query
   const filteredAccounts = useMemo(() => {
-    if (!accountsData?.accounts) return []
+    if (!accountsData?.items) return []
     if (!accountQuery.trim()) return accountsData.accounts.slice(0, 8)
     const q = accountQuery.toLowerCase()
     return accountsData.accounts
