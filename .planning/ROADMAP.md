@@ -7,6 +7,7 @@
 - ✅ **v2.1 CRM Redesign** — Phases 54–58 (shipped 2026-03-27)
 - ✅ **v3.0 Intelligence Flywheel** — Phases 59–63 (shipped 2026-03-28)
 - ✅ **v4.0 Flywheel OS** — Phases 64–66 (shipped 2026-03-28)
+- **v5.0 Tasks UI** — Phase 67 (active)
 
 ## Phases
 
@@ -563,9 +564,45 @@ Plans:
 
 ---
 
+### v5.0 Tasks UI — Commitment Accountability System
+
+**Milestone Goal:** Build a frontend Tasks page and Briefing widget that surfaces AI-extracted commitments for triage, tracks active commitments grouped by due date, and monitors promises others have made — with dual triage modes (list + Tinder-style focus), skill execution, and a slide-in detail panel.
+
+---
+
+### Phase 67: Tasks UI
+
+**Goal:** Build the complete Tasks frontend — page at `/tasks`, Briefing widget, triage inbox with focus mode, My Commitments grouped list, Promises to Me watchlist, detail side panel, quick-add, and one backend extension (add `deferred` status + `confirmed→done` shortcut to task state machine).
+
+**Depends on:** Phase 66.1
+
+**Requirements:** TASK-01 through TASK-16 (see .planning/SPEC-tasks-ui.md)
+
+**Success Criteria** (what must be TRUE):
+  1. Navigating to `/tasks` renders the full Tasks page with four vertically stacked sections: Triage Inbox, My Commitments, Promises to Me, Done (collapsed)
+  2. "Review All" opens Tinder-style focus mode — founder processes 8 tasks with arrow keys (→ confirm, ← dismiss, ↓ later) in under 60 seconds
+  3. My Commitments shows `yours` tasks grouped by due date (Overdue/Today/This Week/Next Week/Later) with rich provenance (meeting source, account, priority, skill chip)
+  4. Promises to Me shows `theirs`/`mutual` tasks as a lightweight watchlist with overdue flagging and one-click "Create Follow-up"
+  5. Clicking any task opens a 480px slide-in detail panel with editable fields, status transitions, and "Generate Deliverable" skill execution
+  6. Briefing page shows a Tasks widget (BrandedCard) with top 3 triage items and overdue promises count, linking to `/tasks`
+  7. `PATCH /tasks/{id}/status` accepts `deferred` from `detected`/`in_review`, and `done` from `confirmed`
+
+**Plans:** 7 plans
+
+Plans:
+- [ ] 67-01-PLAN.md — Backend state machine extension + types + React Query hooks
+- [ ] 67-02-PLAN.md — Tasks page shell, routing, sidebar, Triage Inbox
+- [ ] 67-03-PLAN.md — My Commitments grouped list + Promises to Me watchlist
+- [ ] 67-04-PLAN.md — Task Detail Panel + Quick Add + Done Section
+- [ ] 67-05-PLAN.md — Focus Mode (Tinder-style triage overlay)
+- [ ] 67-06-PLAN.md — Briefing widget + keyboard navigation
+- [ ] 67-07-PLAN.md — Skill execution + search + staggered animations
+
+---
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -596,6 +633,7 @@ Plans:
 | 65. Task Intelligence | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
 | 66. /flywheel Ritual (Rearchitected) | v4.0 | 4/4 | ✓ Complete | 2026-03-29 |
 | 66.1 Flywheel Stabilization (INSERTED) | v4.0 | 3/3 | ✓ Complete | 2026-03-29 |
+| 67. Tasks UI | v5.0 | 0/7 | ○ Planned | — |
 
 ---
 *Roadmap created: 2026-03-24*
