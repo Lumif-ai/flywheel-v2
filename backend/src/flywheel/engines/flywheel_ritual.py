@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from uuid import UUID
 
 import anthropic
@@ -32,6 +32,8 @@ from flywheel.services.skill_executor import (
 )
 
 logger = logging.getLogger("flywheel.engines.flywheel_ritual")
+
+_HAIKU_MODEL = "claude-haiku-4-5-20251001"
 
 
 async def execute_flywheel_ritual(
@@ -266,7 +268,7 @@ async def _stage_3_prep(
     })
 
     # Query today's meetings (external only -- NULL meeting_type treated as external)
-    today = date.today()
+    today = datetime.now(timezone.utc).date()
     async with factory() as session:
         await _set_rls_context(session, tenant_id, user_id)
         result = await session.execute(
@@ -396,18 +398,34 @@ async def _stage_4_execute(
         "data": {"stage": "executing", "message": "Checking for confirmed tasks..."},
     })
 
+    if user_id is None:
+        logger.warning("Stage 4 skipped: user_id is None")
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "executing", "message": "Task execution skipped (no user context)."},
+        })
+        return
+
     # Query confirmed tasks with a suggested skill
-    async with factory() as session:
-        await _set_rls_context(session, tenant_id, user_id)
-        result = await session.execute(
-            select(Task).where(
-                Task.tenant_id == tenant_id,
-                Task.user_id == user_id,
-                Task.status == "confirmed",
-                Task.suggested_skill.isnot(None),
+    try:
+        async with factory() as session:
+            await _set_rls_context(session, tenant_id, user_id)
+            result = await session.execute(
+                select(Task).where(
+                    Task.tenant_id == tenant_id,
+                    Task.user_id == user_id,
+                    Task.status == "confirmed",
+                    Task.suggested_skill.isnot(None),
+                )
             )
-        )
-        executable_tasks = result.scalars().all()
+            executable_tasks = result.scalars().all()
+    except Exception as e:
+        logger.warning("Stage 4: could not query tasks: %s", e)
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "executing", "message": f"Task execution skipped: {_escape(str(e))}"},
+        })
+        return
 
     total_tasks = len(executable_tasks)
     executed_count = 0
@@ -481,7 +499,7 @@ async def _stage_4_execute(
 
             client = anthropic.AsyncAnthropic(api_key=api_key)
             formulation_response = await client.messages.create(
-                model="claude-haiku-4-20250514",
+                model=_HAIKU_MODEL,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": formulation_prompt}],
             )
@@ -609,7 +627,7 @@ async def _stage_4_execute(
 
 def _compose_daily_brief(stage_results: dict) -> str:
     """Compose the HTML daily brief from all stage outputs."""
-    today_str = date.today().strftime("%A, %B %d, %Y")
+    today_str = datetime.now(timezone.utc).date().strftime("%A, %B %d, %Y")
 
     sections = []
 
@@ -815,15 +833,15 @@ def _render_remaining_section(stage_results: dict) -> str:
 
     for item in stage_results.get("processed", []):
         if not item.get("success"):
-            remaining.append(f"Processing failed: {item['title']} \u2014 {item.get('error', 'Unknown')}")
+            remaining.append(f"Processing failed: {_escape(item.get('title', 'Untitled'))} \u2014 {item.get('error', 'Unknown')}")
 
     for item in stage_results.get("prepped", []):
         if not item.get("success"):
-            remaining.append(f"Prep failed: {item['title']} \u2014 {item.get('error', 'Unknown')}")
+            remaining.append(f"Prep failed: {_escape(item.get('title', 'Untitled'))} \u2014 {item.get('error', 'Unknown')}")
 
     for item in stage_results.get("tasks", []):
         if not item.get("success"):
-            remaining.append(f"Task failed: {item['title']} \u2014 {item.get('error', 'Unknown')}")
+            remaining.append(f"Task failed: {_escape(item.get('title', 'Untitled'))} \u2014 {item.get('error', 'Unknown')}")
 
     if not remaining:
         return ''  # No remaining items -- clean run
@@ -852,8 +870,10 @@ def _extract_snippet(html_or_text: str, max_chars: int = 120) -> str:
     return text if text else 'No summary available'
 
 
-def _escape(text: str) -> str:
+def _escape(text: str | None) -> str:
     """HTML-escape text for safe embedding."""
+    if not text:
+        return ""
     return (
         text.replace('&', '&amp;')
         .replace('<', '&lt;')
@@ -891,29 +911,35 @@ async def _filter_unprepped(
 ) -> list:
     """Return meetings that do NOT already have a completed meeting-prep run.
 
-    IMPORTANT: If meeting.title is None/empty, skip the skill_runs query
-    and treat as unprepped. ``contains("")`` would match ALL completed preps,
-    causing every meeting to appear "already prepped".
+    Uses a single batch query instead of per-meeting lookups.
+    Meetings with None/empty title are always treated as unprepped.
     """
-    unprepped = []
-    for meeting in meetings:
-        if not meeting.title:
-            # No title -- can't match against skill_runs, treat as unprepped
-            unprepped.append(meeting)
-            continue
+    if not meetings:
+        return []
 
-        async with factory() as session:
-            await _set_rls_context(session, tenant_id, None)
-            existing_prep = await session.execute(
-                select(SkillRun.id).where(
-                    SkillRun.tenant_id == tenant_id,
-                    SkillRun.skill_name.in_(["meeting-prep"]),
-                    SkillRun.status == "completed",
-                    SkillRun.input_text.contains(meeting.title),
-                ).limit(1)
+    titled = [m for m in meetings if m.title]
+    untitled = [m for m in meetings if not m.title]
+
+    if not titled:
+        return list(untitled)
+
+    # Single batch query: fetch all completed prep input_texts
+    async with factory() as session:
+        await _set_rls_context(session, tenant_id, None)
+        result = await session.execute(
+            select(SkillRun.input_text).where(
+                SkillRun.tenant_id == tenant_id,
+                SkillRun.skill_name == "meeting-prep",
+                SkillRun.status == "completed",
             )
-            if existing_prep.scalar_one_or_none() is None:
-                unprepped.append(meeting)
+        )
+        prepped_texts = [row[0] or "" for row in result.all()]
+
+    # Filter in Python -- check if title appears in any prep input_text
+    unprepped = list(untitled)
+    for meeting in titled:
+        if not any(meeting.title in pt for pt in prepped_texts):
+            unprepped.append(meeting)
 
     return unprepped
 
