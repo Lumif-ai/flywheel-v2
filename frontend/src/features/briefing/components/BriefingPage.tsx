@@ -19,6 +19,7 @@ import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState
 import { FileText, Building2, Clock } from 'lucide-react'
 import { api } from '@/lib/api'
 import { spacing, typography, colors } from '@/lib/design-tokens'
+import { BriefingTasksWidget } from '@/features/tasks/components/BriefingTasksWidget'
 
 function EmptyWorkspaceIllustration() {
   return (
@@ -499,6 +500,11 @@ export function BriefingPage() {
                   <PulseSignals />
                 </div>
               )}
+
+              {/* Tasks Widget */}
+              <div style={{ marginBottom: spacing.section }}>
+                <BriefingTasksWidget />
+              </div>
 
               {/* Recent Documents */}
               <div style={{ marginBottom: spacing.section }}>

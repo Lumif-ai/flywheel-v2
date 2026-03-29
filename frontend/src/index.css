@@ -303,6 +303,13 @@
   }
 }
 
+/* Task keyboard navigation focus ring */
+.task-card-focused {
+  outline: 2px solid var(--brand-coral);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;

@@ -32,6 +32,7 @@ export function TaskTriageCard({ task, onConfirm, onLater, onDismiss, style }: T
   return (
     <div
       role="listitem"
+      data-task-id={task.id}
       className={`group flex items-center justify-between ${exitAnim ?? ''}`}
       style={{
         padding: '16px 20px',

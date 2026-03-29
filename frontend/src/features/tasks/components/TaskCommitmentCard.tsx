@@ -44,6 +44,7 @@ export function TaskCommitmentCard({ task, onSelect }: TaskCommitmentCardProps) 
   const isOverdue = task.due_date && isBefore(startOfDay(new Date(task.due_date)), startOfDay(new Date()))
 
   return (
+    <div data-task-id={task.id}>
     <BrandedCard
       variant={isOverdue ? 'action' : 'info'}
       hoverable
@@ -150,5 +151,6 @@ export function TaskCommitmentCard({ task, onSelect }: TaskCommitmentCardProps) 
         )}
       </div>
     </BrandedCard>
+    </div>
   )
 }

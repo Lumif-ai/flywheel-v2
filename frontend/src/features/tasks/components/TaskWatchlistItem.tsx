@@ -26,6 +26,7 @@ export function TaskWatchlistItem({ task, onCreateFollowUp, hasFollowUp = false 
 
   return (
     <div
+      data-task-id={task.id}
       className="transition-colors duration-150"
       style={{
         padding: '16px 20px',

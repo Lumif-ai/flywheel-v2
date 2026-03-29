@@ -10,11 +10,18 @@ import { PromisesToMe } from './PromisesToMe'
 import { DoneSection } from './DoneSection'
 import { TaskQuickAdd } from './TaskQuickAdd'
 import { TaskDetailPanel } from './TaskDetailPanel'
+import { useTaskKeyboardNav } from '../hooks/useTaskKeyboardNav'
 
 export function TasksPage() {
   const { data: summary, isLoading } = useTaskSummary()
   const [showQuickAdd, setShowQuickAdd] = useState(false)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+
+  // Keyboard navigation
+  useTaskKeyboardNav({
+    enabled: !selectedTaskId && !showQuickAdd,
+    onSelect: (id) => setSelectedTaskId(id),
+  })
 
   // Derive counts from summary
   const activeCount = (summary?.confirmed ?? 0) + (summary?.in_progress ?? 0) + (summary?.in_review ?? 0)
