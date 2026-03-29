@@ -9,11 +9,12 @@ See: .planning/PROJECT.md (updated 2026-03-29)
 
 ## Current Position
 
-Milestone: v4.0 Flywheel OS — COMPLETE (shipped 2026-03-29)
-Status: All milestones shipped (v1.0 → v4.0). Next milestone not yet defined.
-Last activity: 2026-03-29 — v4.0 milestone archived
+Milestone: v1.0 CRM Redesign — Intelligence-First Relationships
+Phase: 67-tasks-ui (Tasks UI)
+Current Plan: 4 of 7
+Status: Executing phase 67 — plan 03 complete
 
-Progress: [████████████████████] 100% — 5 milestones shipped, 23 phases, 56+ plans
+Progress: [████████░░░░░░░░░░░░] 43% — Phase 67: 3/7 plans complete
 
 ## Performance Metrics
 
@@ -36,7 +37,13 @@ Progress: [████████████████████] 100% �
 All v1.0-v4.0 decisions archived in milestone ROADMAP archives.
 See: .planning/milestones/v4.0-ROADMAP.md for full history.
 
-(No active decisions — next milestone not yet started)
+- 67-01: UUIDs typed as string in TypeScript (JSON-serialized from backend)
+- 67-01: 30s stale time for task queries (frequent changes during triage)
+- 67-01: Optimistic removal from filtered list on status transition
+- 67-02: TaskTriageCard uses plain div (not BrandedCard) for lightweight triage cards
+- 67-02: Exit animations via CSS class toggle + 150ms setTimeout (more reliable than onTransitionEnd)
+- 67-03: Account name from task.metadata.account_name (denormalized by backend)
+- 67-03: Follow-up creation tracked in component-local Set state (session-level only)
 
 ### Pending Todos
 
@@ -56,5 +63,5 @@ All v1.0-v4.0 roadmap evolution archived. Clean slate for next milestone.
 ## Session Continuity
 
 Last session: 2026-03-29
-Stopped at: v4.0 milestone archived. Ready for /gsd:new-milestone.
+Stopped at: Completed 67-03-PLAN.md (My Commitments + Promises to Me)
 Resume file: None
