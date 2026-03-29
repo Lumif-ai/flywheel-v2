@@ -1,7 +1,6 @@
-"""Flywheel ritual engine -- Stages 1-4: Granola sync, meeting processing, meeting prep, task execution.
+"""Flywheel ritual engine -- Stages 1-5: Granola sync, meeting processing, meeting prep, task execution, HTML brief.
 
-The core orchestrator that sequences sync, process, prep, and execute stages.
-Stage 5 (HTML brief) is added in Plan 04.
+The core orchestrator that sequences sync, process, prep, execute, and compose stages.
 
 Public API:
     execute_flywheel_ritual(factory, run_id, tenant_id, user_id, api_key)
@@ -79,9 +78,23 @@ async def execute_flywheel_ritual(
         total_token_usage, all_tool_calls, stage_results,
     )
 
-    # --- Stage 5: Compose HTML Brief (Plan 04 adds this) ---
-    # For now, return a placeholder
-    html_output = "<div>Flywheel ritual complete. HTML brief coming in Plan 04.</div>"
+    # --- Stage 5: Compose HTML Daily Brief (ORCH-06) ---
+    await _append_event_atomic(factory, run_id, {
+        "event": "stage",
+        "data": {"stage": "composing", "message": "Composing daily brief..."},
+    })
+
+    html_output = _compose_daily_brief(stage_results)
+
+    # Emit done event with rendered_html
+    await _append_event_atomic(factory, run_id, {
+        "event": "done",
+        "data": {
+            "stage": "done",
+            "message": "Flywheel ritual complete.",
+            "rendered_html": html_output,
+        },
+    })
 
     return html_output, total_token_usage, all_tool_calls
 
@@ -580,6 +593,266 @@ async def _stage_4_execute(
             ),
         },
     })
+
+
+# ---------------------------------------------------------------------------
+# Stage 5 -- Compose HTML Daily Brief (ORCH-06)
+# ---------------------------------------------------------------------------
+
+
+def _compose_daily_brief(stage_results: dict) -> str:
+    """Compose the HTML daily brief from all stage outputs."""
+    today_str = date.today().strftime("%A, %B %d, %Y")
+
+    sections = []
+
+    # Header
+    sections.append(f'''
+    <header style="margin-bottom: 32px;">
+      <h1 style="font-size: 28px; font-weight: 700; color: #121212; margin: 0;">Daily Brief</h1>
+      <p style="font-size: 16px; color: #6B7280; margin: 4px 0 0 0;">{today_str}</p>
+    </header>
+    ''')
+
+    # Section 1: Sync Summary
+    sync = stage_results.get("sync") or {}
+    sections.append(_render_sync_section(sync))
+
+    # Section 2: Processing Summary
+    processed = stage_results.get("processed", [])
+    sections.append(_render_processed_section(processed))
+
+    # Section 3: Prep Summaries
+    prepped = stage_results.get("prepped", [])
+    sections.append(_render_prep_section(prepped))
+
+    # Section 4: Task Execution
+    tasks = stage_results.get("tasks", [])
+    sections.append(_render_tasks_section(tasks))
+
+    # Section 5: Remaining Items
+    sections.append(_render_remaining_section(stage_results))
+
+    # Check if all sections are empty
+    has_content = (
+        sync.get("synced", 0) > 0 or sync.get("error")
+        or len(processed) > 0
+        or len(prepped) > 0
+        or len(tasks) > 0
+    )
+
+    if not has_content:
+        sections = [sections[0]]  # Keep header
+        sections.append('''
+        <div style="text-align: center; padding: 60px 0;">
+          <p style="font-size: 20px; color: #6B7280;">Your day is clear</p>
+          <p style="font-size: 14px; color: #9CA3AF; margin-top: 8px;">No meetings to sync, process, or prep. No pending tasks.</p>
+        </div>
+        ''')
+
+    body = "\n".join(sections)
+    return f'''<div style="font-family: Inter, -apple-system, sans-serif; max-width: 800px; margin: 0 auto; padding: 24px;">
+    {body}
+    </div>'''
+
+
+def _render_sync_section(sync: dict) -> str:
+    if sync.get("error"):
+        # Granola not connected or API failed
+        error_msg = str(sync["error"])
+        if "not connected" in error_msg.lower() or "no stored credentials" in error_msg.lower():
+            msg = "Granola not connected. Connect in Settings &gt; Integrations."
+        else:
+            msg = f"Sync issue: {_escape(error_msg)}"
+        return f'''
+        <section id="sync" style="margin-bottom: 24px;">
+          <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Sync</h2>
+          <div style="background: rgba(233,77,53,0.05); border-radius: 12px; padding: 16px;">
+            <p style="color: #6B7280; margin: 0; font-size: 14px;">{msg}</p>
+          </div>
+        </section>'''
+
+    synced = sync.get("synced", 0)
+    skipped = sync.get("skipped", 0)
+    already = sync.get("already_seen", 0)
+
+    if synced == 0 and skipped == 0 and already == 0:
+        return ''  # No sync data (function wasn't called)
+
+    return f'''
+    <section id="sync" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Sync</h2>
+      <div style="background: rgba(233,77,53,0.05); border-radius: 12px; padding: 16px; display: flex; gap: 24px;">
+        <div><span style="font-size: 24px; font-weight: 700; color: #E94D35;">{synced}</span><br><span style="font-size: 12px; color: #6B7280;">new meetings</span></div>
+        <div><span style="font-size: 24px; font-weight: 700; color: #121212;">{skipped}</span><br><span style="font-size: 12px; color: #6B7280;">skipped</span></div>
+        <div><span style="font-size: 24px; font-weight: 700; color: #121212;">{already}</span><br><span style="font-size: 12px; color: #6B7280;">already seen</span></div>
+      </div>
+    </section>'''
+
+
+def _render_processed_section(processed: list) -> str:
+    if not processed:
+        return '''
+        <section id="processed" style="margin-bottom: 24px;">
+          <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Processing</h2>
+          <p style="color: #6B7280; font-size: 14px;">All meetings up to date.</p>
+        </section>'''
+
+    cards = []
+    for item in processed:
+        if item.get("success"):
+            output = item.get("output", "")
+            snippet = _extract_snippet(output, max_chars=120)
+            cards.append(f'''
+            <div style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+              <p style="font-weight: 600; color: #121212; margin: 0 0 4px 0; font-size: 14px;">{_escape(item["title"])}</p>
+              <p style="color: #6B7280; margin: 0; font-size: 13px;">{_escape(snippet)}</p>
+            </div>''')
+
+    successful = sum(1 for p in processed if p.get("success"))
+    failed = len(processed) - successful
+    summary = f"Processed {successful}/{len(processed)} meetings."
+    if failed:
+        summary += f" {failed} failed."
+
+    return f'''
+    <section id="processed" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">Processing</h2>
+      <p style="color: #6B7280; font-size: 13px; margin: 0 0 12px 0;">{summary}</p>
+      {"".join(cards)}
+    </section>'''
+
+
+def _render_prep_section(prepped: list) -> str:
+    if not prepped:
+        return '''
+        <section id="prep" style="margin-bottom: 24px;">
+          <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Meeting Prep</h2>
+          <p style="color: #6B7280; font-size: 14px;">No upcoming external meetings today.</p>
+        </section>'''
+
+    cards = []
+    for item in prepped:
+        if item.get("success"):
+            snippet = _extract_snippet(item.get("output", ""), max_chars=150)
+            account_note = ' &middot; Account linked' if item.get("account_id") else ""
+            cards.append(f'''
+            <div style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+              <p style="font-weight: 600; color: #121212; margin: 0 0 4px 0; font-size: 14px;">{_escape(item["title"])}{account_note}</p>
+              <p style="color: #6B7280; margin: 0 0 8px 0; font-size: 13px;">{_escape(snippet)}</p>
+              <p style="color: #E94D35; margin: 0; font-size: 12px;">Full brief in Library</p>
+            </div>''')
+
+    successful = sum(1 for p in prepped if p.get("success"))
+    failed = len(prepped) - successful
+    summary = f"Prepared {successful}/{len(prepped)} meeting briefs."
+    if failed:
+        summary += f" {failed} failed."
+
+    return f'''
+    <section id="prep" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">Meeting Prep</h2>
+      <p style="color: #6B7280; font-size: 13px; margin: 0 0 12px 0;">{summary}</p>
+      {"".join(cards)}
+    </section>'''
+
+
+def _render_tasks_section(tasks: list) -> str:
+    if not tasks:
+        return '''
+        <section id="tasks" style="margin-bottom: 24px;">
+          <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Task Execution</h2>
+          <p style="color: #6B7280; font-size: 14px;">No pending tasks.</p>
+        </section>'''
+
+    executed_cards = []
+    pending_items = []
+
+    for item in tasks:
+        if item.get("success"):
+            snippet = _extract_snippet(item.get("output", ""), max_chars=120)
+            trust_badge = ""
+            if item.get("trust_level") == "confirm":
+                trust_badge = ' <span style="background: rgba(233,77,53,0.1); color: #E94D35; padding: 2px 8px; border-radius: 99px; font-size: 11px;">Review required</span>'
+            executed_cards.append(f'''
+            <div style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+              <p style="font-weight: 600; color: #121212; margin: 0 0 4px 0; font-size: 14px;">{_escape(item["title"])}{trust_badge}</p>
+              <p style="color: #9CA3AF; margin: 0 0 4px 0; font-size: 12px;">via {_escape(item.get("suggested_skill", "unknown"))}</p>
+              <p style="color: #6B7280; margin: 0; font-size: 13px;">{_escape(snippet)}</p>
+            </div>''')
+        else:
+            pending_items.append(item)
+
+    successful = len(executed_cards)
+    parts = []
+    if executed_cards:
+        parts.append(f'''<p style="color: #6B7280; font-size: 13px; margin: 0 0 12px 0;">Executed {successful}/{len(tasks)} tasks.</p>''')
+        parts.extend(executed_cards)
+
+    if pending_items:
+        parts.append('''<p style="color: #9CA3AF; font-size: 13px; margin: 16px 0 8px 0; font-weight: 600;">Failed / Not Executed</p>''')
+        for item in pending_items:
+            error = item.get("error", "Unknown error")
+            parts.append(f'''<p style="color: #6B7280; font-size: 13px; margin: 2px 0;">&bull; {_escape(item["title"])} — {_escape(str(error))}</p>''')
+
+    return f'''
+    <section id="tasks" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">Task Execution</h2>
+      {"".join(parts)}
+    </section>'''
+
+
+def _render_remaining_section(stage_results: dict) -> str:
+    """Remaining items: failed processing, failed prep, failed tasks."""
+    remaining = []
+
+    for item in stage_results.get("processed", []):
+        if not item.get("success"):
+            remaining.append(f"Processing failed: {item['title']} \u2014 {item.get('error', 'Unknown')}")
+
+    for item in stage_results.get("prepped", []):
+        if not item.get("success"):
+            remaining.append(f"Prep failed: {item['title']} \u2014 {item.get('error', 'Unknown')}")
+
+    for item in stage_results.get("tasks", []):
+        if not item.get("success"):
+            remaining.append(f"Task failed: {item['title']} \u2014 {item.get('error', 'Unknown')}")
+
+    if not remaining:
+        return ''  # No remaining items -- clean run
+
+    items_html = "".join(
+        f'<p style="color: #6B7280; font-size: 13px; margin: 4px 0;">&bull; {_escape(r)}</p>'
+        for r in remaining
+    )
+
+    return f'''
+    <section id="remaining" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 12px 0;">Remaining Items</h2>
+      {items_html}
+    </section>'''
+
+
+def _extract_snippet(html_or_text: str, max_chars: int = 120) -> str:
+    """Extract a clean text snippet from HTML or plain text output."""
+    import re
+    # Strip HTML tags
+    text = re.sub(r'<[^>]+>', ' ', html_or_text)
+    # Collapse whitespace
+    text = re.sub(r'\s+', ' ', text).strip()
+    if len(text) > max_chars:
+        return text[:max_chars].rsplit(' ', 1)[0] + '...'
+    return text if text else 'No summary available'
+
+
+def _escape(text: str) -> str:
+    """HTML-escape text for safe embedding."""
+    return (
+        text.replace('&', '&amp;')
+        .replace('<', '&lt;')
+        .replace('>', '&gt;')
+        .replace('"', '&quot;')
+    )
 
 
 # ---------------------------------------------------------------------------

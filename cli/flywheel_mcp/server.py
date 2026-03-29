@@ -21,10 +21,12 @@ def flywheel_run_skill(
     skill_name: str = "meeting-prep",
     input_text: str = "",
 ) -> str:
-    """Run a Flywheel skill like meeting-prep or company-intel.
+    """Run a Flywheel skill like meeting-prep, company-intel, or flywheel.
 
     Use for business intelligence: preparing for meetings, researching
     companies, analyzing competitors, gathering market signals.
+    Use 'flywheel' for the daily operating ritual: syncs meetings,
+    processes recordings, preps upcoming meetings, and executes tasks.
     Returns a link to view the full results in the Flywheel web app.
     NOT for coding, file operations, or development tasks.
     """
