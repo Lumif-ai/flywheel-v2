@@ -10,11 +10,11 @@ See: .planning/PROJECT.md (updated 2026-03-28)
 ## Current Position
 
 Phase: 66 of 66 (Flywheel Ritual — Rearchitect)
-Plan: 3 of 4 in current phase (Plan 03 complete)
-Status: Executing Phase 66 rearchitect plans
-Last activity: 2026-03-29 — Phase 66 Plan 03: Stage 4 LLM-powered task execution
+Plan: 4 of 4 in current phase (Plan 04 complete -- Phase 66 DONE)
+Status: Phase 66 complete -- all flywheel ritual plans delivered
+Last activity: 2026-03-29 — Phase 66 Plan 04: Stage 5 HTML daily brief and end-to-end wiring
 
-Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 11/12 plans
+Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 12/12 plans
 
 ## Performance Metrics
 
@@ -160,6 +160,9 @@ Recent decisions affecting current work:
 - [66-03 execution]: Local imports for create_registry/RunContext/RunBudget inside _stage_4_execute -- matches existing pattern in skill_executor.py
 - [Phase 65]: [65-02 execution]: extract_tasks receives both transcript AND Stage 4 extracted intelligence -- full context to Haiku without additional LLM cost
 
+- [66-04 execution]: Prep summary cards show snippet + "Full brief in Library" (not full inline HTML) -- keeps brief scannable
+- [66-04 execution]: Done SSE event carries rendered_html so frontend renders immediately without extra fetch
+- [66-04 execution]: _escape helper used on all user-facing text in HTML brief -- prevents XSS from meeting titles/error messages
 - [66-01 execution]: python3 for all JSON parsing in skills (not jq) -- avoids dependency; python3 guaranteed in project env
 - [66-01 execution]: 401 from any API call stops all sections immediately -- token is dead, no point continuing to other sections
 - [66-01 execution]: Outreach section shows "Not configured" for v1 -- CSV tracker is stretch goal; "Not configured" is acceptable default
@@ -184,5 +187,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-03-29
-Stopped at: Completed 66-03-PLAN.md — Stage 4 LLM-powered task execution
+Stopped at: Completed 66-04-PLAN.md — Stage 5 HTML daily brief and end-to-end wiring (Phase 66 DONE)
 Resume file: None
