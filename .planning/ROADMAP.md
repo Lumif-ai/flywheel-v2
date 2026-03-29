@@ -538,9 +538,34 @@ Plans:
 
 ---
 
+### Phase 66.1: Flywheel Stabilization (INSERTED)
+
+**Goal:** Fix all 18 issues discovered during Phase 66 end-to-end testing. The flywheel engine code is structurally complete but cannot run successfully due to: (1) env var naming mismatch blocking all Supabase Storage operations, (2) migration 034 FK failure preventing tasks table creation, (3) timezone bugs causing wrong-day prep, (4) title matching false positives, (5) unguarded error paths that crash the engine, and (6) architecture issues creating fragility under load.
+
+**Depends on:** Phase 66
+
+**Success Criteria** (what must be TRUE):
+  1. `flywheel_run_skill("flywheel")` completes all 5 stages without crashing — sync, process, prep, execute, compose — and returns an HTML daily brief
+  2. Meeting processing successfully uploads transcripts to Supabase Storage (env var naming fixed)
+  3. `alembic upgrade head` succeeds — migrations 033 and 034 both apply cleanly
+  4. Stage 3 preps the correct day's meetings regardless of server timezone
+  5. Stage 4 gracefully handles missing tasks table, None user_id, and DB errors
+  6. `_compose_daily_brief()` never crashes the engine — all render helpers tolerate None/empty inputs
+  7. `_filter_unprepped()` uses a single batch query (no N+1)
+  8. Meeting processing has a configurable cap to prevent runaway execution
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 66.1-01-PLAN.md — Infrastructure & Migrations: env var fix, migration 034 rewrite, migration chain, updated_at triggers
+- [ ] 66.1-02-PLAN.md — Engine Correctness: timezone fix, title matching, user_id None guards, compose guard, N+1 fix, model constant, HTTPException cleanup
+- [ ] 66.1-03-PLAN.md — Robustness & Architecture: append_event_atomic guard, execution caps, race condition guard, private import cleanup, SKILL.md engine field, MCP timeout
+
+---
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -570,6 +595,7 @@ Plans:
 | 64. Unified Meetings | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
 | 65. Task Intelligence | v4.0 | 3/3 | ✓ Complete | 2026-03-28 |
 | 66. /flywheel Ritual (Rearchitected) | v4.0 | 4/4 | ✓ Complete | 2026-03-29 |
+| 66.1 Flywheel Stabilization (INSERTED) | v4.0 | 0/3 | ○ Pending | — |
 
 ---
 *Roadmap created: 2026-03-24*

@@ -5,16 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-03-28)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** Milestone v4.0 — Flywheel OS (Phases 64–66)
+**Current focus:** Milestone v4.0 — Flywheel OS (Phases 64–66.1)
 
 ## Current Position
 
-Phase: 66 of 66 (Flywheel Ritual — Rearchitect)
-Plan: 4 of 4 in current phase (Plan 04 complete -- Phase 66 DONE)
-Status: Phase 66 complete -- all flywheel ritual plans delivered
-Last activity: 2026-03-29 — Phase 66 Plan 04: Stage 5 HTML daily brief and end-to-end wiring
+Phase: 66.1 (Flywheel Stabilization — INSERTED)
+Plan: 0 of 3 in current phase (not yet planned)
+Status: Phase 66.1 inserted — 18 issues found during Phase 66 E2E testing
+Last activity: 2026-03-29 — Phase 66.1 inserted after Phase 66
 
-Progress: [████████████████████] 100% (42/42 plans complete across v1.0-v3.0) | v4.0: 12/12 plans
+Progress: [██████████████████░░] 92% (42/42 plans complete across v1.0-v3.0) | v4.0: 12/15 plans
 
 ## Performance Metrics
 
@@ -184,8 +184,12 @@ None yet.
 - [Phase 56]: RESOLVED — AG Grid themeQuartz.withParams() with CSS custom properties works cleanly with Tailwind v4 (no CSS imports needed)
 - [Phase 57]: RESOLVED — AskPanel implemented with 4-mode state machine, dual-mode input, source citations — no spike needed
 
+### Roadmap Evolution
+
+- Phase 66.1 inserted after Phase 66: Flywheel Stabilization — 18 issues found during E2E testing (URGENT)
+
 ## Session Continuity
 
 Last session: 2026-03-29
-Stopped at: Completed 66-04-PLAN.md — Stage 5 HTML daily brief and end-to-end wiring (Phase 66 DONE)
+Stopped at: Phase 66.1 inserted. Needs /gsd:plan-phase 66.1 next.
 Resume file: None

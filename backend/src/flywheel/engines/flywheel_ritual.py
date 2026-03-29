@@ -73,10 +73,17 @@ async def execute_flywheel_ritual(
     )
 
     # --- Stage 4: Execute Pending Tasks (ORCH-12) ---
-    await _stage_4_execute(
-        factory, run_id, tenant_id, user_id, api_key,
-        total_token_usage, all_tool_calls, stage_results,
-    )
+    try:
+        await _stage_4_execute(
+            factory, run_id, tenant_id, user_id, api_key,
+            total_token_usage, all_tool_calls, stage_results,
+        )
+    except Exception as e:
+        logger.error("Stage 4 (task execution) failed: %s", e)
+        await _append_event_atomic(factory, run_id, {
+            "event": "stage",
+            "data": {"stage": "executing", "message": f"Task execution skipped: {e}"},
+        })
 
     # --- Stage 5: Compose HTML Daily Brief (ORCH-06) ---
     await _append_event_atomic(factory, run_id, {
