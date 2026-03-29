@@ -558,8 +558,8 @@ Plans:
 
 Plans:
 - [ ] 66.1-01-PLAN.md — Infrastructure & Migrations: env var fix, migration 034 rewrite, migration chain, updated_at triggers
-- [ ] 66.1-02-PLAN.md — Engine Correctness: timezone fix, title matching, user_id None guards, compose guard, N+1 fix, model constant, HTTPException cleanup
-- [ ] 66.1-03-PLAN.md — Robustness & Architecture: append_event_atomic guard, execution caps, race condition guard, private import cleanup, SKILL.md engine field, MCP timeout
+- [ ] 66.1-02-PLAN.md — Engine Correctness: timezone fix, N+1 batch query, user_id None guard, Stage 4 error guard, compose guards, Haiku model constant
+- [ ] 66.1-03-PLAN.md — Robustness & Architecture: append_event_atomic COALESCE, execution caps, optimistic lock, private import docs, MCP timeout
 
 ---
 
