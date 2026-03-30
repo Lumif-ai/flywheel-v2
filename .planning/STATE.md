@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 ## Current Position
 
 Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 73 complete, ready for Phase 74
-Plan: —
-Status: Phase 73 complete (verified)
-Last activity: 2026-03-30 — Phase 73 executed and verified (1/1 plans)
+Phase: 74-email-context-extractor
+Plan: 02 of 02 complete
+Status: Phase 74 Complete
+Last activity: 2026-03-30 — Phase 74 Plan 02 complete (email context extraction engine)
 
-Progress: [███████░░░] 71%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -46,6 +46,8 @@ v7.0 decisions made:
 - [Phase 72]: Voice snapshot stored as {type: voice_snapshot} in context_used JSONB; regeneration merges overrides without mutating persistent profile
 - [Phase 72]: Used existing DropdownMenu primitive (base-ui) for regenerate dropdown; VoiceAnnotation shows 5 badges collapsed, 10-field grid expanded
 - [Phase 73]: Voice content formatted as markdown (not JSON) for direct MCP readability; confidence mapped from samples count (high>=20, medium>=5, low<5); catalog stays active on reset
+- [Phase 74-01]: Detail tags use category:key format for deterministic dedup; source label is caller-provided; engine-sourced writes skip graph extraction; relationship signals stored in insights file
+- [Phase 74-02]: Body truncated to 8000 chars for context window; snippet fallback < 50 chars, skip < 20 chars; per-item error isolation in writer integration
 
 Pending decisions for v7.0 (from spec open questions):
 - Whether context extraction cap (200/day) should be configurable per tenant or global
@@ -63,5 +65,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 73 complete — ready for Phase 74 Email Context Extractor and Shared Writer
+Stopped at: Completed 74-02-PLAN.md — email context extraction engine with LLM call, parser, and writer integration
 Resume file: None
