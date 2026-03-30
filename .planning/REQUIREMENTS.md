@@ -36,8 +36,8 @@
 - [x] **CTX-01**: Voice profile written to sender-voice.md in context store after initial extraction and after every incremental update, following standard entry format
 - [x] **CTX-02**: Email context extractor engine extracts contacts, topics, deal signals, relationship signals, and action items from priority >= 3 emails
 - [x] **CTX-03**: Shared context store writer with direct file I/O for backend engines and MCP wrapper for Claude Code skills — handles dedup (source + detail_tag + date), evidence increment, 4000-char entry cap
-- [ ] **CTX-04**: Low-confidence extractions routed to email_context_reviews table for human review (approve/reject via API), high/medium auto-written
-- [ ] **CTX-05**: Email context extraction wired into gmail sync loop after scoring, with separate 200/day cap per tenant and context_extracted_at tracking column
+- [x] **CTX-04**: Low-confidence extractions routed to email_context_reviews table for human review (approve/reject via API), high/medium auto-written
+- [x] **CTX-05**: Email context extraction wired into gmail sync loop after scoring, with separate 200/day cap per tenant and context_extracted_at tracking column
 
 ## Future Requirements
 
@@ -89,8 +89,8 @@
 | CTX-01 | Phase 73 | Pending |
 | CTX-02 | Phase 74 | Pending |
 | CTX-03 | Phase 74 | Pending |
-| CTX-04 | Phase 75 | Pending |
-| CTX-05 | Phase 75 | Pending |
+| CTX-04 | Phase 75 | ✓ Done |
+| CTX-05 | Phase 75 | ✓ Done |
 
 **Coverage:**
 - v1 requirements: 18 total

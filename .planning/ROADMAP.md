@@ -9,7 +9,7 @@
 - ✅ **v4.0 Flywheel OS** — Phases 64–66.1 (shipped 2026-03-29)
 - ✅ **v5.0 Tasks UI** — Phase 67 (shipped 2026-03-29)
 - ✅ **v6.0 Email-to-Tasks** — Phase 68 (shipped 2026-03-29)
-- 🚧 **v7.0 Email Voice & Intelligence Overhaul** — Phases 69–75 (in progress)
+- ✅ **v7.0 Email Voice & Intelligence Overhaul** — Phases 69–75 (shipped 2026-03-30)
 
 ## Phases
 
@@ -421,8 +421,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 75-01-PLAN.md — email_context_reviews table migration + context_extracted_at column + confidence routing logic
-- [ ] 75-02-PLAN.md — Sync loop wiring: extract after score, daily cap, review API endpoints (list/approve/reject)
+- [x] 75-01-PLAN.md — Migration (email_context_reviews table + context_extracted_at column), ORM models, confidence routing in extractor ✓
+- [x] 75-02-PLAN.md — Sync loop wiring (extract after draft, 200/day cap, per-cycle limit), review API endpoints (list/approve/reject) ✓
 
 ---
 
@@ -467,7 +467,7 @@ Plans:
 | 72. Draft Enhancements | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 73. Voice as Context Store Asset | v7.0 | 1/1 | ✓ Complete | 2026-03-30 |
 | 74. Email Context Extractor and Shared Writer | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
-| 75. Context Extraction Pipeline | v7.0 | 0/2 | Not started | - |
+| 75. Context Extraction Pipeline | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 
 ---
 *Roadmap created: 2026-03-24*
