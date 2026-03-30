@@ -20,14 +20,15 @@ from uuid import UUID
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select
+from sqlalchemy import and_, delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Email, EmailDraft, EmailScore, Integration
+from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile, Integration
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.engines import email_voice_updater
+from flywheel.services.gmail_sync import voice_profile_init
 from flywheel.services.gmail_read import (
     get_message_id_header,
     get_valid_credentials,
@@ -148,6 +149,207 @@ class DraftResponse(BaseModel):
     email_id: UUID
     status: str
     message: str
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models — voice profile
+# ---------------------------------------------------------------------------
+
+
+class VoiceProfileResponse(BaseModel):
+    tone: str | None
+    avg_length: int | None
+    sign_off: str | None
+    phrases: list[str] = []
+    formality_level: str | None
+    greeting_style: str | None
+    question_style: str | None
+    paragraph_pattern: str | None
+    emoji_usage: str | None
+    avg_sentences: int | None
+    samples_analyzed: int
+    updated_at: datetime
+
+
+class VoiceProfilePatch(BaseModel):
+    tone: str | None = None
+    sign_off: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# GET /email/voice-profile
+# ---------------------------------------------------------------------------
+
+
+@router.get("/voice-profile", response_model=VoiceProfileResponse | None)
+async def get_voice_profile(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> VoiceProfileResponse | None:
+    """Return the user's voice profile, or null if none exists."""
+    result = await db.execute(
+        select(EmailVoiceProfile).where(
+            and_(
+                EmailVoiceProfile.tenant_id == user.tenant_id,
+                EmailVoiceProfile.user_id == user.sub,
+            )
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        return None
+    return VoiceProfileResponse(
+        tone=profile.tone,
+        avg_length=profile.avg_length,
+        sign_off=profile.sign_off,
+        phrases=profile.phrases or [],
+        formality_level=profile.formality_level,
+        greeting_style=profile.greeting_style,
+        question_style=profile.question_style,
+        paragraph_pattern=profile.paragraph_pattern,
+        emoji_usage=profile.emoji_usage,
+        avg_sentences=profile.avg_sentences,
+        samples_analyzed=profile.samples_analyzed,
+        updated_at=profile.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# PATCH /email/voice-profile
+# ---------------------------------------------------------------------------
+
+
+@router.patch("/voice-profile", response_model=VoiceProfileResponse)
+async def patch_voice_profile(
+    body: VoiceProfilePatch,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> VoiceProfileResponse:
+    """Update tone and/or sign_off on the user's voice profile."""
+    result = await db.execute(
+        select(EmailVoiceProfile).where(
+            and_(
+                EmailVoiceProfile.tenant_id == user.tenant_id,
+                EmailVoiceProfile.user_id == user.sub,
+            )
+        )
+    )
+    profile = result.scalar_one_or_none()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No voice profile found")
+
+    updates = body.model_dump(exclude_none=True)
+    if updates:
+        updates["updated_at"] = datetime.now(timezone.utc)
+        await db.execute(
+            update(EmailVoiceProfile)
+            .where(
+                and_(
+                    EmailVoiceProfile.tenant_id == user.tenant_id,
+                    EmailVoiceProfile.user_id == user.sub,
+                )
+            )
+            .values(**updates)
+        )
+        await db.commit()
+
+    # Re-fetch to return current state
+    result = await db.execute(
+        select(EmailVoiceProfile).where(
+            and_(
+                EmailVoiceProfile.tenant_id == user.tenant_id,
+                EmailVoiceProfile.user_id == user.sub,
+            )
+        )
+    )
+    profile = result.scalar_one()
+    return VoiceProfileResponse(
+        tone=profile.tone,
+        avg_length=profile.avg_length,
+        sign_off=profile.sign_off,
+        phrases=profile.phrases or [],
+        formality_level=profile.formality_level,
+        greeting_style=profile.greeting_style,
+        question_style=profile.question_style,
+        paragraph_pattern=profile.paragraph_pattern,
+        emoji_usage=profile.emoji_usage,
+        avg_sentences=profile.avg_sentences,
+        samples_analyzed=profile.samples_analyzed,
+        updated_at=profile.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /email/voice-profile/reset
+# ---------------------------------------------------------------------------
+
+
+@router.post("/voice-profile/reset")
+async def reset_voice_profile(
+    background_tasks: BackgroundTasks,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Delete the voice profile and trigger background re-extraction.
+
+    Requires a connected Gmail integration. Returns 400 if none found.
+    """
+    # Verify connected gmail-read integration
+    intg_result = await db.execute(
+        select(Integration).where(
+            and_(
+                Integration.tenant_id == user.tenant_id,
+                Integration.user_id == user.sub,
+                Integration.provider == "gmail-read",
+                Integration.status == "connected",
+            )
+        )
+    )
+    integration = intg_result.scalars().first()
+    if integration is None:
+        raise HTTPException(
+            status_code=400,
+            detail="No Gmail integration connected",
+        )
+
+    # Delete existing voice profile
+    await db.execute(
+        delete(EmailVoiceProfile).where(
+            and_(
+                EmailVoiceProfile.tenant_id == user.tenant_id,
+                EmailVoiceProfile.user_id == user.sub,
+            )
+        )
+    )
+    await db.commit()
+
+    # Capture values for closure safety before defining background task
+    integration_id = integration.id
+    tenant_id = str(user.tenant_id)
+    user_id = str(user.sub)
+
+    async def _run_relearn() -> None:
+        factory = get_session_factory()
+        async with tenant_session(factory, tenant_id, user_id) as bg_db:
+            fresh_result = await bg_db.execute(
+                select(Integration).where(Integration.id == integration_id)
+            )
+            intg = fresh_result.scalar_one_or_none()
+            if intg is None:
+                logger.warning(
+                    "Relearn: integration %s not found", integration_id
+                )
+                return
+            try:
+                await voice_profile_init(bg_db, intg)
+            except Exception:  # noqa: BLE001
+                logger.exception(
+                    "Voice profile re-extraction failed for tenant=%s",
+                    tenant_id,
+                )
+
+    background_tasks.add_task(_run_relearn)
+    return {"status": "relearning"}
 
 
 # ---------------------------------------------------------------------------
