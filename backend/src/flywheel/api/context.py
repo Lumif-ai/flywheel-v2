@@ -27,6 +27,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Company, ContextCatalog, ContextEntry, SkillRun, Tenant
+from flywheel.engines.context_store_writer import _write_entry
+
+_ENGINE_SOURCES = frozenset({
+    "email-context-engine",
+    "ctx-meeting-processor",
+    "mcp-manual",
+})
 
 router = APIRouter(prefix="/context", tags=["context"])
 
@@ -267,7 +274,30 @@ async def append_entry(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Append a new context entry to a file. Auto-tags with active focus from session."""
+    """Append a new context entry to a file. Auto-tags with active focus from session.
+
+    Engine-sourced writes (source in _ENGINE_SOURCES) are routed through the
+    shared _write_entry() helper for identical dedup logic across MCP and
+    backend engine paths.
+    """
+    # Route engine-sourced writes through shared writer for dedup parity
+    if body.source in _ENGINE_SOURCES:
+        result = await _write_entry(
+            db=db,
+            tenant_id=user.tenant_id,
+            user_id=user.sub,
+            file_name=file_name,
+            source=body.source,
+            detail=body.detail or "",
+            content=body.content,
+            confidence=body.confidence or "medium",
+            entry_date=datetime.date.today(),
+        )
+        await db.flush()
+        await db.commit()
+        return {"status": result, "file_name": file_name}
+
+    # Non-engine sources: original direct-insert path
     # Read focus_id from session config (set by X-Focus-Id header via deps.py)
     fid_result = await db.execute(text("SELECT current_setting('app.focus_id', true)"))
     fid_value = fid_result.scalar()
