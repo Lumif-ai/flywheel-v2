@@ -10,6 +10,11 @@ Draft lifecycle endpoints:
 - POST /email/drafts/{draft_id}/approve  -- approve and send a draft as threaded reply
 - POST /email/drafts/{draft_id}/dismiss  -- dismiss a draft (feeds scoring refinement)
 - PUT  /email/drafts/{draft_id}          -- edit draft body before approving
+
+Context review endpoints:
+- GET  /email/context-reviews              -- list pending context reviews
+- POST /email/context-reviews/{id}/approve -- approve and write to context store
+- POST /email/context-reviews/{id}/reject  -- reject without writing
 """
 
 from __future__ import annotations
@@ -25,7 +30,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile, Integration
+from flywheel.db.models import Email, EmailContextReview, EmailDraft, EmailScore, EmailVoiceProfile, Integration
+from flywheel.engines.context_store_writer import (
+    write_contact,
+    write_insight,
+    write_action_item,
+    write_deal_signal,
+    write_relationship_signal,
+)
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.engines import email_voice_updater
 from flywheel.engines.voice_context_writer import delete_voice_from_context
@@ -1055,3 +1067,161 @@ async def regenerate_draft(
         voice_snapshot=voice_snapshot,
         message=f"Draft regenerated with {action_desc} adjustments",
     )
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models — context review endpoints
+# ---------------------------------------------------------------------------
+
+
+class ContextReviewOut(BaseModel):
+    id: UUID
+    email_id: UUID
+    extracted_data: dict
+    status: str
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+# ---------------------------------------------------------------------------
+# GET /email/context-reviews
+# ---------------------------------------------------------------------------
+
+
+@router.get("/context-reviews", response_model=list[ContextReviewOut])
+async def list_context_reviews(
+    status: str = Query("pending"),
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+):
+    """List context extraction reviews for the current tenant.
+
+    Defaults to pending reviews. Supports filtering by status.
+    Returns max 50 reviews sorted by newest first.
+    """
+    result = await db.execute(
+        select(EmailContextReview)
+        .where(EmailContextReview.status == status)
+        .order_by(EmailContextReview.created_at.desc())
+        .limit(50)
+    )
+    return result.scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# POST /email/context-reviews/{review_id}/approve
+# ---------------------------------------------------------------------------
+
+
+@router.post("/context-reviews/{review_id}/approve")
+async def approve_context_review(
+    review_id: UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+):
+    """Approve a pending context review and write items to the context store.
+
+    Items are written with confidence upgraded to 'medium' since human review
+    validates them. Uses the shared context store writer for dedup.
+    """
+    review = await db.get(EmailContextReview, review_id)
+    if not review or review.status != "pending":
+        raise HTTPException(404, "Review not found or already processed")
+
+    # Load parent email to get the correct entry_date for dedup
+    email_obj = await db.get(Email, review.email_id)
+    entry_date = email_obj.received_at.date() if email_obj else None
+
+    # Write each item through the appropriate writer
+    written = 0
+    for item in review.extracted_data.get("items", []):
+        item_type = item.get("type")
+        data = item.get("data", {})
+        try:
+            if item_type == "contact":
+                await write_contact(
+                    db=db, tenant_id=review.tenant_id, user_id=review.user_id,
+                    name=data.get("name", "Unknown"),
+                    title=data.get("title"), company=data.get("company"),
+                    email_address=data.get("email"), notes=data.get("notes"),
+                    source_label="email-context-engine",
+                    confidence="medium",
+                    entry_date=entry_date,
+                )
+            elif item_type == "insight":
+                await write_insight(
+                    db=db, tenant_id=review.tenant_id, user_id=review.user_id,
+                    topic=data.get("topic", "Unknown"),
+                    relevance=data.get("relevance", "medium"),
+                    context_text=data.get("context", ""),
+                    source_label="email-context-engine",
+                    confidence="medium",
+                    entry_date=entry_date,
+                )
+            elif item_type == "deal_signal":
+                await write_deal_signal(
+                    db=db, tenant_id=review.tenant_id, user_id=review.user_id,
+                    signal_type=data.get("signal_type", "unknown"),
+                    description=data.get("description", ""),
+                    counterparty=data.get("counterparty"),
+                    source_label="email-context-engine",
+                    confidence="medium",
+                    entry_date=entry_date,
+                )
+            elif item_type == "relationship_signal":
+                await write_relationship_signal(
+                    db=db, tenant_id=review.tenant_id, user_id=review.user_id,
+                    signal_type=data.get("signal_type", "unknown"),
+                    description=data.get("description", ""),
+                    people_involved=data.get("people_involved", []),
+                    source_label="email-context-engine",
+                    confidence="medium",
+                    entry_date=entry_date,
+                )
+            elif item_type == "action_item":
+                await write_action_item(
+                    db=db, tenant_id=review.tenant_id, user_id=review.user_id,
+                    action=data.get("action", "Unknown"),
+                    owner=data.get("owner"), due_date_str=data.get("due_date"),
+                    urgency=data.get("urgency"),
+                    source_label="email-context-engine",
+                    confidence="medium",
+                    entry_date=entry_date,
+                )
+            else:
+                logger.warning("Unknown review item type: %s", item_type)
+                continue
+            written += 1
+        except Exception:
+            logger.exception(
+                "Failed to write approved review item type=%s review_id=%s",
+                item_type, review_id,
+            )
+
+    review.status = "approved"
+    review.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "approved", "items_written": written}
+
+
+# ---------------------------------------------------------------------------
+# POST /email/context-reviews/{review_id}/reject
+# ---------------------------------------------------------------------------
+
+
+@router.post("/context-reviews/{review_id}/reject")
+async def reject_context_review(
+    review_id: UUID,
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+):
+    """Reject a pending context review. Items are NOT written to the context store."""
+    review = await db.get(EmailContextReview, review_id)
+    if not review or review.status != "pending":
+        raise HTTPException(404, "Review not found or already processed")
+
+    review.status = "rejected"
+    review.reviewed_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "rejected"}

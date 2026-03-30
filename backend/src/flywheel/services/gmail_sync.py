@@ -32,7 +32,8 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.config import settings
-from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile, Integration
+from flywheel.db.models import Email, EmailContextReview, EmailDraft, EmailScore, EmailVoiceProfile, Integration
+from flywheel.engines.email_context_extractor import extract_email_context
 from flywheel.engines.email_drafter import draft_email
 from flywheel.engines.model_config import get_engine_model
 from flywheel.engines.email_scorer import score_email
@@ -191,6 +192,36 @@ async def _check_daily_scoring_cap(
             "SELECT COUNT(*) FROM email_scores es "
             "JOIN emails e ON es.email_id = e.id "
             "WHERE e.tenant_id = :tid AND es.scored_at >= :today"
+        ).bindparams(tid=tenant_id, today=today_utc)
+    )
+    count = result.scalar_one()
+    return max(0, cap - count)
+
+
+async def _check_daily_extraction_cap(
+    db: AsyncSession,
+    tenant_id: UUID,
+    cap: int = 200,
+) -> int:
+    """Return remaining extraction budget for today. Default cap: 200/day.
+
+    Counts emails with context_extracted_at set today (UTC) for the given tenant.
+
+    Args:
+        db: Tenant-scoped async session (RLS enforced).
+        tenant_id: Tenant UUID.
+        cap: Maximum extractions per day (default 200).
+
+    Returns:
+        Remaining budget: max(0, cap - count_today). Returns 0 if cap reached.
+    """
+    today_utc = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    result = await db.execute(
+        sa_text(
+            "SELECT COUNT(*) FROM emails "
+            "WHERE tenant_id = :tid AND context_extracted_at >= :today"
         ).bindparams(tid=tenant_id, today=today_utc)
     )
     count = result.scalar_one()
@@ -363,6 +394,97 @@ async def _draft_important_emails(
     return draft_count
 
 
+_MAX_EXTRACTIONS_PER_CYCLE = 10
+
+
+async def _extract_email_contexts(
+    db: AsyncSession,
+    tenant_id: UUID,
+    integration: Integration,
+    email_ids: list[UUID],
+) -> int:
+    """Extract context from newly scored emails. Returns count extracted.
+
+    Runs after scoring and drafting. Respects daily per-tenant cap (200/day)
+    and per-cycle batch limit (10). High/medium confidence items are written
+    to context store immediately. Low-confidence items are routed to the
+    email_context_reviews table for human approval.
+
+    Per-email errors are caught — one failure never blocks the rest.
+    Commits internally after processing all emails in the batch.
+
+    Args:
+        db: Tenant-scoped async session.
+        tenant_id: Tenant UUID.
+        integration: Gmail Integration for credential retrieval.
+        email_ids: Email UUIDs from the current sync batch.
+
+    Returns:
+        Number of emails successfully extracted.
+    """
+    if not email_ids:
+        return 0
+
+    # Check daily cap
+    remaining = await _check_daily_extraction_cap(db, tenant_id)
+    if remaining == 0:
+        logger.warning(
+            "Daily extraction cap (200) reached for tenant %s — skipping %d email(s)",
+            tenant_id,
+            len(email_ids),
+        )
+        return 0
+
+    # Limit per-cycle to avoid timeout
+    budget = min(remaining, _MAX_EXTRACTIONS_PER_CYCLE)
+
+    # Load emails: not yet extracted, with score (priority check is inside extractor)
+    result = await db.execute(
+        select(Email).where(
+            Email.id.in_(email_ids[:budget]),
+            Email.tenant_id == tenant_id,
+            Email.context_extracted_at.is_(None),
+        )
+    )
+    emails = result.scalars().all()
+
+    extracted_count = 0
+    for email_obj in emails:
+        try:
+            extraction = await extract_email_context(
+                db, tenant_id, email_obj, integration,
+                skip_low_confidence=True,
+            )
+
+            if extraction is not None:
+                # Route low-confidence items to review table
+                low_items = extraction["results"].get("low_confidence_items", [])
+                if low_items:
+                    review = EmailContextReview(
+                        tenant_id=tenant_id,
+                        email_id=email_obj.id,
+                        user_id=email_obj.user_id,
+                        extracted_data={"items": low_items},
+                        status="pending",
+                    )
+                    db.add(review)
+                extracted_count += 1
+
+                # Mark as extracted ONLY when extraction actually ran
+                # (skipped emails stay eligible for future extraction if re-scored)
+                email_obj.context_extracted_at = datetime.now(timezone.utc)
+
+        except Exception:
+            logger.exception(
+                "Context extraction failed for email_id=%s tenant_id=%s",
+                email_obj.id,
+                tenant_id,
+            )
+
+    await db.commit()
+    return extracted_count
+
+
 async def get_thread_priority(
     db: AsyncSession,
     tenant_id: UUID,
@@ -472,6 +594,7 @@ async def _full_sync(
         if row[1] not in synced_gmail_ids
     ]
     if stale_ids:
+        await db.execute(EmailContextReview.__table__.delete().where(EmailContextReview.email_id.in_(stale_ids)))
         await db.execute(EmailDraft.__table__.delete().where(EmailDraft.email_id.in_(stale_ids)))
         await db.execute(EmailScore.__table__.delete().where(EmailScore.email_id.in_(stale_ids)))
         await db.execute(Email.__table__.delete().where(Email.id.in_(stale_ids)))
@@ -517,6 +640,22 @@ async def _full_sync(
         except Exception:
             logger.exception("Drafting failed for integration %s", integration.id)
             # Non-fatal — sync and scoring already committed
+
+        # Extract context AFTER drafting — extraction failure cannot lose synced/scored/drafted emails
+        try:
+            extracted = await _extract_email_contexts(
+                db, integration.tenant_id, integration, new_email_ids
+            )
+            logger.info(
+                "Extracted context from %d emails for integration %s",
+                extracted,
+                integration.id,
+            )
+        except Exception:
+            logger.exception(
+                "Context extraction failed for integration %s", integration.id
+            )
+            # Non-fatal — sync, scoring, and drafting already committed
 
     return count
 
@@ -618,6 +757,9 @@ async def sync_gmail(
             if email_row_id:
                 # Delete child rows first (no FK cascade on email_id)
                 await db.execute(
+                    EmailContextReview.__table__.delete().where(EmailContextReview.email_id == email_row_id)
+                )
+                await db.execute(
                     EmailDraft.__table__.delete().where(EmailDraft.email_id == email_row_id)
                 )
                 await db.execute(
@@ -671,6 +813,22 @@ async def sync_gmail(
         except Exception:
             logger.exception("Drafting failed for integration %s", integration.id)
             # Non-fatal — sync and scoring already committed
+
+        # Extract context AFTER drafting — extraction failure cannot lose synced/scored/drafted emails
+        try:
+            extracted = await _extract_email_contexts(
+                db, integration.tenant_id, integration, new_email_ids
+            )
+            logger.info(
+                "Extracted context from %d emails for integration %s",
+                extracted,
+                integration.id,
+            )
+        except Exception:
+            logger.exception(
+                "Context extraction failed for integration %s", integration.id
+            )
+            # Non-fatal — sync, scoring, and drafting already committed
 
     return count
 
