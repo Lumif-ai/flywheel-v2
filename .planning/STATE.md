@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v7.0 Email Voice & Intelligence Overhaul — Phase 75 complete (verified), milestone complete
+**Current focus:** v7.0 shipped — planning next milestone
 
 ## Current Position
 
-Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 75 complete (verified), all 7 phases done
+Milestone: v7.0 Email Voice & Intelligence Overhaul — SHIPPED 2026-03-30
+Phase: All 7 phases complete (69-75)
 Plan: —
-Status: Phase 75 complete (verified) — v7.0 milestone complete
-Last activity: 2026-03-30 — Phase 75 executed and verified (2/2 plans)
+Status: Milestone archived
+Last activity: 2026-03-30 — v7.0 milestone completed and archived
 
 Progress: [██████████] 100%
 
@@ -37,24 +37,7 @@ Progress: [██████████] 100%
 
 All v1.0-v6.0 decisions archived in milestone ROADMAP archives.
 
-v7.0 decisions made:
-- Model config stored in tenant.settings["email_engine_models"] JSONB path (no new table) — decided in 69-01
-- All 5 engine defaults upgraded to claude-sonnet-4-6 (from Haiku for scoring/voice/learning) — decided in 69-01
-- Voice profile expanded to 10 fields (6 new nullable columns with server_default, no backfill) — decided in 70-01
-- Extraction uses 50 sent emails (up from 20), updater handles all 10 fields with running avg for avg_sentences — decided in 70-02/03
-
-- [Phase 72]: Voice snapshot stored as {type: voice_snapshot} in context_used JSONB; regeneration merges overrides without mutating persistent profile
-- [Phase 72]: Used existing DropdownMenu primitive (base-ui) for regenerate dropdown; VoiceAnnotation shows 5 badges collapsed, 10-field grid expanded
-- [Phase 73]: Voice content formatted as markdown (not JSON) for direct MCP readability; confidence mapped from samples count (high>=20, medium>=5, low<5); catalog stays active on reset
-- [Phase 74-01]: Detail tags use category:key format for deterministic dedup; source label is caller-provided; engine-sourced writes skip graph extraction; relationship signals stored in insights file
-- [Phase 74-02]: Body truncated to 8000 chars for context window; snippet fallback < 50 chars, skip < 20 chars; per-item error isolation in writer integration
-- [Phase 75-01]: Low-confidence items returned in results dict (not written to review table directly) — writer stays stateless, caller decides storage; ON DELETE CASCADE on email_id FK
-
-- [Phase 75-02]: Per-cycle extraction limit set to 10 to prevent timeout; approve endpoint upgrades confidence to medium with entry_date from parent email received_at
-
-Pending decisions for v7.0 (from spec open questions):
-- Whether context extraction cap (200/day) should be configurable per tenant or global
-- Whether "Reset & Relearn" should clear incremental learning history
+All v1.0-v7.0 decisions archived in milestone ROADMAP archives and PROJECT.md Key Decisions table.
 
 ### Pending Todos
 
@@ -68,5 +51,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 75 complete (verified) — v7.0 milestone complete, ready for /gsd:complete-milestone
+Stopped at: v7.0 milestone archived — ready for /gsd:new-milestone
 Resume file: None

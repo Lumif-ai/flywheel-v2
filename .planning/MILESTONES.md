@@ -95,3 +95,57 @@
 
 ---
 
+
+## v5.0 — Tasks UI ✓
+
+**Goal:** Users can see, manage, and act on extracted tasks through a dedicated Tasks page with filtering, status tracking, and inline completion.
+
+**Started:** 2026-03-29
+**Completed:** 2026-03-29
+**Phases:** 67 (1 phase, 7 plans)
+**Last phase number:** 67
+
+**Key deliverables:**
+- Tasks page — filterable, sortable task list with status tracking and inline actions
+- Task detail — full context with source attribution, deadline, assignee
+- Task lifecycle — create, complete, snooze, dismiss with optimistic UI updates
+
+---
+
+## v6.0 — Email-to-Tasks ✓
+
+**Goal:** Emails with action items automatically generate tasks, closing the loop between inbox triage and task execution.
+
+**Started:** 2026-03-29
+**Completed:** 2026-03-29
+**Phases:** 68 (1 phase, 3 plans)
+**Last phase number:** 68
+
+**Key deliverables:**
+- Email-to-task extraction — action items from scored emails become tracked tasks
+- Task attribution — each task links back to source email thread
+- Sync integration — task extraction wired into email scoring pipeline
+
+---
+
+## v7.0 — Email Voice & Intelligence Overhaul ✓
+
+**Goal:** Transform email from a siloed draft engine into a bidirectional intelligence source that sounds like the user, shares voice across all skills, and feeds relationship/deal/contact intelligence back into the context store.
+
+**Started:** 2026-03-30
+**Completed:** 2026-03-30
+**Phases:** 69-75 (7 phases, 13 plans)
+**Last phase number:** 75
+**Stats:** 41 files changed, +5,691 / -454 lines
+
+**Key deliverables:**
+- Per-tenant model configuration — all 5 email engines read LLM model from settings JSONB, defaulting to claude-sonnet-4-6
+- Voice profile overhaul — 10 fields from 50 sent emails (formality, greeting style, paragraph patterns, emoji usage, question style, avg sentences)
+- Voice Settings UI — view all 10 learned fields, edit tone/sign-off inline, Reset & Relearn with confirmation
+- Draft enhancements — collapsible voice annotation badges, regenerate dropdown (shorter/longer/casual/formal/custom)
+- Voice as context store asset — sender-voice.md written after extraction and updated on every incremental learning
+- Email context extractor — extracts contacts, topics, deal signals, relationship signals, action items from priority 3+ emails
+- Context extraction pipeline — wired into gmail sync loop with confidence routing (high/medium auto-write, low → review queue), 200/day per-tenant cap, 10/cycle batch limit, approve/reject API endpoints
+
+---
+

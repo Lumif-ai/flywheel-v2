@@ -10,7 +10,7 @@ Conversations automatically become tracked commitments and executed deliverables
 
 ## Current State
 
-All four milestones shipped. The platform is functionally complete for single-founder dogfooding.
+Eight milestones shipped. The platform is functionally complete for single-founder dogfooding with full email intelligence loop.
 
 **Shipped milestones:**
 - **v1.0 Email Copilot** (2026-03-25) — Gmail sync, 5-tier scoring, voice-learned drafts, review UI, feedback loop
@@ -18,8 +18,15 @@ All four milestones shipped. The platform is functionally complete for single-fo
 - **v2.1 CRM Redesign** (2026-03-27) — Pipeline grid, 4 relationship surfaces, AI synthesis, signal badges
 - **v3.0 Intelligence Flywheel** (2026-03-28) — Team privacy, Granola adapter, meeting intelligence pipeline, prep loop
 - **v4.0 Flywheel OS** (2026-03-29) — Unified meetings, task extraction, flywheel ritual engine, stabilization
+- **v5.0 Tasks UI** (2026-03-29) — Task triage, focus mode, quick-add, detail panel, briefing widget
+- **v6.0 Email-to-Tasks** (2026-03-29) — Email action item extraction, task attribution, sync integration
+- **v7.0 Email Voice & Intelligence Overhaul** (2026-03-30) — 10-field voice profiles, voice settings UI, draft regeneration, voice as context store asset, email context extractor, confidence-routed extraction pipeline
 
-**Codebase:** FastAPI + React, ~20K LOC backend, ~15K LOC frontend
+**Codebase:** FastAPI + React, ~25K LOC backend, ~15K LOC frontend
+
+## Current Milestone: Planning next milestone
+
+v7.0 shipped. Run `/gsd:new-milestone` to define v8.0.
 
 ## Requirements
 
@@ -69,12 +76,27 @@ All four milestones shipped. The platform is functionally complete for single-fo
 - ✓ Task intelligence (extraction, API, signals) — v4.0 Phase 65
 - ✓ Flywheel ritual engine (5-stage daily loop) — v4.0 Phase 66
 - ✓ Flywheel stabilization (18 issues fixed) — v4.0 Phase 66.1
+- ✓ Tasks UI (triage, focus mode, quick-add, detail panel, briefing widget) — v5.0 Phase 67
+- ✓ Email-to-tasks extraction — v6.0 Phase 68
+- ✓ Configurable model per email engine (default Sonnet) — v7.0 Phase 69
+- ✓ Richer voice extraction (50 samples, 10 fields, Sonnet) — v7.0 Phase 70
+- ✓ Expanded EmailVoiceProfile schema (6 new columns) — v7.0 Phase 70
+- ✓ Updated draft system prompt using all 10 voice fields — v7.0 Phase 70
+- ✓ Incremental voice learning with Sonnet + expanded fields — v7.0 Phase 70
+- ✓ Voice Profile settings page (read-mostly mirror card) — v7.0 Phase 71
+- ✓ Voice influence annotations on drafts — v7.0 Phase 72
+- ✓ Manual tone override / regenerate per draft — v7.0 Phase 72
+- ✓ Voice profile written to context store (sender-voice.md) — v7.0 Phase 73
+- ✓ Shared context store writer (direct I/O + MCP wrapper) — v7.0 Phase 74
+- ✓ Email context extractor engine (contacts, topics, deals, relationships, action items) — v7.0 Phase 74
+- ✓ Confidence-based routing with human review queue — v7.0 Phase 75
+- ✓ Email extraction wired into gmail sync loop (200/day cap, 10/cycle) — v7.0 Phase 75
 
 ### Active
 
-<!-- Next milestone scope — TBD -->
+<!-- Next milestone — to be defined -->
 
-(No active requirements — next milestone not yet defined)
+(None — run `/gsd:new-milestone` to define next milestone requirements)
 
 ### Out of Scope
 
@@ -99,11 +121,13 @@ All four milestones shipped. The platform is functionally complete for single-fo
 **Specs:**
 - `.planning/SPEC-ai-native-crm.md` (v2.0)
 - `.planning/SPEC-crm-redesign.md` (v2.1)
-- `.planning/SPEC-flywheel-os.md` (v4.0 — current, reviewed)
+- `.planning/SPEC-flywheel-os.md` (v4.0)
+- `.planning/SPEC-email-voice-intelligence.md` (v7.0 — shipped, 17 requirements across 3 tracks)
 **Concept briefs:**
 - `.planning/CONCEPT-BRIEF-ai-native-crm.md` (v2.0)
 - `.planning/CONCEPT-BRIEF-crm-redesign.md` (v2.1)
 - `.planning/CONCEPT-BRIEF-flywheel-os.md` (v4.0 — 4-round brainstorm, 14 advisors)
+- `.planning/CONCEPT-BRIEF-email-voice-intelligence.md` (v7.0 — 4-round brainstorm, 15 advisors)
 
 ## Constraints
 
@@ -143,5 +167,16 @@ All four milestones shipped. The platform is functionally complete for single-fo
 | trust_level='confirm' for all tasks | Founder reviews everything, no auto-execution | ✓ Good |
 | Execution caps (20 process, 15 prep) | Prevents MCP timeout on large batches | ✓ Good |
 
+| Voice profile as context store asset | Cross-skill voice consistency, switching cost moat | ✓ Good |
+| Source-specific extractors + shared writer | Emails/meetings are different inputs, context store is shared brain | ✓ Good |
+| Sonnet default everywhere | User pays via Claude Code subscription, cost is user-controlled | ✓ Good |
+| Configurable models per engine | Power-user escape hatch, not business necessity | ✓ Good |
+| Read-mostly voice settings | Mirror not mixing console — trust mechanism with light control | ✓ Good |
+| Priority >= 3 guard rail for context extraction | Low-priority emails are noise, would poison context store | ✓ Good |
+| Human review queue for low-confidence | Email is lower-signal than meetings, needs quality gate | ✓ Good |
+| 200/day extraction cap hardcoded | YAGNI per-tenant config; easy to make configurable later | ✓ Good |
+| 10/cycle batch limit | Prevents LLM timeout within 60s sync budget | ✓ Good |
+| Approve upgrades confidence to medium | Human validation implies correctness; entry_date from original email | ✓ Good |
+
 ---
-*Last updated: 2026-03-29 after v4.0 Flywheel OS milestone completion*
+*Last updated: 2026-03-30 after v7.0 milestone completion*
