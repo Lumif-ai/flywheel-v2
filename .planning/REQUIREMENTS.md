@@ -34,8 +34,8 @@
 ### Context Store Integration
 
 - [x] **CTX-01**: Voice profile written to sender-voice.md in context store after initial extraction and after every incremental update, following standard entry format
-- [ ] **CTX-02**: Email context extractor engine extracts contacts, topics, deal signals, relationship signals, and action items from priority >= 3 emails
-- [ ] **CTX-03**: Shared context store writer with direct file I/O for backend engines and MCP wrapper for Claude Code skills — handles dedup (source + detail_tag + date), evidence increment, 4000-char entry cap
+- [x] **CTX-02**: Email context extractor engine extracts contacts, topics, deal signals, relationship signals, and action items from priority >= 3 emails
+- [x] **CTX-03**: Shared context store writer with direct file I/O for backend engines and MCP wrapper for Claude Code skills — handles dedup (source + detail_tag + date), evidence increment, 4000-char entry cap
 - [ ] **CTX-04**: Low-confidence extractions routed to email_context_reviews table for human review (approve/reject via API), high/medium auto-written
 - [ ] **CTX-05**: Email context extraction wired into gmail sync loop after scoring, with separate 200/day cap per tenant and context_extracted_at tracking column
 

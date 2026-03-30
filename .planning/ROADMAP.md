@@ -398,8 +398,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 74-01-PLAN.md — context_store_writer.py: write_contact, write_insight, write_action_item, write_deal_signal with dedup + evidence
-- [ ] 74-02-PLAN.md — email_context_extractor.py: extraction prompt, structured parsing, confidence assignment
+- [x] 74-01-PLAN.md — context_store_writer.py: write_contact, write_insight, write_action_item, write_deal_signal with dedup + evidence ✓
+- [x] 74-02-PLAN.md — email_context_extractor.py: extraction prompt, structured parsing, confidence assignment ✓
 
 ---
 
@@ -466,7 +466,7 @@ Plans:
 | 71. Voice Settings UI | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 72. Draft Enhancements | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 73. Voice as Context Store Asset | v7.0 | 1/1 | ✓ Complete | 2026-03-30 |
-| 74. Email Context Extractor and Shared Writer | v7.0 | 0/2 | Not started | - |
+| 74. Email Context Extractor and Shared Writer | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 75. Context Extraction Pipeline | v7.0 | 0/2 | Not started | - |
 
 ---
