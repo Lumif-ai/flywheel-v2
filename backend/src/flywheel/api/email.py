@@ -637,7 +637,7 @@ async def trigger_sync(
     # Snapshot IDs needed by background task (avoid detached instance issues)
     integration_id = integration.id
     tenant_id = str(user.tenant_id)
-    user_id = str(user.id)
+    user_id = str(user.sub)
 
     async def _run_sync() -> None:
         from flywheel.services.gmail_sync import sync_gmail  # noqa: PLC0415
@@ -884,7 +884,7 @@ async def approve_draft(
         background_tasks.add_task(
             _run_voice_update,
             tenant_id=user.tenant_id,
-            user_id=user.id,
+            user_id=user.sub,
             original_body=original_body,
             edited_body=edited_body,
         )

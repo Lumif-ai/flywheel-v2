@@ -92,14 +92,14 @@ export function RegenerateDropdown({
           {QUICK_ACTIONS.map(({ action, label, icon: Icon }) => (
             <DropdownMenuItem
               key={action}
-              onSelect={() => handleAction({ action })}
+              onClick={() => handleAction({ action })}
             >
               <Icon className="size-3.5" />
               {label}
             </DropdownMenuItem>
           ))}
           <DropdownMenuSeparator />
-          <DropdownMenuItem onSelect={() => setCustomOpen(true)}>
+          <DropdownMenuItem onClick={() => setCustomOpen(true)}>
             <Pencil className="size-3.5" />
             Custom...
           </DropdownMenuItem>

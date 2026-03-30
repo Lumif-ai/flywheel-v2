@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
@@ -88,19 +89,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 __import__("sqlalchemy").text("SELECT 1")
             )
 
-        # Auto-apply pending Alembic migrations
+        # Auto-apply pending Alembic migrations (subprocess to avoid event loop conflict)
         import logging as _logging
+        import subprocess
+        import sys
         _migration_log = _logging.getLogger("flywheel.migrations")
         try:
-            from alembic.config import Config as AlembicConfig
-            from alembic import command as alembic_command
-
-            alembic_cfg = AlembicConfig("alembic.ini")
-            alembic_command.upgrade(alembic_cfg, "head")
-            _migration_log.info("Database migrations applied successfully")
+            # Pass DATABASE_URL so alembic env.py uses the same DB as the running app
+            migration_env = {**os.environ, "DATABASE_URL": settings.database_url}
+            result = subprocess.run(
+                [sys.executable, "-m", "alembic", "upgrade", "head"],
+                cwd=os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                capture_output=True, text=True, timeout=30,
+                env=migration_env,
+            )
+            if result.returncode == 0:
+                _migration_log.info("Database migrations applied successfully")
+            else:
+                _migration_log.error("Migration failed: %s", result.stderr)
         except Exception as e:
-            _migration_log.error("Failed to apply migrations: %s", e)
-            raise
+            _migration_log.warning("Migration auto-apply skipped: %s", e)
 
         # Start background workers
         from flywheel.services.job_queue import job_queue_loop

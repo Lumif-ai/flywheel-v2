@@ -31,7 +31,7 @@ ENGINE_DEFAULTS: dict[str, str] = {
     "scoring": "claude-sonnet-4-6",
     "voice_extraction": "claude-sonnet-4-6",
     "voice_learning": "claude-sonnet-4-6",
-    "drafting": "claude-sonnet-4-6",
+    "drafting": "claude-opus-4-6",
     "context_extraction": "claude-sonnet-4-6",
 }
 

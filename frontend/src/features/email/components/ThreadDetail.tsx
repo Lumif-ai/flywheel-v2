@@ -194,7 +194,7 @@ export function ThreadDetail() {
   const { data, isLoading } = useThreadDetail(selectedThreadId)
 
   return (
-    <Sheet open={detailOpen} onOpenChange={(open: boolean) => !open && closeDetail()}>
+    <Sheet open={detailOpen} onOpenChange={(open: boolean) => !open && closeDetail()} modal={false}>
       <SheetContent side="right" className="w-[500px] sm:w-[540px] flex flex-col overflow-hidden p-0">
         {isLoading ? (
           <DetailSkeleton />
