@@ -975,6 +975,9 @@ class Email(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+    context_extracted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
 
 class EmailScore(Base):
@@ -1043,6 +1046,40 @@ class EmailDraft(Base):
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
     updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class EmailContextReview(Base):
+    """Low-confidence context extractions pending human review."""
+
+    __tablename__ = "email_context_reviews"
+    __table_args__ = (
+        Index("idx_context_reviews_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    email_id: Mapped[UUID] = mapped_column(
+        ForeignKey("emails.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("profiles.id"), nullable=False
+    )
+    extracted_data: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'pending'")
+    )
+    reviewed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
 

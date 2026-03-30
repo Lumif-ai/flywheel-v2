@@ -168,19 +168,27 @@ async def _write_extracted_context(
     email_id: UUID,
     email_date: date,
     extracted: dict,
+    skip_low_confidence: bool = False,
 ) -> dict:
     """Iterate over extracted items and write each via the shared writer.
 
     Individual item failures are caught and logged — one bad item does not
     prevent others from being written.
 
-    Returns dict with keys: created, incremented, total.
+    When *skip_low_confidence* is True, items with ``confidence == "low"`` are
+    collected in ``results["low_confidence_items"]`` instead of being written
+    to the context store.  Default behaviour (False) writes everything.
+
+    Returns dict with keys: created, incremented, total, low_confidence_items.
     """
-    results = {"created": 0, "incremented": 0, "total": 0}
+    results: dict = {"created": 0, "incremented": 0, "total": 0, "low_confidence_items": []}
 
     # Contacts
     for c in extracted.get("contacts", []):
         try:
+            if skip_low_confidence and c.get("confidence") == "low":
+                results["low_confidence_items"].append({"type": "contact", "data": c})
+                continue
             outcome = await write_contact(
                 db=db,
                 tenant_id=tenant_id,
@@ -206,6 +214,9 @@ async def _write_extracted_context(
     # Topics (insights)
     for t in extracted.get("topics", []):
         try:
+            if skip_low_confidence and t.get("confidence") == "low":
+                results["low_confidence_items"].append({"type": "insight", "data": t})
+                continue
             outcome = await write_insight(
                 db=db,
                 tenant_id=tenant_id,
@@ -229,6 +240,9 @@ async def _write_extracted_context(
     # Deal signals
     for d in extracted.get("deal_signals", []):
         try:
+            if skip_low_confidence and d.get("confidence") == "low":
+                results["low_confidence_items"].append({"type": "deal_signal", "data": d})
+                continue
             outcome = await write_deal_signal(
                 db=db,
                 tenant_id=tenant_id,
@@ -252,6 +266,9 @@ async def _write_extracted_context(
     # Relationship signals
     for r in extracted.get("relationship_signals", []):
         try:
+            if skip_low_confidence and r.get("confidence") == "low":
+                results["low_confidence_items"].append({"type": "relationship_signal", "data": r})
+                continue
             outcome = await write_relationship_signal(
                 db=db,
                 tenant_id=tenant_id,
@@ -275,6 +292,9 @@ async def _write_extracted_context(
     # Action items
     for a in extracted.get("action_items", []):
         try:
+            if skip_low_confidence and a.get("confidence") == "low":
+                results["low_confidence_items"].append({"type": "action_item", "data": a})
+                continue
             outcome = await write_action_item(
                 db=db,
                 tenant_id=tenant_id,
@@ -310,6 +330,7 @@ async def extract_email_context(
     email: Email,
     integration: Integration,
     api_key: str | None = None,
+    skip_low_confidence: bool = False,
 ) -> dict | None:
     """Extract structured intelligence from an email and write to context store.
 
@@ -384,7 +405,8 @@ async def extract_email_context(
 
         # 9. Write to context store
         results = await _write_extracted_context(
-            db, tenant_id, email.user_id, email.id, email.received_at.date(), extracted
+            db, tenant_id, email.user_id, email.id, email.received_at.date(), extracted,
+            skip_low_confidence=skip_low_confidence,
         )
 
         # 10. Log summary (no PII)
