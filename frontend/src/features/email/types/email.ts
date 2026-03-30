@@ -30,7 +30,7 @@ export interface VoiceSnapshot {
   tone: string | null
   avg_length: number | null
   sign_off: string | null
-  characteristic_phrases: string[] | null
+  phrases: string[] | null
   formality_level: string | null
   greeting_style: string | null
   question_style: string | null

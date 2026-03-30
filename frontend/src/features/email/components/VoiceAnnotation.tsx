@@ -12,7 +12,7 @@ const COLLAPSED_FIELDS: { key: keyof VoiceSnapshot; label: string; format: (v: u
   { key: 'greeting_style', label: 'Greeting', format: (v) => String(v) },
   { key: 'sign_off', label: 'Sign-off', format: (v) => String(v) },
   { key: 'avg_length', label: 'Avg. Length', format: (v) => `~${v} words` },
-  { key: 'characteristic_phrases', label: 'Phrases', format: (v) => {
+  { key: 'phrases', label: 'Phrases', format: (v) => {
     const arr = v as string[]
     return arr.slice(0, 2).join(', ')
   }},
@@ -28,12 +28,12 @@ const ALL_FIELDS: { key: keyof VoiceSnapshot; label: string }[] = [
   { key: 'paragraph_pattern', label: 'Paragraphs' },
   { key: 'question_style', label: 'Questions' },
   { key: 'emoji_usage', label: 'Emoji' },
-  { key: 'characteristic_phrases', label: 'Phrases' },
+  { key: 'phrases', label: 'Phrases' },
 ]
 
 function formatValue(key: keyof VoiceSnapshot, value: unknown): string {
   if (value === null || value === undefined) return 'Not set'
-  if (key === 'characteristic_phrases') {
+  if (key === 'phrases') {
     const arr = value as string[]
     return arr.length > 0 ? arr.join(', ') : 'Not set'
   }
@@ -80,7 +80,7 @@ export function VoiceAnnotation({ snapshot }: VoiceAnnotationProps) {
           {COLLAPSED_FIELDS.map(({ key, label, format }) => {
             const val = snapshot[key]
             if (val === null || val === undefined) return null
-            if (key === 'characteristic_phrases' && (val as string[]).length === 0) return null
+            if (key === 'phrases' && (val as string[]).length === 0) return null
             return (
               <span
                 key={key}

@@ -49,6 +49,7 @@ from flywheel.db.models import (
     EmailDraft,
     EmailScore,
     EmailVoiceProfile,
+    Integration,
 )
 from flywheel.engines.model_config import get_engine_model
 from flywheel.services.gmail_read import get_message_body, get_valid_credentials
