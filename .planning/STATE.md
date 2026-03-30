@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 ## Current Position
 
 Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 72 Draft Enhancements (plan 1/2 complete)
-Plan: 72-01 complete, ready for 72-02
-Status: Executing Phase 72
-Last activity: 2026-03-30 — Phase 72 plan 01 executed (voice snapshot + regeneration endpoint)
+Phase: 72 Draft Enhancements (plan 2/2 complete)
+Plan: 72-02 complete, phase 72 done
+Status: Phase 72 Complete
+Last activity: 2026-03-30 — Phase 72 plan 02 executed (voice annotation + regenerate dropdown UI)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -44,6 +44,7 @@ v7.0 decisions made:
 - Extraction uses 50 sent emails (up from 20), updater handles all 10 fields with running avg for avg_sentences — decided in 70-02/03
 
 - [Phase 72]: Voice snapshot stored as {type: voice_snapshot} in context_used JSONB; regeneration merges overrides without mutating persistent profile
+- [Phase 72]: Used existing DropdownMenu primitive (base-ui) for regenerate dropdown; VoiceAnnotation shows 5 badges collapsed, 10-field grid expanded
 
 Pending decisions for v7.0 (from spec open questions):
 - Whether context extraction cap (200/day) should be configurable per tenant or global
@@ -61,5 +62,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Completed 72-01-PLAN.md — ready for 72-02
+Stopped at: Completed 72-02-PLAN.md — Phase 72 complete
 Resume file: None
