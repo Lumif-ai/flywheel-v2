@@ -64,23 +64,36 @@ DEFAULT_VOICE_STUB = {
     "avg_length": 80,
     "sign_off": "Best,",
     "phrases": [],
+    "formality_level": "conversational",
+    "greeting_style": "Hi {name},",
+    "question_style": "direct",
+    "paragraph_pattern": "short single-line",
+    "emoji_usage": "never",
+    "avg_sentences": 3,
 }
 
 DRAFT_SYSTEM_PROMPT = """\
 You are drafting email replies on behalf of a specific person. Your job is to write
-a reply that sounds authentically like them — not generic AI prose.
+a reply that sounds authentically like them -- not generic AI prose.
 
 VOICE PROFILE (match this exactly):
 - Tone: {tone}
-- Typical length: {avg_length} words (stay within 20% of this)
+- Formality: {formality_level}
+- Greeting style: {greeting_style}
+- Typical length: {avg_length} words, ~{avg_sentences} sentences
+- Paragraph style: {paragraph_pattern}
+- Question style: {question_style}
+- Emoji usage: {emoji_usage}
 - Sign-off: Always end with "{sign_off}"
 - Characteristic phrases to weave in naturally: {phrases_list}
 
 REPLY CONSTRAINTS:
 - Address the specific ask or question in the email directly
-- Do NOT include a subject line — body only
+- Do NOT include a subject line -- body only
 - Do NOT start with "I hope this email finds you well" or similar filler
 - Do NOT use bullet points unless the incoming email used them
+- Match the greeting style above for the opening
+- Match the formality level -- casual means contractions, informal language
 - End with the sign-off above and nothing after it
 
 CONTEXT FROM USER'S KNOWLEDGE BASE:
@@ -113,7 +126,8 @@ async def _load_voice_profile(
         user_id: User UUID for profile lookup.
 
     Returns:
-        Dict with keys: tone, avg_length, sign_off, phrases.
+        Dict with keys: tone, avg_length, sign_off, phrases, formality_level,
+        greeting_style, question_style, paragraph_pattern, emoji_usage, avg_sentences.
     """
     result = await db.execute(
         select(EmailVoiceProfile).where(
@@ -136,6 +150,12 @@ async def _load_voice_profile(
         "avg_length": profile.avg_length or DEFAULT_VOICE_STUB["avg_length"],
         "sign_off": profile.sign_off or DEFAULT_VOICE_STUB["sign_off"],
         "phrases": (profile.phrases or [])[:5],
+        "formality_level": profile.formality_level or DEFAULT_VOICE_STUB["formality_level"],
+        "greeting_style": profile.greeting_style or DEFAULT_VOICE_STUB["greeting_style"],
+        "question_style": profile.question_style or DEFAULT_VOICE_STUB["question_style"],
+        "paragraph_pattern": profile.paragraph_pattern or DEFAULT_VOICE_STUB["paragraph_pattern"],
+        "emoji_usage": profile.emoji_usage or DEFAULT_VOICE_STUB["emoji_usage"],
+        "avg_sentences": profile.avg_sentences or DEFAULT_VOICE_STUB["avg_sentences"],
     }
 
 
@@ -291,7 +311,8 @@ def _build_draft_prompt(
     Args:
         email: Email ORM instance (sender_email, sender_name, subject used).
         body_text: Full email body text (or snippet on 401/403 fallback).
-        voice_profile: Dict with tone, avg_length, sign_off, phrases.
+        voice_profile: Dict with tone, avg_length, sign_off, phrases, formality_level,
+            greeting_style, question_style, paragraph_pattern, emoji_usage, avg_sentences.
         context_block: Formatted context text from _assemble_draft_context.
 
     Returns:
@@ -308,6 +329,12 @@ def _build_draft_prompt(
         sign_off=voice_profile.get("sign_off", DEFAULT_VOICE_STUB["sign_off"]),
         phrases_list=phrases_list,
         context_block=context_block,
+        formality_level=voice_profile.get("formality_level", DEFAULT_VOICE_STUB["formality_level"]),
+        greeting_style=voice_profile.get("greeting_style", DEFAULT_VOICE_STUB["greeting_style"]),
+        question_style=voice_profile.get("question_style", DEFAULT_VOICE_STUB["question_style"]),
+        paragraph_pattern=voice_profile.get("paragraph_pattern", DEFAULT_VOICE_STUB["paragraph_pattern"]),
+        emoji_usage=voice_profile.get("emoji_usage", DEFAULT_VOICE_STUB["emoji_usage"]),
+        avg_sentences=voice_profile.get("avg_sentences", DEFAULT_VOICE_STUB["avg_sentences"]),
     )
 
     sender_line = email.sender_name or ""

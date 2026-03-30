@@ -2,7 +2,8 @@
 
 Called as a background task from the approve_draft endpoint. Computes a diff
 between the AI-generated draft body and the user's edited version, sends it to
-Haiku for analysis, and merges the returned changes into the existing voice profile.
+the voice learning model for analysis, and merges the returned changes into the
+existing voice profile across all 10 fields.
 
 Functions:
   _compute_diff_summary(original, edited) -> str
@@ -10,7 +11,8 @@ Functions:
     "No changes detected." if texts are identical.
 
   update_from_edit(db, tenant_id, user_id, original_body, edited_body) -> bool
-    Main entry point: loads profile, calls Haiku, merges updates, persists.
+    Main entry point: loads profile, calls voice learning model, merges updates
+    for all 10 voice profile fields, persists.
     Returns True on success, False on no-op or any error.
 """
 
@@ -44,6 +46,12 @@ Allowed return fields:
 - "sign_off": string (e.g. "Thanks,", "Best,")
 - "phrases_to_add": list of strings (phrases the user prefers)
 - "phrases_to_remove": list of strings (phrases the user removed or replaced)
+- "formality_level": string -- "formal", "conversational", or "casual"
+- "greeting_style": string (e.g. "Hi {name},", "Hey,", "No greeting")
+- "question_style": string -- "direct", "embedded", or "rare"
+- "paragraph_pattern": string (e.g. "short single-line", "2-3 sentence blocks")
+- "emoji_usage": string -- "never", "occasional", or "frequent"
+- "avg_sentences": integer (average sentences per email)
 
 Only include a field if the edits clearly demonstrate a preference change.
 If the edits are trivial (whitespace, punctuation only), return an empty JSON object: {}
@@ -103,7 +111,7 @@ async def update_from_edit(
     """Incrementally update the voice profile from a single draft edit.
 
     Loads the existing EmailVoiceProfile for (tenant_id, user_id), computes the
-    diff between original_body and edited_body, calls Haiku to interpret what
+    diff between original_body and edited_body, calls voice learning model to interpret what
     changed, merges the returned fields into the profile, and persists the update.
 
     Fails gracefully: any exception logs tenant_id and user_id only (no PII)
@@ -154,11 +162,17 @@ async def update_from_edit(
                 "avg_length": profile.avg_length,
                 "sign_off": profile.sign_off,
                 "phrases": profile.phrases or [],
+                "formality_level": profile.formality_level,
+                "greeting_style": profile.greeting_style,
+                "question_style": profile.question_style,
+                "paragraph_pattern": profile.paragraph_pattern,
+                "emoji_usage": profile.emoji_usage,
+                "avg_sentences": profile.avg_sentences,
             },
             indent=2,
         )
 
-        # Build Haiku prompt
+        # Build voice learning prompt
         user_message = f"""\
 CURRENT VOICE PROFILE:
 {current_profile_json}
@@ -197,16 +211,16 @@ Return ONLY the fields that should change as a JSON object.
                 updates = json.loads(match.group())
             else:
                 logger.warning(
-                    "voice_update: could not parse Haiku response for tenant_id=%s user_id=%s",
+                    "voice_update: could not parse model response for tenant_id=%s user_id=%s",
                     tenant_id,
                     user_id,
                 )
                 return False
 
-        # Empty response means Haiku found no meaningful changes
+        # Empty response means model found no meaningful changes
         if not updates:
             logger.debug(
-                "voice_update: Haiku returned no changes for tenant_id=%s user_id=%s",
+                "voice_update: model returned no changes for tenant_id=%s user_id=%s",
                 tenant_id,
                 user_id,
             )
@@ -250,6 +264,26 @@ Return ONLY the fields that should change as a JSON object.
         # Cap at 10
         new_phrases = filtered[:10]
 
+        # Direct replacement fields (same merge pattern as tone)
+        new_formality = updates.get("formality_level", profile.formality_level)
+        new_greeting = updates.get("greeting_style", profile.greeting_style)
+        new_question = updates.get("question_style", profile.question_style)
+        new_paragraph = updates.get("paragraph_pattern", profile.paragraph_pattern)
+        new_emoji = updates.get("emoji_usage", profile.emoji_usage)
+
+        # avg_sentences: running average (same pattern as avg_length)
+        if "avg_sentences" in updates and isinstance(updates["avg_sentences"], (int, float)):
+            new_avg_s = updates["avg_sentences"]
+            if profile.avg_sentences is not None and current_samples > 0:
+                new_avg_sentences = int(
+                    (profile.avg_sentences * current_samples + new_avg_s)
+                    / (current_samples + 1)
+                )
+            else:
+                new_avg_sentences = int(new_avg_s)
+        else:
+            new_avg_sentences = profile.avg_sentences
+
         new_samples = current_samples + 1
 
         # Persist update (UPDATE only — row must exist)
@@ -264,6 +298,12 @@ Return ONLY the fields that should change as a JSON object.
                 avg_length=new_avg_length,
                 sign_off=new_sign_off,
                 phrases=new_phrases,
+                formality_level=new_formality,
+                greeting_style=new_greeting,
+                question_style=new_question,
+                paragraph_pattern=new_paragraph,
+                emoji_usage=new_emoji,
+                avg_sentences=new_avg_sentences,
                 samples_analyzed=new_samples,
                 updated_at=datetime.now(timezone.utc),
             )
