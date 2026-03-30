@@ -104,6 +104,7 @@ class DraftDetail(BaseModel):
     status: str
     draft_body: str | None
     user_edits: str | None
+    voice_snapshot: dict | None = None
 
 
 class ThreadDetailResponse(BaseModel):
@@ -142,6 +143,25 @@ class DigestResponse(BaseModel):
 
 class EditDraftRequest(BaseModel):
     draft_body: str
+
+
+class RegenerateRequest(BaseModel):
+    action: str | None = None  # "shorter", "longer", "more_casual", "more_formal"
+    custom_instructions: str | None = None  # Free-form override text
+
+    def model_post_init(self, __context) -> None:
+        if self.action is None and self.custom_instructions is None:
+            raise ValueError("At least one of 'action' or 'custom_instructions' must be provided")
+        valid_actions = {"shorter", "longer", "more_casual", "more_formal"}
+        if self.action is not None and self.action not in valid_actions:
+            raise ValueError(f"Invalid action '{self.action}'. Must be one of: {', '.join(sorted(valid_actions))}")
+
+
+class RegenerateDraftResponse(BaseModel):
+    id: UUID
+    draft_body: str
+    voice_snapshot: dict | None
+    message: str
 
 
 class DraftResponse(BaseModel):
@@ -539,11 +559,19 @@ async def get_thread(
 
         # Capture pending draft (at most one per thread)
         if draft is not None and pending_draft is None:
+            # Extract voice_snapshot from context_used if present
+            draft_voice_snapshot = None
+            if draft.context_used:
+                for entry in draft.context_used:
+                    if isinstance(entry, dict) and entry.get("type") == "voice_snapshot":
+                        draft_voice_snapshot = entry
+                        break
             pending_draft = DraftDetail(
                 id=str(draft.id),
                 status=draft.status,
                 draft_body=draft.draft_body,
                 user_edits=draft.user_edits,
+                voice_snapshot=draft_voice_snapshot,
             )
 
         # Subject from most recent message
@@ -958,4 +986,70 @@ async def edit_draft(
         email_id=draft.email_id,
         status="pending",
         message="Draft updated",
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /email/drafts/{draft_id}/regenerate
+# ---------------------------------------------------------------------------
+
+
+@router.post("/drafts/{draft_id}/regenerate", response_model=RegenerateDraftResponse)
+async def regenerate_draft(
+    draft_id: UUID,
+    body: RegenerateRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> RegenerateDraftResponse:
+    """Regenerate a draft with one-time voice overrides.
+
+    Accepts a quick action (shorter, longer, more_casual, more_formal)
+    and/or custom instructions. Re-generates the draft body with merged
+    voice overrides without modifying the persistent voice profile.
+    """
+    from flywheel.engines.email_drafter import (  # noqa: PLC0415
+        QUICK_ACTION_OVERRIDES,
+        regenerate_draft_with_overrides,
+    )
+
+    # Resolve overrides from action
+    overrides = None
+    if body.action:
+        overrides = QUICK_ACTION_OVERRIDES.get(body.action)
+        if overrides is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid action: {body.action}",
+            )
+
+    try:
+        updated_draft = await regenerate_draft_with_overrides(
+            db,
+            user.tenant_id,
+            draft_id,
+            overrides=overrides,
+            custom_instructions=body.custom_instructions,
+        )
+    except LookupError:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    await db.commit()
+
+    # Extract voice_snapshot from updated context_used
+    voice_snapshot = None
+    if updated_draft.context_used:
+        for entry in updated_draft.context_used:
+            if isinstance(entry, dict) and entry.get("type") == "voice_snapshot":
+                voice_snapshot = entry
+                break
+
+    action_desc = body.action or "custom"
+    logger.info("Draft regenerated: draft_id=%s action=%s", draft_id, action_desc)
+    return RegenerateDraftResponse(
+        id=updated_draft.id,
+        draft_body=updated_draft.draft_body,
+        voice_snapshot=voice_snapshot,
+        message=f"Draft regenerated with {action_desc} adjustments",
     )

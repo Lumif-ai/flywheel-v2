@@ -72,6 +72,18 @@ DEFAULT_VOICE_STUB = {
     "avg_sentences": 3,
 }
 
+QUICK_ACTION_OVERRIDES = {
+    "shorter": {"avg_length": 40, "avg_sentences": 2, "paragraph_pattern": "short single-line responses"},
+    "longer": {"avg_length": 150, "avg_sentences": 6, "paragraph_pattern": "2-3 sentence paragraph blocks"},
+    "more_casual": {"formality_level": "casual", "tone": "friendly and relaxed", "emoji_usage": "occasional"},
+    "more_formal": {"formality_level": "formal", "tone": "professional and polished", "emoji_usage": "never"},
+}
+
+VOICE_SNAPSHOT_FIELDS = [
+    "tone", "avg_length", "sign_off", "phrases", "formality_level",
+    "greeting_style", "question_style", "paragraph_pattern", "emoji_usage", "avg_sentences",
+]
+
 DRAFT_SYSTEM_PROMPT = """\
 You are drafting email replies on behalf of a specific person. Your job is to write
 a reply that sounds authentically like them -- not generic AI prose.
@@ -354,6 +366,194 @@ Subject: {email.subject or "(no subject)"}
     return system_prompt, user_message
 
 
+async def _generate_draft_body(
+    db: AsyncSession,
+    tenant_id: UUID,
+    email: Email,
+    voice_profile_dict: dict,
+    context_refs: list,
+    integration=None,
+    creds=None,
+    body_text: "str | None" = None,
+    custom_instructions: "str | None" = None,
+    api_key: "str | None" = None,
+) -> tuple:
+    """Generate a draft body using Claude with the given voice profile dict.
+
+    This is the core drafting logic extracted for reuse by both draft_email()
+    and regenerate_draft_with_overrides(). Accepts a voice profile as a plain
+    dict (not ORM object) so overrides can be merged before calling.
+
+    Args:
+        db: Async SQLAlchemy session (caller-owned, RLS already set).
+        tenant_id: Tenant UUID.
+        email: Email ORM instance to draft a reply for.
+        voice_profile_dict: Dict with all 10 voice profile fields.
+        context_refs: List of context ref dicts from EmailScore.
+        integration: Integration ORM object (needed if body_text not provided).
+        creds: Google credentials (needed if body_text not provided).
+        body_text: Pre-fetched email body. If None, fetches via Gmail.
+        custom_instructions: Optional free-form instruction to append.
+        api_key: Optional explicit API key for Claude call.
+
+    Returns:
+        Tuple of (draft_body_str, fetch_error_or_None).
+    """
+    fetch_error = None
+
+    # Fetch body if not provided
+    if body_text is None:
+        if creds is None and integration is not None:
+            creds = await get_valid_credentials(integration)
+        body_text, fetch_error = await _fetch_body_with_fallback(
+            integration, email, creds
+        )
+        if body_text == "" and fetch_error == "body_too_short":
+            return ("", "body_too_short")
+
+    # Assemble context
+    context_block = await _assemble_draft_context(db, tenant_id, context_refs)
+
+    # Build prompt
+    system_prompt, user_message = _build_draft_prompt(
+        email, body_text, voice_profile_dict, context_block
+    )
+
+    # Append custom instructions if provided
+    if custom_instructions:
+        system_prompt += f"\n\nAdditional instructions for this draft: {custom_instructions}"
+
+    # Call Claude
+    model = await get_engine_model(db, tenant_id, "drafting")
+    effective_api_key = api_key or settings.flywheel_subsidy_api_key
+    client = anthropic.AsyncAnthropic(api_key=effective_api_key)
+    response = await client.messages.create(
+        model=model,
+        max_tokens=1000,
+        system=system_prompt,
+        messages=[{"role": "user", "content": user_message}],
+    )
+
+    draft_body = response.content[0].text.strip()
+
+    # Truncate if unexpectedly long
+    if len(draft_body) > 2000:
+        logger.warning(
+            "Draft truncated for email_id=%s: length=%d > 2000",
+            email.id,
+            len(draft_body),
+        )
+        draft_body = draft_body[:2000]
+
+    return (draft_body, fetch_error)
+
+
+def _build_voice_snapshot(voice_profile_dict: dict) -> dict:
+    """Build a voice_snapshot context entry from a voice profile dict."""
+    snapshot = {"type": "voice_snapshot"}
+    for field in VOICE_SNAPSHOT_FIELDS:
+        snapshot[field] = voice_profile_dict.get(field)
+    return snapshot
+
+
+async def regenerate_draft_with_overrides(
+    db: AsyncSession,
+    tenant_id: UUID,
+    draft_id: UUID,
+    overrides: "dict | None" = None,
+    custom_instructions: "str | None" = None,
+) -> EmailDraft:
+    """Regenerate a draft with one-time voice overrides.
+
+    Loads the existing draft, verifies it is pending, merges voice overrides
+    into the current voice profile, re-generates the body via Claude, and
+    updates the draft row. The persistent EmailVoiceProfile is never modified.
+
+    Args:
+        db: Async SQLAlchemy session (caller-owned, RLS already set).
+        tenant_id: Tenant UUID.
+        draft_id: EmailDraft UUID.
+        overrides: Dict of voice profile field overrides to merge.
+        custom_instructions: Free-form instruction for the LLM.
+
+    Returns:
+        Updated EmailDraft ORM instance.
+
+    Raises:
+        ValueError: If draft status is not "pending".
+        LookupError: If draft not found for this tenant.
+    """
+    # 1. Load draft with tenant check
+    result = await db.execute(
+        select(EmailDraft).where(
+            EmailDraft.id == draft_id,
+            EmailDraft.tenant_id == tenant_id,
+        )
+    )
+    draft = result.scalar_one_or_none()
+    if draft is None:
+        raise LookupError(f"Draft {draft_id} not found for tenant {tenant_id}")
+
+    # 2. Verify status is pending
+    if draft.status != "pending":
+        raise ValueError(f"Cannot regenerate a {draft.status} draft")
+
+    # 3. Load parent email
+    email_result = await db.execute(
+        select(Email).where(Email.id == draft.email_id)
+    )
+    email = email_result.scalar_one_or_none()
+    if email is None:
+        raise LookupError(f"Parent email {draft.email_id} not found")
+
+    # 4. Load current voice profile
+    voice_profile = await _load_voice_profile(db, tenant_id, email.user_id)
+
+    # 5. Merge overrides into voice dict
+    merged_voice = dict(voice_profile)
+    if overrides:
+        merged_voice.update(overrides)
+
+    # 6. Get context_refs from EmailScore
+    score_result = await db.execute(
+        select(EmailScore).where(EmailScore.email_id == email.id)
+    )
+    score = score_result.scalar_one_or_none()
+    context_refs = (score.context_refs or []) if score else []
+
+    # Load integration for body fetching
+    intg_result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == tenant_id,
+            Integration.provider == "gmail-read",
+            Integration.status == "connected",
+        )
+    )
+    integration = intg_result.scalars().first()
+
+    # 7. Generate new draft body
+    draft_body, _ = await _generate_draft_body(
+        db, tenant_id, email, merged_voice, context_refs,
+        integration=integration,
+        custom_instructions=custom_instructions,
+    )
+
+    # 8. Update draft row
+    new_snapshot = _build_voice_snapshot(merged_voice)
+
+    # Rebuild context_used: keep non-snapshot entries, replace snapshot
+    old_context = draft.context_used or []
+    new_context = [entry for entry in old_context if not (isinstance(entry, dict) and entry.get("type") == "voice_snapshot")]
+    new_context.append(new_snapshot)
+
+    draft.draft_body = draft_body
+    draft.user_edits = None
+    draft.context_used = new_context
+    draft.updated_at = datetime.now(timezone.utc)
+
+    return draft
+
+
 async def _upsert_email_draft(
     db: AsyncSession,
     tenant_id: UUID,
@@ -455,13 +655,15 @@ async def draft_email(
         # Step 2: Get valid credentials from integration
         creds = await get_valid_credentials(integration)
 
-        # Step 3: Fetch body with 401/403 fallback
-        body_text, fetch_error = await _fetch_body_with_fallback(
-            integration, email, creds
+        # Step 3-8: Generate draft body using extracted helper
+        context_refs = score.context_refs or []
+        draft_body, fetch_error = await _generate_draft_body(
+            db, tenant_id, email, voice_profile, context_refs,
+            integration=integration, creds=creds, api_key=api_key,
         )
 
-        # Step 4: Skip drafting if body is too short (empty body check)
-        if body_text == "" and fetch_error == "body_too_short":
+        # Skip drafting if body is too short (empty body check)
+        if draft_body == "" and fetch_error == "body_too_short":
             logger.info(
                 "Skipping draft for email_id=%s tenant_id=%s: body_too_short",
                 email.id,
@@ -469,55 +671,27 @@ async def draft_email(
             )
             return None
 
-        # Step 5: Assemble context from scorer's context_refs
-        context_refs = score.context_refs or []
-        context_block = await _assemble_draft_context(db, tenant_id, context_refs)
+        # Step 9: Build context_used with voice snapshot
+        voice_snapshot = _build_voice_snapshot(voice_profile)
+        context_used = list(context_refs) + [voice_snapshot]
 
-        # Step 6: Build prompt
-        system_prompt, user_message = _build_draft_prompt(
-            email, body_text, voice_profile, context_block
-        )
-
-        # Step 7: Call drafting model (configurable per tenant)
-        model = await get_engine_model(db, tenant_id, "drafting")
-        effective_api_key = api_key or settings.flywheel_subsidy_api_key
-        client = anthropic.AsyncAnthropic(api_key=effective_api_key)
-        response = await client.messages.create(
-            model=model,
-            max_tokens=1000,
-            system=system_prompt,
-            messages=[{"role": "user", "content": user_message}],
-        )
-
-        # Step 8: Extract response text — raw text, no JSON parsing needed
-        draft_body = response.content[0].text.strip()
-
-        # Truncate if unexpectedly long
-        if len(draft_body) > 2000:
-            logger.warning(
-                "Draft truncated for email_id=%s: length=%d > 2000",
-                email.id,
-                len(draft_body),
-            )
-            draft_body = draft_body[:2000]
-
-        # Step 9: Insert EmailDraft row (caller commits)
+        # Step 10: Insert EmailDraft row (caller commits)
         await _upsert_email_draft(
             db,
             tenant_id,
             email.id,
             draft_body,
-            context_refs,
+            context_used,
             fetch_error,
         )
 
-        # Step 10: Return for caller logging
+        # Step 11: Return for caller logging
         logger.info(
             "Drafted reply for email_id=%s tenant_id=%s",
             email.id,
             tenant_id,
         )
-        return {"draft_body": draft_body, "context_used": context_refs}
+        return {"draft_body": draft_body, "context_used": context_used}
 
     except Exception as exc:
         # Non-fatal: log email ID only (no PII — no subject/sender/body in log)
