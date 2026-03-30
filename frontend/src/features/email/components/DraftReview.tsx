@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react'
 import { Loader2 } from 'lucide-react'
 import { colors, typography } from '@/lib/design-tokens'
-import { useApproveDraft, useDismissDraft, useEditDraft } from '../hooks/useDraftActions'
-import type { Draft } from '../types/email'
+import { useApproveDraft, useDismissDraft, useEditDraft, useRegenerateDraft } from '../hooks/useDraftActions'
+import { VoiceAnnotation } from './VoiceAnnotation'
+import { RegenerateDropdown } from './RegenerateDropdown'
+import type { Draft, RegenerateRequest } from '../types/email'
 
 interface DraftReviewProps {
   draft: Draft
@@ -16,6 +18,13 @@ export function DraftReview({ draft }: DraftReviewProps) {
   const approveMutation = useApproveDraft()
   const dismissMutation = useDismissDraft()
   const editMutation = useEditDraft()
+  const regenerateMutation = useRegenerateDraft(draft.id)
+
+  const isRegenerating = regenerateMutation.isPending
+
+  function handleRegenerate(request: RegenerateRequest) {
+    regenerateMutation.mutate(request)
+  }
 
   const displayBody = draft.user_edits ?? draft.draft_body ?? ''
   const isPending = draft.status === 'pending'
@@ -100,40 +109,53 @@ export function DraftReview({ draft }: DraftReviewProps) {
         }}
       />
 
+      {/* Voice annotation */}
+      {isPending && <VoiceAnnotation snapshot={draft.voice_snapshot} />}
+
       {/* Action buttons */}
       {isPending && !isEditing && (
-        <div className="flex items-center gap-2">
-          <button
-            onClick={handleApprove}
-            disabled={approveMutation.isPending}
-            className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
-            style={{ background: 'var(--brand-coral)' }}
-          >
-            {approveMutation.isPending ? (
-              <Loader2 className="size-3.5 animate-spin" />
-            ) : null}
-            {approveSuccess ? 'Sent!' : 'Approve & Send'}
-          </button>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleApprove}
+              disabled={approveMutation.isPending || isRegenerating}
+              className="flex items-center gap-1.5 rounded-xl px-4 py-2 text-sm font-medium text-white transition-opacity hover:opacity-90 disabled:opacity-50"
+              style={{ background: 'var(--brand-coral)' }}
+            >
+              {approveMutation.isPending ? (
+                <Loader2 className="size-3.5 animate-spin" />
+              ) : null}
+              {approveSuccess ? 'Sent!' : 'Approve & Send'}
+            </button>
 
-          <button
-            onClick={() => setIsEditing(true)}
-            className="rounded-xl border px-4 py-2 text-sm font-medium transition-colors hover:bg-[rgba(0,0,0,0.04)]"
-            style={{ borderColor: 'var(--subtle-border)', color: colors.headingText }}
-          >
-            Edit
-          </button>
+            <button
+              onClick={() => setIsEditing(true)}
+              disabled={isRegenerating}
+              className="rounded-xl border px-4 py-2 text-sm font-medium transition-colors hover:bg-[rgba(0,0,0,0.04)] disabled:opacity-50"
+              style={{ borderColor: 'var(--subtle-border)', color: colors.headingText }}
+            >
+              Edit
+            </button>
 
-          <button
-            onClick={handleDismiss}
-            disabled={dismissMutation.isPending}
-            className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-[rgba(239,68,68,0.08)] disabled:opacity-50"
-            style={{ color: '#EF4444' }}
-          >
-            {dismissMutation.isPending ? (
-              <Loader2 className="size-3.5 animate-spin inline mr-1" />
-            ) : null}
-            Dismiss
-          </button>
+            <RegenerateDropdown
+              draftId={draft.id}
+              hasUserEdits={!!draft.user_edits}
+              isRegenerating={isRegenerating}
+              onRegenerate={handleRegenerate}
+            />
+
+            <button
+              onClick={handleDismiss}
+              disabled={dismissMutation.isPending || isRegenerating}
+              className="rounded-xl px-4 py-2 text-sm font-medium transition-colors hover:bg-[rgba(239,68,68,0.08)] disabled:opacity-50"
+              style={{ color: '#EF4444' }}
+            >
+              {dismissMutation.isPending ? (
+                <Loader2 className="size-3.5 animate-spin inline mr-1" />
+              ) : null}
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 

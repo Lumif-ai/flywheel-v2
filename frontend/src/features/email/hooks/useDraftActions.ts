@@ -1,5 +1,7 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import type { RegenerateRequest, RegenerateDraftResponse } from '../types/email'
 
 export function useApproveDraft() {
   const queryClient = useQueryClient()
@@ -36,6 +38,22 @@ export function useEditDraft() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['email-threads'] })
       queryClient.invalidateQueries({ queryKey: ['thread-detail'] })
+    },
+  })
+}
+
+export function useRegenerateDraft(draftId: string) {
+  const queryClient = useQueryClient()
+
+  return useMutation({
+    mutationFn: (request: RegenerateRequest) =>
+      api.post<RegenerateDraftResponse>(`/email/drafts/${draftId}/regenerate`, request),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['email-threads'] })
+      queryClient.invalidateQueries({ queryKey: ['thread-detail'] })
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to regenerate draft')
     },
   })
 }

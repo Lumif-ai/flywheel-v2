@@ -25,11 +25,38 @@ export interface Message {
   score: Score | null
 }
 
+export interface VoiceSnapshot {
+  type: 'voice_snapshot'
+  tone: string | null
+  avg_length: number | null
+  sign_off: string | null
+  characteristic_phrases: string[] | null
+  formality_level: string | null
+  greeting_style: string | null
+  question_style: string | null
+  paragraph_pattern: string | null
+  emoji_usage: string | null
+  avg_sentences: number | null
+}
+
+export interface RegenerateRequest {
+  action?: 'shorter' | 'longer' | 'more_casual' | 'more_formal'
+  custom_instructions?: string
+}
+
+export interface RegenerateDraftResponse {
+  id: string
+  draft_body: string
+  voice_snapshot: VoiceSnapshot | null
+  message: string
+}
+
 export interface Draft {
   id: string
   status: 'pending' | 'sent' | 'dismissed'
   draft_body: string | null
   user_edits: string | null
+  voice_snapshot?: VoiceSnapshot | null
 }
 
 export type PriorityTier = 'critical' | 'high' | 'medium' | 'low' | 'unscored'
