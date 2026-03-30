@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v7.0 Email Voice & Intelligence Overhaul — Phase 71 Voice Settings UI
+**Current focus:** v7.0 Email Voice & Intelligence Overhaul — Phase 72 Draft Enhancements
 
 ## Current Position
 
 Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 71 Voice Settings UI
-Plan: 02 complete (of 2) -- Phase 71 complete
-Status: Phase 71 complete
-Last activity: 2026-03-30 — Plan 71-02 complete (voice profile settings UI)
+Phase: 72 Draft Enhancements (plan 1/2 complete)
+Plan: 72-01 complete, ready for 72-02
+Status: Executing Phase 72
+Last activity: 2026-03-30 — Phase 72 plan 01 executed (voice snapshot + regeneration endpoint)
 
-Progress: [████░░░░░░] 35%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -43,6 +43,8 @@ v7.0 decisions made:
 - Voice profile expanded to 10 fields (6 new nullable columns with server_default, no backfill) — decided in 70-01
 - Extraction uses 50 sent emails (up from 20), updater handles all 10 fields with running avg for avg_sentences — decided in 70-02/03
 
+- [Phase 72]: Voice snapshot stored as {type: voice_snapshot} in context_used JSONB; regeneration merges overrides without mutating persistent profile
+
 Pending decisions for v7.0 (from spec open questions):
 - Whether context extraction cap (200/day) should be configurable per tenant or global
 - Whether "Reset & Relearn" should clear incremental learning history
@@ -59,5 +61,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Completed 71-02-PLAN.md — voice profile settings UI (Phase 71 complete)
+Stopped at: Completed 72-01-PLAN.md — ready for 72-02
 Resume file: None
