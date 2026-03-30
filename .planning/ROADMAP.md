@@ -373,10 +373,10 @@ Plans:
   3. Other skills can read `sender-voice.md` via `flywheel_read_context` and get the current voice profile
   4. The file follows standard context store entry format with source, date, confidence, and evidence count
 
-**Plans:** 2 plans
+**Plans:** 1 plan
 
 Plans:
-- [ ] 73-01-PLAN.md — Voice-to-context-store writer + hook into extraction and incremental update paths
+- [x] 73-01-PLAN.md — Voice context writer module + hooks into extraction, incremental update, and reset paths ✓
 
 ---
 
@@ -465,7 +465,7 @@ Plans:
 | 70. Voice Profile Overhaul | v7.0 | 3/3 | ✓ Complete | 2026-03-30 |
 | 71. Voice Settings UI | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 72. Draft Enhancements | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
-| 73. Voice as Context Store Asset | v7.0 | 0/1 | Not started | - |
+| 73. Voice as Context Store Asset | v7.0 | 1/1 | ✓ Complete | 2026-03-30 |
 | 74. Email Context Extractor and Shared Writer | v7.0 | 0/2 | Not started | - |
 | 75. Context Extraction Pipeline | v7.0 | 0/2 | Not started | - |
 
