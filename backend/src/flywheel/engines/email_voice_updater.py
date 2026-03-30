@@ -32,6 +32,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.config import settings
 from flywheel.db.models import EmailVoiceProfile
 from flywheel.engines.model_config import get_engine_model
+from flywheel.engines.voice_context_writer import write_voice_to_context
 
 logger = logging.getLogger(__name__)
 
@@ -308,6 +309,19 @@ Return ONLY the fields that should change as a JSON object.
                 updated_at=datetime.now(timezone.utc),
             )
         )
+        updated_profile = {
+            "tone": new_tone,
+            "avg_length": new_avg_length,
+            "sign_off": new_sign_off,
+            "phrases": new_phrases,
+            "formality_level": new_formality,
+            "greeting_style": new_greeting,
+            "question_style": new_question,
+            "paragraph_pattern": new_paragraph,
+            "emoji_usage": new_emoji,
+            "avg_sentences": new_avg_sentences,
+        }
+        await write_voice_to_context(db, tenant_id, user_id, updated_profile, new_samples)
         await db.commit()
 
         logger.info(

@@ -36,6 +36,7 @@ from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile,
 from flywheel.engines.email_drafter import draft_email
 from flywheel.engines.model_config import get_engine_model
 from flywheel.engines.email_scorer import score_email
+from flywheel.engines.voice_context_writer import write_voice_to_context
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
     TokenRevokedException,
@@ -939,6 +940,10 @@ async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool
         )
     )
     await db.execute(stmt)
+    await write_voice_to_context(
+        db, integration.tenant_id, integration.user_id,
+        profile_data, samples_count,
+    )
     await db.commit()
 
     logger.info(

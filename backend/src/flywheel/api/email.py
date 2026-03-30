@@ -28,6 +28,7 @@ from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Email, EmailDraft, EmailScore, EmailVoiceProfile, Integration
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.engines import email_voice_updater
+from flywheel.engines.voice_context_writer import delete_voice_from_context
 from flywheel.services.gmail_sync import voice_profile_init
 from flywheel.services.gmail_read import (
     get_message_id_header,
@@ -341,6 +342,7 @@ async def reset_voice_profile(
             )
         )
     )
+    await delete_voice_from_context(db, user.tenant_id)
     await db.commit()
 
     # Capture values for closure safety before defining background task
