@@ -88,6 +88,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 __import__("sqlalchemy").text("SELECT 1")
             )
 
+        # Auto-apply pending Alembic migrations
+        import logging as _logging
+        _migration_log = _logging.getLogger("flywheel.migrations")
+        try:
+            from alembic.config import Config as AlembicConfig
+            from alembic import command as alembic_command
+
+            alembic_cfg = AlembicConfig("alembic.ini")
+            alembic_command.upgrade(alembic_cfg, "head")
+            _migration_log.info("Database migrations applied successfully")
+        except Exception as e:
+            _migration_log.error("Failed to apply migrations: %s", e)
+            raise
+
         # Start background workers
         from flywheel.services.job_queue import job_queue_loop
         from flywheel.services.stale_job_cleaner import cleanup_stale_jobs

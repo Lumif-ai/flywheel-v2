@@ -42,13 +42,14 @@ def upgrade() -> None:
             id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             tenant_id       UUID NOT NULL REFERENCES tenants(id),
             email_id        UUID NOT NULL REFERENCES emails(id) ON DELETE CASCADE,
-            user_id         UUID NOT NULL REFERENCES profiles(id),
+            user_id         UUID NOT NULL,  -- No FK: profiles managed by Supabase Auth
             extracted_data  JSONB NOT NULL DEFAULT '{}'::jsonb,
             status          TEXT NOT NULL DEFAULT 'pending',
             reviewed_at     TIMESTAMP WITH TIME ZONE,
             created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now()
         );
-
+    """)
+    op.execute("""
         CREATE INDEX idx_context_reviews_tenant_status
             ON email_context_reviews (tenant_id, status);
     """)
