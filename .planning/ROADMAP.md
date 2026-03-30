@@ -307,9 +307,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 70-01-PLAN.md — Alembic migration: 6 new columns on email_voice_profiles with defaults
-- [ ] 70-02-PLAN.md — Expanded voice extraction (50 samples, 10-field prompt, parser updates)
-- [ ] 70-03-PLAN.md — Updated draft system prompt using all 10 fields + incremental updater expansion
+- [x] 70-01-PLAN.md — Alembic migration: 6 new columns on email_voice_profiles with defaults ✓
+- [x] 70-02-PLAN.md — Expanded voice extraction (50 samples, 10-field prompt, parser updates) ✓
+- [x] 70-03-PLAN.md — Updated draft system prompt using all 10 fields + incremental updater expansion ✓
 
 ---
 
@@ -328,11 +328,11 @@ Plans:
   4. When no voice profile exists (new user, pre-Gmail-connect), the tab shows "No voice profile yet. Connect Gmail to get started."
   5. All three API endpoints respond correctly: GET returns profile, PATCH updates tone/sign_off only, POST reset triggers re-extraction
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 71-01-PLAN.md — Three API endpoints: GET/PATCH/POST voice-profile (user-scoped)
-- [ ] 71-02-PLAN.md — VoiceProfileSettings component + Settings tab integration
+- [x] 71-01-PLAN.md — Three API endpoints: GET/PATCH/POST voice-profile (user-scoped) ✓
+- [x] 71-02-PLAN.md — VoiceProfileSettings component + Settings tab integration ✓
 
 ---
 
@@ -351,11 +351,11 @@ Plans:
   4. After regenerating with "More casual," the draft voice annotation shows the overridden values — but visiting Voice Profile settings confirms the persistent profile is unchanged
   5. A custom override option allows the user to type free-form tone instructions for regeneration
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
-- [ ] 72-01-PLAN.md — POST /email/drafts/{draft_id}/regenerate endpoint + voice snapshot in context_used
-- [ ] 72-02-PLAN.md — Voice annotation component + Regenerate dropdown on DraftReview
+- [x] 72-01-PLAN.md — POST /email/drafts/{draft_id}/regenerate endpoint + voice snapshot in context_used ✓
+- [x] 72-02-PLAN.md — Voice annotation component + Regenerate dropdown on DraftReview ✓
 
 ---
 
@@ -373,7 +373,7 @@ Plans:
   3. Other skills can read `sender-voice.md` via `flywheel_read_context` and get the current voice profile
   4. The file follows standard context store entry format with source, date, confidence, and evidence count
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 73-01-PLAN.md — Voice-to-context-store writer + hook into extraction and incremental update paths
@@ -395,7 +395,7 @@ Plans:
   4. Backend engines call the writer directly (no MCP dependency during sync), while Claude Code skills can invoke the same writer via MCP tool — both paths use identical write/dedup logic
   5. Email bodies are fetched on-demand and discarded after extraction — never stored in the database (PII posture unchanged)
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 74-01-PLAN.md — context_store_writer.py: write_contact, write_insight, write_action_item, write_deal_signal with dedup + evidence
@@ -418,7 +418,7 @@ Plans:
   4. Approving a review via `POST /email/context-reviews/{id}/approve` writes the extraction to the context store and sets status to "approved"
   5. Context extraction respects the 200/day per-tenant cap — the 201st eligible email in a day is skipped with a log message
 
-**Plans:** TBD
+**Plans:** 2 plans
 
 Plans:
 - [ ] 75-01-PLAN.md — email_context_reviews table migration + context_extracted_at column + confidence routing logic
@@ -462,9 +462,9 @@ Plans:
 | 67. Tasks UI | v5.0 | 7/7 | ✓ Complete | 2026-03-29 |
 | 68. Email-to-Tasks (Layer A) | v6.0 | 3/3 | ✓ Complete | 2026-03-29 |
 | 69. Model Configuration Foundation | v7.0 | 1/1 | ✓ Complete | 2026-03-30 |
-| 70. Voice Profile Overhaul | v7.0 | 0/3 | Not started | - |
-| 71. Voice Settings UI | v7.0 | 0/2 | Not started | - |
-| 72. Draft Enhancements | v7.0 | 0/2 | Not started | - |
+| 70. Voice Profile Overhaul | v7.0 | 3/3 | ✓ Complete | 2026-03-30 |
+| 71. Voice Settings UI | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
+| 72. Draft Enhancements | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 73. Voice as Context Store Asset | v7.0 | 0/1 | Not started | - |
 | 74. Email Context Extractor and Shared Writer | v7.0 | 0/2 | Not started | - |
 | 75. Context Extraction Pipeline | v7.0 | 0/2 | Not started | - |

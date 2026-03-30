@@ -1,0 +1,102 @@
+# Requirements: Flywheel V2 — v7.0 Email Voice & Intelligence Overhaul
+
+**Defined:** 2026-03-30
+**Core Value:** Drafts must sound like the user wrote them — not AI-polished prose. Everything else supports this.
+**Spec:** `.planning/SPEC-email-voice-intelligence.md`
+
+## v1 Requirements
+
+### Voice Extraction
+
+- [x] **VOICE-01**: System extracts voice profile from 50 substantive sent emails using Sonnet, producing 10 fields (tone, avg_length, sign_off, phrases, formality_level, greeting_style, question_style, paragraph_pattern, emoji_usage, avg_sentences)
+- [x] **VOICE-02**: Database schema expanded with 6 new columns on email_voice_profiles (formality_level, greeting_style, question_style, paragraph_pattern, emoji_usage, avg_sentences) via Alembic migration
+- [x] **VOICE-03**: Draft system prompt uses all 10 voice profile fields to produce authentically-voiced replies
+- [x] **VOICE-04**: Incremental voice learning (edit-based) uses Sonnet and updates all 10 fields
+
+### Model Configuration
+
+- [ ] **MODEL-01**: Each email engine (scoring, voice_extraction, voice_learning, drafting, context_extraction) reads its model from a configurable setting, defaulting to claude-sonnet-4-6
+- [ ] **MODEL-02**: No hardcoded model constants remain in email engine files — all use a shared helper that reads from config
+
+### Voice Settings UI
+
+- [ ] **SETTINGS-01**: Voice Profile tab in Settings page shows all 10 learned voice fields as read-only descriptive text with "Learned from N emails" header
+- [ ] **SETTINGS-02**: User can edit tone and sign_off inline with save — other fields remain read-only
+- [ ] **SETTINGS-03**: "Reset & Relearn" button deletes existing profile and re-extracts from sent emails using expanded prompt
+- [ ] **SETTINGS-04**: Three new API endpoints: GET /email/voice-profile (user-scoped), PATCH /email/voice-profile, POST /email/voice-profile/reset
+
+### Draft Enhancements
+
+- [x] **DRAFT-01**: DraftReview component shows collapsible "Voice applied" annotation displaying which voice profile fields influenced the draft
+- [x] **DRAFT-02**: "Regenerate" dropdown on pending drafts with quick actions (shorter, longer, more casual, more formal) that re-draft with one-time overrides without updating the persistent voice profile
+- [x] **DRAFT-03**: New API endpoint POST /email/drafts/{draft_id}/regenerate accepts voice profile overrides
+
+### Context Store Integration
+
+- [ ] **CTX-01**: Voice profile written to sender-voice.md in context store after initial extraction and after every incremental update, following standard entry format
+- [ ] **CTX-02**: Email context extractor engine extracts contacts, topics, deal signals, relationship signals, and action items from priority >= 3 emails
+- [ ] **CTX-03**: Shared context store writer with direct file I/O for backend engines and MCP wrapper for Claude Code skills — handles dedup (source + detail_tag + date), evidence increment, 4000-char entry cap
+- [ ] **CTX-04**: Low-confidence extractions routed to email_context_reviews table for human review (approve/reject via API), high/medium auto-written
+- [ ] **CTX-05**: Email context extraction wired into gmail sync loop after scoring, with separate 200/day cap per tenant and context_extracted_at tracking column
+
+## Future Requirements
+
+### Voice Drift
+- **DRIFT-01**: Periodic re-extraction from sent emails to anchor voice profile against situational drift
+- **DRIFT-02**: Drift detection comparing current profile against fresh extraction
+
+### Context Review UI
+- **REVIEW-01**: Frontend UI for context review queue (approve/reject pending extractions)
+- **REVIEW-02**: Batch approve/reject for review queue
+
+### Meeting-Processor Refactor
+- **REFACTOR-01**: Meeting-processor refactored to use shared context store writer from CTX-03
+
+### Additional Sources
+- **SOURCE-01**: Slack as a context store source using same extractor + shared writer pattern
+- **SOURCE-02**: Voice profile per recipient (adapting tone based on who you're writing to)
+
+## Out of Scope
+
+| Feature | Reason |
+|---------|--------|
+| Auto-send / YOLO mode | Email sending NEVER automatic — hard constraint from v1.0 |
+| PII retention policy for email-derived context | Deferred per user decision during brainstorm |
+| Voice drift detection | Deferred — tackle later per user decision |
+| Frontend for context review queue | API only in v7.0 — UI deferred |
+| Meeting-processor refactor to shared writer | Separate task, not blocking v7.0 |
+| Slack as context store source | Future track, same architecture |
+| Per-recipient voice adaptation | Future enhancement |
+| Mobile-optimized views | Deferred from previous milestones |
+
+## Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| MODEL-01 | Phase 69 | Complete |
+| MODEL-02 | Phase 69 | Complete |
+| VOICE-02 | Phase 70 | Complete |
+| VOICE-01 | Phase 70 | Complete |
+| VOICE-03 | Phase 70 | Complete |
+| VOICE-04 | Phase 70 | Complete |
+| SETTINGS-04 | Phase 71 | Complete |
+| SETTINGS-01 | Phase 71 | Complete |
+| SETTINGS-02 | Phase 71 | Complete |
+| SETTINGS-03 | Phase 71 | Complete |
+| DRAFT-01 | Phase 72 | Pending |
+| DRAFT-02 | Phase 72 | Pending |
+| DRAFT-03 | Phase 72 | Pending |
+| CTX-01 | Phase 73 | Pending |
+| CTX-02 | Phase 74 | Pending |
+| CTX-03 | Phase 74 | Pending |
+| CTX-04 | Phase 75 | Pending |
+| CTX-05 | Phase 75 | Pending |
+
+**Coverage:**
+- v1 requirements: 18 total
+- Mapped to phases: 18
+- Unmapped: 0
+
+---
+*Requirements defined: 2026-03-30*
+*Last updated: 2026-03-29 after v7.0 roadmap creation*
