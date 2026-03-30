@@ -10,10 +10,10 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 ## Current Position
 
 Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 74 complete, ready for Phase 75
-Plan: —
-Status: Phase 74 complete (verified)
-Last activity: 2026-03-30 — Phase 74 executed and verified (2/2 plans)
+Phase: 75 Context Extraction Pipeline
+Plan: 02 complete (2/2 plans done)
+Status: Phase 75 Complete
+Last activity: 2026-03-30 — Phase 75 Plan 02 complete (pipeline wiring + review API)
 
 Progress: [████████░░] 86%
 
@@ -48,6 +48,9 @@ v7.0 decisions made:
 - [Phase 73]: Voice content formatted as markdown (not JSON) for direct MCP readability; confidence mapped from samples count (high>=20, medium>=5, low<5); catalog stays active on reset
 - [Phase 74-01]: Detail tags use category:key format for deterministic dedup; source label is caller-provided; engine-sourced writes skip graph extraction; relationship signals stored in insights file
 - [Phase 74-02]: Body truncated to 8000 chars for context window; snippet fallback < 50 chars, skip < 20 chars; per-item error isolation in writer integration
+- [Phase 75-01]: Low-confidence items returned in results dict (not written to review table directly) — writer stays stateless, caller decides storage; ON DELETE CASCADE on email_id FK
+
+- [Phase 75-02]: Per-cycle extraction limit set to 10 to prevent timeout; approve endpoint upgrades confidence to medium with entry_date from parent email received_at
 
 Pending decisions for v7.0 (from spec open questions):
 - Whether context extraction cap (200/day) should be configurable per tenant or global
@@ -65,5 +68,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 74 complete — ready for Phase 75 Context Extraction Pipeline
+Stopped at: Completed 75-02-PLAN.md — Phase 75 complete
 Resume file: None
