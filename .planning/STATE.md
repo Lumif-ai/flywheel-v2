@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-03-30)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v7.0 Email Voice & Intelligence Overhaul — Phase 70 Voice Profile Overhaul
+**Current focus:** v7.0 Email Voice & Intelligence Overhaul — Phase 71 Voice Settings UI
 
 ## Current Position
 
 Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 70-voice-profile-overhaul
-Plan: 03 complete, ready for Plan 04
-Status: Executing Phase 70
-Last activity: 2026-03-30 — Plan 70-03 executed (engine integration for 10-field voice profile)
+Phase: 71 Voice Settings UI
+Plan: 02 complete (of 2) -- Phase 71 complete
+Status: Phase 71 complete
+Last activity: 2026-03-30 — Plan 71-02 complete (voice profile settings UI)
 
-Progress: [██████░░░░] 60%
+Progress: [████░░░░░░] 35%
 
 ## Performance Metrics
 
@@ -40,7 +40,8 @@ All v1.0-v6.0 decisions archived in milestone ROADMAP archives.
 v7.0 decisions made:
 - Model config stored in tenant.settings["email_engine_models"] JSONB path (no new table) — decided in 69-01
 - All 5 engine defaults upgraded to claude-sonnet-4-6 (from Haiku for scoring/voice/learning) — decided in 69-01
-- Voice profile expansion: 6 new nullable columns with server_default (no backfill needed) — decided in 70-01
+- Voice profile expanded to 10 fields (6 new nullable columns with server_default, no backfill) — decided in 70-01
+- Extraction uses 50 sent emails (up from 20), updater handles all 10 fields with running avg for avg_sentences — decided in 70-02/03
 
 Pending decisions for v7.0 (from spec open questions):
 - Whether context extraction cap (200/day) should be configurable per tenant or global
@@ -58,5 +59,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Completed 70-03-PLAN.md — drafter and updater engines expanded to 10 voice fields, ready for 70-04
+Stopped at: Completed 71-02-PLAN.md — voice profile settings UI (Phase 71 complete)
 Resume file: None
