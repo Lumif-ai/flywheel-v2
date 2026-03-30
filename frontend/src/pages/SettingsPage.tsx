@@ -7,6 +7,7 @@ import { ApiKeyManager } from '@/features/settings/components/ApiKeyManager'
 import { TenantSettings } from '@/features/settings/components/TenantSettings'
 import { TeamManager } from '@/features/settings/components/TeamManager'
 import { GranolaSettings } from '@/features/settings/components/GranolaSettings'
+import { VoiceProfileSettings } from '@/features/settings/components/VoiceProfileSettings'
 
 export function SettingsPage() {
   const navigate = useNavigate()
@@ -48,6 +49,7 @@ export function SettingsPage() {
             {isAdmin && <TabsTrigger value="workspace">Workspace</TabsTrigger>}
             {isAdmin && <TabsTrigger value="team">Team</TabsTrigger>}
             {isAdmin && <TabsTrigger value="integrations">Integrations</TabsTrigger>}
+            {isAdmin && <TabsTrigger value="voice-profile">Voice Profile</TabsTrigger>}
           </TabsList>
 
           {showApiKey && (
@@ -71,6 +73,12 @@ export function SettingsPage() {
           {isAdmin && (
             <TabsContent value="integrations" className="mt-6">
               <GranolaSettings />
+            </TabsContent>
+          )}
+
+          {isAdmin && (
+            <TabsContent value="voice-profile" className="mt-6">
+              <VoiceProfileSettings />
             </TabsContent>
           )}
         </Tabs>
