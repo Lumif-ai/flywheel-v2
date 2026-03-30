@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-03-30)
 ## Current Position
 
 Milestone: v7.0 Email Voice & Intelligence Overhaul
-Phase: 72 complete, ready for Phase 73
-Plan: —
-Status: Phase 72 complete (verified + gap-fixed)
-Last activity: 2026-03-30 — Phase 72 executed, verified, and gap-fixed (2/2 plans)
+Phase: 73 Voice Context Store in progress
+Plan: 73-01 complete
+Status: Phase 73 plan 01 complete (voice context writer + hooks)
+Last activity: 2026-03-30 — Phase 73 plan 01 executed (2/2 tasks)
 
-Progress: [█████░░░░░] 57%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -45,6 +45,7 @@ v7.0 decisions made:
 
 - [Phase 72]: Voice snapshot stored as {type: voice_snapshot} in context_used JSONB; regeneration merges overrides without mutating persistent profile
 - [Phase 72]: Used existing DropdownMenu primitive (base-ui) for regenerate dropdown; VoiceAnnotation shows 5 badges collapsed, 10-field grid expanded
+- [Phase 73]: Voice content formatted as markdown (not JSON) for direct MCP readability; confidence mapped from samples count (high>=20, medium>=5, low<5); catalog stays active on reset
 
 Pending decisions for v7.0 (from spec open questions):
 - Whether context extraction cap (200/day) should be configurable per tenant or global
@@ -62,5 +63,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-03-30
-Stopped at: Phase 72 complete — ready for Phase 73 Voice as Context Store Asset
+Stopped at: Phase 73 plan 01 complete — voice_context_writer.py created and hooked into all mutation paths
 Resume file: None
