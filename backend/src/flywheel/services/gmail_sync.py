@@ -752,6 +752,12 @@ Return a JSON object with exactly these fields:
 - avg_length: integer (estimated average email length in words)
 - sign_off: string (most common sign-off phrase, e.g., "Best," or "Thanks,")
 - phrases: array of strings (3-5 characteristic phrases or expressions the person uses)
+- formality_level: string — one of "formal", "conversational", or "casual"
+- greeting_style: string (most common greeting, e.g., "Hi {name},", "Hey,", "No greeting")
+- question_style: string — one of "direct", "embedded", or "rare"
+- paragraph_pattern: string — e.g., "short single-line", "2-3 sentence blocks", "long form"
+- emoji_usage: string — one of "never", "occasional", or "frequent"
+- avg_sentences: integer (average number of sentences per email)
 - samples_analyzed: integer (number of emails you analyzed)
 
 Return only the JSON object, no other text.\
@@ -843,7 +849,7 @@ async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool
     for this (tenant_id, user_id) pair. Skips if fewer than 3 substantive bodies
     are found — not enough signal for a meaningful profile.
 
-    Sends at most 20 bodies to the LLM (cost control). Up to 100 substantive
+    Sends at most 50 bodies to the LLM (cost control). Up to 100 substantive
     bodies are collected from the most recent 200 sent messages.
 
     Args:
@@ -892,10 +898,10 @@ async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool
     # Resolve voice extraction model for this tenant
     model = await get_engine_model(db, integration.tenant_id, "voice_extraction")
 
-    # Send only the 20 most recent bodies to control token cost
-    profile_data = await _extract_voice_profile(substantive_bodies[:20], model=model)
+    # Send only the 50 most recent bodies to control token cost
+    profile_data = await _extract_voice_profile(substantive_bodies[:50], model=model)
 
-    samples_count = profile_data.get("samples_analyzed", len(substantive_bodies[:20]))
+    samples_count = profile_data.get("samples_analyzed", len(substantive_bodies[:50]))
 
     stmt = (
         pg_insert(EmailVoiceProfile)
@@ -907,6 +913,12 @@ async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool
             sign_off=profile_data.get("sign_off"),
             phrases=profile_data.get("phrases", []),
             samples_analyzed=samples_count,
+            formality_level=profile_data.get("formality_level"),
+            greeting_style=profile_data.get("greeting_style"),
+            question_style=profile_data.get("question_style"),
+            paragraph_pattern=profile_data.get("paragraph_pattern"),
+            emoji_usage=profile_data.get("emoji_usage"),
+            avg_sentences=profile_data.get("avg_sentences"),
         )
         .on_conflict_do_update(
             constraint="uq_voice_profile_tenant_user",
@@ -916,6 +928,12 @@ async def voice_profile_init(db: AsyncSession, integration: Integration) -> bool
                 "sign_off": profile_data.get("sign_off"),
                 "phrases": profile_data.get("phrases", []),
                 "samples_analyzed": samples_count,
+                "formality_level": profile_data.get("formality_level"),
+                "greeting_style": profile_data.get("greeting_style"),
+                "question_style": profile_data.get("question_style"),
+                "paragraph_pattern": profile_data.get("paragraph_pattern"),
+                "emoji_usage": profile_data.get("emoji_usage"),
+                "avg_sentences": profile_data.get("avg_sentences"),
                 "updated_at": datetime.now(timezone.utc),
             },
         )
