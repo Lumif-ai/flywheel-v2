@@ -6,7 +6,7 @@ description: >
   Trigger whenever the user wants to send outreach, email leads, message prospects,
   "send emails to hot leads", "reach out to warm companies", "send LinkedIn messages",
   "start outbound", "email the scored list", or "message the leads we scored".
-  Reads the scored CSV from gtm-company-fit-analyzer or gtm-leads-pipeline, filters for
+  Reads the scored CSV from gtm-company-fit-analyzer or gtm-pipeline, filters for
   Moderate-to-Strong Fit companies, sends the scorer's pre-drafted messages (with optional
   refinement), and tracks everything via the browser. Maintains a persistent outreach tracker
   at ~/.claude/gtm-stack/outreach-tracker.csv, checks the Do Not Contact list, and supports
@@ -125,8 +125,7 @@ cat ~/.claude/gtm-stack/sender-profile.md 2>/dev/null || echo "NOT_FOUND"
 
 - **Found:** Load silently. Extract: Sender Name, Title, Company Name, What We Offer,
   Value Propositions, Outreach Context, Buyer Personas (for tone + hooks).
-- **Not found:** Ask user for: name, title, company name, one-liner about what they do.
-  Suggest running `/gtm-my-company` later for a richer profile.
+- **Not found:** Read company context from the context store via `flywheel_read_context` (look for company-intel, positioning, sender profile entries). If still missing, ask user for: name, title, company name, one-liner about what they do.
 
 ### 0c. Outreach Tracker
 ```bash
@@ -592,7 +591,7 @@ Follow-ups due:      [earliest date] — [latest date]
 
 Next steps:
   • Run "/gtm-outbound-messenger" again in 5 days to check follow-ups
-  • Run "/gtm-leads-pipeline" to find + score + contact more leads
+  • Run "/gtm-pipeline" to find + score + contact more leads
   • Say "show dashboard" any time for the interactive view
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
@@ -606,24 +605,11 @@ YOUR FILES
   Outreach tracker:  ~/.claude/gtm-stack/outreach-tracker.csv
                      Total contacts (all time): [N] | This session: [N]
 
-  Dashboard:         ~/.claude/gtm-stack/gtm-dashboard.html
-                     Open in any browser for the interactive view
-
-  Master workbook:   ~/.claude/gtm-stack/gtm-leads-master.xlsx
-                     All companies and outreach in one file
+  Pipeline view:     Available in the Flywheel app at /pipeline
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
-**Always run merge_master.py first, THEN regenerate the dashboard after this summary.**
-This ensures the dashboard reflects the latest outreach data.
-
-```bash
-# Step 1: Merge all data into master workbook
-python ~/.claude/skills/gtm-leads-pipeline/scripts/merge_master.py
-
-# Step 2: Generate dashboard from the updated master
-python ~/.claude/skills/gtm-dashboard/scripts/generate_dashboard.py
-```
+**Pipeline data is automatically persisted via Flywheel MCP tools.** No manual merge or dashboard generation needed — the pipeline view in the Flywheel app reflects the latest outreach data.
 
 The founder should never have to ask for the dashboard — it's always up to date.
 
@@ -738,32 +724,7 @@ completing a send session, generate the full GTM Command Center dashboard.
 
 ### Generate the dashboard
 
-Run the shared dashboard script:
-```bash
-python ~/.claude/skills/gtm-dashboard/scripts/generate_dashboard.py
-```
-
-This reads ALL GTM data (pipeline runs + scored CSVs + outreach tracker) and produces
-a single interactive HTML file at `~/.claude/gtm-stack/gtm-dashboard.html`.
-
-The dashboard covers the entire pipeline, not just outreach:
-- **Overview tab** — funnel from scraped → scored → contacted → replied → meetings
-- **Actions tab** — overdue follow-ups, failed sends, uncontacted hot leads
-- **Pipeline Runs tab** — every scrape+score run with stats
-- **Companies tab** — every scored company, expandable with full outreach timeline
-
-**Dashboard path:** `~/.claude/gtm-stack/gtm-dashboard.html`
-
-Tell the user:
-```
-✅ GTM Dashboard updated: ~/.claude/gtm-stack/gtm-dashboard.html
-   Open in any browser to see your Command Center.
-```
-
-### Auto-generate after send sessions
-
-After completing STEP 8 (Final Summary), always regenerate the dashboard automatically
-and include the path in the summary output. The founder shouldn't have to ask for it.
+Pipeline data is available in the Flywheel app pipeline view. Use `flywheel_list_leads` to check pipeline status programmatically.
 
 ---
 
@@ -904,7 +865,7 @@ LinkedIn is always capped at 2 concurrent tabs regardless of batch size.
 
 ### Backup Protocol
 - Before overwriting outreach tracker CSV: create `.backup.YYYY-MM-DD`, keep last 3
-- Use `gtm-shared/gtm_utils.backup_file()` where applicable
+- Back up files before overwriting where applicable
 
 ## Error Handling
 

@@ -28,6 +28,8 @@ export function useActivityMutation() {
     onSettled: () => {
       queryClient.invalidateQueries({ queryKey: ['contacts'] })
       queryClient.invalidateQueries({ queryKey: ['contact-activities'] })
+      queryClient.invalidateQueries({ queryKey: ['pipeline-detail'] })
+      queryClient.invalidateQueries({ queryKey: ['pipeline'] })
     },
   })
 }

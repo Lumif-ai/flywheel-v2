@@ -57,7 +57,7 @@ Or just describe what you want — Claude will trigger this skill automatically.
 - Business directories and membership sites
 - Any paginated or scroll-based listing
 
-> **Want to scrape AND score leads in one go?** Use `/gtm-leads-pipeline` instead —
+> **Want to scrape AND score leads in one go?** Use `/gtm-pipeline` instead —
 > it runs this skill first, then automatically scores every company for fit.
 
 ---
@@ -110,7 +110,7 @@ MCP settings and try again."
 - For sites with 100+ pages estimated: confirm scope with user before starting the loop.
 
 ### Parallel Execution
-Scale browser tabs to batch volume. Reference `gtm-shared/parallel.py` for helpers.
+Scale browser tabs to batch volume. Use parallel agents for large batches.
 
 | Items | Agents | Notes |
 |-------|--------|-------|
@@ -124,7 +124,7 @@ Multi-search-term parallelism is defined separately in STEP 6.
 
 ### Backup Protocol
 - Before overwriting output CSV: create `.backup.YYYY-MM-DD`, keep last 3
-- Use `gtm-shared/gtm_utils.backup_file()` where applicable
+- Back up files before overwriting where applicable
 
 ### 0c. Context Store Pre-Read
 - Read `~/.claude/context/_catalog.md` to discover available files

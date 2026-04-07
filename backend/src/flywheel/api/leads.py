@@ -635,7 +635,7 @@ async def create_message(
         if body.subject is not None:
             act.subject = body.subject
         if body.body is not None:
-            act.body_preview = body.body[:500] if body.body else None
+            act.body_preview = body.body if body.body else None
         if body.status:
             act.status = body.status
         meta = dict(act.metadata_ or {})
@@ -665,7 +665,7 @@ async def create_message(
             direction="outbound",
             status=body.status,
             subject=body.subject,
-            body_preview=body.body[:500] if body.body else None,
+            body_preview=body.body if body.body else None,
             metadata_=meta,
         )
         db.add(act)
@@ -702,7 +702,7 @@ async def update_message(
     if body.subject is not None:
         act.subject = body.subject
     if body.body is not None:
-        act.body_preview = body.body[:500] if body.body else None
+        act.body_preview = body.body if body.body else None
     if body.from_email is not None:
         meta["from_email"] = body.from_email
     if body.sent_at:

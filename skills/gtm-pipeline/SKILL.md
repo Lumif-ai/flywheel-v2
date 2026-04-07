@@ -37,7 +37,7 @@ You are running the **flywheel-powered** bidirectional GTM pipeline. Your job is
 
 ## Step 0a: Dependency Check
 - Verify: Playwright MCP tools (`browser_navigate`), Python 3, `~/.claude/skills/_shared/engines/gtm_pipeline.py`, context store catalog (`~/.claude/context/_catalog.md`).
-- Verify sub-skills installed: `gtm-web-scraper-extractor`, `gtm-company-fit-analyzer`, `gtm-outbound-messenger` SKILL.md files exist in `~/.claude/skills/`.
+- Verify sub-skills available: `gtm-web-scraper-extractor`, `gtm-company-fit-analyzer`, `gtm-outbound-messenger` (use `flywheel_fetch_skills` to confirm).
 - If Playwright missing: "Connect Playwright MCP and restart Claude Code."
 - If any sub-skill missing: name which one and how to install it.
 - Block if Playwright or any sub-skill is missing.
@@ -222,7 +222,7 @@ Update memory with new preferences. Edit existing entries, never duplicate.
 For multi-source pipeline runs (2+ sources):
 - Sources can be scraped in parallel (independent operations)
 - Scoring is sequential per source (depends on scrape output)
-- Use `~/.claude/skills/gtm-shared/parallel.py` for batch planning when available
+- Use parallel agents for batch planning when processing multiple sources
 
 | Phase | Parallelizable | Notes |
 |-------|---------------|-------|
@@ -256,7 +256,7 @@ For large pipeline runs (50+ leads):
 
 - **Context store read failure:** Continue with available data; partial reads are acceptable.
 - **Write-back failure:** Log error with filename, continue writing other files (independent writes).
-- **Empty context store:** Warn user, suggest running `/gtm-my-company` first to populate positioning data.
+- **Empty context store:** Warn user, suggest populating company context first via `flywheel_write_context` (company-intel, positioning entries).
 - **Sub-skill failure (scraper/scorer/messenger):** Save all progress to CSV, report which phase failed and at what point, offer to resume from the failed phase.
 - **Partial pipeline completion:** If scraping succeeds but scoring fails, deliver the scraped CSV. If scoring succeeds but outreach fails, deliver the scored CSV.
 - **No outcomes to write:** Skip write-back step, still generate report showing what was read.
@@ -277,8 +277,8 @@ This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/co
 
 ## Important Notes
 
-- This skill does **NOT** replace `gtm-leads-pipeline` or `gtm-outbound-messenger` -- it enriches the pipeline with context store knowledge and records outcomes
-- The outreach tracker CSV (`outreach-tracker.csv`) is owned by `gtm-outbound-messenger` -- read-only access for effectiveness tracking is handled in a separate workflow (Plan 05-02)
+- This skill orchestrates the full GTM pipeline — scraping, scoring, and outreach — enriched with context store knowledge
+- The outreach tracker CSV (`outreach-tracker.csv`) is owned by `gtm-outbound-messenger` -- read-only access for effectiveness tracking
 - Effectiveness scoring is handled separately (Plan 05-02) -- this skill only captures raw outcomes
 - All context store writes follow the entry format in `~/.claude/skills/_shared/context-protocol.md`
 - Outcome entries start at confidence "low" -- confidence upgrades happen based on evidence accumulation

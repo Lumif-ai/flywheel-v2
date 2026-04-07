@@ -57,7 +57,7 @@ Or describe what you want — Claude will trigger this skill automatically.
 - A description of your business and ideal customer (Claude will ask)
 - An outreach template or talking points (optional — Claude can write from scratch)
 
-> **Have a directory to scrape first?** Use `/gtm-leads-pipeline` instead —
+> **Have a directory to scrape first?** Use `/gtm-pipeline` instead —
 > it scrapes the site and feeds the results directly into this scorer.
 
 ---
@@ -73,7 +73,7 @@ If none found: "Playwright MCP isn't connected — please enable it and restart 
 - For batches >50 companies: confirm scope and estimated time with user before proceeding.
 
 ### Parallel Execution
-Scale browser tabs to batch volume. Reference `gtm-shared/parallel.py` for helpers.
+Scale browser tabs to batch volume. Use parallel agents for large batches.
 
 | Items | Agents | Notes |
 |-------|--------|-------|
@@ -96,7 +96,7 @@ Sub-phase batch sizing (quick filter, deep crawl, DM lookup) is defined in STEPs
 
 ### Backup Protocol
 - Before overwriting scored CSV: create `.backup.YYYY-MM-DD`, keep last 3
-- Use `gtm-shared/gtm_utils.backup_file()` where applicable
+- Back up files before overwriting where applicable
 
 ### 0c. Context Store Pre-Read
 - Read `~/.claude/context/_catalog.md` to discover available files
@@ -112,61 +112,41 @@ Sub-phase batch sizing (quick filter, deep crawl, DM lookup) is defined in STEPs
 
 ## STEP 0.5 — Load Sender Profile
 
-The sender profile captures who YOU are. It's built once with `/gtm-my-company` and
-loaded silently here — no re-entry needed if the file exists.
+The sender profile captures who YOU are. Load it from the context store.
 
-**Profile path:** `~/.claude/gtm-stack/sender-profile.md`
+**Load via Flywheel MCP:**
+Use `flywheel_read_context` to search for company-intel, positioning, and sender profile entries.
 
-Check via bash:
-```bash
-cat ~/.claude/gtm-stack/sender-profile.md 2>/dev/null || echo "NOT_FOUND"
-```
+### If profile FOUND in context store — load silently and proceed:
 
-### If profile FOUND — load silently and proceed:
-
-Read the full profile into memory. **Check `schema_version` field:**
-- If `schema_version: 2` → proceed normally
-- If `schema_version: 1` or missing → tell user:
-  ```
-  ⚠ Your company profile uses an older format (v1). Some new features
-  (competitor analysis, buyer personas, follow-up cadence) may be missing.
-
-  Run /gtm-my-company and choose option B (Update permanently) to upgrade.
-  Or continue with the current profile — scoring will still work.
-  ```
-
-Show a single confirmation banner and
+Read the profile entries into memory. Show a single confirmation banner and
 **skip STEP 1 entirely** — go directly to STEP 2 (collect outreach starting point):
 
 ```
-✅ Company profile loaded: [Company Name] (last updated: [date])
+✅ Company profile loaded: [Company Name]
    Sender: [Name, Title]
    ICP: [Industry] · [Type] · [Size] · [Geography]
    Fit signals: [Signal 1], [Signal 2]
    Disqualifiers: [Disqualifier 1], [Disqualifier 2]
-   (Run /gtm-my-company any time to update this)
 ```
 
-Populate fit signals and disqualifiers from the profile's "Fit Scoring Signals" section.
-Pull sender name from the profile's "Sender" section for use in outreach signing.
+Populate fit signals and disqualifiers from the profile context entries.
+Pull sender name from the profile for use in outreach signing.
 
 If the user says "actually I want to use different scoring context" at any point before
-scoring begins → ask what to change, apply in memory for this session only. Do not
-re-run the build wizard.
+scoring begins → ask what to change, apply in memory for this session only.
 
 ### If profile NOT FOUND:
 
 ```
-No company profile found yet.
+No company profile found in the context store.
 
-I can set one up now (~5–10 min) — it saves permanently and loads automatically
-in every future session. Or I'll ask about your business below for this session only.
+I'll ask about your business below for this session and save it to the context store
+for future sessions. Or you can provide a company profile document.
 
-Set up company profile now? (yes / no)
+Continue with quick interview? (yes / no)
 ```
 
-- **yes:** Run the `/gtm-my-company` Build Wizard. After saving, remind: "Profile saved.
-  Restart `/gtm-company-fit-analyzer` — it will load automatically."
 - **no:** Fall through to STEP 1 interview as normal.
 
 ---
@@ -218,7 +198,7 @@ Does this look right? Any corrections?
 > "What indirect signs would suggest a company has that problem? (e.g. team size, hiring patterns, tech stack, project types)"
 
 ### 1c. Save reminder
-Tell the user: "Run `/gtm-my-company` to save this as your persistent profile — it'll load automatically next session and you'll never have to answer these questions again."
+Save the profile to the context store via `flywheel_write_context` (file: company-intel, source: gtm-company-fit-analyzer). Tell the user: "Profile saved to context store — it'll load automatically in every future session."
 
 ---
 

@@ -253,7 +253,7 @@ of fake authority. Fabricated credibility is worse than no credibility.
 | Skill | Integration |
 |-------|-------------|
 | `gtm-outbound-messenger` | Loads personas + advisors before drafting. Runs review after drafting. |
-| `gtm-leads-pipeline` | Wires review step into outreach orchestration. |
+| `gtm-pipeline` | Wires review step into outreach orchestration. |
 | `gtm-company-fit-analyzer` | Consumes company context snippets for persona enrichment. |
 | `meeting-prep` | Reads industry archetypes to understand how contacts think. |
 | `content-critic` | Parallel quality gate pattern (social posts vs. outreach). |

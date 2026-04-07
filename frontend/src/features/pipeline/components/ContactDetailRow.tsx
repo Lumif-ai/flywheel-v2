@@ -1,7 +1,6 @@
-import { useState, useEffect } from 'react'
 import { Mail, Linkedin } from 'lucide-react'
 import type { PipelineContact, PipelineActivity } from '../types/pipeline'
-import { fetchPipelineDetail } from '../api'
+import { usePipelineDetail } from '../hooks/usePipelineDetail'
 
 interface ContactDetailRowProps {
   entryId: string
@@ -15,19 +14,9 @@ const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
 }
 
 export function ContactDetailRow({ entryId }: ContactDetailRowProps) {
-  const [contacts, setContacts] = useState<PipelineContact[]>([])
-  const [activities, setActivities] = useState<PipelineActivity[]>([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    fetchPipelineDetail(entryId)
-      .then((detail) => {
-        setContacts(detail.contacts || [])
-        setActivities(detail.recent_activities || [])
-        setLoading(false)
-      })
-      .catch(() => setLoading(false))
-  }, [entryId])
+  const { data: detail, isLoading: loading } = usePipelineDetail(entryId)
+  const contacts: PipelineContact[] = detail?.contacts || []
+  const activities: PipelineActivity[] = detail?.recent_activities || []
 
   if (loading) {
     return (
@@ -64,6 +53,8 @@ export function ContactDetailRow({ entryId }: ContactDetailRowProps) {
         padding: '8px 16px 8px 48px',
         background: '#FAFAFA',
         borderBottom: '1px solid #F3F4F6',
+        overflowY: 'auto',
+        height: '100%',
       }}
     >
       <table
@@ -176,10 +167,6 @@ export function ContactDetailRow({ entryId }: ContactDetailRowProps) {
                     padding: '6px 8px',
                     color: '#6B7280',
                     fontSize: '11px',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                    maxWidth: '250px',
                   }}
                 >
                   {activity?.subject || '\u2014'}
