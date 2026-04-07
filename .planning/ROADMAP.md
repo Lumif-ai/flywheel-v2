@@ -212,6 +212,16 @@ Plans:
 Plans:
 - [x] 094-01-PLAN.md — flywheel_list_pipeline_contacts + flywheel_create_outreach_step MCP tools
 
+### Phase 95: Skill IP Protection
+**Goal:** Prevent users from copying proprietary skill prompts by gating the prompt endpoint with a protected flag (default true, fail closed), returning an orchestrator stub for protected skills, adding access logging and rate limiting, and hardening server-side execution with anti-extraction measures and error sanitization
+**Depends on:** Phase 94
+**Requirements:** PROT-01 through PROT-08
+**Plans:** 2 plans
+
+Plans:
+- [ ] 95-01-PLAN.md — Data layer: protected column on skill_definitions, seed pipeline frontmatter parsing, Alembic migration
+- [ ] 95-02-PLAN.md — Security layer: prompt endpoint gating with orchestrator stub, access logging, rate limiting, anti-extraction prefix, error sanitization
+
 ## Progress
 
 **Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75 → 76 → 77 → 78 → 79 → 80 → 81 → 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94
