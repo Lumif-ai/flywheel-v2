@@ -1037,6 +1037,113 @@ def flywheel_create_outreach_step(
         return f"Error creating outreach step: {exc}"
 
 
+@mcp.tool()
+def flywheel_list_outreach_steps(
+    pipeline_entry_id: str,
+    contact_id: str = "",
+    status: str = "",
+    limit: int = 50,
+) -> str:
+    """List existing outreach steps (activities) for a pipeline entry.
+
+    Returns outreach activities with their IDs, subjects, body previews, and status.
+    Use to read existing outreach before updating (e.g. to change subject lines).
+
+    Filter by contact_id to see steps for a specific contact, or by status
+    (drafted, sent, replied, bounced) to find steps in a particular state.
+
+    Args:
+        pipeline_entry_id: Pipeline entry UUID
+        contact_id: Optional contact UUID to filter by
+        status: Optional status filter (drafted, sent, replied, bounced)
+        limit: Max results (default 50)
+    """
+    try:
+        client = FlywheelClient()
+        params: dict = {"limit": limit, "type": "outreach"}
+        if contact_id:
+            params["contact_id"] = contact_id
+        if status:
+            params["status"] = status
+
+        data = client.list_pipeline_activities(pipeline_entry_id, **params)
+        items = data.get("items", [])
+
+        if not items:
+            return "No outreach steps found for this entry."
+
+        lines = [f"Found {len(items)} outreach step(s):\n"]
+        for item in items:
+            meta = item.get("metadata_") or item.get("metadata") or {}
+            step_num = meta.get("step_number", "?")
+            body_text = meta.get("body") or item.get("body_preview") or ""
+            lines.append(
+                f"- ID: {item['id']}\n"
+                f"  Contact: {item.get('contact_id', '?')}\n"
+                f"  Step: {step_num} | Channel: {item.get('channel', '?')} | "
+                f"Status: {item.get('status', '?')}\n"
+                f"  Subject: {item.get('subject', '(none)')}\n"
+                f"  Body: {body_text[:150]}{'...' if len(body_text) > 150 else ''}\n"
+            )
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error listing outreach steps: {exc}"
+
+
+@mcp.tool()
+def flywheel_update_outreach_step(
+    pipeline_entry_id: str,
+    activity_id: str,
+    subject: str = "",
+    body: str = "",
+    status: str = "",
+) -> str:
+    """Update an existing outreach step (activity) — change subject, body, or status.
+
+    Only the fields you provide are updated. Omitted fields stay unchanged.
+    Use flywheel_list_outreach_steps first to get the activity_id.
+
+    Common use cases:
+    - Change subject line across drafted emails
+    - Update body text without losing subject
+    - Mark a step as 'sent' or 'replied'
+
+    Args:
+        pipeline_entry_id: Pipeline entry UUID
+        activity_id: Activity UUID (from flywheel_list_outreach_steps)
+        subject: New subject line (leave empty to keep current)
+        body: New body text (leave empty to keep current)
+        status: New status (leave empty to keep current)
+    """
+    try:
+        client = FlywheelClient()
+        fields: dict = {}
+        if subject:
+            fields["subject"] = subject
+        if body:
+            fields["body_preview"] = body[:200]
+            # Also update the full body in metadata
+            fields["metadata_"] = {"body": body}
+        if status:
+            fields["status"] = status
+
+        if not fields:
+            return "No fields to update. Provide at least one of: subject, body, status."
+
+        result = client.update_pipeline_activity(pipeline_entry_id, activity_id, **fields)
+        return (
+            f"Outreach step updated (id: {activity_id})\n"
+            f"  Subject: {result.get('subject', '?')}\n"
+            f"  Status: {result.get('status', '?')}"
+        )
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error updating outreach step: {exc}"
+
+
 # --------------------------------------------------------------------------
 # Deprecated Tools (backward compat)
 # --------------------------------------------------------------------------

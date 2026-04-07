@@ -646,6 +646,8 @@ def setup_claude_code() -> None:
         "mcp__flywheel__flywheel_draft_pipeline_message",
         "mcp__flywheel__flywheel_list_pipeline_contacts",
         "mcp__flywheel__flywheel_create_outreach_step",
+        "mcp__flywheel__flywheel_list_outreach_steps",
+        "mcp__flywheel__flywheel_update_outreach_step",
         "mcp__granola__get_meetings",
     ]
     # Destructive tools NOT auto-allowed (require user confirmation):

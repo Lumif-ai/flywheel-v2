@@ -279,6 +279,11 @@ class FlywheelClient:
         """PATCH /api/v1/pipeline/{id}/activities/{activity_id}."""
         return self._request("patch", f"/api/v1/pipeline/{entry_id}/activities/{activity_id}", json=fields)
 
+    def list_pipeline_activities(self, entry_id: str, **params) -> dict:
+        """GET /api/v1/pipeline/{id}/activities -- list activities for an entry."""
+        clean = {k: v for k, v in params.items() if v is not None}
+        return self._request("get", f"/api/v1/pipeline/{entry_id}/activities", params=clean)
+
     def list_pipeline_contacts(self, **params) -> dict:
         """GET /api/v1/pipeline/contacts/ with filter params."""
         clean = {k: v for k, v in params.items() if v is not None}
