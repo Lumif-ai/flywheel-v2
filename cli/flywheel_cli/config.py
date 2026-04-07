@@ -18,7 +18,8 @@ CREDENTIALS_FILE = FLYWHEEL_DIR / "credentials.json"
 # ---------------------------------------------------------------------------
 
 # Production defaults — safe to embed (anon key is public, same as frontend bundle)
-_DEFAULT_API_URL = "http://localhost:8000"
+# TODO: replace with stable production URL once Cloudflare tunnel / Railway is finalized
+_DEFAULT_API_URL = "https://survive-wearing-dream-treaty.trycloudflare.com"
 _DEFAULT_SUPABASE_URL = "https://qudaxjkjzhjqxrmapggi.supabase.co"
 _DEFAULT_SUPABASE_ANON_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."

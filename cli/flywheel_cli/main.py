@@ -524,13 +524,13 @@ def logout() -> None:
 
 @cli.command("setup-claude-code")
 def setup_claude_code() -> None:
-    """Register Flywheel MCP server with Claude Code."""
+    """Register Flywheel and Granola MCP servers with Claude Code."""
     # 1. Check flywheel-mcp is on PATH
     mcp_path = shutil.which("flywheel-mcp")
     if not mcp_path:
         console.print(
             "[red]flywheel-mcp not found on PATH. "
-            "Install with: cd cli && pip install -e .[/red]"
+            "Install with: uv tool install flywheel-cli[/red]"
         )
         raise SystemExit(1)
 
@@ -539,48 +539,70 @@ def setup_claude_code() -> None:
     if not claude_path:
         console.print(
             "[red]Claude Code CLI not found. "
-            "Install Claude Code first: https://code.claude.com[/red]"
+            "Install Claude Code first: https://claude.ai/download[/red]"
         )
         raise SystemExit(1)
 
-    # 3. Register the MCP server
-    result = subprocess.run(
+    # 3. Register Flywheel MCP server (stdio)
+    console.print("[bold]Registering Flywheel MCP server...[/bold]")
+    flywheel_result = subprocess.run(
         [
-            "claude",
-            "mcp",
-            "add",
-            "--transport",
-            "stdio",
-            "--scope",
-            "user",
-            "flywheel",
-            "--",
-            mcp_path,
+            "claude", "mcp", "add",
+            "--transport", "stdio",
+            "--scope", "user",
+            "flywheel", "--", mcp_path,
         ],
         capture_output=True,
         text=True,
     )
-
-    # 4. Report result
-    if result.returncode == 0:
-        console.print(
-            Panel(
-                "Flywheel MCP server configured for Claude Code.\n\n"
-                "[bold]Tools available:[/bold]\n"
-                "  - flywheel_run_skill: Run meeting-prep, company-intel, etc.\n"
-                "  - flywheel_read_context: Search your business knowledge\n"
-                "  - flywheel_write_context: Store business intelligence\n\n"
-                "[dim]Restart Claude Code to activate.[/dim]",
-                title="Setup Complete",
-                border_style="green",
-            )
-        )
+    if flywheel_result.returncode == 0:
+        console.print("[green]  Flywheel MCP registered[/green]")
     else:
-        console.print(f"[red]Failed to register MCP server:[/red]\n{result.stderr}")
         console.print(
-            "\n[yellow]Try running manually:[/yellow]\n"
-            f"  claude mcp add --transport stdio --scope user flywheel -- {mcp_path}"
+            f"[red]  Flywheel MCP failed:[/red] {flywheel_result.stderr.strip()}\n"
+            f"  [yellow]Try manually:[/yellow] claude mcp add --transport stdio "
+            f"--scope user flywheel -- {mcp_path}"
         )
+
+    # 4. Register Granola MCP server (HTTP)
+    granola_url = "https://mcp.granola.ai/mcp"
+    console.print("[bold]Registering Granola MCP server...[/bold]")
+    granola_result = subprocess.run(
+        [
+            "claude", "mcp", "add",
+            "--transport", "http",
+            "--scope", "user",
+            "granola", "--url", granola_url,
+        ],
+        capture_output=True,
+        text=True,
+    )
+    if granola_result.returncode == 0:
+        console.print("[green]  Granola MCP registered[/green]")
+    else:
+        console.print(
+            f"[red]  Granola MCP failed:[/red] {granola_result.stderr.strip()}\n"
+            f"  [yellow]Try manually:[/yellow] claude mcp add --transport http "
+            f"--scope user granola --url {granola_url}"
+        )
+
+    # 5. Summary
+    console.print(
+        Panel(
+            "[bold]MCP servers configured for Claude Code:[/bold]\n\n"
+            "  [bold]flywheel[/bold] (stdio)\n"
+            "    - flywheel_run_skill: Run meeting-prep, company-intel, etc.\n"
+            "    - flywheel_read_context: Search your business knowledge\n"
+            "    - flywheel_write_context: Store business intelligence\n\n"
+            "  [bold]granola[/bold] (HTTP)\n"
+            "    - get_meetings: Access meeting transcripts from Granola\n\n"
+            "[dim]Optional: Enable Apollo MCP plugin in Claude Code settings "
+            "for lead enrichment tools.[/dim]\n\n"
+            "[dim]Restart Claude Code to activate.[/dim]",
+            title="Setup Complete",
+            border_style="green",
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
