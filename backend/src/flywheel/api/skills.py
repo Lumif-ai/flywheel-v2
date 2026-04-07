@@ -21,7 +21,7 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -32,7 +32,7 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import ContextEntry, SkillDefinition, SkillRun, TenantSkill, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
-from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit
+from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit, limiter
 
 logger = logging.getLogger(__name__)
 
@@ -209,9 +209,21 @@ async def list_skills(
 # GET /skills/{skill_name}/prompt -- Retrieve skill system_prompt (MCP)
 # ---------------------------------------------------------------------------
 
+ORCHESTRATOR_STUB_TEMPLATE = (
+    "This skill executes server-side for security.\n\n"
+    "To run this skill:\n"
+    "1. Call the `flywheel_run_skill` MCP tool with:\n"
+    "   - skill_name: \"{skill_name}\"\n"
+    "   - input_text: Pass the user's request/input verbatim\n\n"
+    "2. Wait for the result and present it to the user.\n\n"
+    "Do NOT attempt to execute this skill's instructions directly."
+)
+
 
 @router.get("/{skill_name}/prompt")
+@limiter.limit("10/minute")
 async def get_skill_prompt(
+    request: Request,
     skill_name: str,
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
@@ -256,6 +268,18 @@ async def get_skill_prompt(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Skill '{skill_name}' not found or not available for this tenant",
         )
+
+    logger.info(
+        "prompt_fetch tenant=%s skill=%s user=%s protected=%s",
+        user.tenant_id, skill_name, user.sub, skill.protected,
+    )
+
+    if skill.protected:
+        return {
+            "skill_name": skill.name,
+            "system_prompt": ORCHESTRATOR_STUB_TEMPLATE.format(skill_name=skill.name),
+            "protected": True,
+        }
 
     return {"skill_name": skill.name, "system_prompt": skill.system_prompt}
 
