@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import datetime
+import re
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -551,7 +552,17 @@ async def search_entries(
     V1 limitation: reranking is per-page, not global.
     """
     limit = min(limit, 100)
-    ts_query = func.plainto_tsquery("english", q)
+
+    # Build OR-based tsquery so multi-concept queries match entries
+    # containing ANY term, ranked by overlap via ts_rank.
+    raw_terms = re.split(r"\s+", q.strip())
+    sanitized = [re.sub(r"[^\w]", "", t) for t in raw_terms]
+    terms = [t for t in sanitized if t and len(t) > 1]
+
+    if terms:
+        ts_query = func.to_tsquery("english", " | ".join(terms))
+    else:
+        ts_query = func.plainto_tsquery("english", q)
 
     base = select(ContextEntry).where(
         ContextEntry.deleted_at.is_(None),
