@@ -33,7 +33,7 @@ fail()    { echo -e "${RED}[FAIL]${NC} $*"; exit 1; }
 step()    { echo -e "\n${BOLD}==> $*${NC}"; }
 
 # -- Config --------------------------------------------------------------
-REPO_URL="https://github.com/Sharan0516/flywheel-v2.git"
+PYPI_PACKAGE="flywheel-ai"
 GRANOLA_MCP_URL="https://mcp.granola.ai/mcp"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=10
@@ -105,10 +105,11 @@ fi
 step "Installing Flywheel CLI"
 
 # Remove previous installation if present (idempotent)
-uv tool uninstall flywheel-cli 2>/dev/null || true
+uv tool uninstall flywheel-ai 2>/dev/null || true
+uv tool uninstall flywheel-cli 2>/dev/null || true  # legacy name
 
-info "Installing from $REPO_URL ..."
-uv tool install "flywheel-cli @ git+${REPO_URL}#subdirectory=cli"
+info "Installing $PYPI_PACKAGE from PyPI ..."
+uv tool install "$PYPI_PACKAGE"
 
 # Verify
 if command -v flywheel &>/dev/null; then
