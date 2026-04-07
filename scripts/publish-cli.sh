@@ -58,13 +58,13 @@ ls -lh dist/
 echo ""
 
 # Get version from built package
-VERSION=$(ls dist/*.tar.gz | grep -oP '\d+\.\d+\.\d+' | head -1)
+VERSION=$(ls dist/*.tar.gz | sed 's/.*-\([0-9]*\.[0-9]*\.[0-9]*\).*/\1/')
 info "Package version: $VERSION"
 
 # Publish
 if $TEST_PYPI; then
     info "Uploading to Test PyPI..."
-    uv publish --index-url https://test.pypi.org/legacy/
+    uv publish --publish-url https://test.pypi.org/legacy/
     echo ""
     success "Published to Test PyPI!"
     echo -e "  View:    ${BOLD}https://test.pypi.org/project/flywheel-ai/${NC}"
