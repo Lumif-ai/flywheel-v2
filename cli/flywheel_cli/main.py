@@ -522,6 +522,38 @@ def logout() -> None:
 # ---------------------------------------------------------------------------
 
 
+_FLYWHEEL_CLAUDE_MD_MARKER = "# Flywheel Integration"
+
+
+def _install_claude_md_template() -> bool:
+    """Install the Flywheel CLAUDE.md template into ~/.claude/CLAUDE.md.
+
+    If ~/.claude/CLAUDE.md doesn't exist, creates it with the template.
+    If it exists but doesn't contain the Flywheel section, appends it.
+    Returns True if changes were made.
+    """
+    from importlib.resources import files as pkg_files
+    from pathlib import Path
+
+    claude_dir = Path.home() / ".claude"
+    claude_md = claude_dir / "CLAUDE.md"
+    template = pkg_files("flywheel_mcp").joinpath("templates/CLAUDE.md").read_text()
+
+    claude_dir.mkdir(parents=True, exist_ok=True)
+
+    if not claude_md.exists():
+        claude_md.write_text(template)
+        return True
+
+    existing = claude_md.read_text()
+    if _FLYWHEEL_CLAUDE_MD_MARKER in existing:
+        return False  # already installed
+
+    # Append with separator
+    claude_md.write_text(existing.rstrip() + "\n\n" + template)
+    return True
+
+
 @cli.command("setup-claude-code")
 def setup_claude_code() -> None:
     """Register Flywheel and Granola MCP servers with Claude Code."""
@@ -586,7 +618,17 @@ def setup_claude_code() -> None:
             f"--scope user granola --url {granola_url}"
         )
 
-    # 5. Summary
+    # 5. Install CLAUDE.md template (Flywheel-first routing rules)
+    console.print("[bold]Installing CLAUDE.md template...[/bold]")
+    try:
+        if _install_claude_md_template():
+            console.print("[green]  Flywheel rules added to ~/.claude/CLAUDE.md[/green]")
+        else:
+            console.print("[dim]  Flywheel rules already present in ~/.claude/CLAUDE.md[/dim]")
+    except Exception as exc:
+        console.print(f"[red]  Failed to install CLAUDE.md template:[/red] {exc}")
+
+    # 6. Summary
     console.print(
         Panel(
             "[bold]MCP servers configured for Claude Code:[/bold]\n\n"
@@ -596,6 +638,10 @@ def setup_claude_code() -> None:
             "    - flywheel_write_context: Store business intelligence\n\n"
             "  [bold]granola[/bold] (HTTP)\n"
             "    - get_meetings: Access meeting transcripts from Granola\n\n"
+            "  [bold]CLAUDE.md[/bold] (routing rules)\n"
+            "    - Always check Flywheel context store before answering\n"
+            "    - Save business intelligence to Flywheel automatically\n"
+            "    - Route to Flywheel skills before general Claude\n\n"
             "[dim]Optional: Enable Apollo MCP plugin in Claude Code settings "
             "for lead enrichment tools.[/dim]\n\n"
             "[dim]Restart Claude Code to activate.[/dim]",
