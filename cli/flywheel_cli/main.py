@@ -549,8 +549,8 @@ def _install_claude_md_template() -> bool:
     if _FLYWHEEL_CLAUDE_MD_MARKER in existing:
         return False  # already installed
 
-    # Append with separator
-    claude_md.write_text(existing.rstrip() + "\n\n" + template)
+    # Prepend so Flywheel rules take priority over other instructions
+    claude_md.write_text(template.rstrip() + "\n\n" + existing)
     return True
 
 
