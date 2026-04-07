@@ -843,6 +843,9 @@ class SkillDefinition(Base):
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )
+    protected: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     token_budget: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")

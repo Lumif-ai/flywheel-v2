@@ -62,6 +62,7 @@ class SkillData:
     token_budget: int | None = None
     parameters: dict = field(default_factory=dict)
     enabled: bool = True
+    protected: bool = True
 
 
 @dataclass
@@ -296,6 +297,12 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
         if not isinstance(enabled, bool):
             enabled = True
 
+        # Read public flag from frontmatter (default False = protected by default)
+        is_public = data.get("public", False)
+        if not isinstance(is_public, bool):
+            is_public = False
+        protected = not is_public
+
         skills.append(
             SkillData(
                 name=name,
@@ -310,6 +317,7 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
                 token_budget=token_budget,
                 parameters=parameters,
                 enabled=enabled,
+                protected=protected,
             )
         )
 
@@ -434,6 +442,7 @@ async def seed_skills(
             "token_budget": skill.token_budget,
             "parameters": skill.parameters,
             "enabled": skill.enabled,
+            "protected": skill.protected,
         }
 
         stmt = pg_insert(SkillDefinition).values(**values)
@@ -451,6 +460,7 @@ async def seed_skills(
                 "token_budget": stmt.excluded.token_budget,
                 "parameters": stmt.excluded.parameters,
                 "enabled": stmt.excluded.enabled,
+                "protected": stmt.excluded.protected,
                 "updated_at": func.now(),
             },
         )
