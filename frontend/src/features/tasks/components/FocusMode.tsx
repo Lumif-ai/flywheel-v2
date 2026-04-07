@@ -550,22 +550,7 @@ export function FocusMode({ tasks, isOpen, onClose }: FocusModeProps) {
               </span>
             </div>
 
-            {/* Suggested skill */}
-            {currentTask.suggested_skill && (
-              <div className="flex items-center gap-2">
-                <span
-                  style={{
-                    fontSize: '13px',
-                    fontWeight: 500,
-                    color: 'var(--secondary-text)',
-                    minWidth: '70px',
-                  }}
-                >
-                  Skill
-                </span>
-                <TaskSkillChip skillName={currentTask.suggested_skill} />
-              </div>
-            )}
+            {/* Skills hidden from user-facing UI */}
 
             {/* Description */}
             {currentTask.description && (

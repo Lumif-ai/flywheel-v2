@@ -1,87 +1,88 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Loader2, UserPlus, X, Mail } from 'lucide-react'
+import { Loader2, UserPlus, X, Mail, Link } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
-import { useTenantStore } from '@/stores/tenant'
 import { useAuthStore } from '@/stores/auth'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 
-interface Member {
-  id: string
-  email: string
-  role: 'admin' | 'member'
-  joined_at: string
-}
-
-interface Invite {
-  id: string
-  email: string
-  status: 'pending' | 'accepted' | 'expired'
-  expires_at: string
+interface MemberItem {
+  user_id: string | null
+  invite_id: string | null
+  email: string | null
+  name: string | null
+  role: string
+  joined_at: string | null
+  status: 'active' | 'pending'
+  expires_at: string | null
+  invite_token: string | null
 }
 
 export function TeamManager() {
   const queryClient = useQueryClient()
-  const activeTenant = useTenantStore((s) => s.activeTenant)
   const currentUser = useAuthStore((s) => s.user)
   const [inviteEmail, setInviteEmail] = useState('')
 
-  const tenantId = activeTenant?.id
-
-  const { data: members, isLoading: membersLoading } = useQuery({
-    queryKey: ['members', tenantId],
-    queryFn: () => api.get<Member[]>(`/tenants/${tenantId}/members`),
-    enabled: !!tenantId,
-  })
-
-  const { data: invites, isLoading: invitesLoading } = useQuery({
-    queryKey: ['invites', tenantId],
-    queryFn: () => api.get<Invite[]>(`/tenants/${tenantId}/invites`),
-    enabled: !!tenantId,
+  const { data: members, isLoading } = useQuery({
+    queryKey: ['tenant-members'],
+    queryFn: () => api.get<MemberItem[]>('/tenants/members'),
+    enabled: true,
   })
 
   const inviteMutation = useMutation({
     mutationFn: (email: string) =>
-      api.post<Invite>(`/tenants/${tenantId}/invites`, { email }),
+      api.post('/tenants/invite', { email }),
     onSuccess: () => {
       setInviteEmail('')
-      queryClient.invalidateQueries({ queryKey: ['invites', tenantId] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-members'] })
+      toast.success('Invite sent')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to send invite')
+    },
+  })
+
+  const cancelInviteMutation = useMutation({
+    mutationFn: (inviteId: string) =>
+      api.delete<void>(`/tenants/invite/${inviteId}`),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['tenant-members'] })
+      toast.success('Invite cancelled')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to cancel invite')
     },
   })
 
   const removeMutation = useMutation({
-    mutationFn: (memberId: string) =>
-      api.delete<void>(`/tenants/${tenantId}/members/${memberId}`),
+    mutationFn: (userId: string) =>
+      api.delete<void>(`/tenants/members/${userId}`),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['members', tenantId] })
+      queryClient.invalidateQueries({ queryKey: ['tenant-members'] })
+      toast.success('Member removed')
+    },
+    onError: (err: Error) => {
+      toast.error(err.message || 'Failed to remove member')
     },
   })
 
-  const revokeMutation = useMutation({
-    mutationFn: (inviteId: string) =>
-      api.delete<void>(`/tenants/${tenantId}/invites/${inviteId}`),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['invites', tenantId] })
-    },
-  })
+  const copyInviteLink = (token: string) => {
+    const link = `${window.location.origin}/invite?token=${token}`
+    navigator.clipboard.writeText(link)
+    toast.success('Invite link copied')
+  }
 
   const handleInvite = () => {
     if (!inviteEmail.trim()) return
     inviteMutation.mutate(inviteEmail.trim())
   }
 
-  if (!tenantId) {
-    return (
-      <div className="text-sm text-muted-foreground">
-        No workspace selected.
-      </div>
-    )
-  }
-
-  const adminCount = members?.filter((m) => m.role === 'admin').length ?? 0
+  const activeMembers = members?.filter((m) => m.status === 'active') ?? []
+  const pendingInvites = members?.filter((m) => m.status === 'pending') ?? []
+  const adminCount = activeMembers.filter((m) => m.role === 'admin').length
 
   return (
     <div className="space-y-8">
@@ -115,65 +116,62 @@ export function TeamManager() {
             )}
           </Button>
         </div>
-        {inviteMutation.isError && (
-          <p className="text-sm text-destructive">
-            Failed to send invite. The user may already be a member.
-          </p>
-        )}
-        {inviteMutation.isSuccess && (
-          <p className="text-sm text-green-600">Invite sent successfully.</p>
-        )}
       </div>
 
-      {/* Members List */}
+      {/* Active Members */}
       <div className="space-y-3">
         <h3 className="text-base font-semibold text-foreground">
-          Members {members ? `(${members.length})` : ''}
+          Members {activeMembers.length > 0 ? `(${activeMembers.length})` : ''}
         </h3>
 
-        {membersLoading ? (
+        {isLoading ? (
           <div className="space-y-2">
             {[1, 2, 3].map((i) => (
               <Skeleton key={i} className="h-12 w-full rounded-lg" />
             ))}
           </div>
-        ) : members && members.length > 0 ? (
+        ) : activeMembers.length > 0 ? (
           <div className="divide-y divide-border rounded-lg border border-border">
-            {members.map((member) => {
-              const isCurrentUser = member.id === currentUser?.id
+            {activeMembers.map((member) => {
+              const isCurrentUser = member.user_id === currentUser?.id
               const isLastAdmin = member.role === 'admin' && adminCount <= 1
-              const canRemove = !isCurrentUser || !isLastAdmin
+              const canRemove = !isCurrentUser && !isLastAdmin
 
               return (
                 <div
-                  key={member.id}
+                  key={member.user_id ?? member.email}
                   className="flex items-center justify-between px-4 py-3"
                 >
                   <div className="flex items-center gap-3">
                     <div className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-xs font-medium">
-                      {member.email.charAt(0).toUpperCase()}
+                      {(member.name ?? member.email)?.charAt(0).toUpperCase()}
                     </div>
                     <div>
                       <p className="text-sm font-medium text-foreground">
-                        {member.email}
+                        {member.name ?? member.email}
                         {isCurrentUser && (
                           <span className="text-muted-foreground ml-1">(you)</span>
                         )}
                       </p>
-                      <p className="text-xs text-muted-foreground">
-                        Joined {new Date(member.joined_at).toLocaleDateString()}
-                      </p>
+                      {member.name && member.email && (
+                        <p className="text-xs text-muted-foreground">{member.email}</p>
+                      )}
+                      {member.joined_at && (
+                        <p className="text-xs text-muted-foreground">
+                          Joined {new Date(member.joined_at).toLocaleDateString()}
+                        </p>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
                     <Badge variant={member.role === 'admin' ? 'default' : 'secondary'}>
                       {member.role}
                     </Badge>
-                    {canRemove && (
+                    {canRemove && member.user_id && (
                       <Button
                         variant="ghost"
                         size="icon-xs"
-                        onClick={() => removeMutation.mutate(member.id)}
+                        onClick={() => removeMutation.mutate(member.user_id!)}
                         disabled={removeMutation.isPending}
                       >
                         <X className="size-3" />
@@ -192,41 +190,56 @@ export function TeamManager() {
       {/* Pending Invites */}
       <div className="space-y-3">
         <h3 className="text-base font-semibold text-foreground">
-          Pending Invites {invites?.filter((i) => i.status === 'pending').length ? `(${invites.filter((i) => i.status === 'pending').length})` : ''}
+          Pending Invites {pendingInvites.length > 0 ? `(${pendingInvites.length})` : ''}
         </h3>
 
-        {invitesLoading ? (
+        {isLoading ? (
           <div className="space-y-2">
             <Skeleton className="h-10 w-full rounded-lg" />
           </div>
-        ) : invites && invites.filter((i) => i.status === 'pending').length > 0 ? (
+        ) : pendingInvites.length > 0 ? (
           <div className="divide-y divide-border rounded-lg border border-border">
-            {invites
-              .filter((i) => i.status === 'pending')
-              .map((invite) => (
-                <div
-                  key={invite.id}
-                  className="flex items-center justify-between px-4 py-3"
-                >
-                  <div className="flex items-center gap-3">
-                    <Mail className="size-4 text-muted-foreground" />
-                    <div>
-                      <p className="text-sm text-foreground">{invite.email}</p>
+            {pendingInvites.map((invite) => (
+              <div
+                key={invite.invite_id ?? invite.email}
+                className="flex items-center justify-between px-4 py-3"
+              >
+                <div className="flex items-center gap-3">
+                  <Mail className="size-4 text-muted-foreground" />
+                  <div>
+                    <p className="text-sm text-foreground">{invite.email}</p>
+                    {invite.expires_at && (
                       <p className="text-xs text-muted-foreground">
                         Expires {new Date(invite.expires_at).toLocaleDateString()}
                       </p>
-                    </div>
+                    )}
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    onClick={() => revokeMutation.mutate(invite.id)}
-                    disabled={revokeMutation.isPending}
-                  >
-                    Revoke
-                  </Button>
                 </div>
-              ))}
+                <div className="flex items-center gap-2">
+                  {invite.invite_token && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyInviteLink(invite.invite_token!)}
+                    >
+                      <Link className="size-3 mr-1" />
+                      Copy Link
+                    </Button>
+                  )}
+                  {invite.invite_id && (
+                    <Button
+                      variant="ghost"
+                      size="icon-xs"
+                      onClick={() => cancelInviteMutation.mutate(invite.invite_id!)}
+                      disabled={cancelInviteMutation.isPending}
+                    >
+                      <X className="size-3" />
+                    </Button>
+                  )}
+                  <Badge variant="outline">Pending</Badge>
+                </div>
+              </div>
+            ))}
           </div>
         ) : (
           <p className="text-sm text-muted-foreground">No pending invites.</p>

@@ -101,12 +101,14 @@ class AcceptInviteResponse(BaseModel):
 
 class MemberItem(BaseModel):
     user_id: str | None = None
-    email: str
+    invite_id: str | None = None
+    email: str | None = None
     name: str | None = None
     role: str
     joined_at: str | None = None
     status: str = "active"
     expires_at: str | None = None
+    invite_token: str | None = None
 
 
 class DeleteTenantResponse(BaseModel):
@@ -120,6 +122,7 @@ class TenantListItem(BaseModel):
     slug: str
     plan: str
     member_limit: int
+    features: dict = {}
 
 
 # ---------------------------------------------------------------------------
@@ -153,6 +156,7 @@ async def list_tenants(
                 slug=settings.get("slug", tenant.name.lower().replace(" ", "-")),
                 plan=settings.get("plan", "free"),
                 member_limit=settings.get("member_limit", DEFAULT_MEMBER_LIMIT),
+                features=settings.get("features", {}),
             )
         )
     return items
@@ -352,6 +356,7 @@ async def invite_member(
         email=body.email,
         role=body.role,
         token_hash=token_hash,
+        token=token,
     )
     db.add(invite)
     await db.commit()
@@ -417,16 +422,53 @@ async def accept_invite(
     if member_count >= member_limit:
         raise HTTPException(status_code=403, detail="Member limit reached")
 
-    # Create user_tenants row
-    ut = UserTenant(
-        user_id=user.sub,
-        tenant_id=invite.tenant_id,
-        role=invite.role,
-        active=False,  # user keeps current tenant active
-    )
-    db.add(ut)
+    # Ensure profile exists (new users signing up via invite may not have one yet)
+    existing_profile = (
+        await db.execute(select(Profile).where(Profile.id == user.sub))
+    ).scalar_one_or_none()
+    if existing_profile is None:
+        db.add(Profile(id=user.sub))
+        await db.flush()
 
-    # Mark invite as accepted
+    # Check if user is already a member of this tenant (idempotent)
+    existing_ut = (
+        await db.execute(
+            select(UserTenant).where(
+                UserTenant.user_id == user.sub,
+                UserTenant.tenant_id == invite.tenant_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing_ut is None:
+        # Deactivate any current active tenant for this user
+        await db.execute(
+            update(UserTenant)
+            .where(UserTenant.user_id == user.sub, UserTenant.active == True)
+            .values(active=False)
+        )
+        db.add(UserTenant(
+            user_id=user.sub,
+            tenant_id=invite.tenant_id,
+            role=invite.role,
+            active=True,
+        ))
+        await db.flush()
+    elif not existing_ut.active:
+        # Already a member but not active — switch to this tenant
+        await db.execute(
+            update(UserTenant)
+            .where(UserTenant.user_id == user.sub, UserTenant.active == True)
+            .values(active=False)
+        )
+        existing_ut.active = True
+        await db.flush()
+
+    # Invalidate tenant cache so subsequent requests pick up the new tenant
+    from flywheel.api.deps import _user_tenant_cache
+    _user_tenant_cache.pop(str(user.sub), None)
+
+    # Mark invite as accepted only after user_tenants succeeds
     invite.accepted_at = datetime.datetime.now(datetime.timezone.utc)
     await db.commit()
 
@@ -456,10 +498,12 @@ async def list_members(
     )
     members = []
     for ut, p in members_result.all():
+        # Use the current user's email from JWT for their own row
+        member_email = user.email if ut.user_id == user.sub else None
         members.append(
             MemberItem(
                 user_id=str(p.id),
-                email=None,  # TODO: email lives in auth.users, fetch via Supabase Admin API if needed
+                email=member_email,
                 name=p.name,
                 role=ut.role,
                 joined_at=ut.joined_at.isoformat() if ut.joined_at else None,
@@ -478,14 +522,46 @@ async def list_members(
     for inv in invites_result.scalars().all():
         members.append(
             MemberItem(
+                invite_id=str(inv.id),
                 email=inv.email,
                 role=inv.role,
                 status="pending",
                 expires_at=inv.expires_at.isoformat() if inv.expires_at else None,
+                invite_token=inv.token,
             )
         )
 
     return members
+
+
+# ---------------------------------------------------------------------------
+# DELETE /tenants/invite/{invite_id} (admin only)
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/invite/{invite_id}")
+async def cancel_invite(
+    invite_id: UUID,
+    user: TokenPayload = Depends(require_admin),
+    db: AsyncSession = Depends(get_db_unscoped),
+):
+    """Cancel a pending invite. Admin only."""
+    result = await db.execute(
+        select(Invite).where(
+            Invite.id == invite_id,
+            Invite.tenant_id == user.tenant_id,
+            Invite.accepted_at.is_(None),
+        )
+    )
+    invite = result.scalar_one_or_none()
+    if invite is None:
+        raise HTTPException(status_code=404, detail="Invite not found")
+
+    await db.delete(invite)
+    await db.commit()
+
+    logger.info("invite_cancelled tenant=%s email=%s", user.tenant_id, invite.email)
+    return {"status": "cancelled", "email": invite.email}
 
 
 # ---------------------------------------------------------------------------

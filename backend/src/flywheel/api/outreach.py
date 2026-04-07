@@ -78,12 +78,17 @@ class PipelineItem(BaseModel):
     id: UUID
     name: str
     domain: str | None
+    industry: str | None = None
     fit_score: float | None
     fit_tier: str | None
     status: str
     last_interaction_at: datetime.datetime | None
     outreach_count: int
     last_outreach_status: str | None
+    last_outreach_channel: str | None = None
+    last_outreach_subject: str | None = None
+    last_outreach_snippet: str | None = None
+    last_outreach_at: datetime.datetime | None = None
     days_since_last_outreach: int | None
     created_at: datetime.datetime
     primary_contact_name: str | None = None
@@ -348,6 +353,7 @@ async def get_pipeline(
     limit: int = Query(default=50, ge=1, le=100),
     fit_tier: list[str] | None = Query(default=None),
     outreach_status: list[str] | None = Query(default=None),
+    industry: list[str] | None = Query(default=None),
     search: str | None = Query(default=None),
     db: AsyncSession = Depends(get_tenant_db),
     user: TokenPayload = Depends(require_tenant),
@@ -365,6 +371,7 @@ async def get_pipeline(
 
     fit_tier_expanded = _expand(fit_tier) if fit_tier is not None else None
     outreach_status_expanded = _expand(outreach_status) if outreach_status is not None else None
+    industry_expanded = _expand(industry) if industry is not None else None
 
     # Subquery: outreach stats per account (avoids N+1)
     # Computes: count, last sent_at, status of most-recent outreach
@@ -378,12 +385,15 @@ async def get_pipeline(
         .subquery("outreach_stats")
     )
 
-    # Subquery: status of the most recent outreach per account
-    # Uses a lateral-style approach: rank by sent_at and pick rank=1
+    # Subquery: most recent outreach per account (status, channel, subject, snippet)
     ranked_outreach = (
         select(
             OutreachActivity.account_id.label("account_id"),
             OutreachActivity.status.label("last_status"),
+            OutreachActivity.channel.label("last_channel"),
+            OutreachActivity.subject.label("last_subject"),
+            OutreachActivity.body_preview.label("last_snippet"),
+            OutreachActivity.sent_at.label("last_outreach_sent_at"),
             func.row_number()
             .over(
                 partition_by=OutreachActivity.account_id,
@@ -398,6 +408,10 @@ async def get_pipeline(
         select(
             ranked_outreach.c.account_id,
             ranked_outreach.c.last_status,
+            ranked_outreach.c.last_channel,
+            ranked_outreach.c.last_subject,
+            ranked_outreach.c.last_snippet,
+            ranked_outreach.c.last_outreach_sent_at,
         )
         .where(ranked_outreach.c.rn == 1)
         .subquery("last_status_sq")
@@ -424,6 +438,10 @@ async def get_pipeline(
             func.coalesce(outreach_stats.c.outreach_count, 0).label("outreach_count"),
             outreach_stats.c.last_sent_at.label("last_sent_at"),
             last_status_sq.c.last_status.label("last_outreach_status"),
+            last_status_sq.c.last_channel.label("last_outreach_channel"),
+            last_status_sq.c.last_subject.label("last_outreach_subject"),
+            last_status_sq.c.last_snippet.label("last_outreach_snippet"),
+            last_status_sq.c.last_outreach_sent_at.label("last_outreach_at"),
             primary_contact_sq.c.contact_name.label("primary_contact_name"),
             primary_contact_sq.c.contact_title.label("primary_contact_title"),
             primary_contact_sq.c.contact_email.label("primary_contact_email"),
@@ -442,6 +460,8 @@ async def get_pipeline(
         stmt = stmt.where(Account.fit_tier.in_(fit_tier_expanded))
     if outreach_status_expanded is not None:
         stmt = stmt.where(last_status_sq.c.last_status.in_(outreach_status_expanded))
+    if industry_expanded is not None:
+        stmt = stmt.where(Account.intel["industry"].astext.in_(industry_expanded))
     if search is not None:
         pattern = f"%{search}%"
         stmt = stmt.where(
@@ -462,6 +482,8 @@ async def get_pipeline(
         count_stmt = count_stmt.where(Account.fit_tier.in_(fit_tier_expanded))
     if outreach_status_expanded is not None:
         count_stmt = count_stmt.where(last_status_sq.c.last_status.in_(outreach_status_expanded))
+    if industry_expanded is not None:
+        count_stmt = count_stmt.where(Account.intel["industry"].astext.in_(industry_expanded))
     if search is not None:
         pattern = f"%{search}%"
         count_stmt = count_stmt.where(
@@ -476,14 +498,17 @@ async def get_pipeline(
         outreach_count = row[1] or 0
         last_sent_at = row[2]
         last_outreach_status = row[3]
-        primary_contact_name = row[4]
-        primary_contact_title = row[5]
-        primary_contact_email = row[6]
-        primary_contact_linkedin = row[7]
+        last_outreach_channel = row[4]
+        last_outreach_subject = row[5]
+        last_outreach_snippet = row[6]
+        last_outreach_at = row[7]
+        primary_contact_name = row[8]
+        primary_contact_title = row[9]
+        primary_contact_email = row[10]
+        primary_contact_linkedin = row[11]
 
         # Compute days_since_last_outreach
         if last_sent_at is not None:
-            # Ensure timezone-aware comparison
             if last_sent_at.tzinfo is None:
                 last_sent_at = last_sent_at.replace(tzinfo=datetime.timezone.utc)
             delta = now - last_sent_at
@@ -491,17 +516,25 @@ async def get_pipeline(
         else:
             days_since = None
 
+        # Extract industry from intel JSONB
+        raw_industry = (account.intel or {}).get("industry")
+
         items.append(
             PipelineItem(
                 id=account.id,
                 name=account.name,
                 domain=account.domain,
+                industry=raw_industry if raw_industry and raw_industry not in ("N/A", "Other") else None,
                 fit_score=float(account.fit_score) if account.fit_score is not None else None,
                 fit_tier=account.fit_tier,
                 status=account.status,
                 last_interaction_at=account.last_interaction_at,
                 outreach_count=int(outreach_count),
                 last_outreach_status=last_outreach_status,
+                last_outreach_channel=last_outreach_channel,
+                last_outreach_subject=last_outreach_subject,
+                last_outreach_snippet=last_outreach_snippet[:120] if last_outreach_snippet else None,
+                last_outreach_at=last_outreach_at,
                 days_since_last_outreach=days_since,
                 created_at=account.created_at,
                 primary_contact_name=primary_contact_name,
@@ -517,6 +550,29 @@ async def get_pipeline(
         "offset": offset,
         "limit": limit,
     }
+
+
+# ---------------------------------------------------------------------------
+# Pipeline filter options
+# ---------------------------------------------------------------------------
+
+
+@router.get("/pipeline/industries")
+async def get_pipeline_industries(
+    db: AsyncSession = Depends(get_tenant_db),
+    user: TokenPayload = Depends(require_tenant),
+) -> list[str]:
+    """Return distinct industry values from prospect accounts for filter dropdown."""
+    stmt = (
+        select(Account.intel["industry"].astext)
+        .where(Account.status == "prospect")
+        .where(Account.intel["industry"].astext.is_not(None))
+        .where(Account.intel["industry"].astext.notin_(["N/A", "Other", ""]))
+        .distinct()
+        .order_by(Account.intel["industry"].astext)
+    )
+    result = await db.execute(stmt)
+    return [row[0] for row in result.all()]
 
 
 # ---------------------------------------------------------------------------

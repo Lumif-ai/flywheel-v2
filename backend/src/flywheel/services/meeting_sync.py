@@ -202,6 +202,9 @@ async def sync_granola_meetings(
         processing_rules = (integration.settings or {}).get("processing_rules", {})
 
         for raw in raw_meetings:
+            if not raw.external_id:
+                skipped += 1
+                continue
             if raw.external_id in existing_ids:
                 continue
 

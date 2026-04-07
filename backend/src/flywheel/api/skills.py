@@ -5,6 +5,7 @@ Skill metadata is sourced from the skill_definitions table, seeded by the
 
 Endpoints:
 - GET  /skills                    -- list available skills
+- GET  /skills/{name}/prompt      -- retrieve skill system_prompt (MCP tool use)
 - POST /skills/runs               -- start a skill run
 - GET  /skills/runs               -- paginated execution history
 - GET  /skills/runs/{run_id}      -- single run detail
@@ -202,6 +203,61 @@ async def list_skills(
 ) -> dict[str, Any]:
     """Return available skills from DB, scoped to tenant."""
     return {"items": await _get_available_skills_db(db, user.tenant_id)}
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/{skill_name}/prompt -- Retrieve skill system_prompt (MCP)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{skill_name}/prompt")
+async def get_skill_prompt(
+    skill_name: str,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Return the system_prompt for a skill, scoped to tenant.
+
+    Used by MCP tools to fetch the full prompt before executing a skill as Opus.
+    Returns 404 if skill is unknown, disabled, or tenant-restricted.
+    """
+    # Check if tenant has tenant_skills overrides (same logic as _get_available_skills_db)
+    has_overrides = await db.execute(
+        select(TenantSkill.skill_id)
+        .where(TenantSkill.tenant_id == user.tenant_id)
+        .limit(1)
+    )
+    if has_overrides.scalar_one_or_none() is not None:
+        # Tenant has explicit skill assignments — use them
+        stmt = (
+            select(SkillDefinition)
+            .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+            .where(
+                TenantSkill.tenant_id == user.tenant_id,
+                TenantSkill.enabled == True,  # noqa: E712
+                SkillDefinition.enabled == True,  # noqa: E712
+                SkillDefinition.name == skill_name,
+            )
+        )
+    else:
+        # No overrides — all enabled skills available
+        stmt = (
+            select(SkillDefinition)
+            .where(
+                SkillDefinition.enabled == True,  # noqa: E712
+                SkillDefinition.name == skill_name,
+            )
+        )
+    result = await db.execute(stmt)
+    skill = result.scalar_one_or_none()
+
+    if skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{skill_name}' not found or not available for this tenant",
+        )
+
+    return {"skill_name": skill.name, "system_prompt": skill.system_prompt}
 
 
 # ---------------------------------------------------------------------------

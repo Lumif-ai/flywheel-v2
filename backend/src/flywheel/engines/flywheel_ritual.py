@@ -19,7 +19,7 @@ from sqlalchemy import func, or_, select, update
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from flywheel.db.models import Meeting, SkillRun, Task
+from flywheel.db.models import LeadContact, LeadMessage, Meeting, SkillDefinition, SkillRun, Task
 from flywheel.engines.channel_task_extractor import extract_channel_tasks
 from flywheel.services.meeting_sync import sync_granola_meetings
 # NOTE: These underscore-prefixed imports create tight coupling with
@@ -39,6 +39,7 @@ from flywheel.services.skill_executor import (
 logger = logging.getLogger("flywheel.engines.flywheel_ritual")
 
 _HAIKU_MODEL = "claude-haiku-4-5-20251001"
+_SONNET_MODEL = "claude-sonnet-4-6-20250514"
 
 MAX_MEETINGS_TO_PROCESS = 20
 MAX_MEETINGS_TO_PREP = 15
@@ -66,6 +67,8 @@ async def execute_flywheel_ritual(
         "prepped": [],
         "tasks": [],  # Stage 4 in Plan 03
         "channel_tasks": None,  # Channel task extraction results (ETL-01)
+        "outreach_due": [],  # Follow-up messages due today
+        "pending_tasks": [],  # Triage-eligible tasks for "Next Actions"
     }
 
     # --- Stage 1: Granola Sync ---
@@ -119,6 +122,77 @@ async def execute_flywheel_ritual(
             "event": "stage",
             "data": {"stage": "executing", "message": f"Task execution skipped: {e}"},
         })
+
+    # --- Gather pending tasks for the brief ---
+    if user_id is not None:
+        try:
+            async with factory() as session:
+                await _set_rls_context(session, tenant_id, user_id)
+                result = await session.execute(
+                    select(Task).where(
+                        Task.tenant_id == tenant_id,
+                        Task.user_id == user_id,
+                        or_(
+                            # Triage-eligible tasks
+                            Task.status.in_(["detected", "in_review", "deferred"]),
+                            # Confirmed tasks that Stage 4 can't auto-execute
+                            # (manual tasks with no suggested_skill)
+                            (Task.status == "confirmed") & (Task.suggested_skill.is_(None)),
+                        ),
+                    ).order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc())
+                )
+                pending = result.scalars().all()
+                stage_results["pending_tasks"] = [
+                    {
+                        "title": t.title,
+                        "status": t.status,
+                        "priority": t.priority,
+                        "due_date": t.due_date.isoformat() if t.due_date else None,
+                        "commitment_direction": t.commitment_direction,
+                        "source": t.source,
+                    }
+                    for t in pending
+                ]
+        except Exception as e:
+            logger.warning("Could not query pending tasks for brief: %s", e)
+
+    # --- Gather outreach follow-ups due ---
+    try:
+        async with factory() as session:
+            await _set_rls_context(session, tenant_id, user_id)
+            today_iso = datetime.now(timezone.utc).isoformat()
+            result = await session.execute(
+                select(LeadMessage)
+                .join(LeadContact, LeadMessage.contact_id == LeadContact.id)
+                .where(
+                    LeadMessage.tenant_id == tenant_id,
+                    LeadMessage.status == "drafted",
+                    LeadMessage.metadata_["send_after"].as_string() <= today_iso,
+                )
+                .order_by(LeadMessage.metadata_["send_after"].as_string().asc())
+                .limit(20)
+            )
+            due_messages = result.scalars().all()
+            if due_messages:
+                # Batch-load contacts for display
+                contact_ids = {m.contact_id for m in due_messages}
+                contacts_result = await session.execute(
+                    select(LeadContact).where(LeadContact.id.in_(contact_ids))
+                )
+                contacts_by_id = {c.id: c for c in contacts_result.scalars().all()}
+                stage_results["outreach_due"] = [
+                    {
+                        "contact_name": contacts_by_id.get(m.contact_id, None) and contacts_by_id[m.contact_id].name or "Unknown",
+                        "step_number": m.step_number,
+                        "channel": m.channel,
+                        "subject": m.subject,
+                        "send_after": (m.metadata_ or {}).get("send_after", ""),
+                        "cadence_days": (m.metadata_ or {}).get("cadence_days", 0),
+                    }
+                    for m in due_messages
+                ]
+    except Exception as e:
+        logger.warning("Could not query outreach due for brief: %s", e)
 
     # --- Stage 5: Compose HTML Daily Brief (ORCH-06) ---
     await _append_event_atomic(factory, run_id, {
@@ -437,6 +511,98 @@ async def _stage_3_prep(
 # ---------------------------------------------------------------------------
 
 
+def _is_question_not_deliverable(output: str) -> bool:
+    """Detect if skill output is asking questions instead of delivering content.
+
+    Returns True if the output looks like the skill is asking for clarification
+    rather than providing an actual deliverable.
+    """
+    if not output or len(output.strip()) < 50:
+        return True
+
+    lower = output.lower()
+
+    # Strong signals: skill is asking what to do
+    question_phrases = [
+        "what would you like",
+        "what type of document",
+        "what i need from you",
+        "please tell me",
+        "to get started",
+        "i need from you",
+        "which industry",
+        "which vertical",
+        "who is the target",
+        "could you provide",
+        "could you clarify",
+        "can you specify",
+        "please provide",
+        "please specify",
+        "what should i",
+        "let me know",
+        "i'd be happy to help",
+        "however, i notice your request is empty",
+    ]
+    question_hits = sum(1 for p in question_phrases if p in lower)
+
+    # If 2+ question phrases detected, it's likely asking questions
+    if question_hits >= 2:
+        return True
+
+    # Count question marks — a deliverable rarely has many
+    question_marks = output.count("?")
+    if question_marks >= 4:
+        return True
+
+    return False
+
+
+async def _load_skill_catalog(factory: async_sessionmaker) -> str:
+    """Load enabled skill names + descriptions for skill inference."""
+    async with factory() as session:
+        result = await session.execute(
+            select(SkillDefinition.name, SkillDefinition.description).where(
+                SkillDefinition.enabled.is_(True),
+            )
+        )
+        rows = result.all()
+    if not rows:
+        return ""
+    return "\n".join(f"- {name}: {desc or 'no description'}" for name, desc in rows)
+
+
+async def _infer_skill_for_task(
+    client: anthropic.AsyncAnthropic,
+    task: "Task",
+    skill_catalog: str,
+    token_usage: dict,
+) -> str | None:
+    """Use Haiku to pick the best skill for a task, or return None if no fit."""
+    prompt = (
+        "You are a task router. Given a task and a list of available skills, "
+        "pick the single best skill to execute this task. If no skill is a good fit, "
+        "respond with exactly: NONE\n\n"
+        f"Task title: {task.title}\n"
+        f"Task description: {task.description or '(none)'}\n\n"
+        f"Available skills:\n{skill_catalog}\n\n"
+        "Respond with ONLY the skill name (e.g. 'sales-collateral') or NONE. "
+        "No explanation."
+    )
+    resp = await client.messages.create(
+        model=_SONNET_MODEL,
+        max_tokens=64,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    token_usage["input_tokens"] += resp.usage.input_tokens
+    token_usage["output_tokens"] += resp.usage.output_tokens
+    answer = resp.content[0].text.strip().lower()
+    if answer == "none" or not answer:
+        return None
+    # Clean up — LLM might return with quotes or extra text
+    answer = answer.strip("'\"").split("\n")[0].strip()
+    return answer
+
+
 async def _stage_4_execute(
     factory: async_sessionmaker,
     run_id: UUID,
@@ -467,7 +633,7 @@ async def _stage_4_execute(
         })
         return
 
-    # Query confirmed tasks with a suggested skill
+    # Query all confirmed tasks (with or without suggested_skill)
     try:
         async with factory() as session:
             await _set_rls_context(session, tenant_id, user_id)
@@ -476,7 +642,6 @@ async def _stage_4_execute(
                     Task.tenant_id == tenant_id,
                     Task.user_id == user_id,
                     Task.status == "confirmed",
-                    Task.suggested_skill.isnot(None),
                 )
             )
             executable_tasks = result.scalars().all()
@@ -487,6 +652,39 @@ async def _stage_4_execute(
             "data": {"stage": "executing", "message": f"Task execution skipped: {_escape(str(e))}"},
         })
         return
+
+    # For tasks without a suggested_skill, infer one from available skills
+    tasks_needing_skill = [t for t in executable_tasks if not t.suggested_skill]
+    if tasks_needing_skill:
+        try:
+            skill_catalog = await _load_skill_catalog(factory)
+            if skill_catalog:
+                client = anthropic.AsyncAnthropic(api_key=api_key)
+                for task in tasks_needing_skill:
+                    inferred = await _infer_skill_for_task(
+                        client, task, skill_catalog, total_token_usage,
+                    )
+                    if inferred:
+                        task.suggested_skill = inferred
+                        logger.info(
+                            "Inferred skill '%s' for task '%s'",
+                            inferred, task.title,
+                        )
+                        # Persist the inferred skill
+                        async with factory() as session:
+                            await _set_rls_context(session, tenant_id, user_id)
+                            await session.execute(
+                                update(Task).where(Task.id == task.id).values(
+                                    suggested_skill=inferred,
+                                    updated_at=datetime.now(timezone.utc),
+                                )
+                            )
+                            await session.commit()
+        except Exception as e:
+            logger.warning("Skill inference failed: %s", e)
+
+    # Filter to tasks that now have a skill (either pre-set or inferred)
+    executable_tasks = [t for t in executable_tasks if t.suggested_skill]
 
     total_tasks = len(executable_tasks)
     executed_count = 0
@@ -511,17 +709,16 @@ async def _stage_4_execute(
                 # skill_context is JSONB with additional context from extraction
                 context_parts.append(f"Context: {json.dumps(task.skill_context)}")
 
-            # Load tenant context (all context entries for the tenant)
-            if task.account_id:
-                try:
-                    tenant_context = await preload_tenant_context(factory, tenant_id)
-                    if tenant_context:
-                        context_parts.append(f"Account Intelligence:\n{tenant_context}")
-                except Exception as ctx_err:
-                    logger.warning(
-                        "Failed to load tenant context for task %s: %s",
-                        task.id, ctx_err,
-                    )
+            # Always load tenant context — it has positioning, ICP, product info
+            try:
+                tenant_context = await preload_tenant_context(factory, tenant_id)
+                if tenant_context:
+                    context_parts.append(f"Company Intelligence:\n{tenant_context}")
+            except Exception as ctx_err:
+                logger.warning(
+                    "Failed to load tenant context for task %s: %s",
+                    task.id, ctx_err,
+                )
 
             # Load meeting summary if task has meeting_id
             if task.meeting_id:
@@ -547,20 +744,30 @@ async def _stage_4_execute(
                     )
 
             # Step 2: Formulate input_text using LLM (Haiku -- cheap and fast)
+            # The prompt must produce a COMPLETE, self-contained instruction
+            # so the skill can execute without asking any follow-up questions.
             formulation_prompt = (
-                f"You are formulating the input for the '{task.suggested_skill}' skill.\n\n"
-                f"Based on the following task and context, write a clear, actionable input "
-                f"that the skill can use to produce a high-quality deliverable.\n\n"
+                f"You are formulating the input for the '{task.suggested_skill}' skill. "
+                f"Your job is to produce a COMPLETE, SELF-CONTAINED instruction that the "
+                f"skill can execute immediately without asking ANY follow-up questions.\n\n"
+                f"TASK: {task.title}\n"
+                f"{'DESCRIPTION: ' + task.description if task.description else ''}\n\n"
+                f"AVAILABLE CONTEXT:\n"
                 + "\n".join(context_parts)
                 + "\n\n"
-                f"Write the input_text for the '{task.suggested_skill}' skill. "
-                f"Be specific, include relevant names, dates, and context. "
-                f"Return ONLY the input text, no explanation."
+                f"RULES:\n"
+                f"- Make reasonable assumptions based on the task title and context\n"
+                f"- Include specific details: company names, industries, target audience, document type\n"
+                f"- If the task says 'send X to Y', the deliverable is X — specify what X should contain\n"
+                f"- Extract the target company/person name from the task title\n"
+                f"- Use the company intelligence above to fill in product details, value props, etc.\n"
+                f"- NEVER leave blanks or ask the skill to choose — make every decision\n\n"
+                f"Write the complete input_text. Return ONLY the input, no explanation."
             )
 
             client = anthropic.AsyncAnthropic(api_key=api_key)
             formulation_response = await client.messages.create(
-                model=_HAIKU_MODEL,
+                model=_SONNET_MODEL,
                 max_tokens=1024,
                 messages=[{"role": "user", "content": formulation_prompt}],
             )
@@ -629,7 +836,38 @@ async def _stage_4_execute(
             _accumulate_usage(total_token_usage, usage)
             all_tool_calls.extend(calls or [])
 
-            # Step 4: Update task status -- confirmed -> in_review (per spec ORCH-12)
+            # Step 4: Validate output is a deliverable, not questions
+            is_failed_output = _is_question_not_deliverable(output or "")
+
+            if is_failed_output:
+                logger.warning(
+                    "Task '%s' skill output is questions, not a deliverable — marking blocked",
+                    task.title,
+                )
+                async with factory() as session:
+                    await _set_rls_context(session, tenant_id, user_id)
+                    await session.execute(
+                        update(Task).where(
+                            Task.id == task.id,
+                            Task.status == "confirmed",
+                        ).values(
+                            status="blocked",
+                            updated_at=datetime.now(timezone.utc),
+                        )
+                    )
+                    await session.commit()
+
+                task_failures += 1
+                stage_results["tasks"].append({
+                    "task_id": str(task.id),
+                    "title": task.title,
+                    "suggested_skill": task.suggested_skill,
+                    "error": "Skill needs more input — requires user clarification",
+                    "success": False,
+                })
+                continue
+
+            # Step 5: Update task status -- confirmed -> in_review (per spec ORCH-12)
             async with factory() as session:
                 await _set_rls_context(session, tenant_id, user_id)
                 result = await session.execute(
@@ -725,6 +963,14 @@ def _compose_daily_brief(stage_results: dict) -> str:
     tasks = stage_results.get("tasks", [])
     sections.append(_render_tasks_section(tasks))
 
+    # Section 4.5: Outreach Due
+    outreach_due = stage_results.get("outreach_due", [])
+    sections.append(_render_outreach_due_section(outreach_due))
+
+    # Section 4.6: Next Actions (pending tasks needing triage)
+    pending_tasks = stage_results.get("pending_tasks", [])
+    sections.append(_render_next_actions_section(pending_tasks))
+
     # Section 5: Remaining Items
     sections.append(_render_remaining_section(stage_results))
 
@@ -734,6 +980,8 @@ def _compose_daily_brief(stage_results: dict) -> str:
         or len(processed) > 0
         or len(prepped) > 0
         or len(tasks) > 0
+        or len(outreach_due) > 0
+        or len(pending_tasks) > 0
         or stage_results.get("channel_tasks")
     )
 
@@ -937,6 +1185,83 @@ def _render_prep_section(prepped: list) -> str:
     </section>'''
 
 
+def _render_next_actions_section(pending_tasks: list) -> str:
+    """Render the Next Actions section showing tasks needing triage."""
+    if not pending_tasks:
+        return ''
+
+    today = datetime.now(timezone.utc).date()
+    parts = []
+
+    for task in pending_tasks:
+        title = _escape(task.get("title", "Untitled"))
+        priority = task.get("priority", "medium")
+        due_date = task.get("due_date")
+        status = task.get("status", "detected")
+        direction = task.get("commitment_direction")
+
+        # Priority dot
+        dot_color = {"high": "#E94D35", "medium": "#F97316", "low": "#6B7280"}.get(priority, "#6B7280")
+        priority_dot = (
+            f'<span style="display: inline-block; width: 8px; height: 8px; '
+            f'border-radius: 50%; background: {dot_color}; margin-right: 8px; '
+            f'vertical-align: middle; flex-shrink: 0;"></span>'
+        )
+
+        # Due date badge
+        due_html = ""
+        if due_date:
+            try:
+                due_dt = datetime.fromisoformat(due_date).date()
+                due_label = due_dt.strftime("%b %d")
+                overdue = due_dt < today
+                due_color = "#E94D35" if overdue else "#6B7280"
+                due_html = (
+                    f'<span style="font-size: 12px; color: {due_color}; '
+                    f'white-space: nowrap; flex-shrink: 0;">{due_label}</span>'
+                )
+            except (ValueError, TypeError):
+                pass
+
+        # Status / direction badges
+        badges = []
+        if status == "deferred":
+            badges.append(
+                '<span style="background: rgba(107,114,128,0.1); color: #6B7280; '
+                'padding: 2px 8px; border-radius: 99px; font-size: 11px;">deferred</span>'
+            )
+        if direction and direction in ("theirs", "mutual"):
+            label = "promise (theirs)" if direction == "theirs" else "mutual commitment"
+            badges.append(
+                f'<span style="background: rgba(59,130,246,0.1); color: #3B82F6; '
+                f'padding: 2px 8px; border-radius: 99px; font-size: 11px;">{label}</span>'
+            )
+        badge_html = f' {"".join(badges)}' if badges else ""
+
+        parts.append(
+            f'<div style="display: flex; align-items: center; gap: 4px; '
+            f'padding: 10px 0; border-bottom: 1px solid rgba(0,0,0,0.05);">'
+            f'{priority_dot}'
+            f'<span style="font-size: 14px; color: #121212; flex: 1; min-width: 0; '
+            f'overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">'
+            f'{title}{badge_html}</span>'
+            f'{due_html}'
+            f'</div>'
+        )
+
+    count = len(pending_tasks)
+    return f'''
+    <section id="next-actions" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">Next Actions
+        <span style="background: rgba(233,77,53,0.1); color: #E94D35; padding: 2px 10px; border-radius: 99px; font-size: 13px; font-weight: 500; margin-left: 8px;">{count}</span>
+      </h2>
+      <p style="color: #6B7280; font-size: 13px; margin: 0 0 8px 0;">Tasks awaiting your review</p>
+      <div style="background: white; border-radius: 12px; padding: 8px 16px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+        {"".join(parts)}
+      </div>
+    </section>'''
+
+
 def _render_tasks_section(tasks: list) -> str:
     if not tasks:
         return '''
@@ -979,6 +1304,35 @@ def _render_tasks_section(tasks: list) -> str:
     <section id="tasks" style="margin-bottom: 24px;">
       <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">Task Execution</h2>
       {"".join(parts)}
+    </section>'''
+
+
+def _render_outreach_due_section(outreach_due: list) -> str:
+    """Render follow-up messages that are due or overdue."""
+    if not outreach_due:
+        return ""
+
+    cards = []
+    for item in outreach_due:
+        channel_icon = "📧" if item["channel"] == "email" else "💬"
+        subject = _escape(item.get("subject") or "No subject")
+        contact = _escape(item["contact_name"])
+        cards.append(f'''
+        <div style="background: white; border-radius: 12px; padding: 16px; margin-bottom: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.08);">
+          <p style="font-weight: 600; color: #121212; margin: 0 0 4px 0; font-size: 14px;">
+            {channel_icon} Step {item["step_number"]} → {contact}
+          </p>
+          <p style="color: #6B7280; margin: 0; font-size: 13px;">{subject}</p>
+        </div>''')
+
+    return f'''
+    <section id="outreach-due" style="margin-bottom: 24px;">
+      <h2 style="font-size: 18px; font-weight: 600; color: #121212; margin: 0 0 4px 0;">
+        Follow-ups Due
+        <span style="background: rgba(233,77,53,0.1); color: #E94D35; padding: 2px 8px; border-radius: 99px; font-size: 13px; font-weight: 500; margin-left: 8px;">{len(outreach_due)}</span>
+      </h2>
+      <p style="color: #6B7280; font-size: 13px; margin: 0 0 12px 0;">{len(outreach_due)} outreach message(s) ready to send.</p>
+      {"".join(cards)}
     </section>'''
 
 

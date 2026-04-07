@@ -43,6 +43,9 @@ from flywheel.api.team_onboarding import router as team_onboarding_router
 from flywheel.api.tenant import router as tenant_router
 from flywheel.api.user import router as user_router
 from flywheel.api.work_items import router as work_items_router
+from flywheel.api.pipeline import router as pipeline_router
+from flywheel.api.saved_views import router as saved_views_router
+from flywheel.api.leads import router as leads_router
 from flywheel.api.outreach import router as outreach_router
 from flywheel.api.accounts import router as accounts_router
 from flywheel.api.timeline import router as timeline_router
@@ -62,6 +65,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     calendar_sync_task = None
     cleanup_anon_task = None
     gmail_sync_task = None
+    retirement_task = None
 
     # Startup
     if settings.flywheel_backend == "postgres":
@@ -117,17 +121,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         from flywheel.services.calendar_sync import calendar_sync_loop
         from flywheel.services.anonymous_cleanup import anonymous_cleanup_loop
         from flywheel.services.gmail_sync import email_sync_loop
+        from flywheel.services.retirement_scanner import retirement_scanner_loop
 
         queue_task = asyncio.create_task(job_queue_loop())
         cleaner_task = asyncio.create_task(cleanup_stale_jobs())
         calendar_sync_task = asyncio.create_task(calendar_sync_loop())
         cleanup_anon_task = asyncio.create_task(anonymous_cleanup_loop())
         gmail_sync_task = asyncio.create_task(email_sync_loop())
+        retirement_task = asyncio.create_task(retirement_scanner_loop())
 
     yield
 
     # Shutdown
-    for task in (queue_task, cleaner_task, calendar_sync_task, cleanup_anon_task, gmail_sync_task):
+    for task in (queue_task, cleaner_task, calendar_sync_task, cleanup_anon_task, gmail_sync_task, retirement_task):
         if task is not None:
             task.cancel()
             try:
@@ -221,6 +227,9 @@ def create_app() -> FastAPI:
     app.include_router(signals_router, prefix="/api/v1")
     app.include_router(meetings_router, prefix="/api/v1")
     app.include_router(tasks_router, prefix="/api/v1")
+    app.include_router(saved_views_router, prefix="/api/v1")
+    app.include_router(pipeline_router, prefix="/api/v1")
+    app.include_router(leads_router, prefix="/api/v1")
 
     return app
 

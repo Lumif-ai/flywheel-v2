@@ -1,5 +1,6 @@
 ---
 name: email-drafter
+enabled: false
 version: "1.0"
 description: >
   Background email draft generator. Creates voice-matched reply drafts for

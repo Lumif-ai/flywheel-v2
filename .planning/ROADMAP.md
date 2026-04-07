@@ -10,185 +10,23 @@
 - ✅ **v5.0 Tasks UI** — Phase 67 (shipped 2026-03-29)
 - ✅ **v6.0 Email-to-Tasks** — Phase 68 (shipped 2026-03-29)
 - ✅ **v7.0 Email Voice & Intelligence Overhaul** — Phases 69–75 (shipped 2026-03-30)
+- ✅ **v8.0 Flywheel Platform Architecture — Wave 0** — Phases 76–82 (shipped 2026-04-05)
+- ✅ **v9.0 Unified Pipeline** — Phases 83–90 (shipped 2026-04-06)
 
 ## Phases
 
 <details>
 <summary>✅ v1.0 Email Copilot (Phases 1–6, 48–49.1) — SHIPPED 2026-03-25</summary>
 
-### Phase 1: Data Layer and Gmail Foundation
-
-**Goal:** The database and Gmail read service are in place — the foundation every subsequent phase depends on. OAuth grants for Gmail read are architecturally separate from existing send-only credentials and can never break existing users.
-
-**Depends on:** Nothing (first phase)
-
-**Requirements:** DATA-01, DATA-02, DATA-03, DATA-04, DATA-05, DATA-06, GMAIL-01, GMAIL-02
-
-**Success Criteria** (what must be TRUE):
-  1. Developer can run Alembic migration and confirm four new tables (`emails`, `email_scores`, `email_drafts`, `email_voice_profiles`) exist with RLS policies matching existing table patterns
-  2. User can initiate a Gmail read OAuth flow and see a new Integration row with `provider="gmail-read"` in the database — the existing `gmail-send` Integration row is unmodified
-  3. `gmail_read.py` can list message headers, fetch body on-demand, and fetch sent messages without touching `google_gmail.py`
-  4. No email content appears in any application log at any level (verifiable by triggering a parse error and inspecting output)
-
-**Plans:** 5 plans
-
-Plans:
-- [x] 01-01-PLAN.md — DB models and Alembic migration (emails, email_scores, email_drafts, email_voice_profiles with RLS) ✓
-- [x] 01-02-PLAN.md — gmail_read.py service and separate gmail-read OAuth flow ✓
-
----
-
-### Phase 2: Sync Worker and Voice Profile
-
-**Goal:** Gmail is polling every 5 minutes, Email rows are being upserted, and the user's voice profile is populated from their sent mail before the first draft request ever arrives.
-
-**Depends on:** Phase 1
-
-**Requirements:** GMAIL-03, GMAIL-04, GMAIL-05, GMAIL-06, GMAIL-07, GMAIL-08, VOICE-01, VOICE-02, VOICE-03
-
-**Success Criteria** (what must be TRUE):
-  1. After connecting Gmail, Email rows appear in the database within 5 minutes, grouped by `gmail_thread_id`
-  2. When Gmail `history.list` returns 404 (simulated), the system resets to full sync and recovers all emails — no silent data loss
-  3. EmailVoiceProfile row exists for the user after first sync, populated from filtered substantive sent emails (auto-replies and one-liners excluded)
-  4. With 5 simultaneous connected users, sync completes without timeout errors (asyncio.gather batch behavior visible in logs)
-  5. Email bodies are fetched on-demand (visible in `gmail_read.py` call logs) and not stored in the `emails` table
-
-**Plans:** 5 plans
-
-Plans:
-- [x] 02-01-PLAN.md — email_sync_loop() background worker with historyId incremental sync and 404 full-sync fallback ✓
-- [x] 02-02-PLAN.md — voice_profile_init() with sent-mail filtering and EmailVoiceProfile persistence ✓
-
----
-
-### Phase 3: Email Scorer Skill
-
-**Goal:** Every newly synced email has a priority score (1-5), a category, a suggested action, and traceable reasoning with context references — making Flywheel's context store advantage visible for the first time.
-
-**Depends on:** Phase 2
-
-**Requirements:** SCORE-01, SCORE-02, SCORE-03, SCORE-04, SCORE-05, SCORE-06, SCORE-07, SCORE-08, SCORE-09
-
-**Success Criteria** (what must be TRUE):
-  1. After sync, each email has an EmailScore row with priority 1-5, a category, a suggested action, and a non-empty reasoning string
-  2. Scoring reasoning cites specific context references (e.g., "Matched context entry: Series A deal closing") when relevant context exists in the store
-  3. An email from a known contact (present in context_entities) scores higher than an identical email from an unknown sender
-  4. Thread-level priority reflects the highest unhandled message score in the thread, not a simple average
-  5. Re-syncing a thread when a new message arrives produces an updated EmailScore for that message
-
-**Plans:** 5 plans
-
-Plans:
-- [x] 03-01-PLAN.md — SKILL.md definition + email_scorer.py Python engine (scoring prompt, context lookups, EmailScore upsert) ✓
-- [x] 03-02-PLAN.md — Sync loop integration: score after upsert, daily cap, thread priority helper, skill_executor dispatch ✓
-
----
-
-### Phase 4: Email Drafter Skill
-
-**Goal:** Emails scored as important have draft replies waiting — written in the user's voice, assembled with relevant context, and never storing the raw email body beyond draft generation.
-
-**Depends on:** Phase 3
-
-**Requirements:** DRAFT-01, DRAFT-02, DRAFT-03, DRAFT-04, DRAFT-05, DRAFT-06, DRAFT-07, DRAFT-08
-
-**Success Criteria** (what must be TRUE):
-  1. Emails with priority 3+ have an EmailDraft row within the configurable visibility delay window (immediately for `delay=0`)
-  2. Draft body reflects the user's characteristic tone, sign-off style, and typical length drawn from their voice profile
-  3. Draft reasoning lists which context entries were assembled for the reply (traceable to specific meetings, deals, or entity notes)
-  4. After draft is sent, `EmailDraft.draft_body` is nulled — the full body is not retained
-  5. When Gmail API returns 401/403 during on-demand body fetch, the system falls back to snippet and surfaces a structured error (not a silent empty draft)
-
-**Plans:** 5 plans
-
-Plans:
-- [x] 04-01-PLAN.md — email_drafter.py engine with voice injection, context assembly, on-demand body fetch, and SKILL.md ✓
-- [x] 04-02-PLAN.md — Sync loop drafting integration, REST API (approve/edit/dismiss), gmail-read send_reply, dispatch fix ✓
-
----
-
-### Phase 5: Review API and Frontend
-
-**Goal:** The user has a working inbox: a prioritized thread list, per-thread scores with reasoning, and one-tap approve/edit/dismiss for drafts. Critical emails surface as in-app alerts before the user even opens the inbox.
-
-**Depends on:** Phase 4
-
-**Requirements:** API-01, API-02, API-03, API-04, API-05, API-06, API-07, UI-01, UI-02, UI-03, UI-04, UI-05, UI-06
-
-**Success Criteria** (what must be TRUE):
-  1. User opens the Email page and sees threads sorted by priority tier (critical at top), with score badges and draft-ready indicators visible without opening any thread
-  2. User opens a thread and sees individual message scores, full reasoning text, and context references that link to the underlying context entries
-  3. User approves a draft and the email is sent via existing dispatch — the draft status updates to "sent" in the UI without a page refresh
-  4. User receives an in-app alert for a priority-5 email even when the Email page is not open
-  5. Thread list with 500+ emails scrolls without jank (virtual scrolling active, no DOM node bloat)
-
-**Plans:** 4 plans
-
-Plans:
-- [x] 05-01-PLAN.md — Backend read API: GET threads, GET thread detail, GET digest, POST manual sync + api.ts put method ✓
-- [x] 05-02-PLAN.md — Email inbox frontend: types, Zustand store, React Query hooks, EmailPage with virtualized ThreadList, ThreadDetail sheet, DraftReview ✓
-- [x] 05-03-PLAN.md — In-app critical email alerts (Sonner), daily digest view, sidebar nav link ✓
-- [x] 05-04-PLAN.md — Gap closure: fix priority filter values, wire thread auto-open from alert, dynamic badge colors, guard standalone API calls ✓
-
----
-
-### Phase 6: Feedback Flywheel
-
-**Goal:** The system learns from the user's corrections — draft edits improve future voice profile accuracy, and re-scoring keeps thread priorities fresh as conversations evolve.
-
-**Depends on:** Phase 5
-
-**Requirements:** VOICE-04, FEED-01, FEED-02, FEED-03
-
-**Success Criteria** (what must be TRUE):
-  1. After the user edits and approves 5 drafts, the voice profile `samples_analyzed` count increases and at least one phrase/pattern field reflects the new signal
-  2. When a new message arrives in an existing thread, that thread's priority score updates to reflect the latest message (not locked to original score)
-  3. After dismissing several drafts for a sender category, subsequent emails from similar senders score lower (observable over 10+ interactions)
-
-**Plans:** 5 plans
-
-Plans:
-- [x] 06-01-PLAN.md — Voice updater engine (diff analysis + Haiku profile merge), dismiss tracker engine, approve endpoint wiring, scorer dismiss injection ✓
-- [x] 06-02-PLAN.md — Thread re-scoring verification (FEED-03 docs), config wiring for dismiss parameters ✓
-
----
-
-### Phase 48: Auth Foundation and Session Resilience (INSERTED)
-
-**Goal:** Auth is solid — tenant resolution works, sessions survive refresh, and no user hits a silent 401 loop.
-
-**Depends on:** Phase 6
-
-**Plans:** 1 plan
-
-Plans:
-- [x] 48-01-PLAN.md ✓
-
----
-
-### Phase 49: Living Company Profile (INSERTED)
-
-**Goal:** The Company Profile document is auto-generated and stays current — no manual effort to maintain the anchor context document.
-
-**Depends on:** Phase 48
-
-**Plans:** 1 plan
-
-Plans:
-- [x] 49-01-PLAN.md ✓
-
----
-
-### Phase 49.1: Web Research Enrichment on Document Upload (INSERTED)
-
-**Goal:** When a document is uploaded, the system auto-enriches related company context with fresh web intelligence.
-
-**Depends on:** Phase 49
-
-**Plans:** 1 plan
-
-Plans:
-- [x] 49.1-01-PLAN.md ✓
+- [x] Phase 1: Data Layer and Gmail Foundation (2/2 plans)
+- [x] Phase 2: Sync Worker and Voice Profile (2/2 plans)
+- [x] Phase 3: Email Scorer Skill (2/2 plans)
+- [x] Phase 4: Email Drafter Skill (2/2 plans)
+- [x] Phase 5: Review API and Frontend (4/4 plans)
+- [x] Phase 6: Feedback Flywheel (2/2 plans)
+- [x] Phase 48: Auth Foundation and Session Resilience (1/1 plan)
+- [x] Phase 49: Living Company Profile (1/1 plan)
+- [x] Phase 49.1: Web Research Enrichment on Document Upload (1/1 plan)
 
 </details>
 
@@ -197,10 +35,10 @@ Plans:
 <details>
 <summary>✅ v2.0 AI-Native CRM (Phases 50–53) — SHIPPED 2026-03-27</summary>
 
-- [x] Phase 50: Data Model and Utilities (2/2 plans) — completed 2026-03-26
-- [x] Phase 51: Seed CLI (1/1 plan) — completed 2026-03-27
-- [x] Phase 52: Backend APIs (3/3 plans) — completed 2026-03-27
-- [x] Phase 53: Frontend (3/3 plans) — completed 2026-03-27
+- [x] Phase 50: Data Model and Utilities (2/2 plans)
+- [x] Phase 51: Seed CLI (1/1 plan)
+- [x] Phase 52: Backend APIs (3/3 plans)
+- [x] Phase 53: Frontend (3/3 plans)
 
 </details>
 
@@ -209,11 +47,11 @@ Plans:
 <details>
 <summary>✅ v2.1 CRM Redesign (Phases 54–58) — SHIPPED 2026-03-27</summary>
 
-- [x] Phase 54: Data Model Foundation (2/2 plans) — completed 2026-03-27
-- [x] Phase 55: Relationships and Signals APIs (3/3 plans) — completed 2026-03-27
-- [x] Phase 56: Pipeline Grid (3/3 plans) — completed 2026-03-27
-- [x] Phase 57: Relationship Surfaces (5/5 plans) — completed 2026-03-27
-- [x] Phase 58: Unified Company Intelligence Engine (3/3 plans) — completed 2026-03-27
+- [x] Phase 54: Data Model Foundation (2/2 plans)
+- [x] Phase 55: Relationships and Signals APIs (3/3 plans)
+- [x] Phase 56: Pipeline Grid (3/3 plans)
+- [x] Phase 57: Relationship Surfaces (5/5 plans)
+- [x] Phase 58: Unified Company Intelligence Engine (3/3 plans)
 
 </details>
 
@@ -222,11 +60,11 @@ Plans:
 <details>
 <summary>✅ v3.0 Intelligence Flywheel (Phases 59–63) — SHIPPED 2026-03-28</summary>
 
-- [x] Phase 59: Team Privacy Foundation (2/2 plans) — completed 2026-03-28
-- [x] Phase 60: Meeting Data Model and Granola Adapter (3/3 plans) — completed 2026-03-28
-- [x] Phase 61: Meeting Intelligence Pipeline (3/3 plans) — completed 2026-03-28
-- [x] Phase 62: Meeting Surfaces and Relationship Enrichment (3/3 plans) — completed 2026-03-28
-- [x] Phase 63: Meeting Prep Loop (3/3 plans) — completed 2026-03-28
+- [x] Phase 59: Team Privacy Foundation (2/2 plans)
+- [x] Phase 60: Meeting Data Model and Granola Adapter (3/3 plans)
+- [x] Phase 61: Meeting Intelligence Pipeline (3/3 plans)
+- [x] Phase 62: Meeting Surfaces and Relationship Enrichment (3/3 plans)
+- [x] Phase 63: Meeting Prep Loop (2/2 plans)
 
 </details>
 
@@ -235,10 +73,10 @@ Plans:
 <details>
 <summary>✅ v4.0 Flywheel OS (Phases 64–66.1) — SHIPPED 2026-03-29</summary>
 
-- [x] Phase 64: Unified Meetings (3/3 plans) — completed 2026-03-28
-- [x] Phase 65: Task Intelligence (3/3 plans) — completed 2026-03-28
-- [x] Phase 66: /flywheel Ritual Rearchitected (4/4 plans) — completed 2026-03-29
-- [x] Phase 66.1: Flywheel Stabilization (3/3 plans) — completed 2026-03-29
+- [x] Phase 64: Unified Meetings (3/3 plans)
+- [x] Phase 65: Task Intelligence (3/3 plans)
+- [x] Phase 66: /flywheel Ritual Rearchitected (4/4 plans)
+- [x] Phase 66.1: Flywheel Stabilization — INSERTED (3/3 plans)
 
 </details>
 
@@ -247,7 +85,7 @@ Plans:
 <details>
 <summary>✅ v5.0 Tasks UI (Phase 67) — SHIPPED 2026-03-29</summary>
 
-- [x] Phase 67: Tasks UI (7/7 plans) — completed 2026-03-29
+- [x] Phase 67: Tasks UI (7/7 plans)
 
 </details>
 
@@ -256,7 +94,7 @@ Plans:
 <details>
 <summary>✅ v6.0 Email-to-Tasks (Phase 68) — SHIPPED 2026-03-29</summary>
 
-- [x] Phase 68: Email-to-Tasks Layer A (3/3 plans) — completed 2026-03-29
+- [x] Phase 68: Email-to-Tasks Layer A (3/3 plans)
 
 </details>
 
@@ -265,21 +103,115 @@ Plans:
 <details>
 <summary>✅ v7.0 Email Voice & Intelligence Overhaul (Phases 69–75) — SHIPPED 2026-03-30</summary>
 
-- [x] Phase 69: Model Configuration Foundation (1/1 plan) — completed 2026-03-30
-- [x] Phase 70: Voice Profile Overhaul (3/3 plans) — completed 2026-03-30
-- [x] Phase 71: Voice Settings UI (2/2 plans) — completed 2026-03-30
-- [x] Phase 72: Draft Enhancements (2/2 plans) — completed 2026-03-30
-- [x] Phase 73: Voice as Context Store Asset (1/1 plan) — completed 2026-03-30
-- [x] Phase 74: Email Context Extractor and Shared Writer (2/2 plans) — completed 2026-03-30
-- [x] Phase 75: Context Extraction Pipeline (2/2 plans) — completed 2026-03-30
+- [x] Phase 69: Model Configuration Foundation (1/1 plan)
+- [x] Phase 70: Voice Profile Overhaul (3/3 plans)
+- [x] Phase 71: Voice Settings UI (2/2 plans)
+- [x] Phase 72: Draft Enhancements (2/2 plans)
+- [x] Phase 73: Voice as Context Store Asset (1/1 plan)
+- [x] Phase 74: Email Context Extractor and Shared Writer (2/2 plans)
+- [x] Phase 75: Context Extraction Pipeline (2/2 plans)
 
 </details>
 
 ---
 
+<details>
+<summary>✅ v8.0 Flywheel Platform Architecture — Wave 0 (Phases 76–82) — SHIPPED 2026-04-05</summary>
+
+- [x] Phase 76: Backend Foundation (2/2 plans)
+- [x] Phase 77: Skill Catalog Seed (2/2 plans)
+- [x] Phase 78: MCP Infrastructure (2/2 plans)
+- [x] Phase 79: MCP Tools (4/4 plans)
+- [x] Phase 80: Frontend Feature Flags (1/1 plan)
+- [x] Phase 81: Platform Setup (1/1 plan)
+- [x] Phase 82: Leads Pipeline Frontend (3/3 plans)
+
+</details>
+
+---
+
+<details>
+<summary>✅ v9.0 Unified Pipeline (Phases 83–90) — SHIPPED 2026-04-06</summary>
+
+- [x] Phase 83: Schema Foundation (2/2 plans)
+- [x] Phase 84: Data Migration (3/3 plans)
+- [x] Phase 85: Pipeline API (3/3 plans)
+- [x] Phase 86: Multi-Source Integration (3/3 plans)
+- [x] Phase 87: Pipeline Grid (4/4 plans)
+- [x] Phase 88: Side Panel & Profile (4/4 plans)
+- [x] Phase 89: Saved Views & Navigation (4/4 plans)
+- [x] Phase 90: Retirement Flow (2/2 plans)
+
+</details>
+
+---
+
+### v10.0 Contact Outreach Pipeline
+
+**Milestone Goal:** Person-first pipeline grid as the default view, with a contact detail panel showing editable outreach sequences (email + LinkedIn), AI-computed next steps, and company as a secondary toggle — turning the CRM into an outreach command center.
+
+- [x] **Phase 91: Contacts API** — Backend endpoints for flattened contact list, contact editing, activity editing, and computed next_step field (4 requirements)
+- [x] **Phase 92: Contact Grid** — Person-first AG Grid with contact columns, view toggle, filtering, and sorting (5 requirements)
+- [ ] **Phase 93: Contact Detail Panel** — Outreach sequence editing, action buttons, and step generation (6 requirements)
+- [ ] **Phase 94: MCP Contact Tools** — CLI tools for listing contacts and creating outreach steps (2 requirements)
+
+## Phase Details
+
+### Phase 91: Contacts API
+**Goal**: The backend serves a flattened contact-centric API that returns one row per contact with parent company, latest outreach activity, computed next step, and supports editing contact fields and activity messages
+**Depends on**: Nothing (first phase of v10.0 — builds on existing pipeline_entries, contacts, activities tables from v9.0)
+**Requirements**: API-01, API-02, API-03, API-04
+**Success Criteria** (what must be TRUE):
+  1. `GET /pipeline/contacts/` returns a paginated list where each row is a contact with parent company name, title, email, and the latest outreach activity (channel, variant, step_number, status, subject)
+  2. Each contact row includes a computed `next_step` field derived from latest activity status and days since `occurred_at` (e.g., "Ready to send", "Follow up in 3d", "Replied - engage", "Bounced - fix email")
+  3. `PATCH /pipeline/{entry_id}/contacts/{contact_id}` successfully updates contact fields (name, email, title, linkedin_url, phone) and returns the updated contact
+  4. `PATCH /pipeline/{entry_id}/activities/{activity_id}` successfully updates activity body_preview (message editing) and status (drafted -> approved -> sent -> replied) and returns the updated activity
+**Plans**: 1 plan
+Plans:
+- [x] 091-01-PLAN.md — Contacts API: flattened contact list endpoint, compute_next_step, status transition validation
+
+### Phase 92: Contact Grid
+**Goal**: A founder opens /pipeline and sees a person-first grid showing every contact as a row with outreach status at a glance, with the ability to toggle back to the company view
+**Depends on**: Phase 91 (contacts API must serve flattened contact data)
+**Requirements**: GRID-01, GRID-02, GRID-03, GRID-04, GRID-05
+**Success Criteria** (what must be TRUE):
+  1. The default pipeline view shows one row per contact with columns: Name, Company, Title, Email, Channel, Variant, Step, Status (pill), Next Step, Subject — matching the 317-contact data shape
+  2. A Contacts | Companies toggle at the top of the pipeline page switches between person-first (default) and company-first views, preserving filter state across toggles
+  3. The "Next Step" column displays AI-computed recommendations (Ready to send / Follow up in Nd / Replied - engage / Bounced - fix email) with visual priority indicators
+  4. Filter bar supports filtering by company, outreach status, channel, variant, and step number; sorting works on name, company, status, last action date, and next step priority
+**Plans**: 3 plans
+Plans:
+- [x] 092-01-PLAN.md — Backend filter/sort extensions + frontend contact data layer (types, API, hook)
+- [x] 092-02-PLAN.md — Contact grid UI: column defs, cell renderers, filter bar, mode toggle, PipelinePage integration
+- [x] 092-03-PLAN.md — Gap closure: Last Action Date column + sort mapping
+
+### Phase 93: Contact Detail Panel
+**Goal**: A founder clicks any contact row and sees the full outreach sequence with editable message bodies, action buttons per step, and the ability to generate new steps — the editing surface for outreach execution
+**Depends on**: Phase 92 (contact grid must exist for panel to attach to)
+**Requirements**: PANEL-01, PANEL-02, PANEL-03, PANEL-04, PANEL-05, PANEL-06
+**Success Criteria** (what must be TRUE):
+  1. Clicking a contact row opens a detail panel showing contact name, title, company, email, LinkedIn URL, and phone — all editable inline with changes persisted via API
+  2. The outreach sequence section shows all steps as a vertical timeline (Step 1 ... Step N) with channel icon, subject line, and status pill per step
+  3. Each step displays the full message body in an editable textarea (email body and LinkedIn message in separate sections if applicable), and edits save via the activity PATCH endpoint
+  4. Action buttons per step (Approve, Skip, Mark Replied) update activity status through the API, with visual feedback on state transitions
+  5. A "Generate Next Step" button creates a placeholder activity (step_number = N+1) for Claude Code to populate via MCP, and the new step appears in the sequence immediately
+**Plans**: 2 plans
+Plans:
+- [ ] 093-01-PLAN.md — Backend contact_id filter + frontend API functions and mutation hooks
+- [ ] 093-02-PLAN.md — ContactDetailPanel component with outreach timeline, inline editing, action buttons, PipelinePage integration
+
+### Phase 94: MCP Contact Tools
+**Goal**: Claude Code can list contacts with outreach status and create new outreach steps directly from the CLI, enabling batch operations like "generate step 2 for all variant A contacts"
+**Depends on**: Phase 91 (contacts API must exist for MCP tools to call)
+**Requirements**: MCP-01, MCP-02
+**Success Criteria** (what must be TRUE):
+  1. `flywheel_list_pipeline_contacts` returns a flattened contact list with outreach status, filterable by company, status, channel, and variant — usable by Claude Code for batch selection
+  2. `flywheel_create_outreach_step` creates a new activity with the correct step_number for a given contact, including channel, subject, and body — and the new step appears in the contact detail panel
+**Plans**: TBD
+
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75 → 76 → 77 → 78 → 79 → 80 → 81 → 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -319,6 +251,25 @@ Plans:
 | 73. Voice as Context Store Asset | v7.0 | 1/1 | ✓ Complete | 2026-03-30 |
 | 74. Email Context Extractor and Shared Writer | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
 | 75. Context Extraction Pipeline | v7.0 | 2/2 | ✓ Complete | 2026-03-30 |
+| 76. Backend Foundation | v8.0 | 2/2 | ✓ Complete | 2026-03-31 |
+| 77. Skill Catalog Seed | v8.0 | 2/2 | ✓ Complete | 2026-03-31 |
+| 78. MCP Infrastructure | v8.0 | 2/2 | ✓ Complete | 2026-03-31 |
+| 79. MCP Tools | v8.0 | 4/4 | ✓ Complete | 2026-03-31 |
+| 80. Frontend Feature Flags | v8.0 | 1/1 | ✓ Complete | 2026-03-31 |
+| 81. Platform Setup | v8.0 | 1/1 | ✓ Complete | 2026-03-31 |
+| 82. Leads Pipeline Frontend | v8.0 | 3/3 | ✓ Complete | 2026-04-01 |
+| 83. Schema Foundation | v9.0 | 2/2 | ✓ Complete | 2026-04-06 |
+| 84. Data Migration | v9.0 | 3/3 | ✓ Complete | 2026-04-06 |
+| 85. Pipeline API | v9.0 | 3/3 | ✓ Complete | 2026-04-06 |
+| 86. Multi-Source Integration | v9.0 | 3/3 | ✓ Complete | 2026-04-06 |
+| 87. Pipeline Grid | v9.0 | 4/4 | ✓ Complete | 2026-04-06 |
+| 88. Side Panel & Profile | v9.0 | 4/4 | ✓ Complete | 2026-04-06 |
+| 89. Saved Views & Navigation | v9.0 | 4/4 | ✓ Complete | 2026-04-06 |
+| 90. Retirement Flow | v9.0 | 2/2 | ✓ Complete | 2026-04-06 |
+| 91. Contacts API | v10.0 | 1/1 | ✓ Complete | 2026-04-07 |
+| 92. Contact Grid | v10.0 | 3/3 | ✓ Complete | 2026-04-07 |
+| 93. Contact Detail Panel | v10.0 | 0/2 | Planning complete | — |
+| 94. MCP Contact Tools | v10.0 | 0/TBD | Not started | — |
 
 ---
 *Roadmap created: 2026-03-24*
@@ -331,3 +282,6 @@ Plans:
 *v5.0 milestone added: 2026-03-29*
 *v6.0 milestone added: 2026-03-29*
 *v7.0 milestone added: 2026-03-29 — Email Voice & Intelligence Overhaul (7 phases, 18 requirements)*
+*v8.0 milestone added: 2026-03-31 — Flywheel Platform Architecture Wave 0 (6 phases, 24 requirements)*
+*v9.0 milestone added: 2026-04-06 — Unified Pipeline (8 phases, 71 requirements)*
+*v10.0 milestone added: 2026-04-07 — Contact Outreach Pipeline (4 phases, 17 requirements)*

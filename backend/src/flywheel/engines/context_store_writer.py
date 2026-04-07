@@ -33,6 +33,8 @@ from flywheel.db.models import ContextCatalog, ContextEntry
 logger = logging.getLogger(__name__)
 
 _MAX_CONTENT_LENGTH = 4000
+_MIN_CONTENT_LENGTH = 10
+_VALID_CONFIDENCE = {"high", "medium", "low"}
 
 _CATALOG_DESCRIPTIONS: dict[str, str] = {
     "contacts": "People and contacts extracted from emails and meetings",
@@ -69,8 +71,13 @@ async def _write_entry(
 
     Does NOT call db.commit() -- caller owns the transaction.
     """
-    # 1. Truncate content
+    # 1. Validate and truncate content
+    if len(content.strip()) < _MIN_CONTENT_LENGTH:
+        logger.debug("context_store_writer: skipped short content (%d chars)", len(content))
+        return "skipped"
     content = content[:_MAX_CONTENT_LENGTH]
+    if confidence not in _VALID_CONFIDENCE:
+        confidence = "medium"
 
     # 2. Default date
     if entry_date is None:
@@ -172,6 +179,8 @@ async def write_contact(
     detail_tag = f"contact:{name.lower().strip()}"
     if company:
         detail_tag += f":{company.lower().strip()}"
+    if email_address:
+        detail_tag += f":{email_address.lower().strip()}"
 
     lines: list[str] = [f"Name: {name}"]
     if title:

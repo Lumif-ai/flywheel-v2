@@ -3,11 +3,11 @@ name: demo-prep
 version: "1.0"
 description: Prepare a custom demo for a prospect company by researching them, seeding a self-contained customer context file, and generating demo-ready artifacts. Zero writes to shared context files.
 context-aware: true
-reads:
+contract_reads:
   - positioning.md
   - product-modules.md
   - market-taxonomy.md
-writes:
+contract_writes:
   - customer-*.md
 triggers:
   - "demo prep"
@@ -16,6 +16,9 @@ triggers:
   - "demo for"
   - "prep a demo"
   - "seed demo"
+tags:
+  - sales
+  - demos
 web_tier: 2
 ---
 

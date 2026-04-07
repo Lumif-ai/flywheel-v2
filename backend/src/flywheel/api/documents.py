@@ -1,4 +1,4 @@
-"""Document endpoints: list, detail, share, public access.
+"""Document endpoints: list, detail, share, public access, create-from-content.
 
 Documents are persistent artifacts created by skill runs (e.g. meeting prep
 briefings, company intel reports). This router provides CRUD-like access
@@ -7,6 +7,7 @@ plus a public share mechanism via token-based URLs.
 Endpoints (ordered to prevent FastAPI path conflicts):
 - GET  /documents                       -- paginated list for current tenant
 - GET  /documents/shared/{share_token}  -- public access (no auth)
+- POST /documents/from-content          -- create document from raw markdown
 - GET  /documents/{document_id}         -- single document detail + signed URL
 - POST /documents/{document_id}/share   -- generate or return share token
 """
@@ -147,7 +148,10 @@ async def get_shared_document(
                 detail="Shared document not found",
             )
 
-        content_url = await get_document_url(doc.storage_path)
+        if doc.storage_path:
+            content_url = await get_document_url(doc.storage_path)
+        else:
+            content_url = f"/api/v1/documents/{doc.id}/content"
         item = _doc_to_list_item(doc)
         return DocumentDetail(
             **item.model_dump(),
@@ -159,6 +163,65 @@ async def get_shared_document(
         status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
         detail="Database unavailable",
     )
+
+
+# ---------------------------------------------------------------------------
+# POST /documents/from-content -- Create document from raw markdown
+# ---------------------------------------------------------------------------
+
+
+class FromContentRequest(BaseModel):
+    title: str
+    skill_name: str
+    markdown_content: str
+    metadata: dict = {}
+
+
+@router.post("/from-content", status_code=201)
+async def create_from_content(
+    body: FromContentRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Create a completed SkillRun and linked Document from raw markdown.
+
+    Used by MCP tools to save skill output as documents. The SkillRun is
+    created with status=completed and attempts=max_attempts so the job queue
+    never picks it up. The markdown is rendered to sanitized HTML via the
+    output rendering pipeline.
+    """
+    from flywheel.engines.output_renderer import render_output
+
+    rendered_html = render_output(body.skill_name, body.markdown_content)
+
+    run = SkillRun(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        skill_name=body.skill_name,
+        input_text=body.markdown_content[:200],
+        output=body.markdown_content,
+        rendered_html=rendered_html,
+        status="completed",
+        attempts=3,
+        max_attempts=3,
+    )
+    db.add(run)
+    await db.flush()
+
+    doc = Document(
+        tenant_id=user.tenant_id,
+        user_id=user.sub,
+        title=body.title,
+        document_type=body.skill_name,
+        storage_path=None,
+        file_size_bytes=len(rendered_html.encode("utf-8")),
+        skill_run_id=run.id,
+        metadata_=body.metadata,
+    )
+    db.add(doc)
+    await db.commit()
+
+    return {"document_id": str(doc.id), "skill_run_id": str(run.id)}
 
 
 # ---------------------------------------------------------------------------

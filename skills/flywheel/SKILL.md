@@ -7,6 +7,16 @@ description: >
   external meetings, executes confirmed tasks via appropriate skills, and
   produces an HTML daily brief. Invoked via MCP flywheel_run_skill("flywheel").
 engine: flywheel_ritual
+triggers:
+  - "run the flywheel"
+  - "daily ritual"
+  - "morning routine"
+  - "daily brief"
+  - "sync meetings and tasks"
+  - "run my daily operating system"
+tags:
+  - operations
+  - daily-ritual
 web_tier: 1
 contract_reads:
   - contacts

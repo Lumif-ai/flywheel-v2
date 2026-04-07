@@ -7,6 +7,7 @@ import { ApiKeyManager } from '@/features/settings/components/ApiKeyManager'
 import { TenantSettings } from '@/features/settings/components/TenantSettings'
 import { TeamManager } from '@/features/settings/components/TeamManager'
 import { GranolaSettings } from '@/features/settings/components/GranolaSettings'
+import { IntegrationSettings } from '@/features/settings/components/IntegrationSettings'
 import { VoiceProfileSettings } from '@/features/settings/components/VoiceProfileSettings'
 
 export function SettingsPage() {
@@ -71,7 +72,8 @@ export function SettingsPage() {
           )}
 
           {isAdmin && (
-            <TabsContent value="integrations" className="mt-6">
+            <TabsContent value="integrations" className="mt-6 space-y-8">
+              <IntegrationSettings />
               <GranolaSettings />
             </TabsContent>
           )}

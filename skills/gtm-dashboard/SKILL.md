@@ -1,5 +1,6 @@
 ---
 name: gtm-dashboard
+enabled: false
 description: >
   [GTM Stack — XSS protection, backup, real data bridge.] Generate and display the GTM Command Center — a single-page dashboard showing
   your entire pipeline from scraped leads through to meetings booked. Trigger on:

@@ -28,7 +28,7 @@ export function AuthBootstrap({ children }: { children: React.ReactNode }) {
           useAuthStore.getState().setUser({
             id: session.user?.id ?? '',
             email: session.user?.email ?? null,
-            is_anonymous: session.user?.is_anonymous ?? false,
+            is_anonymous: session.user?.is_anonymous ?? true,
             display_name: session.user?.user_metadata?.full_name ?? session.user?.user_metadata?.name ?? null,
             avatar_url: session.user?.user_metadata?.avatar_url ?? null,
           })

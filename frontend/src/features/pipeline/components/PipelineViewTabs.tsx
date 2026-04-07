@@ -1,88 +1,49 @@
-import { useSearchParams } from 'react-router'
-import { colors, typography } from '@/lib/design-tokens'
+import type { ViewTab } from '../types/pipeline'
 
-export type PipelineView = 'all' | 'hot' | 'stale' | 'replied'
+export type { ViewTab }
+
+export type PipelineView = ViewTab
 
 export interface PipelineViewTabsProps {
-  activeView: PipelineView
-  onViewChange: (view: PipelineView) => void
-  counts?: {
-    all: number
-    hot: number
-    stale: number
-    replied: number
-  }
+  activeView: ViewTab
+  onViewChange: (view: ViewTab) => void
 }
 
-const TABS: { key: PipelineView; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'hot', label: 'Hot' },
-  { key: 'stale', label: 'Stale' },
-  { key: 'replied', label: 'Replied' },
+const TABS: { id: ViewTab; label: string }[] = [
+  { id: 'all', label: 'All' },
+  { id: 'needs_action', label: 'Needs Action' },
+  { id: 'replied', label: 'Replied' },
+  { id: 'stale', label: 'Stale' },
 ]
 
-export function PipelineViewTabs({ activeView, onViewChange, counts }: PipelineViewTabsProps) {
-  const [, setSearchParams] = useSearchParams()
-
-  const handleTabClick = (view: PipelineView) => {
-    setSearchParams((prev) => {
-      const next = new URLSearchParams(prev)
-      if (view === 'all') {
-        next.delete('view')
-      } else {
-        next.set('view', view)
-      }
-      return next
-    })
-    onViewChange(view)
-  }
-
+export function PipelineViewTabs({ activeView, onViewChange }: PipelineViewTabsProps) {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '4px',
-        borderBottom: `1px solid ${colors.subtleBorder}`,
-        marginBottom: '16px',
-      }}
-    >
-      {TABS.map(({ key, label }) => {
-        const isActive = activeView === key
-        const count = counts?.[key]
+    <div className="flex items-center gap-0.5">
+      {TABS.map(({ id, label }) => {
+        const isActive = activeView === id
         return (
           <button
-            key={key}
-            onClick={() => handleTabClick(key)}
+            key={id}
+            onClick={() => onViewChange(id)}
             style={{
-              padding: '8px 14px',
-              fontSize: typography.caption.size,
-              fontWeight: isActive ? 600 : 400,
-              color: isActive ? 'var(--brand-coral)' : colors.secondaryText,
-              background: 'none',
+              padding: '4px 10px',
+              fontSize: '13px',
+              fontWeight: 500,
+              color: isActive ? '#121212' : '#9CA3AF',
+              background: 'transparent',
               border: 'none',
-              borderBottom: isActive
-                ? '2px solid var(--brand-coral)'
-                : '2px solid transparent',
+              borderBottom: isActive ? '2px solid #E94D35' : '2px solid transparent',
               cursor: 'pointer',
-              marginBottom: '-1px',
               transition: 'color 150ms, border-color 150ms',
-              whiteSpace: 'nowrap',
+            }}
+            onMouseEnter={(e) => {
+              if (!isActive) e.currentTarget.style.color = '#6B7280'
+            }}
+            onMouseLeave={(e) => {
+              if (!isActive) e.currentTarget.style.color = '#9CA3AF'
             }}
           >
             {label}
-            {count !== undefined && count > 0 && (
-              <span
-                style={{
-                  marginLeft: '6px',
-                  fontSize: '11px',
-                  color: isActive ? 'var(--brand-coral)' : colors.secondaryText,
-                  opacity: 0.8,
-                }}
-              >
-                {count}
-              </span>
-            )}
           </button>
         )
       })}

@@ -113,7 +113,7 @@ export function TaskCommitmentCard({ task, onSelect }: TaskCommitmentCardProps) 
         {/* Status row */}
         <div
           className="flex items-center gap-3 flex-wrap"
-          style={{ marginBottom: task.suggested_skill ? '8px' : '0' }}
+          style={{ marginBottom: '0' }}
         >
           <TaskStatusBadge status={task.status} />
           <TaskPriorityBadge priority={task.priority} />
@@ -130,8 +130,8 @@ export function TaskCommitmentCard({ task, onSelect }: TaskCommitmentCardProps) 
           </span>
         </div>
 
-        {/* Skill row (conditional) */}
-        {task.suggested_skill && (
+        {/* Skills hidden from user-facing UI */}
+        {false && task.suggested_skill && (
           <div className="flex items-center justify-between">
             <TaskSkillChip skillName={task.suggested_skill} />
             {task.status === 'confirmed' && (

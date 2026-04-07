@@ -1,5 +1,4 @@
 import { useState, useRef } from 'react'
-import { useQueryClient } from '@tanstack/react-query'
 import { useProfileRefresh } from '../hooks/useProfileRefresh'
 import {
   Building2,
@@ -10,27 +9,39 @@ import {
   Check,
   X,
   Upload,
+  Download,
   FileText,
   Globe,
   Clock,
   AlertCircle,
   RefreshCw,
+  Shield,
+  Layers,
+  ClipboardCheck,
+  Activity,
+  FileEdit,
+  Calculator,
+  Lock,
+  Target,
+  AlertTriangle,
+  Swords,
+  ChevronDown,
 } from 'lucide-react'
 import { colors, spacing, typography } from '@/lib/design-tokens'
 import {
   useCompanyProfile,
   useUpdateCategory,
-  useCreateCategory,
   useLinkProfileFile,
   type ProfileGroup,
-  type ProfileUploadedFile,
+  type ProductTab,
 } from '../hooks/useCompanyProfile'
 import { useProfileCrawl } from '../hooks/useProfileCrawl'
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { LiveCrawl } from '@/features/onboarding/components/LiveCrawl'
 import { api } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
-// URL helpers (inlined from UrlInput)
+// URL helpers
 // ---------------------------------------------------------------------------
 
 function normalizeUrl(input: string): string {
@@ -50,14 +61,13 @@ function isValidUrl(url: string): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Icon map: file_name -> lucide icon component
+// Icon map
 // ---------------------------------------------------------------------------
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
-  Building2,
-  Package,
-  UserCheck,
-  TrendingUp,
+  Building2, Package, UserCheck, TrendingUp, Shield, Layers,
+  ClipboardCheck, Activity, FileEdit, Calculator, Lock, Target,
+  AlertTriangle, Swords,
 }
 
 function CategoryIcon({ name, className }: { name: string; className?: string }) {
@@ -66,12 +76,145 @@ function CategoryIcon({ name, className }: { name: string; className?: string })
 }
 
 // ---------------------------------------------------------------------------
+// Content rendering helpers
+// ---------------------------------------------------------------------------
+
+/** Categories that should render as flowing prose paragraphs */
+const PROSE_CATEGORIES = new Set(['positioning', 'value-mapping'])
+
+/** Categories that are product modules */
+function isProductCategory(category: string) {
+  return category.startsWith('product:')
+}
+
+/**
+ * Render raw_content as readable paragraphs.
+ * Splits on double-newlines for paragraph breaks.
+ * Within a paragraph, lines starting with - or • become bullets.
+ */
+function ProseContent({ content }: { content: string }) {
+  const paragraphs = content.split(/\n{2,}/).filter((p) => p.trim())
+
+  return (
+    <div className="space-y-3">
+      {paragraphs.map((para, i) => {
+        const lines = para.split('\n').filter((l) => l.trim())
+        const isBulletBlock = lines.every((l) => /^[-•*]\s/.test(l.trim()))
+
+        if (isBulletBlock) {
+          return (
+            <ul key={i} className="space-y-1.5 ml-1">
+              {lines.map((line, j) => (
+                <li
+                  key={j}
+                  className="flex gap-2 text-sm leading-relaxed"
+                  style={{ color: colors.bodyText }}
+                >
+                  <span
+                    className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+                    style={{ backgroundColor: colors.brandCoral }}
+                  />
+                  <span>{line.replace(/^[-•*]\s*/, '')}</span>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+
+        return (
+          <p
+            key={i}
+            className="text-sm leading-relaxed"
+            style={{ color: colors.bodyText }}
+          >
+            {lines.join(' ')}
+          </p>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * Render items as a clean bullet list (for non-prose sections).
+ */
+function BulletList({ items }: { items: string[] }) {
+  return (
+    <ul className="space-y-1.5 ml-1">
+      {items.map((item, i) => (
+        <li
+          key={i}
+          className="flex gap-2 text-sm leading-relaxed"
+          style={{ color: colors.bodyText }}
+        >
+          <span
+            className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+            style={{ backgroundColor: colors.brandCoral }}
+          />
+          <span>{item.replace(/^[-•*]\s*/, '')}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Product card: structured layout with capability bullets.
+ */
+function ProductContent({ group }: { group: ProfileGroup }) {
+  const paragraphs = group.raw_content.split(/\n{2,}/).filter((p) => p.trim())
+  // First paragraph-like block that isn't a bullet = description
+  let description = ''
+  const bullets: string[] = []
+
+  for (const para of paragraphs) {
+    const lines = para.split('\n').filter((l) => l.trim())
+    for (const line of lines) {
+      if (/^[-•*]\s/.test(line.trim())) {
+        bullets.push(line.replace(/^[-•*]\s*/, '').trim())
+      } else if (!description && line.trim().length > 20) {
+        description = description ? `${description} ${line.trim()}` : line.trim()
+      } else {
+        bullets.push(line.trim())
+      }
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {description && (
+        <p className="text-sm leading-relaxed" style={{ color: colors.bodyText }}>
+          {description}
+        </p>
+      )}
+      {bullets.length > 0 && (
+        <ul className="space-y-1.5 ml-1">
+          {bullets.map((b, i) => (
+            <li
+              key={i}
+              className="flex gap-2 text-sm leading-relaxed"
+              style={{ color: colors.bodyText }}
+            >
+              <span
+                className="mt-1.5 w-1.5 h-1.5 rounded-full shrink-0"
+                style={{ backgroundColor: colors.brandCoral }}
+              />
+              <span>{b}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // Skeleton
 // ---------------------------------------------------------------------------
 
 function ProfileSkeleton() {
   return (
-    <div className="space-y-4">
+    <div className="space-y-6">
       {[1, 2, 3].map((i) => (
         <div
           key={i}
@@ -80,12 +223,12 @@ function ProfileSkeleton() {
         >
           <div className="flex items-center gap-3 mb-4">
             <div className="w-9 h-9 rounded-lg bg-gray-200" />
-            <div className="h-5 w-32 rounded bg-gray-200" />
+            <div className="h-5 w-40 rounded bg-gray-200" />
           </div>
-          <div className="flex flex-wrap gap-2">
-            {[1, 2, 3, 4].map((j) => (
-              <div key={j} className="h-6 w-24 rounded-full bg-gray-100" />
-            ))}
+          <div className="space-y-2">
+            <div className="h-4 w-full rounded bg-gray-100" />
+            <div className="h-4 w-5/6 rounded bg-gray-100" />
+            <div className="h-4 w-3/4 rounded bg-gray-100" />
           </div>
         </div>
       ))}
@@ -94,21 +237,20 @@ function ProfileSkeleton() {
 }
 
 // ---------------------------------------------------------------------------
-// Category card
+// Section card (summary view with inline edit)
 // ---------------------------------------------------------------------------
 
-interface CategoryCardProps {
+interface SectionCardProps {
   group: ProfileGroup
-  editMode: boolean
 }
 
-function CategoryCard({ group, editMode }: CategoryCardProps) {
+function SectionCard({ group }: SectionCardProps) {
+  const [editing, setEditing] = useState(false)
   const [localContent, setLocalContent] = useState(group.raw_content)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const updateCategory = useUpdateCategory()
 
-  // Reset local content when group changes from outside
   const prevRawRef = useRef(group.raw_content)
   if (prevRawRef.current !== group.raw_content) {
     prevRawRef.current = group.raw_content
@@ -120,7 +262,7 @@ function CategoryCard({ group, editMode }: CategoryCardProps) {
     try {
       await updateCategory.mutateAsync({ entry_id: group.entry_id, content: localContent })
       setSaved(true)
-      setTimeout(() => setSaved(false), 2000)
+      setTimeout(() => { setSaved(false); setEditing(false) }, 1200)
     } finally {
       setSaving(false)
     }
@@ -128,124 +270,189 @@ function CategoryCard({ group, editMode }: CategoryCardProps) {
 
   const handleCancel = () => {
     setLocalContent(group.raw_content)
+    setEditing(false)
   }
 
   const isDirty = localContent !== group.raw_content
+  const isProse = PROSE_CATEGORIES.has(group.category)
+  const isProduct = isProductCategory(group.category)
 
   return (
     <div
       className="rounded-xl border shadow-sm overflow-hidden"
       style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
     >
-      {/* Card header */}
+      {/* Header */}
       <div
-        className="flex items-center justify-between px-5 py-4 border-b"
-        style={{ borderColor: colors.subtleBorder }}
+        className="flex items-center justify-between px-5 py-4"
+        style={{ borderBottom: editing ? `1px solid ${colors.subtleBorder}` : 'none' }}
       >
         <div className="flex items-center gap-3">
           <div
             className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{ backgroundColor: 'rgba(233,77,53,0.1)' }}
+            style={{ backgroundColor: 'rgba(233,77,53,0.08)' }}
           >
             <CategoryIcon
               name={group.icon}
               className="size-4"
-              style={{ color: colors.brandCoral } as React.CSSProperties}
+              // @ts-expect-error style prop on icon
+              style={{ color: colors.brandCoral }}
             />
           </div>
-          <span
+          <h2
             className="font-semibold"
             style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
           >
             {group.label}
-          </span>
+          </h2>
         </div>
+        <button
+          onClick={() => setEditing((v) => !v)}
+          className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium transition-colors"
+          style={{
+            color: editing ? colors.brandCoral : colors.secondaryText,
+            backgroundColor: editing ? 'rgba(233,77,53,0.08)' : 'transparent',
+          }}
+        >
+          {editing ? (
+            <>
+              <ChevronDown className="size-3.5" />
+              Editing
+            </>
+          ) : (
+            <>
+              <Edit3 className="size-3.5" />
+              Edit
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Summary content */}
+      {!editing && (
+        <div className="px-5 pb-5 pt-1">
+          {group.items.length === 0 ? (
+            <p className="text-sm italic" style={{ color: colors.secondaryText }}>
+              No content yet.
+            </p>
+          ) : isProse ? (
+            <ProseContent content={group.raw_content} />
+          ) : isProduct ? (
+            <ProductContent group={group} />
+          ) : (
+            <BulletList items={group.items} />
+          )}
+          {group.count > group.items.length && (
+            <p
+              className="text-xs mt-3"
+              style={{ color: colors.secondaryText }}
+            >
+              + {group.count - group.items.length} more
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Inline editor */}
+      {editing && (
+        <div className="px-5 pb-5 pt-4 space-y-3">
+          <textarea
+            value={localContent}
+            onChange={(e) => setLocalContent(e.target.value)}
+            rows={Math.min(16, Math.max(5, localContent.split('\n').length + 2))}
+            className="w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 resize-y font-mono"
+            style={{
+              borderColor: colors.subtleBorder,
+              color: colors.bodyText,
+              backgroundColor: colors.pageBg,
+              lineHeight: '1.6',
+              // @ts-expect-error CSS variable
+              '--tw-ring-color': colors.brandCoral,
+            }}
+          />
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleSave}
+              disabled={saving || !isDirty}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity disabled:opacity-50"
+              style={{ backgroundColor: colors.brandCoral }}
+            >
+              {saving ? (
+                <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <Check className="size-3.5" />
+              )}
+              {saving ? 'Saving...' : saved ? 'Saved' : 'Save'}
+            </button>
+            <button
+              onClick={handleCancel}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
+              style={{ color: colors.secondaryText, backgroundColor: colors.brandTint }}
+            >
+              <X className="size-3.5" />
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Product module grid (2-col layout for product cards)
+// ---------------------------------------------------------------------------
+
+function ProductTabs({ tabs }: { tabs: ProductTab[] }) {
+  if (tabs.length === 0) return null
+
+  return (
+    <div
+      className="rounded-xl border shadow-sm overflow-hidden"
+      style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
+    >
+      <div
+        className="flex items-center gap-3 px-5 py-4 border-b"
+        style={{ borderColor: colors.subtleBorder }}
+      >
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center"
+          style={{ backgroundColor: 'rgba(233,77,53,0.08)' }}
+        >
+          <Package className="size-4" style={{ color: colors.brandCoral }} />
+        </div>
+        <h2
+          className="font-semibold"
+          style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
+        >
+          Products
+        </h2>
         <span
           className="text-xs px-2 py-0.5 rounded-full font-medium"
           style={{ backgroundColor: colors.brandTint, color: colors.brandCoral }}
         >
-          {group.count}
+          {tabs.length}
         </span>
       </div>
-
-      {/* Card body */}
-      <div className="p-5">
-        {editMode ? (
-          <div className="space-y-3">
-            <textarea
-              value={localContent}
-              onChange={(e) => setLocalContent(e.target.value)}
-              rows={Math.max(4, group.items.length + 1)}
-              className="w-full rounded-lg border px-3 py-2 text-sm focus:outline-none focus:ring-2 resize-y"
-              style={{
-                borderColor: colors.subtleBorder,
-                color: colors.bodyText,
-                backgroundColor: colors.pageBg,
-                // @ts-expect-error CSS variable
-                '--tw-ring-color': colors.brandCoral,
-              }}
-              placeholder="One item per line..."
-            />
-            <p
-              className="text-xs"
-              style={{ color: colors.secondaryText }}
-            >
-              One item per line. Changes save when you click Save.
-            </p>
-            {isDirty && (
-              <div className="flex gap-2">
-                <button
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium text-white transition-opacity disabled:opacity-60"
-                  style={{ backgroundColor: colors.brandCoral }}
-                >
-                  {saving ? (
-                    <span className="inline-block w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  ) : saved ? (
-                    <Check className="size-3.5" />
-                  ) : (
-                    <Check className="size-3.5" />
-                  )}
-                  {saving ? 'Saving...' : saved ? 'Saved' : 'Save'}
-                </button>
-                <button
-                  onClick={handleCancel}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-colors"
-                  style={{ color: colors.secondaryText, backgroundColor: colors.brandTint }}
-                >
-                  <X className="size-3.5" />
-                  Cancel
-                </button>
+      <div className="px-5 py-4">
+        <Tabs defaultValue={tabs[0].slug}>
+          <TabsList variant="line" className="overflow-x-auto">
+            {tabs.map((tab) => (
+              <TabsTrigger key={tab.slug} value={tab.slug}>
+                {tab.name}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+          {tabs.map((tab) => (
+            <TabsContent key={tab.slug} value={tab.slug}>
+              <div className="space-y-4 pt-4">
+                {tab.sections.map((section) => (
+                  <SectionCard key={section.category} group={section} />
+                ))}
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex flex-wrap gap-2">
-            {group.items.length === 0 ? (
-              <p
-                className="text-sm italic"
-                style={{ color: colors.secondaryText }}
-              >
-                No items yet. Switch to Edit mode to add.
-              </p>
-            ) : (
-              group.items.map((item, i) => (
-                <span
-                  key={i}
-                  className="inline-block px-3 py-1 rounded-full text-sm"
-                  style={{
-                    backgroundColor: colors.brandTint,
-                    color: colors.headingText,
-                    border: `1px solid ${colors.subtleBorder}`,
-                  }}
-                >
-                  {item}
-                </span>
-              ))
-            )}
-          </div>
-        )}
+            </TabsContent>
+          ))}
+        </Tabs>
       </div>
     </div>
   )
@@ -255,39 +462,50 @@ function CategoryCard({ group, editMode }: CategoryCardProps) {
 // Uploaded files section
 // ---------------------------------------------------------------------------
 
-interface UploadedFileSectionProps {
-  uploadedFiles: Array<{ id: string; filename: string; mimetype: string; size_bytes: number }>
-  onLink: (fileId: string) => void
-  linking: boolean
-}
-
 function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-function UploadedFilesSection({ uploadedFiles, onLink, linking }: UploadedFileSectionProps) {
+function UploadedFilesSection({
+  uploadedFiles,
+  onAnalyzeStarted,
+}: {
+  uploadedFiles: Array<{ id: string; filename: string; mimetype: string; size_bytes: number }>
+  onAnalyzeStarted?: (runId: string) => void
+}) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [uploading, setUploading] = useState(false)
   const linkFile = useLinkProfileFile()
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
+    const files = e.target.files
+    if (!files || files.length === 0) return
     setUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
       const { token } = await import('@/stores/auth').then((m) => ({ token: m.useAuthStore.getState().token }))
-      const res = await fetch('/api/v1/files/upload', {
-        method: 'POST',
-        headers: token ? { Authorization: `Bearer ${token}` } : {},
-        body: formData,
-      })
-      if (!res.ok) throw new Error('Upload failed')
-      const data = await res.json() as { id: string }
-      await linkFile.mutateAsync(data.id)
+      const fileIds: string[] = []
+      for (const file of Array.from(files)) {
+        const formData = new FormData()
+        formData.append('file', file)
+        const res = await fetch('/api/v1/files/upload', {
+          method: 'POST',
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          body: formData,
+        })
+        if (!res.ok) throw new Error(`Upload failed for ${file.name}`)
+        const data = await res.json() as { id: string }
+        await linkFile.mutateAsync(data.id)
+        fileIds.push(data.id)
+      }
+      // Trigger analysis for the last uploaded file
+      if (fileIds.length > 0) {
+        const result = await api.post<{ run_id: string }>('/profile/analyze-document', {
+          file_id: fileIds[fileIds.length - 1],
+        })
+        onAnalyzeStarted?.(result.run_id)
+      }
     } catch (err) {
       console.error('File upload failed:', err)
     } finally {
@@ -330,13 +548,14 @@ function UploadedFilesSection({ uploadedFiles, onLink, linking }: UploadedFileSe
           ) : (
             <Upload className="size-3.5" />
           )}
-          {uploading ? 'Uploading...' : 'Upload file'}
+          {uploading ? 'Uploading...' : 'Upload files'}
         </button>
         <input
           ref={fileInputRef}
           type="file"
           className="hidden"
           accept=".pdf,.doc,.docx,.txt,.md"
+          multiple
           onChange={handleFileChange}
         />
       </div>
@@ -361,6 +580,27 @@ function UploadedFilesSection({ uploadedFiles, onLink, linking }: UploadedFileSe
                 <span className="text-xs shrink-0" style={{ color: colors.secondaryText }}>
                   {formatFileSize(file.size_bytes)}
                 </span>
+                <button
+                  onClick={async () => {
+                    try {
+                      const { token } = await import('@/stores/auth').then((m) => ({
+                        token: m.useAuthStore.getState().token,
+                      }))
+                      const res = await fetch(`/api/v1/files/${file.id}/download`, {
+                        headers: token ? { Authorization: `Bearer ${token}` } : {},
+                      })
+                      if (!res.ok) return
+                      const data = (await res.json()) as { download_url: string }
+                      window.open(data.download_url, '_blank')
+                    } catch {
+                      // File not available for download
+                    }
+                  }}
+                  className="shrink-0 p-1 rounded hover:bg-gray-100 transition-colors"
+                  title="Download"
+                >
+                  <Download className="size-4" style={{ color: colors.secondaryText }} />
+                </button>
               </div>
             ))}
           </div>
@@ -374,11 +614,7 @@ function UploadedFilesSection({ uploadedFiles, onLink, linking }: UploadedFileSe
 // Empty state: URL crawl panel
 // ---------------------------------------------------------------------------
 
-interface CrawlPanelProps {
-  defaultUrl: string
-}
-
-function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
+function CrawlPanel({ defaultUrl }: { defaultUrl: string }) {
   const crawl = useProfileCrawl()
   const [url, setUrl] = useState(defaultUrl)
   const [urlError, setUrlError] = useState<string | null>(null)
@@ -392,10 +628,6 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
     }
     setUrlError(null)
     crawl.startCrawl(normalized)
-  }
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') handleAnalyze()
   }
 
   if (crawl.phase === 'crawling' || crawl.phase === 'complete') {
@@ -421,10 +653,7 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
         className="rounded-xl border shadow-sm overflow-hidden p-8 text-center"
         style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
       >
-        <AlertCircle
-          className="size-10 mx-auto mb-3"
-          style={{ color: '#EF4444' }}
-        />
+        <AlertCircle className="size-10 mx-auto mb-3" style={{ color: '#EF4444' }} />
         <p className="text-sm mb-4" style={{ color: colors.bodyText }}>
           {crawl.error?.message ?? 'Something went wrong'}
         </p>
@@ -442,17 +671,13 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
     )
   }
 
-  // idle
   return (
     <div
       className="rounded-xl border shadow-sm overflow-hidden p-8"
       style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
     >
       <div className="max-w-lg mx-auto text-center">
-        <Globe
-          className="size-10 mx-auto mb-4"
-          style={{ color: colors.brandCoral, opacity: 0.8 }}
-        />
+        <Globe className="size-10 mx-auto mb-4" style={{ color: colors.brandCoral, opacity: 0.8 }} />
         <h2
           className="font-semibold mb-2"
           style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
@@ -466,11 +691,8 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
           <input
             type="url"
             value={url}
-            onChange={(e) => {
-              setUrl(e.target.value)
-              setUrlError(null)
-            }}
-            onKeyDown={handleKeyDown}
+            onChange={(e) => { setUrl(e.target.value); setUrlError(null) }}
+            onKeyDown={(e) => { if (e.key === 'Enter') handleAnalyze() }}
             placeholder="https://yourcompany.com"
             className="flex-1 rounded-lg border px-4 py-2.5 text-sm focus:outline-none focus:ring-2"
             style={{
@@ -491,9 +713,7 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
           </button>
         </div>
         {urlError && (
-          <p className="text-xs mt-2 text-left" style={{ color: '#EF4444' }}>
-            {urlError}
-          </p>
+          <p className="text-xs mt-2 text-left" style={{ color: '#EF4444' }}>{urlError}</p>
         )}
       </div>
     </div>
@@ -504,11 +724,7 @@ function CrawlPanel({ defaultUrl }: CrawlPanelProps) {
 // Empty state: Document upload + analyze panel
 // ---------------------------------------------------------------------------
 
-interface DocumentAnalyzePanelProps {
-  onRunStarted?: (runId: string) => void
-}
-
-function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
+function DocumentAnalyzePanel({ onRunStarted }: { onRunStarted?: (runId: string) => void }) {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [analyzing, setAnalyzing] = useState(false)
   const [analyzeError, setAnalyzeError] = useState<string | null>(null)
@@ -520,7 +736,6 @@ function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
     setAnalyzing(true)
     setAnalyzeError(null)
     try {
-      // 1. Upload file
       const formData = new FormData()
       formData.append('file', file)
       const { token } = await import('@/stores/auth').then((m) => ({
@@ -534,17 +749,8 @@ function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
       if (!uploadRes.ok) throw new Error('Upload failed')
       const uploadData = (await uploadRes.json()) as { id: string }
       const fileId = uploadData.id
-
-      // 2. Link file to profile
       await linkFile.mutateAsync(fileId)
-
-      // 3. Trigger analysis — returns run_id for SSE streaming
-      const result = await api.post<{ run_id: string }>(
-        '/profile/analyze-document',
-        { file_id: fileId },
-      )
-
-      // 4. Hand off to parent for SSE streaming
+      const result = await api.post<{ run_id: string }>('/profile/analyze-document', { file_id: fileId })
       onRunStarted?.(result.run_id)
     } catch (err) {
       console.error('Document analyze failed:', err)
@@ -561,10 +767,7 @@ function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
       style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
     >
       <div className="max-w-lg mx-auto text-center">
-        <FileText
-          className="size-10 mx-auto mb-4"
-          style={{ color: colors.brandCoral, opacity: 0.8 }}
-        />
+        <FileText className="size-10 mx-auto mb-4" style={{ color: colors.brandCoral, opacity: 0.8 }} />
         <h2
           className="font-semibold mb-2"
           style={{ fontSize: typography.sectionTitle.size, color: colors.headingText }}
@@ -600,9 +803,7 @@ function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
           onChange={handleFileChange}
         />
         {analyzeError && (
-          <p className="text-xs mt-3" style={{ color: '#EF4444' }}>
-            {analyzeError}
-          </p>
+          <p className="text-xs mt-3" style={{ color: '#EF4444' }}>{analyzeError}</p>
         )}
       </div>
     </div>
@@ -614,7 +815,6 @@ function DocumentAnalyzePanel({ onRunStarted }: DocumentAnalyzePanelProps) {
 // ---------------------------------------------------------------------------
 
 export function CompanyProfilePage() {
-  const [editMode, setEditMode] = useState(false)
   const [resetConfirm, setResetConfirm] = useState(false)
   const { data: profile, isLoading, isError } = useCompanyProfile()
   const linkFile = useLinkProfileFile()
@@ -626,7 +826,7 @@ export function CompanyProfilePage() {
         className="min-h-screen"
         style={{ backgroundColor: colors.pageBg, padding: `${spacing.section} ${spacing.pageDesktop}` }}
       >
-        <div style={{ maxWidth: spacing.maxGrid, margin: '0 auto' }}>
+        <div style={{ maxWidth: spacing.maxReading, margin: '0 auto' }}>
           <div className="mb-8">
             <div className="h-8 w-48 rounded bg-gray-200 animate-pulse mb-2" />
             <div className="h-4 w-32 rounded bg-gray-100 animate-pulse" />
@@ -657,22 +857,25 @@ export function CompanyProfilePage() {
     )
   }
 
-  const hasGroups = profile.groups.length > 0
+  const hasGroups = profile.groups.length > 0 || (profile.product_tabs && profile.product_tabs.length > 0)
   const formattedLastUpdated = profile.last_updated
     ? new Date(profile.last_updated).toLocaleDateString('en-US', {
-        month: 'short',
-        day: 'numeric',
-        year: 'numeric',
+        month: 'short', day: 'numeric', year: 'numeric',
       })
     : null
 
   const defaultCrawlUrl = profile.domain ? `https://${profile.domain}` : ''
 
+  // Products now come from product_tabs; regular groups exclude any legacy product entries
+  const regularGroups = profile.groups.filter((g) => !isProductCategory(g.category))
+
+  // Split regular groups into before-products and after-products
+  // Products should come after "About" (positioning) and before everything else
+  const aboutGroup = regularGroups.find((g) => g.category === 'positioning')
+  const otherGroups = regularGroups.filter((g) => g.category !== 'positioning')
+
   return (
-    <div
-      className="min-h-screen"
-      style={{ backgroundColor: colors.pageBg }}
-    >
+    <div className="min-h-screen" style={{ backgroundColor: colors.pageBg }}>
       <div
         className="mx-auto"
         style={{
@@ -681,7 +884,7 @@ export function CompanyProfilePage() {
         }}
       >
         {/* Page header */}
-        <div className="flex items-start justify-between mb-8">
+        <div className="flex items-start justify-between mb-10">
           <div>
             <h1
               className="font-bold"
@@ -742,78 +945,14 @@ export function CompanyProfilePage() {
               >
                 Reset
               </button>
-              <button
-                onClick={() => setEditMode((v) => !v)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors"
-                style={
-                  editMode
-                    ? {
-                        backgroundColor: colors.brandCoral,
-                        borderColor: colors.brandCoral,
-                        color: '#fff',
-                      }
-                    : {
-                        backgroundColor: colors.cardBg,
-                        borderColor: colors.subtleBorder,
-                        color: colors.headingText,
-                      }
-                }
-              >
-                {editMode ? (
-                  <>
-                    <Check className="size-4" />
-                    Done editing
-                  </>
-                ) : (
-                  <>
-                    <Edit3 className="size-4" />
-                    Edit profile
-                  </>
-                )}
-              </button>
             </div>
           )}
         </div>
 
-        {/* Stats bar */}
-        {hasGroups && (
-          <div
-            className="flex items-center gap-6 px-5 py-3 rounded-xl border mb-8"
-            style={{ backgroundColor: colors.cardBg, borderColor: colors.subtleBorder }}
-          >
-            <div>
-              <span
-                className="text-2xl font-bold"
-                style={{ color: colors.headingText }}
-              >
-                {profile.total_items}
-              </span>
-              <span className="ml-1.5 text-sm" style={{ color: colors.secondaryText }}>
-                intel items
-              </span>
-            </div>
-            <div
-              className="w-px h-8"
-              style={{ backgroundColor: colors.subtleBorder }}
-            />
-            <div>
-              <span
-                className="text-2xl font-bold"
-                style={{ color: colors.headingText }}
-              >
-                {profile.groups.length}
-              </span>
-              <span className="ml-1.5 text-sm" style={{ color: colors.secondaryText }}>
-                categories
-              </span>
-            </div>
-          </div>
-        )}
-
         {/* Inline reset confirmation */}
         {resetConfirm && (
           <div
-            className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-4"
+            className="flex items-center justify-between px-5 py-3.5 rounded-xl mb-6"
             style={{
               backgroundColor: 'rgba(239,68,68,0.06)',
               border: '1px solid rgba(239,68,68,0.2)',
@@ -860,42 +999,32 @@ export function CompanyProfilePage() {
           </div>
         ) : !hasGroups ? (
           <div className="space-y-4">
-            {/* URL crawl panel */}
             <CrawlPanel defaultUrl={defaultCrawlUrl} />
-
-            {/* Divider */}
             <div className="flex items-center gap-4 px-4">
               <div className="flex-1 h-px" style={{ backgroundColor: colors.subtleBorder }} />
-              <span className="text-xs font-medium" style={{ color: colors.secondaryText }}>
-                or
-              </span>
+              <span className="text-xs font-medium" style={{ color: colors.secondaryText }}>or</span>
               <div className="flex-1 h-px" style={{ backgroundColor: colors.subtleBorder }} />
             </div>
-
-            {/* Document upload + analyze panel */}
             <DocumentAnalyzePanel onRunStarted={(runId) => refresh.startFromRunId(runId)} />
-
-            {/* Show linked files if any exist */}
-            {profile.uploaded_files.length > 0 && (
-              <UploadedFilesSection
-                uploadedFiles={profile.uploaded_files}
-                onLink={(fileId) => linkFile.mutate(fileId)}
-                linking={linkFile.isPending}
-              />
-            )}
+            <UploadedFilesSection uploadedFiles={profile.uploaded_files} onAnalyzeStarted={(runId) => refresh.startFromRunId(runId)} />
           </div>
         ) : (
-          <div className="space-y-4">
-            {profile.groups.map((group) => (
-              <CategoryCard key={group.category} group={group} editMode={editMode} />
+          <div className="space-y-6">
+            {/* About section (positioning) — always first */}
+            {aboutGroup && <SectionCard group={aboutGroup} />}
+
+            {/* Product modules — 2-col grid */}
+            {profile.product_tabs && profile.product_tabs.length > 0 && (
+              <ProductTabs tabs={profile.product_tabs} />
+            )}
+
+            {/* Remaining sections */}
+            {otherGroups.map((group) => (
+              <SectionCard key={group.category} group={group} />
             ))}
 
-            {/* Uploaded files */}
-            <UploadedFilesSection
-              uploadedFiles={profile.uploaded_files}
-              onLink={(fileId) => linkFile.mutate(fileId)}
-              linking={linkFile.isPending}
-            />
+            {/* Uploaded files — always show so users can upload more */}
+            <UploadedFilesSection uploadedFiles={profile.uploaded_files} onAnalyzeStarted={(runId) => refresh.startFromRunId(runId)} />
           </div>
         )}
       </div>

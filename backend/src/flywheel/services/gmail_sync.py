@@ -37,6 +37,7 @@ from flywheel.engines.email_context_extractor import extract_email_context
 from flywheel.engines.email_drafter import draft_email
 from flywheel.engines.model_config import get_engine_model
 from flywheel.engines.email_scorer import score_email
+from flywheel.engines.meeting_processor_web import FREE_EMAIL_DOMAINS
 from flywheel.engines.voice_context_writer import write_voice_to_context
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
@@ -232,6 +233,7 @@ async def _score_new_emails(
     db: AsyncSession,
     tenant_id: UUID,
     email_ids: list[UUID],
+    factory=None,
 ) -> int:
     """Score a batch of newly synced emails. Returns count of emails scored.
 
@@ -295,6 +297,17 @@ async def _score_new_emails(
                 )
             else:
                 scored_count += 1
+                # Phase 86: auto-create pipeline entry for high-priority emails
+                if factory is not None:
+                    try:
+                        await _maybe_create_pipeline_entry(
+                            factory, tenant_id, email.user_id, email, score
+                        )
+                    except Exception:
+                        logger.exception(
+                            "Pipeline entry creation failed for email_id=%s (non-fatal)",
+                            email.id,
+                        )
         except Exception:
             logger.exception(
                 "Unexpected error scoring email_id=%s tenant_id=%s",
@@ -313,6 +326,72 @@ async def _score_new_emails(
         tenant_id,
     )
     return scored_count
+
+
+async def _maybe_create_pipeline_entry(
+    factory,
+    tenant_id: UUID,
+    user_id: UUID,
+    email: "Email",
+    score_result: dict,
+) -> None:
+    """Create pipeline entry from email sender if score warrants it.
+
+    Only creates entries for:
+    - Priority >= 3 (NORMAL or above)
+    - Category not in ('marketing', 'informational')
+    - Sender domain not a free email provider (gmail.com, yahoo.com, etc.)
+
+    Uses its own db session (via factory) to avoid interfering with the
+    caller's batch-commit semantics in _score_new_emails.
+
+    Pipeline creation is best-effort -- failures are logged and do not
+    affect the scoring pipeline.
+    """
+    priority = score_result.get("priority", 1)
+    category = score_result.get("category", "informational")
+
+    if priority < 3 or category in ("marketing", "informational"):
+        return
+
+    sender_email_addr = getattr(email, "sender_email", "") or ""
+    if "@" not in sender_email_addr:
+        return
+
+    domain = sender_email_addr.split("@")[1].lower().strip()
+    if domain in FREE_EMAIL_DOMAINS:
+        return
+
+    # Derive company name from domain (e.g. acme.com -> Acme)
+    company_name = domain.split(".")[0].title()
+
+    from flywheel.auth.jwt import TokenPayload
+    from flywheel.services.pipeline_service import (
+        PipelineService,
+        CreatePipelineRequest,
+    )
+
+    token = TokenPayload(
+        sub=user_id,
+        app_metadata={"tenant_id": str(tenant_id)},
+    )
+
+    async with factory() as sess:
+        await sess.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+        svc = PipelineService(sess, token)
+        await svc.upsert_from_source(
+            CreatePipelineRequest(
+                name=company_name,
+                entity_type="company",
+                domain=domain,
+                source="email",
+                source_ref_id=email.id,
+                stage="identified",
+            )
+        )
 
 
 async def _draft_important_emails(
@@ -527,6 +606,7 @@ async def _full_sync(
     db: AsyncSession,
     integration: Integration,
     creds,
+    factory=None,
 ) -> int:
     """Perform a full inbox sync for an integration.
 
@@ -621,7 +701,7 @@ async def _full_sync(
     # Score new emails AFTER commit — scoring failure cannot lose synced emails
     if new_email_ids:
         try:
-            scored = await _score_new_emails(db, integration.tenant_id, new_email_ids)
+            scored = await _score_new_emails(db, integration.tenant_id, new_email_ids, factory=factory)
             logger.info(
                 "Scored %d new emails for integration %s", scored, integration.id
             )
@@ -669,6 +749,7 @@ async def sync_gmail(
     db: AsyncSession,
     integration: Integration,
     _retry_count: int = 0,
+    factory=None,
 ) -> int:
     """Sync a single gmail-read integration using historyId incremental sync.
 
@@ -693,7 +774,7 @@ async def sync_gmail(
     history_id = (integration.settings or {}).get("history_id")
 
     if history_id is None:
-        return await _full_sync(db, integration, creds)
+        return await _full_sync(db, integration, creds, factory=factory)
 
     try:
         response = await get_history(creds, history_id)
@@ -706,7 +787,7 @@ async def sync_gmail(
             settings = dict(integration.settings or {})
             settings["history_id"] = None
             integration.settings = settings
-            return await sync_gmail(db, integration, _retry_count=1)
+            return await sync_gmail(db, integration, _retry_count=1, factory=factory)
         raise
 
     # Gmail omits "history" key when there are no new records — use .get()
@@ -794,7 +875,7 @@ async def sync_gmail(
     # Score new emails AFTER commit — scoring failure cannot lose synced emails
     if new_email_ids:
         try:
-            scored = await _score_new_emails(db, integration.tenant_id, new_email_ids)
+            scored = await _score_new_emails(db, integration.tenant_id, new_email_ids, factory=factory)
             logger.info(
                 "Scored %d new emails for integration %s", scored, integration.id
             )
@@ -864,7 +945,7 @@ async def _sync_one_integration(factory, integration: Integration) -> int:
         intg = result.scalar_one()
 
         try:
-            count = await sync_gmail(db, intg)
+            count = await sync_gmail(db, intg, factory=factory)
         except TokenRevokedException:
             logger.warning(
                 "Token revoked for integration %s, marking disconnected",

@@ -8,7 +8,16 @@ description: >
   quality gate, and narrative arc. Only asks the user for genuine gaps.
 context-aware: true
 triggers:
-  - manual
+  - "investor update"
+  - "monthly update"
+  - "draft update"
+  - "investor report"
+  - "write the update"
+  - "prepare investor email"
+  - "board update"
+tags:
+  - strategy
+  - investor-relations
 dependencies:
   skills: []
   files:

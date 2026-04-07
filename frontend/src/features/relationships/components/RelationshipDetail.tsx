@@ -202,11 +202,11 @@ export function RelationshipDetail() {
                 <TimelineTab timeline={account.recent_timeline} />
               </TabsContent>
               <TabsContent value="people">
-                <PeopleTab contacts={account.contacts} />
+                <PeopleTab accountId={account.id} contacts={account.contacts} />
               </TabsContent>
               {/* Intelligence tab: only rendered for prospect/customer (TAB_CONFIG drives visibility) */}
               <TabsContent value="intelligence">
-                <IntelligenceTab intel={account.intel ?? {}} />
+                <IntelligenceTab accountId={account.id} intel={account.intel ?? {}} />
               </TabsContent>
               <TabsContent value="commitments">
                 <CommitmentsTab commitments={account.commitments ?? []} />

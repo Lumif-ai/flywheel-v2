@@ -6,6 +6,8 @@ Schema matches V2-PRODUCT-SPEC.md. Tables are divided into:
 - Focus tables (2 tables) -- focus/lens scoping for context
 - Context graph tables (3 tables) -- entity graph layer on top of context_entries
 - CRM tables (4 tables) -- accounts, contacts, outreach activities, meetings for v2.0 GTM CRM
+- Unified pipeline tables (4 tables) -- pipeline_entries, contacts, activities, sources for v9.0 unified CRM
+- Saved views (1 table) -- user-created pipeline view configurations
 """
 
 from __future__ import annotations
@@ -167,6 +169,7 @@ class Invite(Base):
     email: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, server_default="member")
     token_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    token: Mapped[str | None] = mapped_column(Text)  # raw token for invite URL copy
     accepted_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )
@@ -245,6 +248,10 @@ class ContextEntry(Base):
         ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True, index=True
     )
     account: Mapped["Account | None"] = relationship()
+    pipeline_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    pipeline_entry: Mapped["PipelineEntry | None"] = relationship()
 
 
 class ContextCatalog(Base):
@@ -1164,6 +1171,7 @@ class Account(Base):
             "graduated_at",
             postgresql_where=text("graduated_at IS NOT NULL"),
         ),
+        Index("idx_account_tenant_visibility", "tenant_id", "visibility"),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -1172,6 +1180,10 @@ class Account(Base):
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id"), nullable=False
     )
+    owner_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("profiles.id"), nullable=True
+    )
+    visibility: Mapped[str] = mapped_column(Text, server_default="team")
     name: Mapped[str] = mapped_column(Text, nullable=False)
     normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
     domain: Mapped[str | None] = mapped_column(Text)
@@ -1215,6 +1227,152 @@ class Account(Base):
     outreach_activities: Mapped[list["OutreachActivity"]] = relationship(
         back_populates="account", cascade="all, delete-orphan"
     )
+
+
+class Lead(Base):
+    """A GTM pipeline lead — a company being prospected before it becomes an account."""
+
+    __tablename__ = "leads"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "owner_id", "normalized_name", name="uq_lead_tenant_owner_normalized"),
+        Index("idx_lead_tenant_purpose", "purpose", postgresql_using="gin"),
+        Index("idx_lead_tenant_fit", "tenant_id", "fit_tier"),
+        Index("idx_lead_owner", "tenant_id", "owner_id"),
+        Index(
+            "idx_lead_graduated",
+            "graduated_at",
+            postgresql_where=text("graduated_at IS NOT NULL"),
+        ),
+        Index(
+            "idx_lead_tenant_campaign",
+            "tenant_id",
+            "campaign",
+            postgresql_where=text("campaign IS NOT NULL"),
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    owner_id: Mapped[UUID] = mapped_column(
+        ForeignKey("profiles.id"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str | None] = mapped_column(Text)
+    purpose: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{sales}'::text[]")
+    )
+    fit_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    fit_tier: Mapped[str | None] = mapped_column(Text)
+    fit_rationale: Mapped[str | None] = mapped_column(Text)
+    intel: Mapped[dict] = mapped_column(JSONB, server_default=text("'{}'::jsonb"))
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    campaign: Mapped[str | None] = mapped_column(Text)
+    account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("accounts.id", ondelete="SET NULL"), nullable=True
+    )
+    graduated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    lead_contacts: Mapped[list["LeadContact"]] = relationship(
+        back_populates="lead", cascade="all, delete-orphan"
+    )
+    account: Mapped["Account | None"] = relationship()
+
+
+class LeadContact(Base):
+    """A person at a lead company — tracks individual outreach pipeline stage."""
+
+    __tablename__ = "lead_contacts"
+    __table_args__ = (
+        Index("idx_lead_contact_lead", "lead_id"),
+        Index("idx_lead_contact_tenant_stage", "tenant_id", "pipeline_stage"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    lead_id: Mapped[UUID] = mapped_column(
+        ForeignKey("leads.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    linkedin_url: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str | None] = mapped_column(Text)
+    pipeline_stage: Mapped[str] = mapped_column(
+        Text, server_default=text("'scraped'")
+    )
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    lead: Mapped["Lead"] = relationship(back_populates="lead_contacts")
+    messages: Mapped[list["LeadMessage"]] = relationship(
+        back_populates="contact", cascade="all, delete-orphan"
+    )
+
+
+class LeadMessage(Base):
+    """An outreach message in a sequence for a lead contact."""
+
+    __tablename__ = "lead_messages"
+    __table_args__ = (
+        UniqueConstraint("contact_id", "step_number", "channel", name="uq_lead_message_step"),
+        Index("idx_lead_message_contact", "contact_id"),
+        Index("idx_lead_message_tenant_status", "tenant_id", "status"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    contact_id: Mapped[UUID] = mapped_column(
+        ForeignKey("lead_contacts.id", ondelete="CASCADE"), nullable=False
+    )
+    step_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    channel: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'drafted'"))
+    subject: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str | None] = mapped_column(Text)
+    from_email: Mapped[str | None] = mapped_column(Text)
+    drafted_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    replied_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    contact: Mapped["LeadContact"] = relationship(back_populates="messages")
 
 
 class AccountContact(Base):
@@ -1283,6 +1441,7 @@ class OutreachActivity(Base):
     status: Mapped[str] = mapped_column(Text, server_default="sent")
     subject: Mapped[str | None] = mapped_column(Text)
     body_preview: Mapped[str | None] = mapped_column(Text)
+    from_email: Mapped[str | None] = mapped_column(Text)
     sent_at: Mapped[datetime.datetime | None] = mapped_column(
         TIMESTAMP(timezone=True)
     )
@@ -1392,6 +1551,10 @@ class Meeting(Base):
 
     account: Mapped["Account | None"] = relationship()
     skill_run: Mapped["SkillRun | None"] = relationship()
+    pipeline_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
+    )
+    pipeline_entry: Mapped["PipelineEntry | None"] = relationship()
 
 
 class Task(Base):
@@ -1471,3 +1634,266 @@ class Task(Base):
     meeting: Mapped["Meeting | None"] = relationship()
     account: Mapped["Account | None"] = relationship()
     email: Mapped["Email | None"] = relationship()
+    pipeline_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
+    )
+    pipeline_entry: Mapped["PipelineEntry | None"] = relationship()
+
+
+# ---------------------------------------------------------------------------
+# UNIFIED PIPELINE TABLES (v9.0 — replaces leads + accounts)
+# ---------------------------------------------------------------------------
+
+
+class PipelineEntry(Base):
+    """Unified pipeline entry — company or person tracked in the GTM CRM.
+
+    Replaces the dual leads/accounts model. entity_type distinguishes
+    company vs person entries.
+    """
+
+    __tablename__ = "pipeline_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id", "owner_id", "normalized_name",
+            name="uq_pipeline_tenant_owner_normalized",
+        ),
+        Index("idx_pipeline_tenant_stage", "tenant_id", "stage"),
+        Index("idx_pipeline_tenant_fit", "tenant_id", "fit_tier"),
+        Index(
+            "idx_pipeline_relationship_type",
+            "relationship_type",
+            postgresql_using="gin",
+        ),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    owner_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("profiles.id"), nullable=True
+    )
+    entity_type: Mapped[str] = mapped_column(
+        Text, server_default=text("'company'"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
+    domain: Mapped[str | None] = mapped_column(Text)
+    stage: Mapped[str] = mapped_column(
+        Text, server_default=text("'identified'"), nullable=False
+    )
+    fit_score: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    fit_tier: Mapped[str | None] = mapped_column(Text)
+    fit_rationale: Mapped[str | None] = mapped_column(Text)
+    relationship_type: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{prospect}'::text[]")
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    channels: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    intel: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+    ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    company_cache_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("companies.id"), nullable=True
+    )
+    context_entity_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("context_entities.id"), nullable=True
+    )
+    referred_by: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id"), nullable=True
+    )
+    next_action_date: Mapped[datetime.date | None] = mapped_column(
+        Date, nullable=True
+    )
+    next_action_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_activity_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    stale_notified_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    retired_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    # Relationships
+    company: Mapped["Company | None"] = relationship(lazy="selectin")
+    context_entity: Mapped["ContextEntity | None"] = relationship(lazy="selectin")
+    referrer: Mapped["PipelineEntry | None"] = relationship(
+        remote_side="PipelineEntry.id", lazy="selectin"
+    )
+    contacts: Mapped[list["Contact"]] = relationship(
+        back_populates="pipeline_entry", cascade="all, delete-orphan"
+    )
+    activities: Mapped[list["Activity"]] = relationship(
+        back_populates="pipeline_entry", cascade="all, delete-orphan"
+    )
+    sources: Mapped[list["PipelineEntrySource"]] = relationship(
+        back_populates="pipeline_entry", cascade="all, delete-orphan"
+    )
+
+
+class Contact(Base):
+    """A person associated with a pipeline entry.
+
+    For person-type pipeline entries, a self-referencing contact row
+    (is_primary=True) represents the person themselves.
+    """
+
+    __tablename__ = "contacts"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    pipeline_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="CASCADE"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str | None] = mapped_column(Text)
+    linkedin_url: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_primary: Mapped[bool] = mapped_column(
+        Boolean, server_default=text("false"), nullable=False
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    pipeline_entry: Mapped["PipelineEntry | None"] = relationship(
+        back_populates="contacts"
+    )
+
+
+class Activity(Base):
+    """A timeline event for a pipeline entry (email, meeting, call, stage change, etc.).
+
+    INSERT triggers a SECURITY DEFINER function that updates
+    pipeline_entries.last_activity_at.
+    """
+
+    __tablename__ = "activities"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    pipeline_entry_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    contact_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True
+    )
+    type: Mapped[str] = mapped_column(Text, nullable=False)
+    channel: Mapped[str | None] = mapped_column(Text)
+    direction: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(
+        Text, server_default=text("'completed'"), nullable=False
+    )
+    subject: Mapped[str | None] = mapped_column(Text)
+    body_preview: Mapped[str | None] = mapped_column(Text)
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    occurred_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    pipeline_entry: Mapped["PipelineEntry"] = relationship(
+        back_populates="activities"
+    )
+    contact: Mapped["Contact | None"] = relationship(lazy="selectin")
+
+
+class PipelineEntrySource(Base):
+    """Provenance record for how a pipeline entry was discovered."""
+
+    __tablename__ = "pipeline_entry_sources"
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    pipeline_entry_id: Mapped[UUID] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="CASCADE"), nullable=False
+    )
+    source_type: Mapped[str] = mapped_column(Text, nullable=False)
+    source_ref_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    pipeline_entry: Mapped["PipelineEntry"] = relationship(
+        back_populates="sources"
+    )
+
+
+# ---------------------------------------------------------------------------
+# SAVED VIEWS (user-created pipeline view configurations)
+# ---------------------------------------------------------------------------
+
+
+class SavedView(Base):
+    """A named filter/sort/column configuration for the pipeline grid.
+
+    Each user can save multiple views that persist across sessions
+    and appear in the sidebar navigation.
+    """
+
+    __tablename__ = "saved_views"
+    __table_args__ = (
+        Index("idx_saved_views_tenant_owner", "tenant_id", "owner_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    owner_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    filters: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    sort: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    columns: Mapped[list | None] = mapped_column(JSONB, nullable=True)
+    is_default: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
+    position: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default=text("0")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )

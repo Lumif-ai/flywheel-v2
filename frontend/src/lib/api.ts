@@ -19,6 +19,7 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
   const focusId = useFocusStore.getState().activeFocus?.id
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
+    cache: 'no-store',
     headers: {
       'Content-Type': 'application/json',
       ...(token ? { Authorization: `Bearer ${token}` } : {}),

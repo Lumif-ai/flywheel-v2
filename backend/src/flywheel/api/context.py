@@ -19,7 +19,7 @@ import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import func, select, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -43,21 +43,38 @@ router = APIRouter(prefix="/context", tags=["context"])
 # ---------------------------------------------------------------------------
 
 
+VALID_CONFIDENCE = {"high", "medium", "low"}
+
+
 class AppendEntryRequest(BaseModel):
-    content: str
+    content: str = Field(..., min_length=10, max_length=4000)
     source: str
     detail: str | None = None
     confidence: str = "medium"
     metadata: dict | None = None
+
+    @field_validator("confidence")
+    @classmethod
+    def check_confidence(cls, v: str) -> str:
+        if v not in VALID_CONFIDENCE:
+            raise ValueError(f"confidence must be one of {VALID_CONFIDENCE}")
+        return v
 
 
 class BatchEntryItem(BaseModel):
     file_name: str
-    content: str
+    content: str = Field(..., min_length=10, max_length=4000)
     source: str
     detail: str | None = None
     confidence: str = "medium"
     metadata: dict | None = None
+
+    @field_validator("confidence")
+    @classmethod
+    def check_confidence(cls, v: str) -> str:
+        if v not in VALID_CONFIDENCE:
+            raise ValueError(f"confidence must be one of {VALID_CONFIDENCE}")
+        return v
 
 
 class BatchEntriesRequest(BaseModel):
@@ -65,8 +82,15 @@ class BatchEntriesRequest(BaseModel):
 
 
 class UpdateEntryRequest(BaseModel):
-    content: str | None = None
+    content: str | None = Field(None, min_length=10, max_length=4000)
     confidence: str | None = None
+
+    @field_validator("confidence")
+    @classmethod
+    def check_confidence(cls, v: str | None) -> str | None:
+        if v is not None and v not in VALID_CONFIDENCE:
+            raise ValueError(f"confidence must be one of {VALID_CONFIDENCE}")
+        return v
 
 
 class OnboardingCacheGroup(BaseModel):
@@ -591,6 +615,8 @@ _FILE_DISPLAY: dict[str, tuple[str, str]] = {
     "leadership": ("Users", "Leadership"),
     "company-details": ("Info", "Company Details"),
     "tech-stack": ("Cpu", "Tech Stack"),
+    "value-mapping": ("Target", "Value Mapping"),
+    "pain-points": ("AlertTriangle", "Pain Points"),
 }
 
 

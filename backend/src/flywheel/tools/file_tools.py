@@ -21,6 +21,7 @@ from sqlalchemy import text as sa_text
 from sqlalchemy import select
 
 from flywheel.db.models import UploadedFile
+from flywheel.services.document_storage import upload_file as upload_to_storage
 from flywheel.tools.registry import RunContext
 
 
@@ -81,8 +82,8 @@ async def handle_file_read(tool_input: dict, context: RunContext) -> str:
 async def handle_file_write(tool_input: dict, context: RunContext) -> str:
     """Write a generated file as an UploadedFile DB record.
 
-    Stores text content in extracted_text column (interim approach --
-    Supabase Storage upload deferred). Returns download URL.
+    Uploads file bytes to Supabase Storage and stores text content in
+    extracted_text column for fast skill reads. Returns download URL.
 
     Args:
         tool_input: {"filename": "output.html", "content": "...", "mimetype": "text/html"}
@@ -102,10 +103,19 @@ async def handle_file_write(tool_input: dict, context: RunContext) -> str:
             return "Error: content is required"
 
         file_uuid = uuid4()
-        storage_path = (
-            f"generated/{context.tenant_id}/{context.run_id}/"
-            f"{file_uuid}/{filename}"
-        )
+        try:
+            storage_path = await upload_to_storage(
+                tenant_id=str(context.tenant_id),
+                file_id=str(file_uuid),
+                filename=filename,
+                content=content.encode("utf-8"),
+                mime_type=mimetype,
+            )
+        except Exception:
+            storage_path = (
+                f"generated/{context.tenant_id}/{context.run_id}/"
+                f"{file_uuid}/{filename}"
+            )
 
         # Determine if content is text-based for extracted_text storage
         is_text = mimetype.startswith("text/") or mimetype in (

@@ -1,9 +1,10 @@
-"""File upload, listing, and metadata endpoints.
+"""File upload, listing, download, and metadata endpoints.
 
 Endpoints:
-- POST /files/upload    -- Upload a file with text extraction
-- GET  /files/          -- List uploaded files (paginated)
-- GET  /files/{file_id} -- Get file metadata including extracted text
+- POST /files/upload           -- Upload a file with text extraction + Supabase Storage
+- GET  /files/                 -- List uploaded files (paginated)
+- GET  /files/{file_id}        -- Get file metadata including extracted text
+- GET  /files/{file_id}/download -- Get signed download URL for the original file
 """
 
 from __future__ import annotations
@@ -18,6 +19,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import UploadedFile
+from flywheel.services.document_storage import (
+    get_file_url,
+    upload_file as upload_to_storage,
+)
 from flywheel.services.file_extraction import (
     ALLOWED_MIMETYPES,
     MAX_FILE_SIZE,
@@ -77,9 +82,18 @@ async def upload_file(
     # Extract text
     extracted = await extract_text(content, mimetype)
 
-    # Storage path (local placeholder -- Supabase Storage in Phase 25)
+    # Upload to Supabase Storage; fall back to local placeholder on failure
     file_uuid = uuid4()
-    storage_path = f"local://{user.tenant_id}/{file_uuid}/{file.filename}"
+    try:
+        storage_path = await upload_to_storage(
+            tenant_id=str(user.tenant_id),
+            file_id=str(file_uuid),
+            filename=file.filename or "unknown",
+            content=content,
+            mime_type=mimetype,
+        )
+    except Exception:
+        storage_path = f"local://{user.tenant_id}/{file_uuid}/{file.filename}"
 
     # Create DB record
     uploaded = UploadedFile(
@@ -159,3 +173,32 @@ async def get_file(
         raise HTTPException(status_code=404, detail="File not found")
 
     return _file_to_dict(uploaded, include_text=True)
+
+
+# ---------------------------------------------------------------------------
+# GET /files/{file_id}/download -- Signed download URL
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{file_id}/download")
+async def download_file(
+    file_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Generate a signed download URL for an uploaded file."""
+    result = await db.execute(
+        select(UploadedFile).where(UploadedFile.id == file_id)
+    )
+    uploaded = result.scalar_one_or_none()
+    if uploaded is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if uploaded.storage_path.startswith("local://"):
+        raise HTTPException(
+            status_code=404,
+            detail="File not available for download (stored before Supabase integration)",
+        )
+
+    signed_url = await get_file_url(uploaded.storage_path)
+    return {"download_url": signed_url, "filename": uploaded.filename}

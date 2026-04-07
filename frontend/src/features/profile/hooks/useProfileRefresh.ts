@@ -129,27 +129,33 @@ export function useProfileRefresh() {
   }, [])
 
   const startReset = useCallback(async () => {
-    setPhase('refreshing')
-    setCrawlItems([])
-    setCrawlTotal(0)
-    setCrawlStatus(null)
     setError(null)
 
     try {
-      const res = await api.post<{ run_id: string; deleted_count?: number }>(
-        '/profile/reset',
-        {},
-      )
-      setSseUrl(`/api/v1/skills/runs/${res.run_id}/stream`)
+      await api.post<{ deleted_count: number }>('/profile/reset', {})
+      // Clear cache immediately so UI shows blank state, then mark stale
+      // so next navigation/focus triggers a fresh fetch
+      queryClient.setQueryData(['company-profile'], {
+        company_name: null,
+        domain: null,
+        groups: [],
+        product_tabs: [],
+        total_items: 0,
+        last_updated: null,
+        uploaded_files: [],
+        enrichment_status: null,
+      })
+      queryClient.invalidateQueries({ queryKey: ['company-profile'] })
+      setPhase('idle')
     } catch (err) {
       setPhase('error')
       setError({
         message:
-          err instanceof Error ? err.message : 'Failed to start reset',
+          err instanceof Error ? err.message : 'Failed to reset profile',
         retryable: true,
       })
     }
-  }, [])
+  }, [queryClient])
 
   const startFromRunId = useCallback((runId: string) => {
     setPhase('refreshing')

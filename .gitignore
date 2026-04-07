@@ -25,6 +25,22 @@ dist/
 # Docker
 pgdata/
 
+# Uploaded file storage / local data
+backend/data/uploads/
+data/
+
+# One-off migration scripts
+backend/src/flywheel/fix_migration.py
+backend/src/flywheel/import_meetings.py
+backend/src/flywheel/import_research.py
+backend/src/flywheel/migrate_context_store.py
+
+# GSD planning artifacts
+.planning/
+
+# Spreadsheets / analysis files
+*.xlsx
+
 # IDE
 .idea/
 .vscode/

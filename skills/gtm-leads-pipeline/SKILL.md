@@ -1,5 +1,6 @@
 ---
 name: gtm-leads-pipeline
+enabled: false
 version: "1.0"
 description: >
   Use this skill to run a full end-to-end lead generation, qualification, and outreach pipeline.

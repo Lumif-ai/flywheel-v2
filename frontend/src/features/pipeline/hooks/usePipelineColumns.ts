@@ -1,130 +1,148 @@
 import { useCallback, useRef } from 'react'
 import type { ColDef, GridApi, ColumnState } from 'ag-grid-community'
-import { CompanyCell } from '../components/cell-renderers/CompanyCell'
+import { NameCell } from '../components/cell-renderers/NameCell'
 import { ContactCell } from '../components/cell-renderers/ContactCell'
+import { StagePill } from '../components/cell-renderers/StagePill'
 import { FitTierBadge } from '../components/cell-renderers/FitTierBadge'
-import { OutreachDot } from '../components/cell-renderers/OutreachDot'
-import { GraduateButton } from '../components/cell-renderers/GraduateButton'
-import { DaysSinceCell } from '../components/cell-renderers/DaysSinceCell'
-import type { PipelineItem } from '../types/pipeline'
+import { ChannelsCell } from '../components/cell-renderers/ChannelsCell'
+import { DateCell } from '../components/cell-renderers/DateCell'
+import { AiInsightCell } from '../components/cell-renderers/AiInsightCell'
+import { DatePickerEditor } from '../components/cell-renderers/DatePickerEditor'
+import { OutreachStatusCell } from '../components/cell-renderers/OutreachStatusCell'
+import { ExpandToggleCell } from '../components/cell-renderers/ExpandToggleCell'
+import type { PipelineListItem } from '../types/pipeline'
 
-const COLUMN_STATE_KEY = 'flywheel:pipeline:columnState'
+const COLUMN_STATE_KEY = 'pipeline-col-state'
 
-function formatRelativeTime(dateStr: string | null | undefined): string {
-  if (!dateStr) return 'Never'
-  const now = Date.now()
-  const then = new Date(dateStr).getTime()
-  const diffMs = now - then
-  const diffMin = Math.floor(diffMs / 60000)
-  if (diffMin < 1) return 'just now'
-  if (diffMin < 60) return `${diffMin}m ago`
-  const diffHr = Math.floor(diffMin / 60)
-  if (diffHr < 24) return `${diffHr}h ago`
-  const diffDay = Math.floor(diffHr / 24)
-  if (diffDay === 1) return 'yesterday'
-  if (diffDay < 7) return `${diffDay}d ago`
-  return new Date(dateStr).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
-}
-
-const columnDefs: ColDef<PipelineItem>[] = [
+const columnDefs: ColDef<PipelineListItem>[] = [
+  // 0. Expand toggle — pinned left
   {
-    headerName: 'Company',
-    field: 'name',
-    cellRenderer: CompanyCell,
-    minWidth: 200,
-    flex: 1.5,
-    resizable: true,
-    sortable: true,
-  },
-  {
-    headerName: 'Contact',
-    field: 'primary_contact_name',
-    cellRenderer: ContactCell,
-    minWidth: 160,
-    flex: 1,
-    resizable: true,
-    sortable: true,
-  },
-  {
-    headerName: 'Email',
-    field: 'primary_contact_email',
-    minWidth: 140,
-    resizable: true,
-    sortable: false,
-    cellRenderer: (params: { value: string | null | undefined }) => {
-      if (!params.value) return '<span style="color:var(--secondary-text)">—</span>'
-      return `<a href="mailto:${params.value}" style="color:var(--brand-coral);font-size:13px;text-decoration:none;">${params.value}</a>`
-    },
-  },
-  {
-    headerName: 'LinkedIn',
-    field: 'primary_contact_linkedin',
-    minWidth: 80,
-    width: 80,
-    resizable: true,
-    sortable: false,
-    cellRenderer: (params: { value: string | null | undefined }) => {
-      if (!params.value) return '<span style="color:var(--secondary-text)">—</span>'
-      return `<a href="${params.value}" target="_blank" rel="noreferrer" style="color:var(--brand-coral);font-size:13px;">↗</a>`
-    },
-  },
-  {
-    headerName: 'Fit Tier',
-    field: 'fit_tier',
-    cellRenderer: FitTierBadge,
-    width: 120,
-    resizable: true,
-    sortable: true,
-  },
-  {
-    headerName: 'Outreach',
-    field: 'last_outreach_status',
-    cellRenderer: OutreachDot,
-    width: 130,
-    resizable: true,
-    sortable: true,
-  },
-  {
-    headerName: 'Last Action',
-    field: 'last_interaction_at',
-    width: 140,
-    resizable: true,
-    sortable: true,
-    valueFormatter: (params) => formatRelativeTime(params.value as string | null),
-  },
-  {
-    headerName: 'Days Stale',
-    field: 'days_since_last_outreach',
-    width: 100,
-    resizable: true,
-    sortable: true,
-    cellRenderer: DaysSinceCell,
-  },
-  {
-    headerName: 'Graduate',
-    field: undefined,
-    cellRenderer: GraduateButton,
-    width: 110,
+    headerName: '',
+    width: 36,
+    pinned: 'left',
     sortable: false,
     resizable: false,
-    pinned: 'right' as const,
     suppressMovable: true,
+    lockPosition: 'left',
+    cellRenderer: ExpandToggleCell,
+    // cellRendererParams overridden in PipelinePage.tsx
+  },
+  // 1. Row number — pinned left
+  {
+    headerName: '',
+    width: 48,
+    pinned: 'left',
+    sortable: false,
+    resizable: false,
+    suppressMovable: true,
+    lockPosition: 'left',
+    cellStyle: { color: '#9CA3AF', fontSize: '11px', textAlign: 'center' },
+    valueGetter: (params) => (params.node ? params.node.rowIndex! + 1 : ''),
+  },
+  // 2. Name (widened, domain shown as icon)
+  {
+    headerName: 'Name',
+    field: 'name',
+    width: 260,
+    pinned: 'left',
+    cellRenderer: NameCell,
+    editable: false,
+    sortable: true,
+  },
+  // 3. Primary Contact
+  {
+    headerName: 'Primary Contact',
+    field: 'primary_contact' as keyof PipelineListItem,
+    width: 160,
+    cellRenderer: ContactCell,
+    editable: false,
+    sortable: false,
+  },
+  // 4. Stage — editable dropdown
+  {
+    headerName: 'Stage',
+    field: 'stage',
+    width: 130,
+    cellRenderer: StagePill,
+    editable: true,
+    cellEditor: 'agSelectCellEditor',
+    cellEditorParams: {
+      values: ['identified', 'contacted', 'engaged', 'qualified', 'committed', 'closed'],
+    },
+    sortable: true,
+  },
+  // 5. Fit — editable dropdown
+  {
+    headerName: 'Fit',
+    field: 'fit_tier',
+    width: 100,
+    cellRenderer: FitTierBadge,
+    editable: true,
+    cellEditor: 'agSelectCellEditor',
+    cellEditorParams: {
+      values: ['Strong', 'Medium', 'Weak'],
+    },
+    sortable: true,
+  },
+  // 6. Channels
+  {
+    headerName: 'Channels',
+    field: 'channels',
+    width: 120,
+    cellRenderer: ChannelsCell,
+    editable: false,
+    sortable: false,
+  },
+  // 7. Outreach (replaces Next Outreach)
+  {
+    headerName: 'Outreach',
+    field: 'outreach_summary' as keyof PipelineListItem,
+    width: 130,
+    cellRenderer: OutreachStatusCell,
+    editable: false,
+    sortable: false,
+  },
+  // 8. AI Insight
+  {
+    headerName: 'AI Insight',
+    field: 'ai_summary',
+    width: 200,
+    cellRenderer: AiInsightCell,
+    editable: false,
+    sortable: false,
+  },
+  // 9. Next Action — editable date picker
+  {
+    headerName: 'Next Action',
+    field: 'next_action_date',
+    width: 150,
+    cellRenderer: DateCell,
+    editable: true,
+    cellEditor: DatePickerEditor,
+    sortable: true,
   },
 ]
 
 export function usePipelineColumns() {
   const gridApiRef = useRef<GridApi | null>(null)
 
-  const getInitialState = (): { columnState: ColumnState[] } | undefined => {
+  const getSavedColumnState = (): ColumnState[] | null => {
     try {
       const raw = localStorage.getItem(COLUMN_STATE_KEY)
-      if (!raw) return undefined
-      const parsed = JSON.parse(raw) as ColumnState[]
-      return { columnState: parsed }
+      if (!raw) return null
+      return JSON.parse(raw) as ColumnState[]
     } catch {
-      return undefined
+      return null
     }
   }
+
+  /** Call from onGridReady to restore saved column widths/order/visibility */
+  const restoreColumnState = useCallback((api: GridApi) => {
+    const saved = getSavedColumnState()
+    if (saved) {
+      api.applyColumnState({ state: saved, applyOrder: true })
+    }
+  }, [])
 
   const onColumnStateChanged = useCallback(() => {
     const api = gridApiRef.current
@@ -133,13 +151,13 @@ export function usePipelineColumns() {
       const state = api.getColumnState()
       localStorage.setItem(COLUMN_STATE_KEY, JSON.stringify(state))
     } catch {
-      // localStorage write failure — non-fatal
+      // localStorage write failure -- non-fatal
     }
   }, [])
 
   return {
     columnDefs,
-    initialState: getInitialState(),
+    restoreColumnState,
     onColumnStateChanged,
     gridApiRef,
   }

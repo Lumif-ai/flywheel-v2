@@ -7,7 +7,7 @@
  * and meeting notes ingestion before redirecting to briefing.
  */
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router'
 import { api } from '@/lib/api'
 
@@ -65,15 +65,16 @@ export function useTeamOnboarding(token: string) {
   // ------------------------------------------------------------------
   // Phase: accepting -- call invite accept on mount
   // ------------------------------------------------------------------
+  const acceptingRef = useRef(false)
+
   useEffect(() => {
     if (state.phase !== 'accepting' || !token) return
-
-    let cancelled = false
+    if (acceptingRef.current) return // Guard against StrictMode double-fire
+    acceptingRef.current = true
 
     async function acceptInvite() {
       try {
         const res = await api.post<AcceptResponse>('/tenants/invite/accept', { token })
-        if (cancelled) return
 
         setState(prev => ({
           ...prev,
@@ -81,7 +82,7 @@ export function useTeamOnboarding(token: string) {
           phase: 'streams',
         }))
       } catch (err: unknown) {
-        if (cancelled) return
+        acceptingRef.current = false
         const message =
           err instanceof Error && 'code' in err && (err as { code: number }).code === 404
             ? 'Invalid or expired invite link. Please ask your team admin to resend.'
@@ -91,7 +92,6 @@ export function useTeamOnboarding(token: string) {
     }
 
     acceptInvite()
-    return () => { cancelled = true }
   }, [token, state.phase])
 
   // ------------------------------------------------------------------

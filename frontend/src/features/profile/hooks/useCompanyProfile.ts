@@ -22,10 +22,18 @@ export interface ProfileUploadedFile {
   size_bytes: number
 }
 
+export interface ProductTab {
+  slug: string
+  name: string
+  icon: string
+  sections: ProfileGroup[]
+}
+
 export interface CompanyProfile {
   company_name: string | null
   domain: string | null
   groups: ProfileGroup[]
+  product_tabs: ProductTab[]
   total_items: number
   last_updated: string | null
   uploaded_files: ProfileUploadedFile[]
@@ -40,10 +48,14 @@ export function useCompanyProfile() {
   return useQuery({
     queryKey: ['company-profile'],
     queryFn: () => api.get<CompanyProfile>('/profile'),
-    staleTime: 30_000,
+    staleTime: 10_000,
     refetchInterval: (query: Query<CompanyProfile>) => {
-      const status = query.state.data?.enrichment_status
-      return (status === 'pending' || status === 'running') ? 3000 : false
+      const data = query.state.data
+      const status = data?.enrichment_status
+      // Poll while enrichment is running OR while we have uploaded files but no groups yet
+      if (status === 'pending' || status === 'running') return 3000
+      if (data && data.uploaded_files.length > 0 && data.groups.length === 0 && (!data.product_tabs || data.product_tabs.length === 0)) return 5000
+      return false
     },
   })
 }

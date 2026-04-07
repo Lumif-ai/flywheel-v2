@@ -9,10 +9,21 @@ import { useSearchParams } from 'react-router'
 import { Loader2 } from 'lucide-react'
 import { useTeamOnboarding } from '@/features/onboarding/hooks/useTeamOnboarding'
 import { TeamOnboarding } from '@/features/onboarding/components/TeamOnboarding'
+import { useAuthStore } from '@/stores/auth'
+import { getSupabase } from '@/lib/supabase'
+import { useState } from 'react'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
 
 export function InviteAcceptPage() {
   const [searchParams] = useSearchParams()
   const token = searchParams.get('token') ?? ''
+  const user = useAuthStore((s) => s.user)
+  const isAnonymous = user?.is_anonymous ?? true
+  const [email, setEmail] = useState('')
+  const [authLoading, setAuthLoading] = useState(false)
+  const [authError, setAuthError] = useState<string | null>(null)
+  const [magicLinkSent, setMagicLinkSent] = useState(false)
 
   const {
     phase,
@@ -28,7 +39,77 @@ export function InviteAcceptPage() {
     skipStreams,
     skipMeetings,
     onMeetingsComplete,
-  } = useTeamOnboarding(token)
+  } = useTeamOnboarding(isAnonymous ? '' : token) // Don't accept until authenticated
+
+  const handleMagicLink = async () => {
+    if (!email.trim()) return
+    setAuthLoading(true)
+    setAuthError(null)
+    try {
+      const supabase = await getSupabase()
+      if (!supabase) throw new Error('Auth not available')
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          emailRedirectTo: `${window.location.origin}/invite?token=${token}`,
+        },
+      })
+      if (error) throw error
+      setMagicLinkSent(true)
+    } catch (err) {
+      setAuthError(err instanceof Error ? err.message : 'Failed to send login link')
+    }
+    setAuthLoading(false)
+  }
+
+  // Anonymous user — must sign in first
+  if (isAnonymous && token) {
+    return (
+      <div className="flex min-h-[80vh] flex-col items-center justify-center px-4">
+        <div className="max-w-md w-full space-y-6 text-center">
+          <div className="space-y-2">
+            <h1 className="text-xl font-semibold">You've been invited to Flywheel</h1>
+            <p className="text-sm text-muted-foreground">
+              Sign in or create an account to accept this invite.
+            </p>
+          </div>
+
+          {magicLinkSent ? (
+            <div className="rounded-lg border border-border p-6 space-y-2">
+              <p className="text-sm font-medium">Check your email</p>
+              <p className="text-sm text-muted-foreground">
+                We sent a sign-in link to <strong>{email}</strong>. Click it to continue.
+              </p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Input
+                type="email"
+                placeholder="your@email.com"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleMagicLink()}
+              />
+              <Button
+                className="w-full"
+                onClick={handleMagicLink}
+                disabled={!email.trim() || authLoading}
+              >
+                {authLoading ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  'Continue with Email'
+                )}
+              </Button>
+              {authError && (
+                <p className="text-sm text-destructive">{authError}</p>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   // No token provided
   if (!token) {

@@ -1,5 +1,6 @@
 ---
 name: browse
+enabled: false
 version: 1.0.0
 description: |
   Fast web browsing for Claude Code via persistent headless Chromium daemon. Navigate to any URL,

@@ -71,3 +71,61 @@ export function triggerRelationshipPrep(
     meeting_id: meetingId ?? null,
   })
 }
+
+// ---------------------------------------------------------------------------
+// Mutations
+// ---------------------------------------------------------------------------
+
+export interface UpdateAccountPayload {
+  name?: string
+  domain?: string | null
+  status?: string
+  relationship_status?: string
+  fit_score?: number | null
+  fit_tier?: string | null
+  intel?: Record<string, unknown>
+  next_action_due?: string | null
+  next_action_type?: string | null
+}
+
+export function updateAccount(id: string, payload: UpdateAccountPayload): Promise<unknown> {
+  return api.patch(`/accounts/${id}`, payload)
+}
+
+export function updateRelationshipType(id: string, types: string[]): Promise<unknown> {
+  return api.patch(`/relationships/${id}/type`, { types })
+}
+
+export interface UpdateContactPayload {
+  name?: string
+  email?: string | null
+  title?: string | null
+  role_in_deal?: string | null
+  linkedin_url?: string | null
+  notes?: string | null
+}
+
+export function updateContact(
+  accountId: string,
+  contactId: string,
+  payload: UpdateContactPayload,
+): Promise<unknown> {
+  return api.patch(`/accounts/${accountId}/contacts/${contactId}`, payload)
+}
+
+export interface CreateContactPayload {
+  name: string
+  email?: string | null
+  title?: string | null
+  role_in_deal?: string | null
+  linkedin_url?: string | null
+  notes?: string | null
+}
+
+export function createContact(accountId: string, payload: CreateContactPayload): Promise<unknown> {
+  return api.post(`/accounts/${accountId}/contacts`, payload)
+}
+
+export function deleteContact(accountId: string, contactId: string): Promise<unknown> {
+  return api.delete(`/accounts/${accountId}/contacts/${contactId}`)
+}

@@ -12,6 +12,16 @@ description: >
   Requires: Playwright MCP server connected.
 compatibility: "Requires Playwright MCP server connected and active."
 version: "1.0"
+triggers:
+  - "score these companies"
+  - "is this a good fit"
+  - "research these leads"
+  - "score my CSV"
+  - "which companies should I prioritize"
+  - "qualify these leads"
+tags:
+  - gtm
+  - fit-analysis
 context-aware: true
 web_tier: 2
 ---
@@ -1042,3 +1052,13 @@ Update memory with new preferences. Edit existing entries, never duplicate.
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-03-13 | Pre-Flywheel baseline (existing behavior, no standard sections) |
+
+## Flywheel MCP Integration
+
+When connected to the Flywheel MCP server, persist scores to the GTM leads pipeline:
+
+### After scoring each company:
+1. Call `flywheel_upsert_lead(name, fit_score=<score>, fit_tier="<tier>", fit_rationale="<why>", source="gtm-company-fit-analyzer")`
+2. Include any additional intel discovered during scoring in the `intel` parameter
+
+If Flywheel MCP is not connected, skip these steps silently and use local file output.

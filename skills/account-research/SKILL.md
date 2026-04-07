@@ -10,7 +10,14 @@ description: >
   Can run standalone for pure research or as part of the account strategy pipeline.
 context-aware: true
 triggers:
-  - manual
+  - "research this account"
+  - "company deep dive"
+  - "stakeholder map for"
+  - "who do we know at"
+  - "account research for"
+tags:
+  - research
+  - accounts
 dependencies:
   skills: []
   files:
@@ -350,3 +357,14 @@ This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/co
 | Version | Date | Changes |
 |---------|------|---------|
 | 1.0 | 2026-03-17 | Initial creation. Phases 0-3 extracted from account-strategy monolith. Source discovery, company intelligence, stakeholder mapping, pain/workflow extraction. |
+
+## Flywheel MCP Integration
+
+When connected to the Flywheel MCP server, persist research findings to the GTM leads pipeline:
+
+### After researching a company:
+1. Call `flywheel_upsert_lead(name, intel={industry, size, strategy, pain_points, ...}, source="account-research")`
+2. For each stakeholder discovered, call `flywheel_add_lead_contact(lead_name, contact_name, email, title, linkedin_url, role="decision-maker|champion|influencer")`
+3. Also call `flywheel_write_context(content, file_name="company-intel")` for deep intel that enriches the context store
+
+If Flywheel MCP is not connected, skip these steps silently and use local file output.

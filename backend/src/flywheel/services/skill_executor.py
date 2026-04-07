@@ -939,6 +939,23 @@ async def _execute_company_intel(
         raw_text = _file_row.extracted_text
         url = f"document:{file_id}"
 
+        # Append supplementary document texts (multi-file upload scenario)
+        if supplementary_file_ids:
+            for _sup_fid in supplementary_file_ids:
+                try:
+                    async with factory() as _sup_sess:
+                        await _sup_sess.execute(
+                            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                            {"tid": str(tenant_id)},
+                        )
+                        _sup_row = (await _sup_sess.execute(
+                            select(UploadedFile).where(UploadedFile.id == _sup_fid)
+                        )).scalar_one_or_none()
+                    if _sup_row and _sup_row.extracted_text:
+                        raw_text += f"\n\n---\nDocument supplement:\n\n{_sup_row.extracted_text}"
+                except Exception as _sup_err:
+                    logger.warning("Could not fetch supplementary document %s: %s", _sup_fid, _sup_err)
+
     else:
         # Stage 1 (URL path): crawl the website
         await _append_event_atomic(factory, run_id, {
@@ -1262,9 +1279,6 @@ async def _execute_company_intel(
         "competitive-intel.md": _build_list_content(
             enriched.get("competitors", []), "competitive-landscape"
         ),
-        "product-modules.md": _build_list_content(
-            enriched.get("products", []), "product-inventory"
-        ),
         "market-taxonomy.md": _build_list_content(
             enriched.get("industries", []), "industry-verticals"
         ),
@@ -1278,6 +1292,33 @@ async def _execute_company_intel(
     import urllib.parse as _urlparse
     _parsed = _urlparse.urlparse(url if url.startswith("http") else f"https://{url}")
     company_domain = (_parsed.hostname or url).removeprefix("www.").lower()
+
+    # Soft-delete stale static section entries before writing fresh ones
+    static_files = [fn.replace(".md", "") for fn in section_map.keys()]
+    try:
+        async with factory() as _static_cleanup:
+            await _static_cleanup.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            _uid_cleanup = str(user_id) if user_id else str(tenant_id)
+            await _static_cleanup.execute(
+                sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                {"uid": _uid_cleanup},
+            )
+            from sqlalchemy.dialects.postgresql import array as pg_array
+            await _static_cleanup.execute(
+                sa_text(
+                    "UPDATE context_entries SET deleted_at = now() "
+                    "WHERE file_name = ANY(:names) "
+                    "AND source = :source "
+                    "AND deleted_at IS NULL"
+                ),
+                {"names": static_files, "source": source},
+            )
+            await _static_cleanup.commit()
+    except Exception as e:
+        logger.warning("Failed to clean up stale static entries: %s", e)
 
     files_written = 0
     for filename, (content_lines, detail) in section_map.items():
@@ -1317,6 +1358,115 @@ async def _execute_company_intel(
             logger.error("Context write failed for %s: %s", filename, e)
 
     tool_calls.append({"tool": "write_context", "input": str(list(section_map.keys())), "result_length": files_written})
+
+    # --- Soft-delete stale product entries before writing new ones ---
+    # This prevents duplicates when the LLM returns differently-slugged
+    # products across runs (e.g. "WC Premium Audit" vs "Workers Comp Premium Audit").
+    try:
+        async with factory() as _cleanup_sess:
+            await _cleanup_sess.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            _uid = str(user_id) if user_id else str(tenant_id)
+            await _cleanup_sess.execute(
+                sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                {"uid": _uid},
+            )
+            await _cleanup_sess.execute(
+                sa_text(
+                    "UPDATE context_entries SET deleted_at = now() "
+                    "WHERE file_name LIKE 'product:%' "
+                    "AND source = :source "
+                    "AND deleted_at IS NULL"
+                ),
+                {"source": source},
+            )
+            await _cleanup_sess.commit()
+        logger.info("Cleaned up stale product entries for tenant %s", tenant_id)
+    except Exception as e:
+        logger.warning("Failed to clean up stale product entries: %s", e)
+
+    # --- Per-product structured writes ---
+    import re as _re
+
+    def _slugify(name: str) -> str:
+        slug = name.lower().strip()
+        slug = _re.sub(r"[^a-z0-9\s-]", "", slug)
+        slug = _re.sub(r"[\s]+", "-", slug)
+        return slug[:60]
+
+    products = enriched.get("products", [])
+    for p in products:
+        # Defensive: handle plain string products (backward compat)
+        if isinstance(p, str):
+            p = {"name": p, "description": "", "target_customers": [],
+                 "pain_points": [], "competitors": [], "value_proposition": ""}
+
+        pname = p.get("name", "unknown")
+        slug = _slugify(pname)
+        if not slug:
+            continue
+
+        # Build per-product entries
+        product_entries = {}
+
+        # Base entry: description + value proposition
+        desc_lines = [pname]
+        if p.get("description"):
+            desc_lines.append(p["description"])
+        if p.get("value_proposition"):
+            desc_lines.append(f"Value Proposition: {p['value_proposition']}")
+        product_entries[f"product:{slug}"] = (desc_lines, f"product-overview:{slug}")
+
+        # ICP
+        if p.get("target_customers"):
+            product_entries[f"product:{slug}.icp"] = (
+                [str(c) for c in p["target_customers"]], f"product-icp:{slug}"
+            )
+
+        # Pain points
+        if p.get("pain_points"):
+            product_entries[f"product:{slug}.pain-points"] = (
+                [str(pp) for pp in p["pain_points"]], f"product-pain-points:{slug}"
+            )
+
+        # Competitors
+        if p.get("competitors"):
+            product_entries[f"product:{slug}.competitors"] = (
+                [str(c) for c in p["competitors"]], f"product-competitors:{slug}"
+            )
+
+        for file_key, (content_lines, detail) in product_entries.items():
+            if not content_lines:
+                continue
+            entry = {
+                "detail": detail,
+                "confidence": "medium",
+                "content": content_lines,
+                "metadata": {"source_url": url, "product_slug": slug},
+            }
+            try:
+                async with factory() as session:
+                    await session.execute(
+                        sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                        {"tid": str(tenant_id)},
+                    )
+                    _uid = str(user_id) if user_id else str(tenant_id)
+                    await session.execute(
+                        sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                        {"uid": _uid},
+                    )
+                    await async_append_entry(
+                        session=session,
+                        file=file_key,
+                        entry=entry,
+                        source=source,
+                    )
+                    await session.commit()
+                files_written += 1
+            except Exception as e:
+                logger.error("Product context write failed for %s: %s", file_key, e)
 
     # Build output summary
     output_parts.append(f"# Company Intelligence: {company_name}")
@@ -1366,6 +1516,78 @@ async def _execute_company_intel(
     token_usage = {"input_tokens": 0, "output_tokens": 0, "model": "claude-sonnet-4-20250514"}
 
     return "\n".join(output_parts), token_usage, tool_calls
+
+
+async def _upsert_pipeline_from_meeting(
+    factory: async_sessionmaker,
+    tenant_id: UUID,
+    user_id: UUID | None,
+    meeting_id: UUID,
+    account_id: UUID | None,
+    attendees: list[dict] | None,
+) -> UUID | None:
+    """Create or upsert a pipeline entry from a processed meeting.
+
+    Derives company name from: matched account name > external attendee domain.
+    Returns pipeline_entry.id or None if no company could be identified.
+    """
+    from flywheel.engines.meeting_processor_web import (
+        _extract_external_domains,
+    )
+    from flywheel.services.pipeline_service import PipelineService, CreatePipelineRequest
+    from flywheel.auth.jwt import TokenPayload
+
+    company_name = None
+    domain = None
+
+    # Priority 1: Use matched account's name and domain
+    if account_id:
+        async with factory() as sess:
+            await sess.execute(
+                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                {"tid": str(tenant_id)},
+            )
+            from flywheel.db.models import Account
+            acct = (await sess.execute(
+                select(Account).where(Account.id == account_id)
+            )).scalar_one_or_none()
+            if acct:
+                company_name = acct.name
+                domain = acct.domain
+
+    # Priority 2: Derive from external attendee domains
+    if not company_name and attendees:
+        external_domains = _extract_external_domains(attendees)
+        if external_domains:
+            domain = external_domains[0]
+            company_name = domain.split(".")[0].title()
+
+    if not company_name:
+        return None  # Can't create entry without a name
+
+    # Build a synthetic TokenPayload for PipelineService
+    token = TokenPayload(
+        sub=user_id or UUID("00000000-0000-0000-0000-000000000000"),
+        app_metadata={"tenant_id": str(tenant_id)},
+    )
+
+    async with factory() as sess:
+        await sess.execute(
+            sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+            {"tid": str(tenant_id)},
+        )
+        svc = PipelineService(sess, token)
+        entry, _was_existing = await svc.upsert_from_source(
+            CreatePipelineRequest(
+                name=company_name,
+                entity_type="company",
+                domain=domain,
+                source="meeting",
+                source_ref_id=meeting_id,
+                stage="identified",
+            )
+        )
+        return entry.id
 
 
 async def _execute_meeting_processor(
@@ -1674,6 +1896,24 @@ async def _execute_meeting_processor(
             else:
                 logger.info("Run %s: no account match (all-internal or free-email attendees)", run_id)
 
+        # --- Pipeline entry auto-creation (Phase 86: SOURCE-01) ---
+        pipeline_entry_id = None
+        try:
+            if meeting_type not in ("internal", "team-meeting"):
+                pipeline_entry_id = await _upsert_pipeline_from_meeting(
+                    factory=factory,
+                    tenant_id=tenant_id,
+                    user_id=user_id,
+                    meeting_id=meeting_id,
+                    account_id=account_id,
+                    attendees=content.attendees,
+                )
+        except Exception as pe_exc:
+            logger.warning(
+                "Run %s: pipeline entry creation failed (non-fatal): %s",
+                run_id, pe_exc,
+            )
+
         # ------------------------------------------------------------------
         # Stage 6: writing
         # ------------------------------------------------------------------
@@ -1760,6 +2000,7 @@ async def _execute_meeting_processor(
                     processed_at=datetime.now(timezone.utc),
                     meeting_type=meeting_type,
                     account_id=account_id,
+                    pipeline_entry_id=pipeline_entry_id,
                     skill_run_id=run_id,
                 )
             )

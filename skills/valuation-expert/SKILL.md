@@ -1,5 +1,6 @@
 ---
 name: valuation-expert
+enabled: false
 version: "1.0"
 description: "Perform rigorous company valuations for any context — acquisition, joint venture, fundraising, strategic planning, litigation, tax, or internal benchmarking. Use this skill whenever a user asks to value a company, estimate enterprise value, calculate what a business is worth, run a DCF, apply revenue or EBITDA multiples, do comparable company analysis, or produce a valuation report. Also trigger when the user mentions 'valuation', 'what is my company worth', 'acquisition price', 'deal valuation', 'fundraising valuation', 'pre-money', 'post-money', 'EV/Revenue', 'EV/EBITDA', 'discounted cash flow', 'terminal value', 'WACC', or 'valuation memo'. Adapts methodology, premiums/discounts, and report framing to the user's stated purpose. Works for all company stages: pre-revenue, growth-stage, and mature. Produces a professional Word document (.docx) with full methodology transparency. Even if the user just shares financials and asks 'what is this worth', use this skill."
 web_tier: 1

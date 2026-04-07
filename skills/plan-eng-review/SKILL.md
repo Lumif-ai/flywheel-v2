@@ -1,5 +1,6 @@
 ---
 name: plan-eng-review
+enabled: false
 version: 1.0.0
 description: |
   Eng manager-mode plan review. Lock in the execution plan — architecture,

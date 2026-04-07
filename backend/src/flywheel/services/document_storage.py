@@ -1,11 +1,9 @@
-"""Supabase Storage integration for document artifacts.
-
-Provides upload/download helpers for HTML documents produced by skill runs,
-plus title generation and metadata extraction utilities.
+"""Supabase Storage integration for documents and uploaded files.
 
 Public API:
-    upload_document(tenant_id, document_type, document_id, content, mime_type) -> str
-    get_document_url(storage_path, expires_in) -> str
+    get_document_url(storage_path, expires_in) -> str   -- signed URL for "documents" bucket (legacy)
+    upload_file(tenant_id, file_id, filename, ...) -> str -- upload to "uploads" bucket
+    get_file_url(storage_path, expires_in) -> str        -- signed URL for "uploads" bucket
     _generate_title(skill_name, input_text, metadata) -> str
     _extract_document_metadata(skill_name, input_text, output) -> dict
 """
@@ -23,23 +21,49 @@ from flywheel.config import settings
 logger = logging.getLogger(__name__)
 
 BUCKET = "documents"
+UPLOADS_BUCKET = "uploads"
 
 
-async def upload_document(
-    tenant_id: str,
-    document_type: str,
-    document_id: str,
-    content: bytes,
-    mime_type: str = "text/html",
-) -> str:
-    """Upload content to Supabase Storage and return the storage path."""
+async def get_document_url(storage_path: str, expires_in: int = 3600) -> str:
+    """Generate a signed URL for a document in Supabase Storage."""
     supabase_url = settings.supabase_url
     service_key = settings.supabase_service_key
 
-    storage_path = f"{tenant_id}/{document_type}/{document_id}.html"
-    url = f"{supabase_url}/storage/v1/object/{BUCKET}/{storage_path}"
+    url = f"{supabase_url}/storage/v1/object/sign/{BUCKET}/{storage_path}"
 
-    async with httpx.AsyncClient(timeout=30) as client:
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            url,
+            json={"expiresIn": expires_in},
+            headers={
+                "Authorization": f"Bearer {service_key}",
+                "Content-Type": "application/json",
+            },
+        )
+        resp.raise_for_status()
+        data = resp.json()
+
+    signed_path = data.get("signedURL", "")
+    if signed_path.startswith("/"):
+        return f"{supabase_url}{signed_path}"
+    return signed_path
+
+
+async def upload_file(
+    tenant_id: str,
+    file_id: str,
+    filename: str,
+    content: bytes,
+    mime_type: str = "application/octet-stream",
+) -> str:
+    """Upload raw file bytes to the 'uploads' bucket. Returns storage path."""
+    supabase_url = settings.supabase_url
+    service_key = settings.supabase_service_key
+
+    storage_path = f"{tenant_id}/{file_id}/{filename}"
+    url = f"{supabase_url}/storage/v1/object/{UPLOADS_BUCKET}/{storage_path}"
+
+    async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             url,
             content=content,
@@ -50,16 +74,16 @@ async def upload_document(
         )
         resp.raise_for_status()
 
-    logger.info("Uploaded document to %s (%d bytes)", storage_path, len(content))
+    logger.info("Uploaded file to %s (%d bytes)", storage_path, len(content))
     return storage_path
 
 
-async def get_document_url(storage_path: str, expires_in: int = 3600) -> str:
-    """Generate a signed URL for a document in Supabase Storage."""
+async def get_file_url(storage_path: str, expires_in: int = 3600) -> str:
+    """Generate a signed URL for a file in the 'uploads' bucket."""
     supabase_url = settings.supabase_url
     service_key = settings.supabase_service_key
 
-    url = f"{supabase_url}/storage/v1/object/sign/{BUCKET}/{storage_path}"
+    url = f"{supabase_url}/storage/v1/object/sign/{UPLOADS_BUCKET}/{storage_path}"
 
     async with httpx.AsyncClient(timeout=10) as client:
         resp = await client.post(

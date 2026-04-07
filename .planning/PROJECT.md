@@ -2,7 +2,7 @@
 
 ## What This Is
 
-An AI-powered intelligence operating system for founders. Compounds knowledge from meetings, emails, companies, and relationships — then acts on it. Conversations automatically become tracked commitments and executed deliverables via a daily flywheel ritual. Ships email copilot, intelligence-first CRM, meeting intelligence pipeline, task extraction, and an automated daily operating loop.
+An AI-powered intelligence platform for founders. Founders install Flywheel as an MCP server on Claude Code, get curated skills (meeting prep, sales collateral, outreach, legal review, etc.), and their business intelligence compounds automatically via a context store. Claude Code is the brain — all LLM reasoning runs through the user's Claude Code subscription. Flywheel is the data layer — context store, skill catalog, document library, meeting/task/account data.
 
 ## Core Value
 
@@ -10,7 +10,7 @@ Conversations automatically become tracked commitments and executed deliverables
 
 ## Current State
 
-Eight milestones shipped. The platform is functionally complete for single-founder dogfooding with full email intelligence loop.
+Ten milestones shipped. The platform is functionally complete for single-founder dogfooding with Claude Code as the brain and Flywheel as the data layer. The CRM surface is now a unified pipeline — one table for all companies and people, with saved views, automatic lifecycle management, and full provenance tracking.
 
 **Shipped milestones:**
 - **v1.0 Email Copilot** (2026-03-25) — Gmail sync, 5-tier scoring, voice-learned drafts, review UI, feedback loop
@@ -21,12 +21,10 @@ Eight milestones shipped. The platform is functionally complete for single-found
 - **v5.0 Tasks UI** (2026-03-29) — Task triage, focus mode, quick-add, detail panel, briefing widget
 - **v6.0 Email-to-Tasks** (2026-03-29) — Email action item extraction, task attribution, sync integration
 - **v7.0 Email Voice & Intelligence Overhaul** (2026-03-30) — 10-field voice profiles, voice settings UI, draft regeneration, voice as context store asset, email context extractor, confidence-routed extraction pipeline
+- **v8.0 Flywheel Platform Architecture** (2026-04-05) — 10 MCP data primitives, skill catalog seed, feature flags, CLAUDE.md template, leads pipeline frontend
+- **v9.0 Unified Pipeline** (2026-04-06) — Unified schema (pipeline_entries + contacts + activities + sources), data migration, full pipeline API, multi-source integration, AG Grid with saved views, side panel + profile, retirement flow
 
-**Codebase:** FastAPI + React, ~25K LOC backend, ~15K LOC frontend
-
-## Current Milestone: Planning next milestone
-
-v7.0 shipped. Run `/gsd:new-milestone` to define v8.0.
+**Codebase:** FastAPI + React, ~60K LOC backend, ~39K LOC frontend, ~800K LOC MCP CLI
 
 ## Requirements
 
@@ -92,11 +90,35 @@ v7.0 shipped. Run `/gsd:new-milestone` to define v8.0.
 - ✓ Confidence-based routing with human review queue — v7.0 Phase 75
 - ✓ Email extraction wired into gmail sync loop (200/day cap, 10/cycle) — v7.0 Phase 75
 
+- ✓ 10 MCP data primitives on existing flywheel MCP server — v8.0 Phase 78-79
+- ✓ GET /api/v1/skills/{name}/prompt endpoint (skill prompt access) — v8.0 Phase 76
+- ✓ PATCH /api/v1/meetings/{id} endpoint (meeting summary write-back) — v8.0 Phase 76
+- ✓ Markdown → HTML renderer for skill_run output — v8.0 Phase 76
+- ✓ 20 founder-facing skills seeded with triggers, tags, contracts — v8.0 Phase 77
+- ✓ Frontend feature flags (email=false, tasks=false) — v8.0 Phase 80
+- ✓ CLAUDE.md integration rules template — v8.0 Phase 81
+
+- ✓ Unified pipeline schema (pipeline_entries + contacts + activities + pipeline_entry_sources) — v9.0 Phase 83
+- ✓ ORM models for unified pipeline tables — v9.0 Phase 83
+- ✓ Data migration from leads + accounts with dedup and UUID preservation — v9.0 Phase 84
+- ✓ FK retargeting (meetings, tasks, context_entries → pipeline_entries) — v9.0 Phase 84
+- ✓ Legacy table rename (*_legacy) with count verification — v9.0 Phase 84
+- ✓ Pipeline CRUD API with dedup check, search, timeline — v9.0 Phase 85
+- ✓ Legacy leads/accounts endpoint wrappers — v9.0 Phase 85
+- ✓ Multi-source auto-creation (meetings, emails, GTM, manual) with provenance — v9.0 Phase 86
+- ✓ AG Grid pipeline with inline editing, stage pills, fit tier, filters, keyboard nav — v9.0 Phase 87
+- ✓ 7-section side panel (header, AI summary, insights, outreach, tasks, contacts, timeline) — v9.0 Phase 88
+- ✓ Full profile page with scroll restoration on back-navigation — v9.0 Phase 88
+- ✓ Saved views (JSONB filter/sort/columns persistence) — v9.0 Phase 89
+- ✓ Unified MCP pipeline tools + deprecated lead wrappers — v9.0 Phase 89
+- ✓ Sidebar restructure (single Pipeline section with built-in filters + saved views) — v9.0 Phase 89
+- ✓ Legacy route redirects + graduation removal — v9.0 Phase 89
+- ✓ Retirement scanner (60d stale, 90d retire, clear-on-activity) — v9.0 Phase 90
+- ✓ Manual retire/reactivate with visual stale/retired indicators — v9.0 Phase 90
+
 ### Active
 
-<!-- Next milestone — to be defined -->
-
-(None — run `/gsd:new-milestone` to define next milestone requirements)
+(No active requirements — next milestone not yet planned)
 
 ### Out of Scope
 
@@ -123,11 +145,13 @@ v7.0 shipped. Run `/gsd:new-milestone` to define v8.0.
 - `.planning/SPEC-crm-redesign.md` (v2.1)
 - `.planning/SPEC-flywheel-os.md` (v4.0)
 - `.planning/SPEC-email-voice-intelligence.md` (v7.0 — shipped, 17 requirements across 3 tracks)
+- `.planning/SPEC-flywheel-platform-architecture.md` (v8.0 — 10 MCP tools, 2 endpoints, feature flags, skill catalog)
 **Concept briefs:**
 - `.planning/CONCEPT-BRIEF-ai-native-crm.md` (v2.0)
 - `.planning/CONCEPT-BRIEF-crm-redesign.md` (v2.1)
 - `.planning/CONCEPT-BRIEF-flywheel-os.md` (v4.0 — 4-round brainstorm, 14 advisors)
 - `.planning/CONCEPT-BRIEF-email-voice-intelligence.md` (v7.0 — 4-round brainstorm, 15 advisors)
+- `.planning/CONCEPT-BRIEF-flywheel-platform-architecture.md` (v8.0 — 4-round brainstorm, 14 advisors)
 
 ## Constraints
 
@@ -147,7 +171,7 @@ v7.0 shipped. Run `/gsd:new-milestone` to define v8.0.
 | Thread-level display, message-level scoring | Matches human mental model | ✓ Good |
 | Company-first not person-first | B2B engagement is account-level, matches how founders talk | ✓ Good |
 | Accounts as top-level nav | Investors/partners aren't revenue, need cross-focus visibility | ✓ Good |
-| Pipeline separate from Accounts | Different JTBD: triage/execute vs nurture/track | ✓ Good |
+| Pipeline separate from Accounts | Different JTBD: triage/execute vs nurture/track | ✓ Merged in v9.0 — unified pipeline_entries table |
 | Clean break migration + seed | 3 users, no legacy debt, can afford to break | ✓ Good |
 | CSV outreach → database | Relational joins, timeline, multi-founder visibility required | ✓ Good |
 | Feed + Table (Pulse + Pipeline/Accounts) | Different temporal needs: daily signals vs portfolio assessment | ✓ Good |
@@ -178,5 +202,11 @@ v7.0 shipped. Run `/gsd:new-milestone` to define v8.0.
 | 10/cycle batch limit | Prevents LLM timeout within 60s sync budget | ✓ Good |
 | Approve upgrades confidence to medium | Human validation implies correctness; entry_date from original email | ✓ Good |
 
+| Unified pipeline over leads+accounts+relationships | Double graduation UX is confusing; one table, one view, one stage progression | ✓ Good — shipped v9.0, eliminated graduation entirely |
+| Person entries always get a contacts row | Uniform querying, outreach sequences target contacts not pipeline entries | ✓ Good — API-layer enforcement in Phase 85 |
+| sources as junction table not array | Need provenance tracking (which meeting/email created this entry) | ✓ Good — pipeline_entry_sources with 3-column dedup |
+| Context entity bridging via FK | Pipeline is CRM surface, context store is AI knowledge — share identity, not table | ✓ Good — context_entity_id on pipeline_entries |
+| Fit tier renamed Strong/Medium/Weak | A/B/C not intuitive for non-technical founders | ✓ Good — shipped in v9.0 grid |
+
 ---
-*Last updated: 2026-03-30 after v7.0 milestone completion*
+*Last updated: 2026-04-06 after v9.0 Unified Pipeline shipped*

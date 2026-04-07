@@ -1,12 +1,13 @@
 """Meetings endpoints.
 
 Endpoints:
-- POST /meetings/sync                -- pull meetings from Granola, dedup, insert new rows
-- POST /meetings/process-pending     -- batch trigger processing for all pending meetings
-- GET  /meetings/                    -- paginated list of meetings (optional status/time filter)
-- GET  /meetings/{id}                -- detail view (owner-only for transcript_url/ai_summary)
-- POST /meetings/{id}/process        -- trigger meeting intelligence processing pipeline
-- POST /meetings/{id}/prep           -- trigger meeting prep and return stream URL
+- POST  /meetings/sync                -- pull meetings from Granola, dedup, insert new rows
+- POST  /meetings/process-pending     -- batch trigger processing for all pending meetings
+- GET   /meetings/                    -- paginated list of meetings (optional status/time filter)
+- GET   /meetings/{id}                -- detail view (owner-only for transcript_url/ai_summary)
+- PATCH /meetings/{id}                -- partial update (ai_summary, processing_status)
+- POST  /meetings/{id}/process        -- trigger meeting intelligence processing pipeline
+- POST  /meetings/{id}/prep           -- trigger meeting prep and return stream URL
 """
 
 from __future__ import annotations
@@ -15,6 +16,7 @@ from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,6 +28,22 @@ from flywheel.engines.meeting_processor_web import auto_link_meeting_to_account
 from flywheel.services.meeting_sync import sync_granola_meetings
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
+
+
+# ---------------------------------------------------------------------------
+# Request models
+# ---------------------------------------------------------------------------
+
+
+class MeetingPatchRequest(BaseModel):
+    ai_summary: str | None = None
+    processing_status: str | None = None
+
+
+VALID_PROCESSING_STATUSES = {
+    "pending", "processing", "complete", "failed",
+    "skipped", "recorded", "scheduled",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -241,6 +259,60 @@ async def get_meeting(
         data["ai_summary"] = meeting.ai_summary
 
     return data
+
+
+@router.patch("/{meeting_id}")
+async def patch_meeting(
+    meeting_id: UUID,
+    body: MeetingPatchRequest,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Partial update for a meeting record.
+
+    Used by MCP tools to write back AI-generated summaries and update
+    processing status after pipeline execution.
+
+    Only updates fields that are explicitly provided (not None).
+
+    Raises:
+        404 if meeting not found for this tenant (or soft-deleted)
+        422 if processing_status is not a valid value
+    """
+    result = await db.execute(
+        select(Meeting).where(
+            Meeting.id == meeting_id,
+            Meeting.tenant_id == user.tenant_id,
+            Meeting.deleted_at.is_(None),
+        ).limit(1)
+    )
+    meeting = result.scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    # Validate processing_status if provided
+    if body.processing_status is not None:
+        if body.processing_status not in VALID_PROCESSING_STATUSES:
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    f"Invalid processing_status '{body.processing_status}'. "
+                    f"Valid values: {sorted(VALID_PROCESSING_STATUSES)}"
+                ),
+            )
+        meeting.processing_status = body.processing_status
+
+    if body.ai_summary is not None:
+        meeting.ai_summary = body.ai_summary
+
+    await db.commit()
+    await db.refresh(meeting)
+
+    return {
+        "id": str(meeting.id),
+        "ai_summary": meeting.ai_summary,
+        "processing_status": meeting.processing_status,
+    }
 
 
 @router.post("/{meeting_id}/process")

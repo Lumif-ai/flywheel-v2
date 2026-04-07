@@ -1,5 +1,6 @@
 ---
 name: review
+enabled: false
 version: 1.0.0
 description: |
   Pre-landing PR review. Analyzes diff against main for SQL safety, LLM trust

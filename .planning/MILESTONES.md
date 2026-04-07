@@ -95,7 +95,6 @@
 
 ---
 
-
 ## v5.0 — Tasks UI ✓
 
 **Goal:** Users can see, manage, and act on extracted tasks through a dedicated Tasks page with filtering, status tracking, and inline completion.
@@ -146,6 +145,49 @@
 - Voice as context store asset — sender-voice.md written after extraction and updated on every incremental learning
 - Email context extractor — extracts contacts, topics, deal signals, relationship signals, action items from priority 3+ emails
 - Context extraction pipeline — wired into gmail sync loop with confidence routing (high/medium auto-write, low → review queue), 200/day per-tenant cap, 10/cycle batch limit, approve/reject API endpoints
+
+---
+
+## v8.0 — Flywheel Platform Architecture ✓
+
+**Goal:** Transform Flywheel from a backend-executed skill runner into a platform where Claude Code is the brain and Flywheel is the data layer. 10 MCP data primitives, skill catalog, feature flags, CLAUDE.md template, leads pipeline frontend.
+
+**Started:** 2026-03-31
+**Completed:** 2026-04-05
+**Phases:** 76-82 (7 phases, 14 plans)
+**Last phase number:** 82
+
+**Key deliverables:**
+- Backend foundation — skill prompt endpoint, meeting PATCH, markdown renderer, document from-content
+- Skill catalog seed — 20 founder-facing skills with triggers, tags, contracts
+- MCP infrastructure — FlywheelClient methods, logging decorator, port fix
+- 10 MCP data primitives — skill discovery, meetings, tasks, accounts, documents via Claude Code
+- Frontend feature flags — compile-time route gating for design partners
+- CLAUDE.md integration rules template — context routing, skill-first lookup, output saving
+- Leads pipeline frontend — funnel, AG Grid table, side panel, graduation flow
+
+---
+
+## v9.0 — Unified Pipeline ✓
+
+**Goal:** Collapse leads, pipeline, and relationships into a single Airtable-style pipeline surface backed by a unified schema — one table for all companies and people, one table for all contacts, one table for all activities. Eliminate the graduation wall. Single continuous stage progression.
+
+**Started:** 2026-04-06
+**Completed:** 2026-04-06
+**Phases:** 83-90 (8 phases, 25 plans)
+**Last phase number:** 90
+**Stats:** 77 files changed, +9,856 / -2,266 lines
+
+**Key deliverables:**
+- Unified schema — `pipeline_entries` + `contacts` + `activities` + `pipeline_entry_sources` replacing 6 fragmented tables, with RLS, triggers, and indexes
+- Data migration — zero-loss merge of leads + accounts with graduated lead dedup, UUID-preserving FK retargeting for meetings/tasks, 6 legacy tables renamed
+- Pipeline API — full CRUD, search, timeline, dedup check, stage change tracking, source provenance, compatibility wrappers for old endpoints
+- Multi-source integration — auto-creation from meetings and emails with provenance tracking, GTM scrape and manual source types
+- Pipeline grid — unified AG Grid with inline editing, continuous stage progression, filters, search, keyboard nav, view tabs
+- Side panel + profile — 7-section click-to-expand detail panel with AI summary, insights, outreach, tasks, contacts, timeline; full profile page with scroll restoration
+- Saved views — personal filter/sort/column configurations persisted as JSONB, sidebar with built-in relationship filters + user-saved views
+- Navigation cleanup — single Pipeline sidebar section, 7 legacy route redirects, graduation components fully removed, MCP tools replaced with unified pipeline tools
+- Retirement flow — hourly background scanner (60d stale, 90d retire), manual retire/reactivate, "Show retired" toggle, visual stale/retired indicators
 
 ---
 

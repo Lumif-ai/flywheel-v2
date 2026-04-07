@@ -21,7 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from flywheel.auth.jwt import TokenPayload, decode_jwt
-from flywheel.auth.anonymous import ensure_provisioned
+from flywheel.auth.anonymous import ensure_provisioned, ensure_authenticated_provisioned
 from flywheel.db.models import UserTenant
 from flywheel.db.session import get_db, get_session_factory, get_tenant_session
 
@@ -31,26 +31,31 @@ _bearer = HTTPBearer(auto_error=False)
 _user_tenant_cache: dict[str, str] = {}
 
 
-async def _resolve_tenant_for_user(user_id) -> str | None:
-    """Look up tenant_id from user_tenants for an authenticated user."""
+async def _resolve_tenant_for_user(user_id) -> tuple[str | None, str | None]:
+    """Look up tenant_id and role from user_tenants for an authenticated user."""
     uid = str(user_id)
     if uid in _user_tenant_cache:
-        return _user_tenant_cache[uid]
+        cached = _user_tenant_cache[uid]
+        # Cache may be old format (str) or new format (tuple)
+        if isinstance(cached, tuple):
+            return cached
+        return cached, "member"
 
     factory = get_session_factory()
     async with factory() as session:
         result = await session.execute(
-            select(UserTenant.tenant_id).where(
+            select(UserTenant.tenant_id, UserTenant.role).where(
                 UserTenant.user_id == user_id,
                 UserTenant.active == True,
             ).limit(1)
         )
-        row = result.scalar_one_or_none()
+        row = result.first()
         if row:
-            tid = str(row)
-            _user_tenant_cache[uid] = tid
-            return tid
-    return None
+            tid = str(row.tenant_id)
+            role = row.role or "member"
+            _user_tenant_cache[uid] = (tid, role)
+            return tid, role
+    return None, None
 
 
 async def get_current_user(
@@ -80,10 +85,12 @@ async def get_current_user(
             token.app_metadata["tenant_id"] = str(tenant_id)
     elif token.tenant_id is None:
         # Authenticated user without tenant_id in JWT (post-OAuth).
-        # Look up their tenant from the DB.
-        tenant_id = await _resolve_tenant_for_user(token.sub)
+        # Look up their tenant and role from the DB.
+        tenant_id, role = await _resolve_tenant_for_user(token.sub)
         if tenant_id:
             token.app_metadata["tenant_id"] = str(tenant_id)
+            if role:
+                token.app_metadata["role"] = role
 
     return token
 
@@ -91,7 +98,23 @@ async def get_current_user(
 async def require_tenant(
     user: TokenPayload = Depends(get_current_user),
 ) -> TokenPayload:
-    """Require the user to have an active tenant."""
+    """Require the user to have an active tenant.
+
+    Self-healing: if an authenticated user has no tenant (e.g., promote-oauth
+    failed silently during OAuth callback), auto-provisions Profile + Tenant +
+    UserTenant so the request succeeds instead of returning 403.
+    """
+    if user.tenant_id is None and not user.is_anonymous and user.email:
+        # Auto-provision authenticated user who slipped through without a tenant
+        tenant_id, role = await ensure_authenticated_provisioned(
+            user.sub, user.email
+        )
+        if tenant_id:
+            user.app_metadata["tenant_id"] = tenant_id
+            user.app_metadata["role"] = role
+            # Bust the _resolve cache so subsequent calls in this request see it
+            _user_tenant_cache[str(user.sub)] = (tenant_id, role)
+
     if user.tenant_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -103,8 +126,18 @@ async def require_tenant(
 async def require_admin(
     user: TokenPayload = Depends(require_tenant),
 ) -> TokenPayload:
-    """Require the user to be a tenant admin."""
-    if user.tenant_role != "admin":
+    """Require the user to be a tenant admin.
+
+    Falls back to DB lookup if JWT app_metadata doesn't include role,
+    since Supabase JWTs often lack custom app_metadata fields.
+    """
+    role = user.tenant_role
+    if role != "admin":
+        # JWT may not have role — check DB as source of truth
+        _, db_role = await _resolve_tenant_for_user(user.sub)
+        if db_role == "admin":
+            user.app_metadata["role"] = "admin"
+            return user
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Admin access required",

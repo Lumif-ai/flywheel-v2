@@ -1,181 +1,137 @@
-# Feature Landscape — v2.1 CRM Redesign
+# Feature Landscape: Unified Pipeline CRM
 
-**Domain:** Intelligence-first founder CRM (relationship type segmentation, AI synthesis, configurable pipeline grid, commitment tracking, signal layer)
-**Researched:** 2026-03-27
-**Confidence:** MEDIUM — sources include Attio, Folk, Notion CRM patterns, Zoho Signals, TanStack Table docs. Most architectural claims verified. UX pattern claims are MEDIUM confidence (WebSearch + practitioner consensus).
-
----
-
-## Context: What Already Exists vs What's New
-
-The v2.0 CRM shipped flat account tables, basic pipeline triage, and REST APIs. v2.1 builds intelligence surfaces on top of that data. Nothing in this document requires rebuilding what works — it only extends it.
-
-| Already Shipped (v2.0) | Status |
-|------------------------|--------|
-| Accounts list + detail page | Done |
-| Pipeline page (table + Graduate button) | Done |
-| Pulse signals on Briefing page | Done |
-| REST APIs: accounts, contacts, outreach, timeline, pulse | Done |
-| Sidebar with Accounts + Pipeline links | Done |
-
----
+**Domain:** AI-native CRM for founders — unified pipeline replacing 3 separate views
+**Researched:** 2026-04-06
 
 ## Table Stakes
 
-Features users expect. Missing = product feels incomplete or broken.
+Features users expect from a unified pipeline CRM. Missing = product feels broken or half-baked.
 
-| Feature | Why Expected | Complexity | Depends On |
-|---------|--------------|------------|------------|
-| Separate list pages per relationship type (Prospects, Customers, Advisors, Investors) | Every CRM since Salesforce 2005 segments contacts. Attio, Folk, HubSpot all do this. Users cannot mentally manage Advisors and Prospects in a single table — the context and actions are completely different. | Medium | DM-01 `relationship_type[]` migration, API-01 |
-| Click-through to relationship detail | Navigation to detail is non-negotiable. No CRM ships a list-only view. | Low | Existing account detail page — reuse and extend |
-| Primary contact visible on list card | Folk, Attio, and Notion CRM templates all surface the lead contact inline. Users cannot remember which card is which without a name. | Low | API-01 `primary_contact` field |
-| AI summary on detail page (cached, not on-demand) | Nutshell, Attio, and Folk all ship cached relationship summaries. Users expect synthesis; reading raw timeline is too slow. | Medium | DM-04 `ai_summary` + `ai_summary_updated_at` columns, API-07 synthesize |
-| Graceful degradation when AI summary is empty | Attio shows enrichment data when AI context is thin. Folk shows a limited-data research note. Industry consensus: never show a blank panel — display a shorter template-based summary or a "not enough data yet" state instead. | Low | API-07 threshold logic (fewer than 3 data points triggers template summary not LLM call) |
-| Note capture on any relationship (quick-add) | Every personal CRM (Dex, Nimble, Folk) has a quick note field. It's the primary data input for founder users. | Low | API-05 quick-add note, context entry system (already built) |
-| Timeline showing all interaction history | Core CRM table stakes since Salesforce. Users orient by recency. | Low | API already ships unified timeline; FE-09 is the new renderer |
-| Sidebar navigation with relationship type sections | HubSpot, Attio, and Pipedrive all have persistent type-based navigation. Founders context-switch constantly between investor mode and customer mode. | Low | FE-06 sidebar redesign |
-| Graduate-to-relationship flow from Pipeline | Users need an explicit promotion action — this is the "graduation ceremony" of a prospect becoming a real relationship. | Low | API-04 graduate endpoint (already designed) |
-| Configurable Pipeline columns (show/hide) | Airtable-style column management. Any power user of CRMs expects this. TanStack Table supports it natively with column visibility state. | Medium | FE-01 Pipeline grid |
-| Signal count badges on sidebar | Zoho CRM Signals, HubSpot notification dots, Intercom badge counts — users need to know where attention is needed without opening every page. | Medium | API-09 signals endpoint, FE-06 |
-
----
+| Feature | Why Expected | Complexity | Dependencies | Notes |
+|---------|--------------|------------|--------------|-------|
+| Single grid showing all entities (leads + accounts + relationships) | This is the entire premise. Attio, Folk, and HubSpot all show companies/people in one surface. Separate views = separate products. | **High** | Requires unified data model or query layer that JOINs `leads`, `accounts`, and their contacts into one result set | AG Grid already used on both Leads and Pipeline pages — reuse the component but unify the data source |
+| Continuous stage column (no graduation walls) | Attio and Folk both use a single status/stage field per record. HubSpot uses deal stages that flow continuously. The graduation flow (Lead -> Account -> Relationship) is Flywheel's biggest UX friction — users shouldn't need to "promote" a record to keep working it. | **High** | Needs schema migration: either merge Lead + Account tables, or create a unified view/materialized view. Current `leads.graduated_at` and `accounts.pipeline_stage` + `accounts.relationship_status` are separate progression tracks | This is the hardest backend change. Recommend a single `pipeline_stage` enum that covers the full lifecycle: `scraped -> researched -> contacted -> replied -> meeting_booked -> in_conversation -> proposal -> closed_won -> active_customer -> churned` |
+| Side panel for record detail | Every modern CRM (Attio, Folk, Pipedrive, HubSpot) uses click-to-expand side panels. Already built on both Leads and Pipeline pages. | **Low** | Merge `LeadSidePanel` and `PipelineSidePanel` into one `UnifiedSidePanel` that handles both entity types | Existing panels have different data shapes — will need a normalized props interface |
+| Full-text search across all records | Attio handles 50k+ contacts with instant search. Users type a name and expect to see every matching company/person regardless of lifecycle stage. | **Medium** | Existing `normalized_name` fields on both tables. Can use pg `ILIKE` or full-text search via `search_vector` on `context_entries` | Search should hit company name, contact name, domain, and notes |
+| Filter bar with multi-select facets | Attio, Folk, and Pipedrive all offer combinatorial filters (stage + fit tier + industry + source). Already partially built in `LeadsFilterBar` and `PipelineFilterBar`. | **Medium** | Unify filter state management. Current filters are different per page. | Filter facets: stage, fit tier, relationship type (prospect/customer/advisor/investor), source, last activity recency, owner |
+| Column sorting and reordering | Standard spreadsheet behavior. Attio and Clay both allow column drag-to-reorder and click-to-sort. | **Low** | AG Grid supports this natively. Just needs column definitions to enable `sortable: true` and `suppressMovable: false` | Already partially working in existing grids |
+| Row click -> side panel -> detail page navigation | Attio: click row = side panel, click "Open" = full page. Folk: same pattern. Two-level progressive disclosure. | **Low** | Side panel already opens on row click. Add a "View full profile" link in the panel header that routes to `/profile/:id` | CompanyProfilePage already exists at `frontend/src/features/profile/` |
+| Pagination or virtual scroll for 500+ records | Pipedrive and HubSpot paginate. Attio virtualizes. Both LeadsPage and PipelinePage already have `PAGE_SIZE_OPTIONS = [25, 50, 100]`. | **Low** | AG Grid virtual scrolling is built-in. Keep server-side pagination via existing pattern | Already implemented — just needs unified endpoint |
+| Activity recency indicators | Pipedrive shows overdue/due/no-activity badges on pipeline cards. Existing `OutreachDot` and `DaysSinceCell` renderers serve this purpose. | **Low** | Reuse existing cell renderers. `last_interaction_at` exists on Account model. Need to compute equivalent for Leads from `lead_messages.sent_at` | Color-coded dot: green (< 3d), yellow (3-7d), red (> 7d), gray (never) |
 
 ## Differentiators
 
-Features that set this product apart from standard CRMs. Not expected, but create meaningful value and justify adoption over commodity alternatives.
+Features that set the product apart. Not expected in a basic CRM but highly valued by founders.
 
-| Feature | Value Proposition | Complexity | Notes |
-|---------|-------------------|------------|-------|
-| Multi-type account (one entity = Advisor + Investor simultaneously) | Attio supports this and it is their primary differentiator for startup use cases. For a founder, their lead investor IS also their advisor. No other lightweight CRM does this cleanly — most require separate records or a single forced type. | Medium | DM-01 text array not enum; type badge chips with PATCH API-03 |
-| Interactive AI panel — Q&A about a relationship | Asking "what did we discuss last about pricing?" is impossible in legacy CRMs. RAG over account context is founder-specific and high value. Folk offers "draft follow-up from thread" but not open Q&A. | High | API-08 ask endpoint; requires quality RAG implementation with source attribution |
-| Two-paradigm layout: Pipeline as data grid, Relationships as intelligence journals | No single CRM separates these cleanly. Airtable feels clinical for investor journals; Notion feels too freeform for outreach triage. The design decision to have two distinct visual modes is the conceptual differentiator. | High | FE-01 (grid) and FE-07/FE-08 (cards and detail) must look and feel different from each other |
-| Commitment tracking — "What You Owe / What They Owe" | This is the founder's primary cognitive burden after a meeting. Meeting notes contain commitments but no tool extracts and surfaces them bidirectionally. Closest competitor is OnePageCRM's "next action" concept, but that is unidirectional and not commitment-specific. | Medium | FE-12 Commitments tab; API-02 commitments field |
-| Type-specific tab sets per relationship (Advisor tabs differ from Investor tabs differ from Prospect tabs) | Folk and Attio use the same record layout for all contact types. Flywheel's type-driven rendering is a meaningful UX improvement — advisors have "What They Help With", investors have "Updates Owed", prospects have "Outreach". | Medium | FE-08 tab config map; shared RelationshipDetail component with four configurations |
-| Signal layer with priority tiers (reply_received above followup_overdue above commitment_due above stale) | Zoho's Signals are limited to email-open events. Flywheel's signal taxonomy is relationship-aware and multi-source — it covers outreach staleness, commitment deadlines, and inbound replies in a single feed. | Medium | API-09 signal computation; signal types map to founder job-to-be-done |
-| File attachment on relationship (PDF, contract, deck) | Neither Attio nor Folk have native file attachment to contact records. Supabase Storage already exists in this codebase — it is low-cost to add but high value for founder workflows (investor deck attached to investor record, NDA attached to customer). | Medium | API-06, Supabase Storage (already in stack) |
-| Stale relationship detection with ambient visual tint | "Losing touch" detection exists in Dex and Nimble but is limited to notification reminders. Flywheel's grid shows staleness inline (colored number and row background tint) making it ambient and glanceable rather than disruptive. | Low | `days_since_last_outreach` computed field plus CSS class on row |
-| AI-generated type-specific action prompts (Advisor gets "Draft Thank You", Investor gets "Draft Update") | The action bar adapting to relationship type signals the system understands who this person is. No commodity CRM does type-aware action suggestions. The stubs in v2.1 set the surface for v3 skill triggers. | Low | FE-13 type-to-button config map; most buttons are stubs in v2.1 with "Coming soon" toasts |
-
----
+| Feature | Value Proposition | Complexity | Dependencies | Notes |
+|---------|-------------------|------------|--------------|-------|
+| AI-computed stage suggestions | When a reply comes in or a meeting is booked, suggest (or auto-advance) the stage. No other lightweight CRM does this well. Attio's workflows require manual setup. For founders, the CRM should just know. | **Medium** | Needs signal detection: email reply -> suggest "replied", meeting scheduled -> suggest "meeting_booked". Existing meeting processing and outreach tracking provide the raw signals | Show as a subtle nudge in the side panel: "Acme replied 2h ago — move to Replied?" with one-click accept. Don't auto-advance without user control initially. |
+| Unified activity timeline in side panel | Attio's biggest strength: emails, meetings, notes, stage changes — all in one chronological feed per record. Currently split across `outreach_activities`, `meetings`, `context_entries`, and `lead_messages`. | **High** | Must aggregate from 4+ tables. Create a `GET /api/crm/records/:id/timeline` endpoint that unions these sources with a polymorphic shape | This is the single most impactful differentiator. Folk and Pipedrive timelines are basic. Attio's is great. Combine all signal sources into one scrollable feed with type-specific rendering (email card, meeting card, note card, stage-change card) |
+| Smart dedup on record creation | When adding a company, detect near-duplicates by normalized name and domain. Show "Did you mean Acme Corp (already in pipeline)?" Clay and Attio both do this. | **Medium** | `normalized_name` and `domain` already indexed with unique constraints. Add a fuzzy match check (Levenshtein or trigram via pg `pg_trgm`) before insert | Prevention > cleanup. Block duplicate creation at the UI level with a merge-or-create dialog |
+| Saved views (personal) | Attio's saved views are a core feature: "My hot leads", "Stale accounts", "Investors". Folk has custom views per group. Founders want 3-5 saved filters they toggle between. | **Medium** | New `saved_views` table: `{id, tenant_id, user_id, name, filters: JSONB, sort: JSONB, columns: JSONB, is_default}`. Frontend: tab bar above grid. | Start with personal views only (not shared/team views). The existing `PipelineViewTabs` (all/hot/replied/stale) are hardcoded saved views — make them configurable |
+| Inline cell editing (stage, notes, next action) | Attio and Clay both support clicking a cell to edit in-place. More efficient than opening a side panel for a quick stage change. | **Medium** | AG Grid supports `editable: true` on column defs with custom cell editors. Need PATCH endpoint per field. | Only make high-frequency fields inline-editable: stage (dropdown), fit tier (dropdown), next action date (date picker), notes (text). Don't make everything editable — that's a spreadsheet, not a CRM. |
+| Multi-source entry with source tagging | Records come from CSV import, manual add, meeting detection, email sync, AI research. Each source should be visible. Attio tags records with source and shows enrichment provenance. | **Low** | `source` field already exists on both Lead and Account. Display as a badge in the grid. Add source to the add-record dialog. | Sources: `manual`, `csv_import`, `meeting_detected`, `email_sync`, `ai_research`, `browser_extension` |
+| Keyboard navigation | Attio and Clay both support arrow keys in grid, Enter to open, Escape to close panel. Power users expect this. | **Medium** | AG Grid has built-in keyboard nav. Wire Enter -> open side panel, Escape -> close. Add Cmd+K for quick search. | Low effort, high perceived quality. Ship in v1 of unified view. |
+| Quick-add row at bottom of grid | Airtable's "+" row at the bottom. Type a company name, hit Enter, record created with defaults. | **Low** | AG Grid `pinnedBottomRowData` with a custom "Add new" row renderer. On submit, POST to `/api/crm/records` with dedup check. | Much faster than opening a modal. Attio does this. |
+| Outreach sequence status as a column | Show "Step 2/4 sent" or "Waiting for reply" inline in the grid. Folk integrates sequences directly in the pipeline view. Currently, sequence state lives in `lead_messages` (step_number, status). | **Medium** | Aggregate sequence progress per contact: `MAX(step_number) WHERE status='sent'` / total steps. Show as a progress indicator cell. | Don't embed full sequence editing in the grid. Show status; click to manage in side panel. |
 
 ## Anti-Features
 
-Features to explicitly avoid. Building these would dilute focus, add maintenance cost, or conflict with existing design decisions already recorded in PROJECT.md.
+Features to explicitly NOT build. These add complexity without proportional value for a founder-focused CRM.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Custom pipeline stages | Out of scope per PROJECT.md. Stages are fixed by design. Adding configurability requires a settings page, migration strategy, and validation logic that does not add founder value. | Document the 5 fixed stages clearly in UI. |
-| Kanban drag-and-drop for Pipeline | Out of scope per PROJECT.md. Adds complex drag state, mobile incompatibility, and conflicts with the "data grid" paradigm. | Provide inline status dropdown per row if needed in a future patch. |
-| Bulk outreach sending from Pipeline UI | Out of scope per PROJECT.md. Creates compliance risk and undermines the founder ethos of intentional, skill-generated outreach. | Keep outreach generated by skills only. |
-| AI-auto-populate commitments from NLP extraction (v2.1) | High complexity, high error rate. NLP commitment extraction from freeform meeting notes is a standalone ML problem. Wrong commitments displayed as facts erode trust faster than the feature delivers value. | Extract commitments from context entries with `source = "commitment"` — manual capture first, NLP deferred to v3. |
-| Free-text contact creation from UI | Conflicts with no-manual-entry design principle from PROJECT.md. Contacts are created by skills and seed CLI. Adding forms opens data hygiene debt with duplicates and normalization issues. | If quick-add is needed, call the existing contact API with minimal fields. Defer to v3. |
-| Kanban board view for relationship types (e.g., Advisors as Kanban) | Relationships are not a pipeline — they are persistent and do not move through stages. A board view implies stage progression, which is conceptually wrong for advisor/investor relationships. | Card grid for relationships, table grid for pipeline. The two-paradigm design is a stated principle. |
-| Mobile-responsive layout | Out of scope per PROJECT.md. Responsive work doubles CSS complexity. This is a daily-use desktop tool for founders. | Use minimum widths, defer mobile to a dedicated milestone. |
-| Slack and email notification delivery for signals | Out of scope. In-app badges and Briefing page cover signal surfacing for v2.1 without delivery infrastructure. | Ship in-app first, notification delivery is v3. |
-| Account merge and dedup UI | Out of scope per PROJECT.md. Normalization handles this at seed time via CLI. UI dedup adds complex conflict resolution UI. | Run normalization CLI when duplicates appear. |
-| Server-side saved views (persisted to DB) | Overengineered for v2.1. The 4 predefined filter tabs (All, Strong Fit, Needs Follow-up, Stale) cover 90% of pipeline triage needs without requiring a views table, API, and settings UI. | Client-side filter presets. Add server persistence when users explicitly request custom views. |
-
----
+| Kanban board view | Pipedrive's kanban is their identity, but Flywheel is grid-first. Kanban requires a completely different data fetching pattern, drag-drop infrastructure, and doesn't scale past ~50 visible cards. Founders managing 200+ relationships need density, not cards. | Stick with AG Grid table view. Stage progression via inline dropdown or side panel. The filter bar already segments by stage. |
+| Custom objects / custom fields (Attio-style) | Attio's object model is powerful but complex. Building a schema-builder is a product unto itself. Founders don't need to define custom objects — they need the one pipeline to work well. | Use JSONB `intel` and `metadata` fields for extensibility. Add specific columns as needed (e.g., `deal_value`, `industry`) rather than a generic field builder. |
+| Shared/team saved views with permissions | Team views require role-based visibility, edit permissions, and conflict resolution. For a solo-founder or tiny team, personal views are sufficient. | Ship personal saved views. Add shared views in a future milestone when multi-user is a real use case. |
+| Full email compose inside the grid | HubSpot's inline email composer is heavy. Folk's is simpler but still adds significant complexity. | Show email history in the timeline. Link to email compose (existing email feature). Don't embed a rich-text email editor in the CRM grid. |
+| Automated sequence execution engine | Building a reliable email sending queue with scheduling, throttling, bounce handling, and deliverability monitoring is a massive undertaking. Clay and HubSpot have dedicated teams for this. | Show sequence templates and drafted messages. Let the user send from their email client (or existing email feature). AI drafts the messages; human sends them. |
+| Calendar view of pipeline activities | Attio offers calendar views. Low usage for pipeline management. Founders check their calendar in Google Calendar, not their CRM. | Show "next meeting" as a column in the grid. Link to calendar for scheduling. |
+| Real-time collaboration / multiplayer cursors | Attio has multi-user presence indicators. Flywheel is founder-first, often single-user. The engineering cost of real-time sync (WebSockets, conflict resolution) is enormous. | Standard optimistic updates with last-write-wins. Add collaboration features when team size warrants it. |
+| Company/contact separation toggle | Some CRMs let you toggle between "show companies" and "show people" as separate grid modes. This recreates the fragmentation we're eliminating. | One grid. Company is the primary row. Contacts are visible in the side panel and as expandable sub-rows (if needed). |
 
 ## Feature Dependencies
 
-Build order constraints — features downstream of others must wait.
-
 ```
-DM-01 (relationship_type[] column)
-  → API-01 (relationships list filtered by type)
-    → FE-07 (relationship list pages — 4 surfaces)
-    → FE-06 (sidebar badge counts)
-  → API-03 (type update)
-    → FE-08 type badges (clickable)
-  → API-04 (graduate with type assignment)
-    → FE-04 (graduation modal)
+Unified data model ──────────────┬── Single grid view
+                                 ├── Unified side panel
+                                 ├── Continuous stage progression
+                                 └── Full-text search across all records
 
-DM-02 (entity_level column)
-  → FE-10 (People tab — person-level = single prominent card, not grid)
+Single grid view ────────────────┬── Inline cell editing
+                                 ├── Column sorting/reordering
+                                 ├── Saved views (depends on filter state shape)
+                                 ├── Quick-add row
+                                 └── Keyboard navigation
 
-DM-03 (relationship_status + pipeline_stage rename)
-  → API-01 (relationship list filters on relationship_status)
-  → API-10 (pipeline filters on pipeline_stage)
-  → FE-01 (Pipeline grid uses pipeline_stage not old status)
+Unified side panel ──────────────┬── Activity timeline (aggregated)
+                                 └── Outreach sequence status
 
-DM-04 (ai_summary + ai_summary_updated_at columns)
-  → API-07 (synthesize endpoint)
-    → FE-08 AI panel (cached summary display)
-  → API-08 (ask endpoint)
-    → FE-08 AI panel (Q&A mode — question detection)
+Activity timeline ───────────────── AI stage suggestions (needs signal data)
 
-API-05 (quick-add note)
-  → FE-08 AI panel note input
-    → FE-09 Timeline (optimistic update, new entry at top)
+Filter bar ──────────────────────── Saved views (serialized filter state)
 
-API-06 (file upload)
-  → FE-08 AI panel attachment button
-    → FE-09 Timeline file-type entries
-
-API-09 (signals)
-  → FE-06 sidebar badge counts
-  → FE-07 card signal indicator
-  → FE-08 signal banner on detail page
-
-Existing (already built):
-  - Timeline API → API-07 synthesize and API-08 ask both consume this data
-  - Context store → AI endpoints read from it; note quick-add writes to it
-  - Accounts API Graduate endpoint → API-04 extends it with type parameter
-  - Supabase Storage → API-06 file upload uses the existing storage pattern
+Dedup check ─────────────────────── Quick-add row (must check before insert)
+                                 └── Multi-source entry (merge-or-create on import)
 ```
-
----
 
 ## MVP Recommendation
 
-Given the target user (founder managing 15 deep relationships plus 200 outreach pipeline), the minimum shipping set for v2.1:
+**Phase 1 — Unified Grid (must ship together):**
+1. Unified data model / query layer (merges leads + accounts into one result set)
+2. Single AG Grid with continuous stage column (no graduation)
+3. Merged side panel (handles both legacy entity types)
+4. Unified filter bar with stage, fit tier, relationship type, search
+5. Keyboard navigation (Enter/Escape/arrow keys)
 
-**Prioritize — cannot ship without:**
-1. DM-01 to DM-03 data model migrations (all other features block on this)
-2. API-01 and API-02 relationship list and detail with primary_contact and signal_count
-3. FE-06 sidebar with 5 surfaces and badge counts
-4. FE-07 relationship card list pages (4 type surfaces)
-5. FE-08 relationship detail with AI panel and type-driven tabs
-6. FE-01 Pipeline grid (Airtable-style) with column show/hide and filter tabs
-7. FE-04 graduation flow with type selection modal
-8. API-07 synthesize and API-08 ask endpoints with graceful degradation
-9. FE-12 Commitments tab (the founder pain point v2.0 does not address at all)
+**Phase 2 — Rich interactions:**
+6. Inline cell editing (stage, fit tier, next action)
+7. Saved views (personal)
+8. Quick-add row with dedup
+9. Activity timeline in side panel (aggregated from all sources)
 
-**Defer to patch or v2.2:**
-- File attachments (API-06 and attachment button in FE-08) — note capture is higher value per effort; files add Supabase storage wiring that should not block the main surfaces
-- Action bar skill triggers (FE-13 stubs are fine for v2.1 — "Coming soon" toasts are acceptable)
-- Signal computation beyond `stale_relationship` type — reply_received and commitment_due require richer event wiring that can ship as a follow-on
-- Column drag-to-reorder — show/hide is sufficient for v2.1; drag-reorder is polish
+**Phase 3 — AI layer:**
+10. AI stage suggestions based on activity signals
+11. Smart dedup on all entry points (CSV import, manual add)
+12. Outreach sequence status column
 
----
+**Defer entirely:**
+- Kanban view: not needed for density-first founder CRM
+- Custom objects: JSONB covers extensibility needs
+- Email compose in grid: existing email feature handles this
+- Automated sequence sending: draft-and-send-manually is fine for now
 
-## Complexity Assessment by Feature Area
+## Existing Infrastructure to Leverage
 
-| Feature Area | Complexity | Risk | Notes |
-|-------------|------------|------|-------|
-| Data model migrations (DM-01 to DM-04) | Low | Low | Additive columns only; existing data gets safe defaults |
-| Relationships API (API-01 to API-10) | Medium | Low | Follows established FastAPI patterns already in codebase |
-| Pipeline grid (FE-01 to FE-05) | Medium | Medium | TanStack Table v8 handles column state; saved-view tabs are client-side only |
-| Relationship list pages (FE-07) | Low | Low | Card grid with type-config map; mostly CSS and one API call |
-| Relationship detail (FE-08 to FE-12) | High | Medium | Multi-tab, AI panel, Q&A detection, optimistic updates — most complex FE component |
-| AI synthesis (API-07, AI panel display) | Medium | Medium | Prompt engineering and graceful degradation logic; LLM latency needs streaming or spinner |
-| AI Q&A (API-08) | High | Medium | RAG quality determines usefulness; source attribution adds implementation complexity |
-| Signal layer (API-09 and sidebar badges) | Medium | Low | Signal computation is rule-based (not ML); badge polling or React Query invalidation needed |
-| Commitment tracking (FE-12) | Medium | Low | Two-column layout with context entry storage is straightforward; display is harder than storage |
-| Premium design system | Low | Low | Design tokens already defined in project constraints; mostly Tailwind utility classes |
-
----
+| Existing Component | Reuse Strategy |
+|-------------------|----------------|
+| AG Grid (both pages) | Unified column definitions, shared theme config (already near-identical between `leadsTheme` and `pipelineTheme`) |
+| `PipelineSidePanel` + `LeadSidePanel` | Merge into `UnifiedSidePanel` with normalized data interface |
+| `PipelineFilterBar` + `LeadsFilterBar` | Merge into `UnifiedFilterBar` with superset of filter facets |
+| `OutreachDot`, `DaysSinceCell`, `FitTierBadge`, `StageBadge` | Reuse directly — these cell renderers work regardless of entity source |
+| `CompanyProfilePage` | Already handles full profile view — just needs routing from unified grid |
+| `GraduationModal` + `GraduateButton` + `LeadGraduateButton` | **Remove** — graduation is replaced by continuous stage progression |
+| `PipelineViewTabs` (all/hot/replied/stale) | Replace with saved views system (these become default saved views) |
+| `LeadsFunnel` | Keep as optional collapsible visualization above the grid |
+| Backend `Account` + `Lead` models | Create a unified query endpoint that JOINs/UNIONs with consistent shape |
+| `lead_messages` + `outreach_activities` + `meetings` | Unified timeline query for side panel |
+| `RelationshipListPage` type tabs (prospect/customer/advisor/investor) | Become filter facets in the unified filter bar, not separate pages |
 
 ## Sources
 
-- Attio multi-type custom objects and relationship intelligence: [Attio CRM Review 2025 — Stacksync](https://www.stacksync.com/blog/attio-crm-2025-review-features-pros-cons-pricing), [Attio CRM Review 2026 — Authencio](https://www.authencio.com/blog/attio-crm-review-features-pricing-customization-alternatives), [Attio vs Folk 2025 — popi.ai](https://popi.ai/compare/crm-software/attio-vs-folk-crm/)
-- Folk Magic Fields and AI enrichment: [Folk CRM AI Features — folk.app](https://www.folk.app/articles/folk-crm-ai-features)
-- AI relationship summaries (Nutshell timeline summarization): [AI-Powered CRM 2025 — usemotion.com](https://www.usemotion.com/blog/ai-crm)
-- Saved views and column config patterns (Airtable): [Getting Started with Airtable Views](https://support.airtable.com/docs/getting-started-with-airtable-views)
-- TanStack Table column sizing and state persistence: [Column Sizing Guide — TanStack Table](https://tanstack.com/table/v8/docs/guide/column-sizing)
-- Zoho CRM Signals (real-time notification system): [Signals — Zoho CRM Help](https://help.zoho.com/portal/en/kb/crm/experience-center/salessignals/articles/signals-an-overview)
-- AI graceful degradation patterns: [Graceful Degradation — MOTA AI on Medium](https://medium.com/@mota_ai/building-ai-that-never-goes-down-the-graceful-degradation-playbook-d7428dc34ca3)
-- Stale contact detection patterns: [CRM Health Score — Medium](https://medium.com/@williamflaiz/your-crm-health-score-is-hiding-a-2m-problem-heres-the-scorecard-that-exposes-it-4a1ee8c4452d)
-- Personal CRM losing-touch detection: [Personal CRM Guide 2025 — folk.app](https://www.folk.app/articles/personal-crm-guide)
-- Segmentation best practices for founders and VCs: [Essential CRM Features for Private Equity — 4Degrees](https://www.4degrees.ai/blog/essential-crm-features-for-private-equity-firms-in-2025-streamline-deal-flow-relationships-and-data-driven-decisions)
+- [Attio Help Center - Views](https://attio.com/help/academy/introduction/views) — HIGH confidence
+- [Attio Help Center - Filter and sort views](https://attio.com/help/reference/managing-your-data/views/filter-and-sort-views) — HIGH confidence
+- [Attio Help Center - Table views](https://attio.com/help/reference/managing-your-data/views/create-and-manage-table-views) — HIGH confidence
+- [Attio Workflows](https://attio.com/platform/workflows) — HIGH confidence
+- [Attio Chrome Extension](https://attio.com/help/reference/tools-and-extensions/attio-chrome-extension) — HIGH confidence
+- [Attio Email and Calendar Syncing](https://attio.com/help/reference/email-calendar/email-and-calendar-syncing) — HIGH confidence
+- [Folk CRM - Create views](https://help.folk.app/en/articles/4998224-create-views) — HIGH confidence
+- [Folk CRM - Email sequences](https://help.folk.app/en/articles/8744016-send-email-sequences) — HIGH confidence
+- [Folk CRM - Best practice email sequences](https://www.folk.app/articles/best-practice-for-sending-email-sequences) — HIGH confidence
+- [Pipedrive Pipeline view](https://support.pipedrive.com/en/article/pipeline-view) — HIGH confidence
+- [HubSpot Pipeline Management](https://www.hubspot.com/products/crm/pipeline-management) — MEDIUM confidence
+- [CRM Deduplication Guide 2025](https://www.rtdynamic.com/blog/crm-deduplication-guide-2025/) — MEDIUM confidence
+- [Attio CRM Review 2026 - CRM.org](https://crm.org/news/attio-review) — MEDIUM confidence
+- [Folk CRM Review 2026 - hackceleration](https://hackceleration.com/folk-crm-review/) — MEDIUM confidence
+- [react-datasheet-grid](https://github.com/nick-keller/react-datasheet-grid) — MEDIUM confidence (implementation patterns)
+- [Attio + Clay Integration](https://attio.com/apps/clay) — HIGH confidence (multi-source enrichment patterns)

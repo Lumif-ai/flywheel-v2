@@ -27,7 +27,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.api.deps import get_tenant_db, require_tenant
+from fastapi.responses import RedirectResponse
+
+from flywheel.api.deps import get_db_unscoped, get_tenant_db, require_tenant
 from flywheel.auth.encryption import encrypt_api_key
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Integration
@@ -115,6 +117,27 @@ async def list_integrations(
     }
 
 
+async def _cleanup_before_authorize(
+    db: AsyncSession, tenant_id, user_id, provider: str,
+):
+    """Remove stale pending and disconnected rows before starting a new OAuth flow.
+
+    Prevents duplicate Integration rows from accumulating when users retry
+    the connect flow or when previous attempts failed.
+    """
+    result = await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == tenant_id,
+            Integration.user_id == user_id,
+            Integration.provider == provider,
+            Integration.status.in_(("pending", "disconnected")),
+        )
+    )
+    for row in result.scalars().all():
+        await db.delete(row)
+    await db.flush()
+
+
 # ---------------------------------------------------------------------------
 # GET /integrations/google-calendar/authorize
 # ---------------------------------------------------------------------------
@@ -130,21 +153,20 @@ async def authorize_google_calendar(
     Creates a pending Integration row with a cryptographic state parameter
     for CSRF protection, then returns the Google authorization URL.
     """
-    state = secrets.token_urlsafe(32)
+    await _cleanup_before_authorize(db, user.tenant_id, user.sub, "google-calendar")
 
-    # Create a pending integration row to track the OAuth state
+    state = secrets.token_urlsafe(32)
+    auth_url, code_verifier = generate_auth_url(state)
+
     integration = Integration(
         tenant_id=user.tenant_id,
         user_id=user.sub,
         provider="google-calendar",
         status="pending",
-        settings={"oauth_state": state, "sync_token": None},
+        settings={"oauth_state": state, "sync_token": None, "code_verifier": code_verifier},
     )
     db.add(integration)
     await db.commit()
-    await db.refresh(integration)
-
-    auth_url = generate_auth_url(state)
 
     return {"auth_url": auth_url, "state": state}
 
@@ -158,25 +180,21 @@ async def authorize_google_calendar(
 async def google_calendar_callback(
     code: str = Query(..., description="Authorization code from Google"),
     state: str = Query(..., description="State parameter for CSRF verification"),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
+    db: AsyncSession = Depends(get_db_unscoped),
 ):
     """Handle Google Calendar OAuth callback.
 
-    Verifies the state parameter, exchanges the authorization code for
-    credentials, encrypts them, and updates the Integration row.
+    Browser redirect — no JWT available. Uses state parameter to look up
+    the pending Integration row for CSRF verification and tenant identification.
     """
-    # Find the pending integration matching this state
     result = await db.execute(
         select(Integration).where(
-            Integration.tenant_id == user.tenant_id,
             Integration.provider == "google-calendar",
             Integration.status == "pending",
         )
     )
     pending = result.scalars().all()
 
-    # Match state parameter (CSRF protection)
     integration = None
     for p in pending:
         if p.settings and p.settings.get("oauth_state") == state:
@@ -189,11 +207,10 @@ async def google_calendar_callback(
             detail="Invalid OAuth state. Please restart the authorization flow.",
         )
 
-    # Exchange authorization code for credentials
     try:
-        creds = exchange_code(code)
+        code_verifier = integration.settings.get("code_verifier") if integration.settings else None
+        creds = exchange_code(code, code_verifier=code_verifier)
     except ValueError as exc:
-        # Clean up the pending row on failure
         await db.delete(integration)
         await db.commit()
         raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -205,14 +222,13 @@ async def google_calendar_callback(
             detail=f"OAuth code exchange failed: {exc}",
         ) from exc
 
-    # Encrypt and store credentials
     encrypted = serialize_credentials(creds)
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
-    integration.settings = {"sync_token": None}  # Clear oauth_state, init sync_token
+    integration.settings = {"sync_token": None}
     await db.commit()
 
-    return {"status": "connected", "id": str(integration.id)}
+    return RedirectResponse(url="/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -231,20 +247,20 @@ async def authorize_gmail(
     for CSRF protection, then returns the Google authorization URL with
     gmail.send scope.
     """
+    await _cleanup_before_authorize(db, user.tenant_id, user.sub, "gmail")
+
     state = secrets.token_urlsafe(32)
+    auth_url, code_verifier = generate_gmail_auth_url(state)
 
     integration = Integration(
         tenant_id=user.tenant_id,
         user_id=user.sub,
         provider="gmail",
         status="pending",
-        settings={"oauth_state": state},
+        settings={"oauth_state": state, "code_verifier": code_verifier},
     )
     db.add(integration)
     await db.commit()
-    await db.refresh(integration)
-
-    auth_url = generate_gmail_auth_url(state)
 
     return {"auth_url": auth_url, "state": state}
 
@@ -258,17 +274,15 @@ async def authorize_gmail(
 async def gmail_callback(
     code: str = Query(..., description="Authorization code from Google"),
     state: str = Query(..., description="State parameter for CSRF verification"),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
+    db: AsyncSession = Depends(get_db_unscoped),
 ):
     """Handle Gmail OAuth callback.
 
-    Verifies the state parameter, exchanges the authorization code for
-    credentials, encrypts them, and updates the Integration row.
+    Browser redirect — no JWT available. Uses state parameter to look up
+    the pending Integration row.
     """
     result = await db.execute(
         select(Integration).where(
-            Integration.tenant_id == user.tenant_id,
             Integration.provider == "gmail",
             Integration.status == "pending",
         )
@@ -288,7 +302,8 @@ async def gmail_callback(
         )
 
     try:
-        creds = exchange_gmail_code(code)
+        code_verifier = integration.settings.get("code_verifier") if integration.settings else None
+        creds = exchange_gmail_code(code, code_verifier=code_verifier)
     except ValueError as exc:
         await db.delete(integration)
         await db.commit()
@@ -304,10 +319,10 @@ async def gmail_callback(
     encrypted = serialize_gmail_credentials(creds)
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
-    integration.settings = {}  # Clear oauth_state
+    integration.settings = {}
     await db.commit()
 
-    return {"status": "connected", "id": str(integration.id)}
+    return RedirectResponse(url="/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -329,20 +344,20 @@ async def authorize_gmail_read(
     IMPORTANT: This endpoint uses provider="gmail-read" exclusively and
     NEVER queries or modifies provider="gmail" Integration rows.
     """
+    await _cleanup_before_authorize(db, user.tenant_id, user.sub, "gmail-read")
+
     state = secrets.token_urlsafe(32)
+    auth_url, code_verifier = generate_gmail_read_auth_url(state)
 
     integration = Integration(
         tenant_id=user.tenant_id,
         user_id=user.sub,
         provider="gmail-read",
         status="pending",
-        settings={"oauth_state": state, "history_id": None},
+        settings={"oauth_state": state, "code_verifier": code_verifier, "history_id": None},
     )
     db.add(integration)
     await db.commit()
-    await db.refresh(integration)
-
-    auth_url = generate_gmail_read_auth_url(state)
 
     return {"auth_url": auth_url, "state": state}
 
@@ -356,21 +371,15 @@ async def authorize_gmail_read(
 async def gmail_read_callback(
     code: str = Query(..., description="Authorization code from Google"),
     state: str = Query(..., description="State parameter for CSRF verification"),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
+    db: AsyncSession = Depends(get_db_unscoped),
 ):
     """Handle Gmail Read OAuth callback.
 
-    Verifies the state parameter, exchanges the authorization code for
-    credentials (gmail.readonly + gmail.modify + gmail.send), encrypts them,
-    and updates the Integration row with provider="gmail-read".
-
-    IMPORTANT: The query filter is always provider="gmail-read". This callback
-    NEVER queries provider="gmail" rows.
+    Browser redirect — no JWT available. Uses state parameter to look up
+    the pending Integration row for CSRF verification and tenant identification.
     """
     result = await db.execute(
         select(Integration).where(
-            Integration.tenant_id == user.tenant_id,
             Integration.provider == "gmail-read",
             Integration.status == "pending",
         )
@@ -390,7 +399,8 @@ async def gmail_read_callback(
         )
 
     try:
-        creds = exchange_gmail_read_code(code)
+        code_verifier = integration.settings.get("code_verifier") if integration.settings else None
+        creds = exchange_gmail_read_code(code, code_verifier=code_verifier)
     except ValueError as exc:
         await db.delete(integration)
         await db.commit()
@@ -406,10 +416,10 @@ async def gmail_read_callback(
     encrypted = serialize_gmail_read_credentials(creds)
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
-    integration.settings = {"history_id": None}  # Clear oauth_state, keep history_id slot
+    integration.settings = {"history_id": None}
     await db.commit()
 
-    return {"status": "connected", "id": str(integration.id)}
+    return RedirectResponse(url="/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -427,8 +437,9 @@ async def authorize_outlook(
     Creates a pending Integration row with a cryptographic state parameter
     for CSRF protection, then returns the Microsoft authorization URL.
     """
-    state = secrets.token_urlsafe(32)
+    await _cleanup_before_authorize(db, user.tenant_id, user.sub, "outlook")
 
+    state = secrets.token_urlsafe(32)
     integration = Integration(
         tenant_id=user.tenant_id,
         user_id=user.sub,
@@ -438,7 +449,6 @@ async def authorize_outlook(
     )
     db.add(integration)
     await db.commit()
-    await db.refresh(integration)
 
     auth_url = generate_outlook_auth_url(state, settings.microsoft_redirect_uri)
 
@@ -454,17 +464,15 @@ async def authorize_outlook(
 async def outlook_callback(
     code: str = Query(..., description="Authorization code from Microsoft"),
     state: str = Query(..., description="State parameter for CSRF verification"),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
+    db: AsyncSession = Depends(get_db_unscoped),
 ):
     """Handle Outlook OAuth callback.
 
-    Verifies the state parameter, exchanges the authorization code for
-    tokens via MSAL, encrypts them, and updates the Integration row.
+    Browser redirect — no JWT available. Uses state parameter to look up
+    the pending Integration row.
     """
     result = await db.execute(
         select(Integration).where(
-            Integration.tenant_id == user.tenant_id,
             Integration.provider == "outlook",
             Integration.status == "pending",
         )
@@ -500,10 +508,10 @@ async def outlook_callback(
     encrypted = serialize_outlook_credentials(token_result)
     integration.status = "connected"
     integration.credentials_encrypted = encrypted
-    integration.settings = {}  # Clear oauth_state
+    integration.settings = {}
     await db.commit()
 
-    return {"status": "connected", "id": str(integration.id)}
+    return RedirectResponse(url="/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -521,8 +529,9 @@ async def authorize_slack(
     Creates a pending Integration row with a cryptographic state parameter
     for CSRF protection, then returns the Slack authorization URL.
     """
-    state = secrets.token_urlsafe(32)
+    await _cleanup_before_authorize(db, user.tenant_id, user.sub, "slack")
 
+    state = secrets.token_urlsafe(32)
     integration = Integration(
         tenant_id=user.tenant_id,
         user_id=user.sub,
@@ -532,7 +541,6 @@ async def authorize_slack(
     )
     db.add(integration)
     await db.commit()
-    await db.refresh(integration)
 
     auth_url = generate_slack_auth_url(state)
 
@@ -548,18 +556,15 @@ async def authorize_slack(
 async def slack_callback(
     code: str = Query(..., description="Authorization code from Slack"),
     state: str = Query(..., description="State parameter for CSRF verification"),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
+    db: AsyncSession = Depends(get_db_unscoped),
 ):
     """Handle Slack OAuth callback.
 
-    Verifies the state parameter, exchanges the authorization code for
-    workspace install data, encrypts the bot token, and updates the
-    Integration row with team metadata.
+    Browser redirect — no JWT available. Uses state parameter to look up
+    the pending Integration row.
     """
     result = await db.execute(
         select(Integration).where(
-            Integration.tenant_id == user.tenant_id,
             Integration.provider == "slack",
             Integration.status == "pending",
         )
@@ -601,7 +606,7 @@ async def slack_callback(
     }
     await db.commit()
 
-    return {"status": "connected", "id": str(integration.id)}
+    return RedirectResponse(url="/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------

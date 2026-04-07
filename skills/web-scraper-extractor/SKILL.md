@@ -1,5 +1,6 @@
 ---
 name: web-scraper-extractor
+enabled: false
 description: >
   DEPRECATED -- Use `/gtm-web-scraper-extractor` instead. This skill is the base version;
   the GTM version adds parallel multi-term scraping, smarter dedup (case-insensitive

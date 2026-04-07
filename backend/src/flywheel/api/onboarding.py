@@ -143,6 +143,7 @@ class PromoteOAuthRequest(BaseModel):
     provider_token: str = ""  # May be empty if linkIdentity doesn't return it
     provider_refresh_token: str | None = None
     email: str
+    display_name: str | None = None
 
 
 class PromoteResponse(BaseModel):
@@ -408,8 +409,10 @@ async def promote_oauth(
         await db.execute(select(Profile).where(Profile.id == user.sub))
     ).scalar_one_or_none()
     if existing_profile is None:
-        db.add(Profile(id=user.sub))
+        db.add(Profile(id=user.sub, name=body.display_name))
         await db.flush()
+    elif body.display_name and not existing_profile.name:
+        existing_profile.name = body.display_name
 
     existing_ut = (
         await db.execute(

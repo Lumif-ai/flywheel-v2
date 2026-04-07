@@ -50,7 +50,7 @@ def register_error_handlers(app: FastAPI) -> None:
             status_code=500,
             content={
                 "error": "InternalError",
-                "message": "An unexpected error occurred",
+                "message": f"{type(exc).__name__}: {exc}",
                 "code": 500,
             },
         )

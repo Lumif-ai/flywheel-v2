@@ -5,6 +5,7 @@ Transforms raw skill text output into structured, professional HTML documents.
 Each skill type has a purpose-built template; unknown types fall back to generic.
 
 Public API:
+    sanitize_html(html) -> str
     detect_output_type(skill_name) -> str
     parse_output_sections(raw_output) -> dict
     extract_key_facts(sections) -> list
@@ -18,6 +19,59 @@ import re
 from typing import Optional
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# HTML sanitization (allowlist-based XSS protection)
+# ---------------------------------------------------------------------------
+
+from bs4 import BeautifulSoup
+
+ALLOWED_TAGS = {
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "p", "br", "hr",
+    "ul", "ol", "li",
+    "strong", "em", "b", "i", "u", "s", "code", "pre", "blockquote",
+    "a", "img",
+    "table", "thead", "tbody", "tr", "th", "td",
+    "div", "span",
+    "dl", "dt", "dd",
+    "sup", "sub",
+}
+ALLOWED_ATTRS = {
+    "a": {"href", "title", "target", "rel"},
+    "img": {"src", "alt", "width", "height"},
+    "td": {"colspan", "rowspan"},
+    "th": {"colspan", "rowspan"},
+}
+DANGEROUS_PROTOCOLS = {"javascript", "vbscript", "data"}
+
+
+def sanitize_html(html: str) -> str:
+    """Allowlist-based HTML sanitizer. Strips disallowed tags and attributes.
+
+    Uses BeautifulSoup4 to parse HTML and remove:
+    - Tags not in ALLOWED_TAGS (via decompose -- removes tag AND contents)
+    - Attributes not in ALLOWED_ATTRS for that tag
+    - href/src values using dangerous protocols (javascript:, vbscript:, data:)
+    """
+    if not html:
+        return ""
+    soup = BeautifulSoup(html, "html.parser")
+    for tag in list(soup.find_all(True)):
+        if tag.name not in ALLOWED_TAGS:
+            tag.decompose()
+            continue
+        allowed = ALLOWED_ATTRS.get(tag.name, set())
+        for attr in list(tag.attrs):
+            if attr not in allowed:
+                del tag[attr]
+        for url_attr in ("href", "src"):
+            if url_attr in tag.attrs:
+                val = tag[url_attr].strip().lower()
+                if any(val.startswith(p + ":") for p in DANGEROUS_PROTOCOLS):
+                    del tag[url_attr]
+    return str(soup)
+
 
 # ---------------------------------------------------------------------------
 # Output type detection
@@ -195,6 +249,7 @@ def _load_jinja2_env(templates_dir: str):
             import markdown as _md
             from markupsafe import Markup
             html = _md.markdown(str(text), extensions=["extra"])
+            html = sanitize_html(html)
             return Markup(html)
         except ImportError:
             # Fallback: at minimum convert **bold** and newlines
@@ -204,6 +259,7 @@ def _load_jinja2_env(templates_dir: str):
             text = _re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
             text = _re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
             text = text.replace('\n', '<br>')
+            text = sanitize_html(text)
             return Markup(text)
 
     env.filters["md"] = _md_to_html

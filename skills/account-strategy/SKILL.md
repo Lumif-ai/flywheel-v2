@@ -1,5 +1,6 @@
 ---
 name: account-strategy
+enabled: false
 version: "2.1"
 description: >
   Orchestrator that produces comprehensive account strategy briefings for

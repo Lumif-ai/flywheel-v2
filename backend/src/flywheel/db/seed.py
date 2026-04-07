@@ -61,6 +61,7 @@ class SkillData:
     tags: list[str] = field(default_factory=list)
     token_budget: int | None = None
     parameters: dict = field(default_factory=dict)
+    enabled: bool = True
 
 
 @dataclass
@@ -258,11 +259,11 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
         system_prompt = _extract_system_prompt(full_content)
 
         # Optional fields
-        contract_reads = data.get("contract_reads", [])
+        contract_reads = data.get("contract_reads", data.get("reads", []))
         if not isinstance(contract_reads, list):
             contract_reads = []
 
-        contract_writes = data.get("contract_writes", [])
+        contract_writes = data.get("contract_writes", data.get("writes", []))
         if not isinstance(contract_writes, list):
             contract_writes = []
 
@@ -285,6 +286,16 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
         if not isinstance(parameters, dict):
             parameters = {}
 
+        # Extract triggers from frontmatter and inject into parameters JSONB
+        triggers = data.get("triggers", [])
+        if isinstance(triggers, list) and triggers:
+            parameters["triggers"] = triggers
+
+        # Read enabled flag from frontmatter (default True)
+        enabled = data.get("enabled", True)
+        if not isinstance(enabled, bool):
+            enabled = True
+
         skills.append(
             SkillData(
                 name=name,
@@ -298,6 +309,7 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
                 tags=tags,
                 token_budget=token_budget,
                 parameters=parameters,
+                enabled=enabled,
             )
         )
 
@@ -421,7 +433,7 @@ async def seed_skills(
             "tags": skill.tags,
             "token_budget": skill.token_budget,
             "parameters": skill.parameters,
-            "enabled": True,
+            "enabled": skill.enabled,
         }
 
         stmt = pg_insert(SkillDefinition).values(**values)

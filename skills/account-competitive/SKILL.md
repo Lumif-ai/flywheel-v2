@@ -1,5 +1,6 @@
 ---
 name: account-competitive
+enabled: false
 version: "1.0"
 description: >
   Competitive landscape and commercial signal analysis for enterprise accounts.

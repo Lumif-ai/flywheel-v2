@@ -69,6 +69,7 @@ class TaskCreate(BaseModel):
     due_date: datetime.datetime | None = None
     meeting_id: UUID | None = None
     account_id: UUID | None = None
+    pipeline_entry_id: UUID | None = None
 
     @field_validator("task_type")
     @classmethod
@@ -151,6 +152,7 @@ class TaskResponse(BaseModel):
     user_id: UUID
     meeting_id: UUID | None
     account_id: UUID | None
+    pipeline_entry_id: UUID | None = None
     email_id: UUID | None = None
     title: str
     description: str | None
@@ -204,6 +206,7 @@ def _task_to_response(t: Task) -> dict:
         "user_id": t.user_id,
         "meeting_id": t.meeting_id,
         "account_id": t.account_id,
+        "pipeline_entry_id": t.pipeline_entry_id,
         "email_id": t.email_id,
         "title": t.title,
         "description": t.description,
@@ -240,6 +243,7 @@ async def list_tasks(
     priority: str | None = Query(None),
     meeting_id: UUID | None = Query(None),
     account_id: UUID | None = Query(None),
+    pipeline_entry_id: UUID | None = Query(None),
     source: str | None = Query(None),
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
@@ -259,6 +263,8 @@ async def list_tasks(
         base = base.where(Task.meeting_id == meeting_id)
     if account_id is not None:
         base = base.where(Task.account_id == account_id)
+    if pipeline_entry_id is not None:
+        base = base.where(Task.pipeline_entry_id == pipeline_entry_id)
     if source is not None:
         base = base.where(Task.source == source)
 
@@ -367,6 +373,7 @@ async def create_task(
         due_date=body.due_date,
         meeting_id=body.meeting_id,
         account_id=body.account_id,
+        pipeline_entry_id=body.pipeline_entry_id,
     )
     db.add(new_task)
     await db.flush()

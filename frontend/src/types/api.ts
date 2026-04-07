@@ -68,6 +68,7 @@ export interface Tenant {
   slug: string
   plan: string
   member_limit: number
+  features: Record<string, boolean>
 }
 
 export interface User {

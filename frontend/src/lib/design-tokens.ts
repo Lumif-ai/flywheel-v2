@@ -62,11 +62,11 @@ export const registers = {
 
 export const badges = {
   fitTier: {
-    excellent: { bg: 'rgba(34, 197, 94, 0.1)', text: '#16a34a' },
-    strong:    { bg: 'rgba(34, 197, 94, 0.1)', text: '#16a34a' },
-    good:      { bg: 'rgba(59, 130, 246, 0.1)', text: '#2563eb' },
-    fair:      { bg: 'rgba(245, 158, 11, 0.1)', text: '#d97706' },
-    weak:      { bg: 'rgba(239, 68, 68, 0.1)', text: '#dc2626' },
-    poor:      { bg: 'rgba(239, 68, 68, 0.1)', text: '#dc2626' },
+    'strong fit':    { bg: 'rgba(34, 197, 94, 0.1)', text: '#16a34a' },
+    'good fit':      { bg: 'rgba(59, 130, 246, 0.1)', text: '#2563eb' },
+    'moderate fit':  { bg: 'rgba(245, 158, 11, 0.1)', text: '#d97706' },
+    'weak fit':      { bg: 'rgba(239, 68, 68, 0.08)', text: '#dc2626' },
+    'no fit':        { bg: 'rgba(107, 114, 128, 0.08)', text: '#6b7280' },
+    'disqualified':  { bg: 'rgba(107, 114, 128, 0.08)', text: '#6b7280' },
   },
 } as const;

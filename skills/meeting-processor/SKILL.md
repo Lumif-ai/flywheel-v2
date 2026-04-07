@@ -8,8 +8,16 @@ description: >
   from compounded knowledge. Supports parallel processing for large batches.
 context-aware: true
 triggers:
-  - manual
-  - mcp-webhook
+  - "process meetings"
+  - "pull from Granola"
+  - "update insights"
+  - "process my calls"
+  - "add meeting notes"
+  - "sync meeting notes"
+  - "process my notes"
+tags:
+  - meetings
+  - transcription
 dependencies:
   skills: []
   files:

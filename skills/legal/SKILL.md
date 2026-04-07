@@ -3,6 +3,17 @@ name: legal
 version: 1.2
 description: >
   Founder-first legal platform with PII redaction. Supports four modes: single document review, redline comparison, batch deal review, and contract drafting. Review/compare/batch modes start with local PII redaction via Presidio. Triggers on: "review this contract", "legal review", "confidential review", "compare these contracts", "what changed between versions", "redline review", "review this closing set", "batch review", "review all these documents", "review my fundraise docs", "is this safe to sign", "check this NDA", "analyze this agreement", "red flags in this document", "what does this clause mean", "founder-friendly review", "should I sign this", "compare v1 and v2", "what did they change", "review the redline", "do these documents conflict", "are these consistent", "what's missing from this deal", "draft an NDA", "create a contract", "generate a SAFE", "write an agreement", "draft a contractor agreement", "I need an NDA", "create an advisor agreement", "draft founders agreement", "write an employment offer", "help me draft", "generate a contract", or when any legal document is shared. ALWAYS use this skill when the user uploads or shares any legal document and wants analysis, OR when the user asks to draft, create, generate, or write a legal agreement.
+triggers:
+  - "review this contract"
+  - "legal review"
+  - "compare these contracts"
+  - "redline review"
+  - "is this safe to sign"
+  - "draft an NDA"
+  - "create a contract"
+tags:
+  - legal
+  - contracts
 context-aware: true
 web_tier: 1
 ---

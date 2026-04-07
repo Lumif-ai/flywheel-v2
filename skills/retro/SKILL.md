@@ -1,5 +1,6 @@
 ---
 name: retro
+enabled: false
 version: 1.0.0
 description: |
   Weekly engineering retrospective. Analyzes commit history, work patterns,

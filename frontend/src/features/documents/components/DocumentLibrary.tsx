@@ -1,24 +1,17 @@
-import { useState } from 'react'
+import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
+import { Search, X, FileText } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { Toast } from '@/components/ui/toast-notification'
-import { DocumentCard } from './DocumentCard'
+import { EmptyState } from '@/components/ui/empty-state'
+import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
+import { DocumentRow, DocumentRowSkeleton } from './DocumentRow'
+import { DocumentGridCard, DocumentGridCardSkeleton } from './DocumentGridCard'
 import { fetchDocuments, shareDocument } from '../api'
 import type { DocumentListItem } from '../api'
-
-// ---------------------------------------------------------------------------
-// Filter types
-// ---------------------------------------------------------------------------
-
-type FilterType = 'all' | 'meeting-prep' | 'company-intel'
-
-const FILTERS: { key: FilterType; label: string }[] = [
-  { key: 'all', label: 'All' },
-  { key: 'meeting-prep', label: 'Meeting Preps' },
-  { key: 'company-intel', label: 'Company Intel' },
-]
+import { getTypeStyle } from '../utils'
 
 // ---------------------------------------------------------------------------
 // Date grouping
@@ -45,7 +38,6 @@ function groupByDate(docs: DocumentListItem[]): Map<string, DocumentListItem[]> 
     const group = getDateGroup(doc.created_at)
     groups.get(group)!.push(doc)
   }
-  // Remove empty groups
   for (const [key, value] of groups) {
     if (value.length === 0) groups.delete(key)
   }
@@ -53,87 +45,98 @@ function groupByDate(docs: DocumentListItem[]): Map<string, DocumentListItem[]> 
 }
 
 // ---------------------------------------------------------------------------
-// Skeleton loader
+// View mode persistence
 // ---------------------------------------------------------------------------
 
-function SkeletonCard() {
-  return (
-    <div className="bg-[var(--card-bg)] border border-[var(--subtle-border)] rounded-xl shadow-sm p-6">
-      <div className="flex items-start gap-3">
-        <div className="w-9 h-9 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
-        <div className="flex-1 space-y-2">
-          <div className="h-4 w-3/4 rounded animate-shimmer bg-[var(--skeleton-bg)]" />
-          <div className="h-3 w-1/2 rounded animate-shimmer bg-[var(--skeleton-bg)]" />
-        </div>
-      </div>
-      <div className="flex justify-end gap-2 mt-4">
-        <div className="h-8 w-16 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
-        <div className="h-8 w-16 rounded-lg animate-shimmer bg-[var(--skeleton-bg)]" />
-      </div>
-    </div>
-  )
-}
-
-// ---------------------------------------------------------------------------
-// Empty state illustration
-// ---------------------------------------------------------------------------
-
-function EmptyDocumentsIllustration() {
-  return (
-    <svg width="80" height="80" viewBox="0 0 80 80" fill="none" xmlns="http://www.w3.org/2000/svg">
-      {/* Stacked document pages */}
-      <rect x="18" y="12" width="44" height="56" rx="4" fill="var(--card-bg)" stroke="var(--subtle-border)" strokeWidth="1.5" />
-      <rect x="14" y="16" width="44" height="56" rx="4" fill="var(--card-bg)" stroke="var(--subtle-border)" strokeWidth="1.5" />
-      <rect x="10" y="20" width="44" height="56" rx="4" fill="var(--card-bg)" stroke="var(--brand-coral)" strokeWidth="1.5" opacity="0.9" />
-      {/* Content lines on front page */}
-      <rect x="18" y="30" width="24" height="2" rx="1" fill="var(--brand-coral)" opacity="0.4" />
-      <rect x="18" y="36" width="28" height="2" rx="1" fill="var(--subtle-border)" />
-      <rect x="18" y="42" width="20" height="2" rx="1" fill="var(--subtle-border)" />
-      <rect x="18" y="48" width="26" height="2" rx="1" fill="var(--subtle-border)" />
-      <rect x="18" y="56" width="16" height="2" rx="1" fill="var(--brand-coral)" opacity="0.3" />
-    </svg>
-  )
+function getStoredViewMode(): ViewMode {
+  try {
+    const stored = localStorage.getItem('library-view-mode')
+    if (stored === 'grid' || stored === 'list') return stored
+  } catch {
+    // ignore
+  }
+  return 'list'
 }
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-const PAGE_SIZE = 20
+const PAGE_SIZE = 50
 
 export function DocumentLibrary() {
   const navigate = useNavigate()
   const user = useAuthStore((s) => s.user)
-  const [filter, setFilter] = useState<FilterType>('all')
+  const [activeTab, setActiveTab] = useState<string>('all')
+  const [searchQuery, setSearchQuery] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+  const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode)
   const [extraPages, setExtraPages] = useState<DocumentListItem[]>([])
   const [shareToast, setShareToast] = useState<string | null>(null)
 
-  const queryParams = {
-    limit: PAGE_SIZE,
-    offset: 0,
-    ...(filter !== 'all' ? { document_type: filter } : {}),
-  }
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchQuery), 300)
+    return () => clearTimeout(timer)
+  }, [searchQuery])
 
+  // Persist view mode
+  const handleViewChange = useCallback((mode: ViewMode) => {
+    setViewMode(mode)
+    try { localStorage.setItem('library-view-mode', mode) } catch { /* ignore */ }
+  }, [])
+
+  // Fetch all documents
   const { data, isLoading: loading } = useQuery({
-    queryKey: ['documents', filter],
-    queryFn: () => fetchDocuments(queryParams),
+    queryKey: ['documents', 'all'],
+    queryFn: () => fetchDocuments({ limit: PAGE_SIZE, offset: 0 }),
     enabled: !!user,
   })
 
   const firstPageDocs = data?.documents ?? []
   const total = data?.total ?? 0
-  const documents = [...firstPageDocs, ...extraPages]
+  const allDocuments = [...firstPageDocs, ...extraPages]
 
-  const handleFilterChange = (f: FilterType) => {
-    setFilter(f)
-    setExtraPages([])
-  }
+  // Build tabs dynamically from document types
+  const tabs = useMemo(() => {
+    const typeCounts = new Map<string, number>()
+    for (const doc of allDocuments) {
+      typeCounts.set(doc.document_type, (typeCounts.get(doc.document_type) ?? 0) + 1)
+    }
+    // Sort by count descending
+    const typeEntries = Array.from(typeCounts.entries()).sort((a, b) => b[1] - a[1])
+    return [
+      { key: 'all', label: 'All', count: allDocuments.length },
+      ...typeEntries.map(([type, count]) => ({
+        key: type,
+        label: getTypeStyle(type).label,
+        count,
+      })),
+    ]
+  }, [allDocuments])
+
+  // Filter by active tab
+  const tabFiltered = useMemo(() => {
+    if (activeTab === 'all') return allDocuments
+    return allDocuments.filter((doc) => doc.document_type === activeTab)
+  }, [allDocuments, activeTab])
+
+  // Apply search on top of tab filter
+  const documents = useMemo(() => {
+    if (!debouncedSearch.trim()) return tabFiltered
+    const q = debouncedSearch.toLowerCase()
+    return tabFiltered.filter((doc) => {
+      const title = doc.title.toLowerCase()
+      const companies = (doc.metadata?.companies ?? []).join(' ').toLowerCase()
+      const contacts = (doc.metadata?.contacts ?? []).join(' ').toLowerCase()
+      return title.includes(q) || companies.includes(q) || contacts.includes(q)
+    })
+  }, [tabFiltered, debouncedSearch])
 
   const handleLoadMore = async () => {
-    const newOffset = documents.length
+    const newOffset = allDocuments.length
     try {
-      const params = { limit: PAGE_SIZE, offset: newOffset, ...(filter !== 'all' ? { document_type: filter } : {}) }
-      const res = await fetchDocuments(params)
+      const res = await fetchDocuments({ limit: PAGE_SIZE, offset: newOffset })
       setExtraPages((prev) => [...prev, ...res.documents])
     } catch (err) {
       console.error('Failed to load more documents:', err)
@@ -155,8 +158,13 @@ export function DocumentLibrary() {
     navigate(`/documents/${doc.id}`)
   }
 
+  const handleClearSearch = () => {
+    setSearchQuery('')
+    setDebouncedSearch('')
+  }
+
   const grouped = groupByDate(documents)
-  const hasMore = documents.length < total
+  const hasMore = allDocuments.length < total && !debouncedSearch.trim()
 
   return (
     <div
@@ -168,109 +176,241 @@ export function DocumentLibrary() {
     >
       <Toast message="Link copied to clipboard" visible={!!shareToast} onDismiss={() => setShareToast(null)} />
 
-      {/* Page title */}
-      <h1
-        style={{
-          fontSize: typography.pageTitle.size,
-          fontWeight: typography.pageTitle.weight,
-          lineHeight: typography.pageTitle.lineHeight,
-          letterSpacing: typography.pageTitle.letterSpacing,
-          color: colors.headingText,
-          marginBottom: spacing.card,
-        }}
-      >
-        Library
-      </h1>
-
-      {/* Filter bar */}
-      <div className="flex items-center gap-2 mb-8">
-        {FILTERS.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            onClick={() => handleFilterChange(f.key)}
-            className="px-4 py-2 rounded-full text-sm font-medium transition-all duration-200"
-            style={
-              filter === f.key
-                ? {
-                    background: `linear-gradient(135deg, ${colors.brandCoral}, ${colors.brandGradientEnd})`,
-                    color: '#fff',
-                  }
-                : {
-                    backgroundColor: colors.brandTint,
-                    color: colors.secondaryText,
-                  }
-            }
+      {/* ── Header ── */}
+      <div className="flex items-baseline gap-3 mb-2">
+        <h1
+          style={{
+            fontSize: typography.pageTitle.size,
+            fontWeight: typography.pageTitle.weight,
+            lineHeight: typography.pageTitle.lineHeight,
+            letterSpacing: typography.pageTitle.letterSpacing,
+            color: colors.headingText,
+          }}
+        >
+          Library
+        </h1>
+        {total > 0 && (
+          <span
+            className="inline-flex items-center px-2.5 py-0.5 rounded-full font-medium"
+            style={{
+              fontSize: typography.caption.size,
+              backgroundColor: colors.brandTint,
+              color: colors.secondaryText,
+            }}
           >
-            {f.label}
-          </button>
-        ))}
+            {total}
+          </span>
+        )}
       </div>
 
-      {/* Loading skeleton */}
-      {loading && documents.length === 0 && (
-        <div className="space-y-4">
-          <SkeletonCard />
-          <SkeletonCard />
-          <SkeletonCard />
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && documents.length === 0 && (
-        <div className="text-center py-16 rounded-xl" style={{ backgroundColor: 'rgba(233,77,53,0.03)' }}>
-          <div className="flex justify-center mb-4">
-            <EmptyDocumentsIllustration />
-          </div>
-          <p style={{ fontSize: typography.body.size, color: colors.secondaryText }}>
-            Your intelligence library grows with every skill you run
-          </p>
-          <p className="mt-1" style={{ fontSize: typography.caption.size, color: colors.secondaryText, opacity: 0.7 }}>
-            Briefings, research, and analysis — all saved here
-          </p>
-        </div>
-      )}
-
-      {/* Document timeline grouped by date */}
-      {!loading || documents.length > 0
-        ? Array.from(grouped.entries()).map(([group, docs]) => (
-            <div key={group} className="mb-8">
-              <h2
-                className="uppercase tracking-wider mb-4"
+      {/* ── Tabs ── */}
+      <div
+        className="flex items-center gap-1 overflow-x-auto mb-6 -mx-1 px-1"
+        role="tablist"
+        aria-label="Document types"
+        style={{ borderBottom: `1px solid ${colors.subtleBorder}` }}
+      >
+        {tabs.map((tab) => {
+          const isActive = activeTab === tab.key
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setActiveTab(tab.key)}
+              className="relative flex items-center gap-1.5 px-4 py-3 text-sm font-medium whitespace-nowrap transition-colors duration-200"
+              style={{
+                color: isActive ? colors.headingText : colors.secondaryText,
+              }}
+            >
+              {tab.label}
+              <span
+                className="text-xs tabular-nums rounded-full px-1.5 py-0.5"
                 style={{
-                  fontSize: typography.caption.size,
-                  fontWeight: '600',
-                  color: colors.secondaryText,
-                  letterSpacing: '0.05em',
+                  backgroundColor: isActive ? colors.brandTint : 'transparent',
+                  color: isActive ? 'var(--brand-coral)' : colors.secondaryText,
+                  opacity: isActive ? 1 : 0.6,
                 }}
               >
-                {group}
-              </h2>
-              <div className="space-y-3">
-                {docs.map((doc, i) => (
-                  <DocumentCard
-                    key={doc.id}
-                    document={doc}
-                    index={i}
-                    onShare={handleShare}
-                    onView={handleView}
-                  />
-                ))}
-              </div>
-            </div>
-          ))
-        : null}
+                {tab.count}
+              </span>
+              {/* Active indicator bar */}
+              {isActive && (
+                <span
+                  className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
+                  style={{ backgroundColor: 'var(--brand-coral)' }}
+                />
+              )}
+            </button>
+          )
+        })}
+      </div>
 
-      {/* Load more */}
+      {/* ── Search + View toggle ── */}
+      <div className="flex items-center gap-3 mb-6">
+        <div className="relative flex-1 max-w-sm" role="search">
+          <Search
+            size={16}
+            className="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+            style={{ color: colors.secondaryText }}
+            aria-hidden="true"
+          />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search documents..."
+            aria-label="Search documents"
+            className="w-full h-10 pl-9 pr-9 rounded-xl border border-[var(--subtle-border)] bg-[var(--card-bg)] text-sm transition-all duration-200 outline-none focus:border-[var(--brand-coral)] focus:ring-2 focus:ring-[rgba(233,77,53,0.15)]"
+            style={{ color: colors.headingText }}
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={handleClearSearch}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 inline-flex items-center justify-center size-6 rounded-md transition-colors hover:bg-[var(--brand-tint)]"
+              style={{ color: colors.secondaryText }}
+              aria-label="Clear search"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+        <div className="ml-auto">
+          <ViewToggle view={viewMode} onViewChange={handleViewChange} />
+        </div>
+      </div>
+
+      {/* ── Loading skeleton ── */}
+      {loading && documents.length === 0 && (
+        viewMode === 'list' ? (
+          <div className="space-y-1">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <DocumentRowSkeleton key={i} />
+            ))}
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <DocumentGridCardSkeleton key={i} />
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── Empty state (no documents at all) ── */}
+      {!loading && allDocuments.length === 0 && (
+        <EmptyState
+          icon={FileText}
+          title="Your library is empty"
+          description="Intelligence documents from skills like meeting prep and company research will appear here."
+        />
+      )}
+
+      {/* ── Empty state (search/tab yields nothing) ── */}
+      {!loading && allDocuments.length > 0 && documents.length === 0 && (
+        <EmptyState
+          icon={Search}
+          title="No documents found"
+          description={
+            debouncedSearch.trim()
+              ? "Try a different search term or switch tabs."
+              : "No documents in this category yet."
+          }
+          actionLabel={debouncedSearch.trim() ? "Clear search" : "Show all"}
+          onAction={() => {
+            handleClearSearch()
+            setActiveTab('all')
+          }}
+        />
+      )}
+
+      {/* ── Document content ── */}
+      {(!loading || documents.length > 0) && documents.length > 0 && (
+        viewMode === 'list' ? (
+          <div>
+            {Array.from(grouped.entries()).map(([group, docs]) => (
+              <div key={group} className="mb-6">
+                <h2
+                  className="flex items-center gap-2 uppercase tracking-wider mb-2 pl-4"
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: colors.secondaryText,
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  <span
+                    className="w-0.5 h-3 rounded-full"
+                    style={{ backgroundColor: 'rgba(233,77,53,0.3)' }}
+                    aria-hidden="true"
+                  />
+                  {group}
+                </h2>
+                <div className="space-y-0.5">
+                  {docs.map((doc) => (
+                    <DocumentRow
+                      key={doc.id}
+                      document={doc}
+                      onView={handleView}
+                      onShare={handleShare}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <div>
+            {Array.from(grouped.entries()).map(([group, docs]) => (
+              <div key={group} className="mb-8">
+                <h2
+                  className="flex items-center gap-2 uppercase tracking-wider mb-4"
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: '600',
+                    color: colors.secondaryText,
+                    letterSpacing: '0.05em',
+                  }}
+                >
+                  <span
+                    className="w-0.5 h-3 rounded-full"
+                    style={{ backgroundColor: 'rgba(233,77,53,0.3)' }}
+                    aria-hidden="true"
+                  />
+                  {group}
+                </h2>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-5">
+                  {docs.map((doc, i) => (
+                    <DocumentGridCard
+                      key={doc.id}
+                      document={doc}
+                      index={i}
+                      onView={handleView}
+                      onShare={handleShare}
+                    />
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )
+      )}
+
+      {/* ── Pagination ── */}
       {hasMore && !loading && (
-        <div className="flex justify-center mt-8">
+        <div className="flex items-center justify-between mt-8 px-4">
+          <span style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
+            Showing {allDocuments.length} of {total} documents
+          </span>
           <button
             type="button"
             onClick={handleLoadMore}
-            className="px-6 py-2.5 rounded-xl text-sm font-medium transition-all duration-200 hover:shadow-md"
+            className="px-5 py-2 rounded-xl text-sm font-medium border border-[var(--subtle-border)] transition-all duration-200 hover:border-[var(--brand-coral)] hover:text-[var(--brand-coral)] hover:shadow-sm"
             style={{
-              backgroundColor: colors.brandTint,
-              color: colors.brandCoral,
+              backgroundColor: 'transparent',
+              color: colors.secondaryText,
             }}
           >
             Load more
@@ -278,8 +418,8 @@ export function DocumentLibrary() {
         </div>
       )}
 
-      {/* Loading more indicator */}
-      {loading && documents.length > 0 && (
+      {/* ── Loading more indicator ── */}
+      {loading && allDocuments.length > 0 && (
         <div className="flex justify-center mt-4">
           <div className="w-6 h-6 border-2 border-[var(--subtle-border)] border-t-[var(--brand-coral)] rounded-full animate-spin" />
         </div>

@@ -47,10 +47,18 @@ class ProfileGroup(BaseModel):
     count: int
 
 
+class ProductTab(BaseModel):
+    slug: str
+    name: str
+    icon: str
+    sections: list[ProfileGroup]
+
+
 class CompanyProfileResponse(BaseModel):
     company_name: str | None
     domain: str | None
     groups: list[ProfileGroup]
+    product_tabs: list[ProductTab] = []
     total_items: int
     last_updated: str | None
     uploaded_files: list[dict]
@@ -87,14 +95,40 @@ async def get_company_profile(
 ) -> CompanyProfileResponse:
     """Return the tenant's company intelligence grouped by category.
 
-    Queries context_entries where source='company-intel-onboarding', groups them
-    by file_name, and returns each group with its entry_id for inline editing.
+    Sections are ordered for a logical company profile flow:
+    About → Products (per-product) → Value Prop → Target Market → Market → Pain Points → Competitive.
+    Product modules use `product:*` file_name convention for per-product sections.
+    Items within each section are capped at MAX_DISPLAY_ITEMS with full count returned.
     """
-    # Fetch all onboarding intel entries for this tenant (RLS handles scoping)
+    from sqlalchemy import or_
+
+    # Section ordering and display config
+    # (file_name_or_prefix, icon, label, max_items)
+    SECTION_ORDER = [
+        ("positioning", "Building2", "About", 8),
+        ("product:", None, None, 0),  # placeholder — expanded dynamically per product
+        ("value-mapping", "Target", "Value Proposition", 8),
+        ("icp-profiles", "UserCheck", "Target Customers", 8),
+        ("market-taxonomy", "TrendingUp", "Market", 0),  # 0 = show all
+        ("pain-points", "AlertTriangle", "Pain Points We Solve", 8),
+        ("competitive-intel", "Swords", "Competitive Landscape", 5),
+    ]
+
+    # Fetch all profile-relevant entries (static files + product:* prefix)
+    STATIC_FILES = {
+        "positioning", "icp-profiles", "competitive-intel",
+        "market-taxonomy", "leadership", "company-details", "tech-stack",
+        "value-mapping", "pain-points",
+    }
+
     entries_result = await db.execute(
         select(ContextEntry).where(
             ContextEntry.deleted_at.is_(None),
             ContextEntry.source == "company-intel-onboarding",
+            or_(
+                ContextEntry.file_name.in_(STATIC_FILES),
+                ContextEntry.file_name.like("product:%"),
+            ),
         )
     )
     entries = entries_result.scalars().all()
@@ -105,53 +139,143 @@ async def get_company_profile(
     )
     tenant = tenant_result.scalar_one_or_none()
 
-    # Fetch linked files
-    files_result = await db.execute(select(UploadedFile))
+    # Fetch linked files — tenant-scoped, deduped by filename
+    files_result = await db.execute(
+        select(UploadedFile)
+        .where(UploadedFile.tenant_id == user.tenant_id)
+        .order_by(UploadedFile.created_at.desc())
+    )
     all_files = files_result.scalars().all()
-    uploaded_files = [
-        {
-            "id": str(f.id),
-            "filename": f.filename,
-            "mimetype": f.mimetype,
-            "size_bytes": f.size_bytes,
-        }
-        for f in all_files
-        if (f.metadata_ or {}).get("profile_linked") is True
-    ]
+    seen_filenames: set[str] = set()
+    uploaded_files = []
+    for f in all_files:
+        if (f.metadata_ or {}).get("profile_linked") is True and f.filename not in seen_filenames:
+            seen_filenames.add(f.filename)
+            uploaded_files.append({
+                "id": str(f.id),
+                "filename": f.filename,
+                "mimetype": f.mimetype,
+                "size_bytes": f.size_bytes,
+            })
 
-    # Build groups
+    # Group entries by file_name
+    grouped: dict[str, list] = {}
+    for entry in entries:
+        grouped.setdefault(entry.file_name, []).append(entry)
+
+    # Build groups in section order
     groups: list[ProfileGroup] = []
     total_items = 0
     last_updated_dt: datetime.datetime | None = None
+    seen_files: set[str] = set()
 
-    for entry in entries:
-        items = _split_entry_items(entry)
-        icon, label = _FILE_DISPLAY.get(
-            entry.file_name,
-            ("Building2", entry.file_name.replace("-", " ").replace("_", " ").title()),
+    def _build_group(file_name: str, icon: str, label: str, max_items: int) -> ProfileGroup | None:
+        nonlocal total_items, last_updated_dt
+        file_entries = grouped.get(file_name)
+        if not file_entries:
+            return None
+
+        seen_files.add(file_name)
+        all_items: list[str] = []
+        all_raw: list[str] = []
+        latest_entry_id = file_entries[0].id
+
+        for entry in file_entries:
+            all_items.extend(_split_entry_items(entry))
+            all_raw.append(entry.content or "")
+            entry_ts = entry.updated_at or entry.created_at
+            if entry_ts and (last_updated_dt is None or entry_ts > last_updated_dt):
+                last_updated_dt = entry_ts
+
+        display_items = all_items[:max_items] if max_items > 0 else all_items
+        total_items += len(all_items)
+
+        return ProfileGroup(
+            category=file_name,
+            icon=icon,
+            label=label,
+            items=display_items,
+            entry_id=str(latest_entry_id),
+            raw_content="\n\n".join(all_raw),
+            count=len(all_items),  # full count so frontend can show "N more"
         )
-        groups.append(
-            ProfileGroup(
-                category=entry.file_name,
-                icon=icon,
-                label=label,
-                items=items,
-                entry_id=str(entry.id),
-                raw_content=entry.content or "",
-                count=len(items),
+
+    # --- Build per-product tabs ---
+    PRODUCT_SECTION_META = {
+        "": ("Package", "Overview"),
+        ".icp": ("UserCheck", "Target Customers"),
+        ".pain-points": ("AlertTriangle", "Pain Points Solved"),
+        ".competitors": ("Swords", "Competitors"),
+    }
+
+    # Discover product slugs from file names like product:{slug} and product:{slug}.{section}
+    product_slugs: dict[str, dict[str, str]] = {}  # slug -> {suffix -> file_name}
+    for fn in sorted(grouped.keys()):
+        if fn.startswith("product:"):
+            rest = fn[len("product:"):]
+            if "." in rest:
+                slug, suffix = rest.split(".", 1)
+                product_slugs.setdefault(slug, {})[f".{suffix}"] = fn
+            else:
+                product_slugs.setdefault(rest, {})[""] = fn
+
+    product_tabs: list[ProductTab] = []
+    for slug, suffix_map in product_slugs.items():
+        tab_sections: list[ProfileGroup] = []
+        tab_name = slug.replace("-", " ").title()
+
+        for suffix, (sec_icon, sec_label) in PRODUCT_SECTION_META.items():
+            fn = suffix_map.get(suffix)
+            if not fn:
+                continue
+            grp = _build_group(fn, sec_icon, sec_label, 0)
+            if grp:
+                tab_sections.append(grp)
+                # Derive tab name from base entry first line
+                if suffix == "" and grp.raw_content:
+                    first_line = grp.raw_content.split("\n")[0].strip()
+                    if first_line:
+                        tab_name = first_line
+
+        if tab_sections:
+            product_tabs.append(ProductTab(
+                slug=slug,
+                name=tab_name,
+                icon="Package",
+                sections=tab_sections,
+            ))
+
+    # Mark all product: files as seen so they don't appear in global groups
+    for fn in grouped:
+        if fn.startswith("product:"):
+            seen_files.add(fn)
+
+    for key, icon, label, max_items in SECTION_ORDER:
+        if key == "product:":
+            continue  # products are in product_tabs now
+        else:
+            fallback_icon, fallback_label = _FILE_DISPLAY.get(
+                key, ("Building2", key.replace("-", " ").replace("_", " ").title())
             )
-        )
-        total_items += len(items)
+            grp = _build_group(key, icon or fallback_icon, label or fallback_label, max_items)
+            if grp:
+                groups.append(grp)
 
-        # Track most recent update
-        entry_ts = entry.updated_at or entry.created_at
-        if entry_ts and (last_updated_dt is None or entry_ts > last_updated_dt):
-            last_updated_dt = entry_ts
+    # Append any remaining files not in SECTION_ORDER
+    for file_name in sorted(grouped.keys()):
+        if file_name not in seen_files:
+            fallback_icon, fallback_label = _FILE_DISPLAY.get(
+                file_name, ("Building2", file_name.replace("-", " ").replace("_", " ").title())
+            )
+            grp = _build_group(file_name, fallback_icon, fallback_label, 5)
+            if grp:
+                groups.append(grp)
 
     return CompanyProfileResponse(
         company_name=tenant.name if tenant else None,
         domain=tenant.domain if tenant else None,
         groups=groups,
+        product_tabs=product_tabs,
         total_items=total_items,
         last_updated=last_updated_dt.isoformat() if last_updated_dt else None,
         uploaded_files=uploaded_files,
@@ -420,10 +544,9 @@ async def reset_profile(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
-    """Soft-delete all company profile entries, then re-run intelligence from scratch."""
+    """Soft-delete all company profile entries and return to blank state."""
     from sqlalchemy import update as sa_update
 
-    # Soft-delete all company-intel-onboarding entries
     result = await db.execute(
         sa_update(ContextEntry)
         .where(
@@ -434,12 +557,4 @@ async def reset_profile(
         .values(deleted_at=datetime.datetime.now(datetime.timezone.utc))
     )
     await db.commit()
-    deleted_count = result.rowcount
-
-    # Now run the same refresh flow to rebuild
-    refresh_result = await refresh_profile(user=user, db=db)
-
-    return {
-        "run_id": refresh_result["run_id"],
-        "deleted_count": deleted_count,
-    }
+    return {"deleted_count": result.rowcount}

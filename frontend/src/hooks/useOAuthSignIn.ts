@@ -55,12 +55,12 @@ export function useOAuthSignIn() {
       // Identity already exists -- fall back to regular OAuth sign-in.
       // prompt:'select_account' lets returning users pick an account without
       // being forced through the full consent flow again.
-      // Use prompt:'consent' to ensure Google returns a refresh token.
-      // 'select_account' alone won't yield provider_token/refresh_token.
+      // The refresh token was already obtained during the first linkIdentity call
+      // and stored in the Integration row, so we don't need prompt:'consent' here.
       const signInQueryParams: Record<string, string> =
         provider === 'google'
-          ? { access_type: 'offline', prompt: 'consent' }
-          : { prompt: 'consent' }
+          ? { access_type: 'offline', prompt: 'select_account' }
+          : { prompt: 'select_account' }
 
       await supabase.auth.signInWithOAuth({
         provider,

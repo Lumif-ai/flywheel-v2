@@ -11,6 +11,16 @@ description: >-
   "review this spec", "is this spec complete", "find gaps", "tighten the spec",
   "spec review", "what am I missing", "help me define requirements", or shares an idea
   they want to turn into a buildable specification.
+triggers:
+  - "spec this out"
+  - "write a spec"
+  - "I want to build"
+  - "review this spec"
+  - "find gaps"
+  - "help me define requirements"
+tags:
+  - strategy
+  - specification
 web_tier: 1
 ---
 

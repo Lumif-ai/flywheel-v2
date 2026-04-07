@@ -330,10 +330,16 @@ def structure_intelligence(raw_text: str, source_label: str, *, api_key: str | N
         "- company_name: string\n"
         "- tagline: string (or null)\n"
         "- what_they_do: string (1-2 sentence summary)\n"
-        "- products: list of strings\n"
-        "- target_customers: list of strings\n"
+        "- products: list of objects, each with:\n"
+        "    - name: string (product name)\n"
+        "    - description: string (1-2 sentence summary of the product)\n"
+        "    - target_customers: list of strings (ICP specific to this product)\n"
+        "    - pain_points: list of strings (problems this product solves)\n"
+        "    - competitors: list of strings (direct alternatives to this product)\n"
+        "    - value_proposition: string (moat/differentiator for this product)\n"
+        "- target_customers: list of strings (company-wide ICP)\n"
         "- industries: list of strings\n"
-        "- competitors: list of strings (or empty list)\n"
+        "- competitors: list of strings (company-level competitors, or empty list)\n"
         "- pricing_model: string (or null)\n"
         "- key_differentiators: list of strings\n\n"
         "Return ONLY valid JSON. No markdown fencing."
@@ -342,21 +348,44 @@ def structure_intelligence(raw_text: str, source_label: str, *, api_key: str | N
     last_error = None
     for attempt in range(MAX_LLM_RETRIES + 1):
         try:
+            # Soft cap at 100K chars to avoid extreme token usage
+            input_text = raw_text
+            if len(input_text) > 100_000:
+                _log.warning("structure_intelligence: input text is %d chars, capping at 100K", len(input_text))
+                input_text = input_text[:100_000]
+
             message = client.messages.create(
                 model="claude-sonnet-4-20250514",
-                max_tokens=2000,
+                max_tokens=4096,
                 timeout=LLM_TIMEOUT,
                 system=system_prompt,
                 messages=[
                     {
                         "role": "user",
                         "content": "Extract company intelligence from this text (source: %s):\n\n%s"
-                        % (source_label, raw_text[:8000]),
+                        % (source_label, input_text),
                     }
                 ],
             )
 
-            response_text = message.content[0].text.strip()
+            if not message.content:
+                raise ValueError("Empty response from LLM")
+            # Find the first text block
+            response_text = ""
+            for block in message.content:
+                if hasattr(block, "text") and block.text:
+                    response_text = block.text.strip()
+                    break
+            if not response_text:
+                raise ValueError(f"No text in LLM response, blocks: {[type(b).__name__ for b in message.content]}")
+            _log.info("structure_intelligence raw response length: %d chars, first 100: %s",
+                      len(response_text), repr(response_text[:100]))
+            # Strip markdown fencing if present
+            if response_text.startswith("```"):
+                lines = response_text.split("\n")
+                # Remove first line (```json) and last line (```)
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                response_text = "\n".join(lines).strip()
             intelligence = json.loads(response_text)
 
             # Basic structural validation

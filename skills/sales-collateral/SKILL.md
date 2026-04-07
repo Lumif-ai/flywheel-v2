@@ -1,7 +1,7 @@
 ---
 name: sales-collateral
-version: 1.1.0
-web_tier: 1
+version: "2.1"
+context-aware: true
 description: Create professional B2B sales documents including value proposition one-pagers, partnership pitches, case studies (1-page and 2-page), and vertical-specific marketing collateral. Use when anyone asks to create a value prop doc, sales one-pager, partnership pitch, case study, marketing doc, customer-facing collateral, leave-behind, pitch doc, or any sales document. Also triggers on "create a one-pager", "make a value prop", "build a case study", "partnership one-pager", "sales collateral", "marketing one-pager", or any request to produce a professional sales document. ALWAYS use this skill when creating sales or marketing documents. Produces documents that are defensible, honest, and designed to survive scrutiny from senior buyers.
 ---
 
@@ -10,8 +10,10 @@ description: Create professional B2B sales documents including value proposition
 Create professional, defensible, sector-specific sales documents that survive scrutiny from senior buyers.
 
 **Changelog:**
+- v2.1.0 (2026-03-31): Added "Never Fabricate Numbers" as content principle #7. All figures must be sourced or replaced with qualitative descriptions. Triggered by fabricated vendor counts in Skechers/UA one-pager brainstorm.
+- v2.0.0 (2026-03-21): Deep fix -- added error handling table (Standard 10), input validation before research (Standard 9), resume/checkpoint for long sessions (Standard 5), progress updates in Steps 2/3/4 (Standard 8)
 - v1.1.0 (2026-03-18): Added partnership pitch doc type, brainstorm-before-build step, stats banner component, stricter source attribution, naming/template/multi-doc guidance, domain research emphasis
-- v1.0.0 (2026-03-16): Initial merged version — core framework + Lumif.ai specifics + context store integration
+- v1.0.0 (2026-03-16): Initial merged version -- core framework + brand specifics + context store integration
 
 ---
 
@@ -30,9 +32,40 @@ Produces branded Word documents (.docx) for sales and marketing:
 
 Before starting, verify:
 1. **docx skill** exists — check `~/.claude/skills/` for a docx-capable skill (e.g., `document-skills:docx`). If missing, warn the user and stop.
-2. **Brand template** exists at `~/.claude/brand-assets/lumifai-page-template.docx`. If missing, create from scratch instead.
+2. **Brand template** exists at `~/.claude/brand-assets/page-template.docx`. If missing, create from scratch instead.
 3. **Template content check**: Unpack the template header and verify it has no outdated content (old addresses, stale URLs, wrong company names). Fix before first use. Outdated template content leaks into every doc.
 4. **Context store** is accessible at `~/.claude/context/`. If missing, proceed without context enrichment but warn the user.
+
+---
+
+## Error Handling (Standard 10)
+
+| Failure | Detection | User Message | Recovery |
+|---------|-----------|-------------|----------|
+| docx template missing (`~/.claude/brand-assets/page-template.docx`) | Check in Dependency Check step | "Brand template not found at ~/.claude/brand-assets/page-template.docx. Creating document from scratch instead. To use branded template, place your .docx template at that path." | Proceed without template (degrade gracefully) |
+| docx skill missing | Check in Dependency Check step | "No docx-capable skill found in ~/.claude/skills/. Cannot produce .docx output. Install document-skills:docx skill first." | Stop execution, do not proceed |
+| Web research fails (timeout, no results) | try/except around web research in Step 2 | "Web research for [vertical] failed: [error]. Proceeding with context store data only. Document may have less industry-specific detail." | Continue with context store data, flag gaps in deliverables |
+| Context store file unreadable | Check each file read in Context Store Integration | "Could not read [filename]: [error]. Proceeding without [what that file provides]. Run may produce less tailored output." | Skip unreadable file, continue with remaining files, list skipped files in deliverables |
+| Context store directory missing | Check `~/.claude/context/` existence | "Context store not found at ~/.claude/context/. Proceeding without context enrichment. Output will use only user-provided inputs and web research." | Proceed without context, warn in deliverables |
+| Brand template has outdated content | Unpack and inspect header in Step 4 | "Brand template contains outdated content: [specifics]. Fixing before document generation." | Auto-fix the template content, log what was changed |
+
+When multiple failures occur in a single run, collect all warnings and present them together before proceeding. Never silently skip a failed step.
+
+---
+
+## Input Validation (Standard 9)
+
+Before starting expensive vertical research (Step 2), run these validation checks. If any blocker fails, stop and tell the user. If any warning fails, proceed but inform the user.
+
+| Check | Type | How to Validate | On Failure |
+|-------|------|----------------|------------|
+| Vertical is recognized | Blocker | Check if vertical appears in `~/.claude/context/vertical-strategy.md` or `references/vertical-guide.md`. If neither file exists, any vertical is accepted (will require full research). | "Vertical '[name]' not found in vertical-strategy.md or vertical-guide.md. Did you mean one of: [list known verticals]? If this is a new vertical, confirm to proceed with full research." |
+| Brand template accessible | Warning | Check `~/.claude/brand-assets/page-template.docx` exists and is readable | "Brand template not accessible. Document will be created without branded styling. Place template at ~/.claude/brand-assets/page-template.docx to enable branding." |
+| Context store readable | Warning | Check `~/.claude/context/` directory exists and at least `positioning.md` is readable | "Context store not readable. Document will rely on user inputs and web research only. Expect to provide more manual input." |
+| Document type specified | Blocker | User has specified one of: value-prop, partnership-pitch, case-study-1p, or case-study-2p | "Please specify document type: value-prop, partnership-pitch, case-study-1p, or case-study-2p." |
+| Target market specified | Warning | User has indicated geography (defaults to US if not specified) | "No target market specified. Defaulting to US terminology and currency. Say 'UK' or specify another market to adjust." |
+
+Run all checks before Step 2 begins. Present all blockers together (do not stop at the first one). Present warnings after blockers are resolved.
 
 ---
 
@@ -90,6 +123,48 @@ Save learned preferences to memory so future runs auto-apply them.
 
 ---
 
+## Resume & Checkpoint (Standard 5)
+
+Vertical research (Step 2) can take several minutes. Save progress after each research dimension so interrupted sessions can resume.
+
+### Checkpoint File
+
+Location: `/tmp/sales-collateral-checkpoint.md`
+
+After completing each research dimension in Step 2, append the results to the checkpoint file:
+
+```
+## Checkpoint: [vertical] - [doc-type]
+Started: [timestamp]
+Last updated: [timestamp]
+
+### Completed Dimensions
+- [x] Industry-Specific Pain: [summary of findings]
+- [x] Existing Ecosystem: [summary of findings]
+- [ ] Terminology
+- [ ] Regulatory Landscape
+- [ ] Buyer Persona
+
+### Context Store Files Read
+- positioning.md: [loaded/skipped/error]
+- competitive-intel.md: [loaded/skipped/error]
+- [etc.]
+
+### Partial Output
+[Any content written so far]
+```
+
+### Resume Protocol
+
+At the start of Step 2, check for `/tmp/sales-collateral-checkpoint.md`:
+- If it exists and matches the current vertical + doc type: "Found checkpoint from [timestamp]. Resuming from [last completed dimension]. [N/5] research dimensions already complete."
+- If it exists but for a different vertical/doc type: "Found checkpoint for [other vertical]. Starting fresh for [current vertical]. Delete old checkpoint? (y/n)"
+- If it does not exist: proceed normally.
+
+After Step 4 completes successfully, delete the checkpoint file.
+
+---
+
 ## Step 0: Gather Inputs
 
 Before creating any document, establish:
@@ -99,7 +174,7 @@ Before creating any document, establish:
 3. **Target vertical**: Which industry is this for? (Check `vertical-strategy.md` for existing knowledge)
 4. **Target market**: Geography? (affects terminology, currency, regulatory references)
 5. **Target reader**: Who picks this up? (Check `icp-profiles.md` for existing personas)
-6. **Brand template**: Use `~/.claude/brand-assets/lumifai-page-template.docx` if it exists. Otherwise ask.
+6. **Brand template**: Use `~/.claude/brand-assets/page-template.docx` if it exists. Otherwise ask.
 7. **Competitive landscape**: What existing tools/processes does the buyer already use? (Check `competitive-intel.md`)
 
 If context store has answers, auto-apply them and show the user what was used. Only ask for what's genuinely missing.
@@ -122,16 +197,28 @@ This is the most powerful B2B framing for any AI-powered product:
 - **System of intelligence**: Where AI does the analysis, comparison, or reconciliation. The system does the concluding.
 - Frame it as: "[Existing tool] is where your team records that [task] was done. But someone still had to [manual steps]. [Product] automates the [task] itself."
 
-### Lumif.ai Core Positioning (auto-loaded from context store)
-- "Contract-to-coverage review" is Lumif.ai's coined term for the end-to-end compliance process
-- AI reads the contract, reads the policy/evidence document, does the reconciliation
-- Primary sales wedge across all verticals
-- Three modules: Insurance Compliance (primary wedge), Wrap Programme Management (US CCIP/OCIP), Vendor Pre-Qualification
+### Core Positioning (auto-loaded from context store)
+
+Read current positioning from `positioning.md` and `product-modules.md` in the context store. The positioning section below is a template -- populate from tenant settings or context store data at runtime.
+
+- Core value proposition: loaded from `positioning.md`
+- Primary product modules: loaded from `product-modules.md`
+- Primary sales wedge across all verticals: loaded from `vertical-strategy.md`
 - Broader capability hint: the same engine can reconcile ANY contract requirement against supplier evidence
 
 ---
 
 ## Step 2: Research the Vertical
+
+**Progress Update (Standard 8):** Inform the user at the start of each research dimension:
+- "Researching [vertical] - Dimension 1/5: Industry-Specific Pain..."
+- "Researching [vertical] - Dimension 2/5: Existing Ecosystem..."
+- "Researching [vertical] - Dimension 3/5: Terminology..."
+- "Researching [vertical] - Dimension 4/5: Regulatory Landscape..."
+- "Researching [vertical] - Dimension 5/5: Buyer Persona..."
+- "Research complete. Moving to brainstorm step."
+
+**Checkpoint Check (Standard 5):** Before starting research, check for `/tmp/sales-collateral-checkpoint.md`. If a checkpoint exists for this vertical + doc type, resume from the last completed dimension instead of restarting. See the Resume & Checkpoint section above for the full protocol (file format, resume logic, cleanup).
 
 For any vertical, research these dimensions before writing. Check `vertical-strategy.md` and `references/vertical-guide.md` first — if the vertical is already researched, skip to Step 3.
 
@@ -185,6 +272,12 @@ Present options, get alignment, then write. The cost of rewriting a finished doc
 
 ## Step 3: Write the Content
 
+**Progress Update (Standard 8):** Inform the user at key milestones:
+- "Writing [doc-type] for [vertical] - drafting headline and structure..."
+- "Writing [doc-type] for [vertical] - drafting body content..."
+- "Writing [doc-type] for [vertical] - adding stats banner and footnotes..."
+- "Draft complete. Moving to document build."
+
 ### Content Principles
 
 These principles apply universally to all B2B sales documents.
@@ -232,7 +325,17 @@ Every sector has a trigger event. Address it directly:
 "Manual Process" column: blend honest qualitative descriptions with sourced numbers where available.
 "With [Product]" column: product outcomes with * citation and honest caveat footnote.
 
-**7. Transparent Sourcing**
+**7. Never Fabricate Numbers**
+
+NEVER make up statistics, counts, or figures that are not sourced from research, public filings, or the user. If a number is not verified, do not use it. This includes:
+- Vendor counts per location (e.g., "12 new vendor relationships") unless confirmed by research or the user
+- Headcount, cost savings, or efficiency percentages that are not sourced
+- Store counts, revenue figures, or operational details that are not from public filings or confirmed research
+- Extrapolated or "reasonable estimate" numbers presented as fact
+
+If a specific number would strengthen the copy but you don't have a source, either: (a) use a qualitative description instead ("multiple vendor relationships" not "12 vendor relationships"), (b) use a sourced industry average with footnote, or (c) ask the user. Getting caught with a fabricated number in a sales doc destroys credibility with the prospect and the internal contact who forwarded it.
+
+**8. Transparent Sourcing**
 
 **Every metric in the document must have a footnote.** No exceptions. Use superscript numbers (not asterisks) for all sources.
 
@@ -249,19 +352,19 @@ Rules:
 - Be honest about what each number is and where it came from
 - If a number is inferred (not directly stated in any source), label it as such and explain the derivation
 
-**8. Broader Capability Hint**
+**9. Broader Capability Hint**
 
 End with one italicised line:
 - "The same engine that [does primary thing] can [do broader thing]: [examples]."
 
-**9. CTA**
+**10. CTA**
 
 Specific, low-friction, value-giving:
 - "Book a 15-minute call. We'll show you what [core capability] looks like for your [projects/portfolio/organisation]. [website]"
 - NOT: "Contact us to learn more"
 - NOT: "Request a demo"
 
-**10. Spell Out Technical Terms**
+**11. Spell Out Technical Terms**
 
 Always spell out abbreviations on first use. If the reader can't forward the doc to their Finance Director without explanation, the doc isn't ready.
 
@@ -269,25 +372,31 @@ Always spell out abbreviations on first use. If the reader can't forward the doc
 
 ### Visual Design Principles
 
-**11. Minimal Brand Colour Usage**
+**12. Minimal Brand Colour Usage**
 
 Brand colour (#E94D35) appears in: section headings, one status quo panel, the table header row, and the "With [Product]" column values. That's it.
 
-**12. Subdued Bullets**
+**13. Subdued Bullets**
 
 Bullet points use grey (#9CA3AF), not brand colour. The bold lead-in text does the work.
 
-**13. One-Page Fit**
+**14. One-Page Fit**
 
 Value prop one-pagers MUST fit on one page. Write tight copy upfront. If it spills, tighten copy first (don't reduce font sizes below readability).
 
-**14. Clean Visual Hierarchy**
+**15. Clean Visual Hierarchy**
 
 One page should have at most three visual weights: the headline, one shaded data panel, and one branded table. Everything else is clean text.
 
 ---
 
 ## Step 4: Build the Document
+
+**Progress Update (Standard 8):** Inform the user at key milestones:
+- "Building .docx - loading brand template..."
+- "Building .docx - applying content and formatting..."
+- "Building .docx - generating PDF preview..."
+- "Document build complete. Running self-review."
 
 Read the docx skill reference:
 ```
@@ -296,7 +405,7 @@ view ~/.claude/skills/document-skills/docx/SKILL.md
 
 ### Brand Template
 
-Use `~/.claude/brand-assets/lumifai-page-template.docx` as the base template. See `references/template-specs.md` for full brand specs including colours, fonts, sizing, and build process.
+Use `~/.claude/brand-assets/page-template.docx` as the base template. See `references/template-specs.md` for full brand specs including colours, fonts, sizing, and build process.
 
 Key specs (aligned to design-guidelines.md):
 - Primary accent: #E94D35
@@ -383,17 +492,17 @@ A stats banner is a standard top-of-page element for both value prop one-pagers 
 ## Terminology Rules
 
 - "Contract-to-coverage review" (not "contract-to-evidence reconciliation")
-- "Trade contractors" (UK construction), "contractors" / "supply chain partners" (water utilities), "subcontractors" (US construction)
+- Use industry-specific terminology from `vertical-strategy.md` or tenant settings (e.g., what they call suppliers, contracts, compliance roles)
 - "Finance Director" (UK), "CFO" (US)
 - "Turnover" (UK), "revenue" (US)
 - Avoid em dashes throughout
-- Spell out all insurance types on first use
+- Spell out all technical terms and industry-specific abbreviations on first use
 
 ### Naming Rules for External Documents
 
 - **Never coin abbreviations** the prospect doesn't use publicly. Check their website, brochures, and prior conversations. If they don't use a shorthand, neither should we. Use their full name on first mention, then a natural short form (e.g., "The Amphibious Group" -> "Amphibious", never "TAG" unless they use it).
-- **Never name internal contacts by first name** in external docs. Reference roles and activities instead (e.g., "building insurance carrier relationships" not "Ken is building carrier relationships"). Internal people change roles; docs persist.
-- **Company names must match their own branding.** Check capitalization, spacing, and legal name. "lumif.ai" not "Lumif.ai". "The Amphibious Group" not "Amphibious Group" on first mention.
+- **Never name internal contacts by first name** in external docs. Reference roles and activities instead (e.g., "building partner relationships" not "Ken is building partner relationships"). Internal people change roles; docs persist.
+- **Company names must match their own branding.** Check capitalization, spacing, and legal name. "The Amphibious Group" not "Amphibious Group" on first mention.
 
 ---
 
@@ -424,21 +533,18 @@ Every run MUST end with a clear deliverables block:
 
 ---
 
-## Tool Access (Web Platform)
-
-When running on the web platform, you have access to these tools via tool_use:
-
-- **context_read**: Read context files. Call with `{"file": "company-intel"}` to read a context file.
-- **context_write**: Write to context files. Call with `{"file": "company-intel", "content": ["line1", "line2"], "detail": "description", "confidence": "high"}`.
-- **context_query**: Search across context. Call with `{"search": "search terms"}`.
-- **web_search**: Search the web. Call with `{"query": "search query"}`. Limited to 20 searches per run.
-- **web_fetch**: Fetch and extract text from a URL. Call with `{"url": "https://..."}`.
-- **file_write**: Save generated output. Call with `{"filename": "output.html", "content": "<html>...", "mimetype": "text/html"}`.
-
-When running in Claude Code (CLI), use direct Python calls to context_utils instead.
-
 ## Reference Files
 
 - `references/research-framework.md` — Detailed vertical research checklist and example research output
 - `references/template-specs.md` — Brand template specifications (colours, fonts, sizing, build process)
-- `references/vertical-guide.md` — Sector-specific knowledge for proven verticals (construction, water utilities)
+- `references/vertical-guide.md` — Vertical knowledge template for sector-specific collateral
+
+## Flywheel MCP Integration
+
+When connected to the Flywheel MCP server, save generated collateral:
+
+### After creating collateral:
+1. Call `flywheel_save_document(title="<collateral title>", content=<markdown>, skill_name="sales-collateral")` to save the document to the Flywheel library
+2. If the collateral is for a specific lead/prospect, also call `flywheel_upsert_lead(name, intel={collateral_created: true, collateral_type: "value-prop|case-study|partnership-pitch"})` to track it on the lead
+
+If Flywheel MCP is not connected, skip these steps silently and use local file output.

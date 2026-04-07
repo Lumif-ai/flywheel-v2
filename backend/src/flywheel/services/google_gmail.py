@@ -60,14 +60,14 @@ def _create_oauth_flow() -> Flow:
     )
 
 
-def generate_gmail_auth_url(state: str) -> str:
+def generate_gmail_auth_url(state: str) -> tuple[str, str | None]:
     """Generate the Google OAuth authorization URL for Gmail.
 
     Args:
         state: Cryptographic state parameter for CSRF protection.
 
     Returns:
-        Authorization URL the user should be redirected to.
+        Tuple of (authorization URL, code_verifier for PKCE).
     """
     flow = _create_oauth_flow()
     auth_url, _ = flow.authorization_url(
@@ -76,10 +76,10 @@ def generate_gmail_auth_url(state: str) -> str:
         include_granted_scopes="true",
         state=state,
     )
-    return auth_url
+    return auth_url, flow.code_verifier
 
 
-def exchange_gmail_code(code: str) -> Credentials:
+def exchange_gmail_code(code: str, code_verifier: str | None = None) -> Credentials:
     """Exchange an authorization code for OAuth credentials.
 
     Args:
@@ -92,6 +92,7 @@ def exchange_gmail_code(code: str) -> Credentials:
         ValueError: If no refresh token was returned.
     """
     flow = _create_oauth_flow()
+    flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     if creds.refresh_token is None:

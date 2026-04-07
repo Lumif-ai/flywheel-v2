@@ -1,11 +1,12 @@
 import { useState } from 'react'
-import { NavLink, useLocation, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Users, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare } from 'lucide-react'
+import { NavLink, useLocation, useSearchParams, Link } from 'react-router'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare, Bookmark } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
-import { useSignals } from '@/features/relationships/hooks/useSignals'
+import { useSavedViews, buildViewUrl } from '@/features/pipeline/hooks/useSavedViews'
 import { colors, typography } from '@/lib/design-tokens'
+import { useFeatureFlag } from '@/lib/feature-flags'
 import {
   Sidebar,
   SidebarContent,
@@ -24,6 +25,11 @@ import { StreamSidebar } from '@/features/streams/components/StreamSidebar'
 
 export function AppSidebar() {
   const location = useLocation()
+  const [searchParams] = useSearchParams()
+  const emailEnabled = useFeatureFlag('email')
+  const tasksEnabled = useFeatureFlag('tasks')
+  const pipelineEnabled = useFeatureFlag('pipeline')
+  const meetingsEnabled = useFeatureFlag('meetings')
 
   const { state, hasApiKey, isAnonymous: isAnonymousServer } = useLifecycleState()
   const user = useAuthStore((s) => s.user)
@@ -33,10 +39,8 @@ export function AppSidebar() {
   const [oauthLoading, setOauthLoading] = useState<'google' | 'microsoft' | null>(null)
   const { signInWithProvider } = useOAuthSignIn()
   const logout = useAuthStore((s) => s.logout)
-  const { data: signals } = useSignals()
 
-  const signalByType = (type: string) =>
-    signals?.types.find((t) => t.type === type)?.total_signals ?? 0
+  const { data: savedViews = [] } = useSavedViews()
 
   // Derive display name and initials from user metadata
   const initials = user?.display_name
@@ -48,6 +52,10 @@ export function AppSidebar() {
 
   // Show API key banner only for S4 (power threshold) and S5 (power user without key -- impossible but safe)
   const showApiKeyBanner = !hasApiKey && (state === 'S4' || state === 'S5')
+
+  // Active state detection for pipeline section
+  const isPipelinePath = location.pathname === '/pipeline' || location.pathname.startsWith('/pipeline/')
+  const activeRelType = searchParams.get('relationshipType')
 
   const handleSignOut = async () => {
     const supabase = await (await import('@/lib/supabase')).getSupabase()
@@ -138,6 +146,7 @@ export function AppSidebar() {
                   <span>Library</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              {emailEnabled && (
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={location.pathname.startsWith('/email')}
@@ -148,6 +157,8 @@ export function AppSidebar() {
                   <span>Email</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              )}
+              {meetingsEnabled && (
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={location.pathname.startsWith('/meetings')}
@@ -158,6 +169,8 @@ export function AppSidebar() {
                   <span>Meetings</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+              )}
+              {tasksEnabled && (
               <SidebarMenuItem>
                 <SidebarMenuButton
                   isActive={location.pathname.startsWith('/tasks')}
@@ -168,22 +181,13 @@ export function AppSidebar() {
                   <span>Tasks</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
-              {/* Accounts kept for backward compatibility */}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname.startsWith('/accounts')}
-                  render={<NavLink to="/accounts" />}
-                  tooltip="Accounts"
-                >
-                  <Building2 className="size-4" />
-                  <span>Accounts</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
+              )}
             </SidebarMenu>
           </SidebarGroupContent>
         </SidebarGroup>
 
-        {/* Relationships section */}
+        {/* Pipeline — unified section */}
+        {pipelineEnabled && (
         <SidebarGroup>
           <SidebarGroupLabel
             style={{
@@ -194,62 +198,74 @@ export function AppSidebar() {
               color: 'var(--secondary-text)',
             }}
           >
-            Relationships
+            Pipeline
           </SidebarGroupLabel>
           <SidebarGroupContent>
             <SidebarMenu>
-              {[
-                { label: 'Prospects', type: 'prospect', path: '/relationships/prospects', icon: <Users className="size-4" /> },
-                { label: 'Customers', type: 'customer', path: '/relationships/customers', icon: <TrendingUp className="size-4" /> },
-                { label: 'Advisors', type: 'advisor', path: '/relationships/advisors', icon: <Briefcase className="size-4" /> },
-                { label: 'Investors', type: 'investor', path: '/relationships/investors', icon: <DollarSign className="size-4" /> },
-              ].map(({ label, type, path, icon }) => {
-                const badge = signalByType(type)
-                return (
-                  <SidebarMenuItem key={type}>
-                    <SidebarMenuButton
-                      isActive={location.pathname.startsWith(path)}
-                      render={<NavLink to={path} />}
-                      tooltip={label}
-                    >
-                      {icon}
-                      <span>{label}</span>
-                      {badge > 0 && (
-                        <span
-                          className="badge-translucent ml-auto"
-                          style={{
-                            background: 'rgba(233,77,53,0.1)',
-                            color: 'var(--brand-coral)',
-                          }}
-                        >
-                          {badge}
-                        </span>
-                      )}
-                    </SidebarMenuButton>
-                  </SidebarMenuItem>
-                )
-              })}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Pipeline — positioned below Relationships */}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
+              {/* All entries */}
               <SidebarMenuItem>
                 <SidebarMenuButton
-                  isActive={location.pathname === '/pipeline'}
+                  isActive={isPipelinePath && !activeRelType}
                   render={<NavLink to="/pipeline" />}
-                  tooltip="Pipeline"
+                  tooltip="All"
                 >
                   <TrendingUp className="size-4" />
-                  <span>Pipeline</span>
+                  <span>All</span>
                 </SidebarMenuButton>
               </SidebarMenuItem>
+
+              {/* Built-in relationship filters */}
+              {[
+                { label: 'Customers', type: 'customer', icon: <TrendingUp className="size-4" /> },
+                { label: 'Advisors', type: 'advisor', icon: <Briefcase className="size-4" /> },
+                { label: 'Investors', type: 'investor', icon: <DollarSign className="size-4" /> },
+              ].map(({ label, type, icon }) => (
+                <SidebarMenuItem key={type}>
+                  <SidebarMenuButton
+                    isActive={isPipelinePath && activeRelType === type}
+                    render={<NavLink to={`/pipeline?relationshipType=${type}`} />}
+                    tooltip={label}
+                  >
+                    {icon}
+                    <span>{label}</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
             </SidebarMenu>
+
+            {/* Saved Views */}
+            {savedViews.length > 0 && (
+              <>
+                <SidebarGroupLabel
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 600,
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    color: 'var(--secondary-text)',
+                    marginTop: '8px',
+                  }}
+                >
+                  Saved Views
+                </SidebarGroupLabel>
+                <SidebarMenu>
+                  {savedViews.map((view) => (
+                    <SidebarMenuItem key={view.id}>
+                      <SidebarMenuButton
+                        render={<NavLink to={buildViewUrl(view)} />}
+                        tooltip={view.name}
+                      >
+                        <Bookmark className="size-4" />
+                        <span>{view.name}</span>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
+                  ))}
+                </SidebarMenu>
+              </>
+            )}
           </SidebarGroupContent>
         </SidebarGroup>
+        )}
 
         <SidebarGroup>
           <SidebarGroupContent>

@@ -10,7 +10,15 @@ description: >
   sender-profile.md for backward compatibility with existing GTM pipeline skills.
 context-aware: true
 triggers:
-  - manual
+  - "update company profile"
+  - "build sender profile"
+  - "update positioning"
+  - "my company"
+  - "who are we"
+  - "update ICP"
+tags:
+  - gtm
+  - company-profile
 dependencies:
   skills: []
   files:

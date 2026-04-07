@@ -7,7 +7,16 @@ description: >
   reports as HTML and JSON. Can be invoked standalone or consumed by meeting-prep.
 context-aware: true
 triggers:
-  - manual
+  - "call intelligence"
+  - "show me decisions from"
+  - "what was discussed in"
+  - "what was decided"
+  - "call details for"
+  - "decision log"
+  - "call insights for"
+tags:
+  - meetings
+  - analysis
 dependencies:
   skills: []
   files:

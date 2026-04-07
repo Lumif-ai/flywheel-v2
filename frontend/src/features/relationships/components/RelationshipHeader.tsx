@@ -1,8 +1,11 @@
+import { useState } from 'react'
 import { Link } from 'react-router'
-import { Globe } from 'lucide-react'
+import { Globe, Pencil } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
+import { Button } from '@/components/ui/button'
 import { typography } from '@/lib/design-tokens'
 import type { RelationshipDetailItem, RelationshipType } from '../types/relationships'
+import { EditAccountDialog } from './EditAccountDialog'
 
 function getInitials(name: string): string {
   return name
@@ -44,6 +47,7 @@ const TYPE_TO_PLURAL: Record<RelationshipType, string> = {
 
 export function RelationshipHeader({ account, fromType }: RelationshipHeaderProps) {
   const initials = getInitials(account.name)
+  const [editOpen, setEditOpen] = useState(false)
 
   return (
     <div className="flex flex-col sm:flex-row items-start gap-4 mb-6">
@@ -62,18 +66,30 @@ export function RelationshipHeader({ account, fromType }: RelationshipHeaderProp
 
       {/* Text content */}
       <div className="flex-1 min-w-0">
-        {/* Name */}
-        <h1
-          className="text-foreground"
-          style={{
-            fontSize: typography.pageTitle.size,
-            fontWeight: typography.pageTitle.weight,
-            lineHeight: typography.pageTitle.lineHeight,
-            letterSpacing: typography.pageTitle.letterSpacing,
-          }}
-        >
-          {account.name}
-        </h1>
+        {/* Name + Edit button */}
+        <div className="flex items-center gap-2">
+          <h1
+            className="text-foreground"
+            style={{
+              fontSize: typography.pageTitle.size,
+              fontWeight: typography.pageTitle.weight,
+              lineHeight: typography.pageTitle.lineHeight,
+              letterSpacing: typography.pageTitle.letterSpacing,
+            }}
+          >
+            {account.name}
+          </h1>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setEditOpen(true)}
+            className="opacity-50 hover:opacity-100 transition-opacity"
+          >
+            <Pencil className="size-3.5" />
+          </Button>
+        </div>
+
+        <EditAccountDialog account={account} open={editOpen} onOpenChange={setEditOpen} />
 
         {/* Domain */}
         {account.domain && (

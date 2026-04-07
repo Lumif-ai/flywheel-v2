@@ -1,5 +1,6 @@
 ---
 name: ship
+enabled: false
 version: 1.0.0
 description: |
   Ship workflow: merge main, run tests, review diff, bump VERSION, update CHANGELOG, commit, push, create PR.

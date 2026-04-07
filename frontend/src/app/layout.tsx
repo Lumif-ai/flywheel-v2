@@ -12,6 +12,7 @@ import { AppRoutes } from '@/app/routes'
 import { AuthBootstrap } from '@/app/AuthBootstrap'
 import { CriticalEmailAlert } from '@/features/email/components/CriticalEmailAlert'
 import { useEmailThreads } from '@/features/email/hooks/useEmailThreads'
+import { useFeatureFlag } from '@/lib/feature-flags'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -75,9 +76,18 @@ const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy', '/bri
 // Only rendered inside the authenticated shell so useEmailThreads never fires
 // on standalone routes (which have no auth context and would return 401).
 // React Query deduplicates this call with the same query on EmailPage.
-function AuthenticatedAlerts() {
+// Two-component pattern: AuthenticatedAlerts gates on FEATURE_EMAIL before
+// rendering EmailAlertInner, ensuring useEmailThreads() never fires when
+// email is disabled (hooks cannot be called conditionally).
+function EmailAlertInner() {
   const { data: emailData } = useEmailThreads()
   return emailData?.threads ? <CriticalEmailAlert threads={emailData.threads} /> : null
+}
+
+function AuthenticatedAlerts() {
+  const emailEnabled = useFeatureFlag('email')
+  if (!emailEnabled) return null
+  return <EmailAlertInner />
 }
 
 function AppShell() {

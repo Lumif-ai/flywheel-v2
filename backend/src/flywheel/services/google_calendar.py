@@ -56,14 +56,14 @@ def create_oauth_flow() -> Flow:
     return flow
 
 
-def generate_auth_url(state: str) -> str:
+def generate_auth_url(state: str) -> tuple[str, str | None]:
     """Generate the Google OAuth authorization URL.
 
     Args:
         state: Cryptographic state parameter for CSRF protection.
 
     Returns:
-        Authorization URL the user should be redirected to.
+        Tuple of (authorization URL, code_verifier for PKCE).
     """
     flow = create_oauth_flow()
     auth_url, _ = flow.authorization_url(
@@ -72,14 +72,15 @@ def generate_auth_url(state: str) -> str:
         include_granted_scopes="true",
         state=state,
     )
-    return auth_url
+    return auth_url, flow.code_verifier
 
 
-def exchange_code(code: str) -> Credentials:
+def exchange_code(code: str, code_verifier: str | None = None) -> Credentials:
     """Exchange an authorization code for OAuth credentials.
 
     Args:
         code: Authorization code from the OAuth callback.
+        code_verifier: PKCE code verifier from the authorize step.
 
     Returns:
         Google OAuth2 Credentials with refresh token.
@@ -89,6 +90,7 @@ def exchange_code(code: str) -> Credentials:
             granted offline access or consent was not forced).
     """
     flow = create_oauth_flow()
+    flow.code_verifier = code_verifier
     flow.fetch_token(code=code)
     creds = flow.credentials
     if creds.refresh_token is None:

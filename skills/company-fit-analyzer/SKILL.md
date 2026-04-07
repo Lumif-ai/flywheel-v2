@@ -1,5 +1,6 @@
 ---
 name: company-fit-analyzer
+enabled: false
 description: >
   DEPRECATED -- Use `/gtm-company-fit-analyzer` instead. This skill is kept as a reference
   for its LinkedIn authenticated scrape (Phase 4.5) but all new scoring should use the GTM

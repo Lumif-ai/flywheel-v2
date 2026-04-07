@@ -1,665 +1,342 @@
-# Domain Pitfalls: CRM Redesign — Multi-Type Relationships, AI Synthesis, Configurable Grid
+# Domain Pitfalls
 
-**Domain:** Brownfield CRM migration — adding multi-type relationships, AI synthesis caching,
-configurable data grid, and entity-level switching (person vs company) to existing system
-**Researched:** 2026-03-27
-**Confidence:** HIGH for migration/backend pitfalls (direct codebase inspection + official docs).
-MEDIUM for frontend grid pitfalls (official TanStack docs + community patterns). MEDIUM for AI
-cost/caching (multiple credible sources, no single authoritative reference).
-
----
-
-## Context: What Already Exists
-
-The existing system has:
-- `accounts` table with a `status TEXT` column (values: `prospect`, `engaged`, etc.)
-- 206 seeded accounts, all with `status = 'prospect'` or `status = 'engaged'`
-- `GET /pipeline/` filters on `Account.status`
-- `POST /accounts/{id}/graduate` sets `status = 'engaged'`
-- Frontend `PipelineItem` TypeScript type has `status: string` field
-- Frontend `pipeline/api.ts` calls `GET /pipeline/` and `POST /accounts/{id}/graduate`
-- `GET /accounts/?status=...` filters on the `status` column directly
-
-The migration renames `status` → `pipeline_stage`, adds `relationship_type text[]`,
-`relationship_status text`, `entity_level text`, `ai_summary text`, and `ai_summary_updated_at`.
+**Domain:** Unified pipeline schema migration — merging 6 CRM tables into 3 on a live Flywheel V2 system
+**Researched:** 2026-04-06
+**Confidence:** HIGH (based on direct codebase analysis of all 6 CRM models, 12 API files, 8 engine files, 7 service files, 4 frontend feature directories, 43 Alembic migrations, and Supabase-specific constraints)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites, data loss, or major regressions.
+Mistakes that cause data loss, extended downtime, or require rewrites.
+
+### Pitfall 1: Supabase PgBouncer Silently Rolls Back Multi-Statement DDL
+
+**What goes wrong:** Alembic wraps all DDL in a single transaction. PgBouncer (Supabase's connection pooler) commits the `alembic_version` UPDATE but silently rolls back the actual DDL. The migration reports success, `alembic current` shows the new revision, but no tables/columns actually changed. You proceed to deploy code that references non-existent schema.
+
+**Why it happens:** PgBouncer in transaction pooling mode cannot handle multi-statement DDL transactions. Supabase uses PgBouncer by default on the pooled connection string. This is a known, documented issue in this project (see CLAUDE.md and `feedback_supabase_ddl.md`).
+
+**Consequences:** Code deploys referencing `pipeline_entries` table that does not exist. Every API call returns 500. If you deployed the ORM model changes alongside the "migration," rollback requires reverting both code AND manually checking what actually exists in the DB.
+
+**Prevention:**
+1. Never run multi-statement DDL through Alembic's standard `upgrade()` path on Supabase pooled connections.
+2. For each DDL statement, use a separate `session.execute()` + `session.commit()` via the direct (non-pooled) Supabase connection string, OR paste SQL directly into Supabase SQL Editor.
+3. After all DDL succeeds, run `alembic stamp <revision>` to sync Alembic's state.
+4. Write the Alembic migration file for documentation and downgrade support, but do NOT rely on `alembic upgrade head` to apply it.
+
+**Detection:** After any migration, verify with a direct SQL query: `SELECT column_name FROM information_schema.columns WHERE table_name = 'pipeline_entries';`. Never trust `alembic current` alone.
+
+**Which phase should address:** Phase 1 (schema migration). Every subsequent phase that adds columns or indexes must follow the same protocol.
 
 ---
 
-### Pitfall 1: Atomic Rename — The Gap Between Migration and Code Deploy
+### Pitfall 2: Data Loss During Table Merge — Orphaned or Duplicated Records
 
-**What goes wrong:**
-`status` is renamed to `pipeline_stage` in Alembic. The migration runs. For the window
-between migration completion and code deploy, the existing API code still references
-`Account.status`. SQLAlchemy raises `AttributeError: Account has no attribute 'status'` on
-every request. The entire `/accounts/`, `/pipeline/`, and `/graduate` API surface goes 500.
-With 206 accounts in the DB, this affects every user immediately.
+**What goes wrong:** Merging `leads` + `accounts` into `pipeline_entries` loses data because:
+- Lead-only fields (`purpose`, `campaign`, `fit_rationale`) have no column in the target table and are silently dropped.
+- Duplicate normalized_name entries exist across leads and accounts (same company in both tables, e.g., a lead that was graduated but the lead row was retained with `account_id` FK set).
+- The graduation flow in `leads.py:773-905` already copies lead data to accounts during graduation. Merging both rows without checking `Lead.account_id` creates duplicates.
 
-**Why it happens:**
-In Python SQLAlchemy, the ORM model attribute name and the DB column name must stay in sync.
-When you rename a column in the DB (via `op.alter_column`) but haven't updated the ORM model or
-the API code, every ORM reference to `Account.status` compiles to SQL referencing a column that
-no longer exists. PostgreSQL returns `column "status" does not exist`.
+**Why it happens:** The leads and accounts tables evolved independently with different column sets. 15 fields on Lead have no direct counterpart on Account (e.g., `purpose ARRAY(Text)`, `campaign TEXT`, `fit_rationale TEXT`). During migration, the INSERT-SELECT either omits these columns (data loss) or requires a JSONB metadata column to preserve them.
 
-Additionally, the existing `PATCH /accounts/{id}` endpoint accepts `UpdateAccountRequest` with
-a `status` field. After the migration, this field silently does nothing (the column is gone) —
-no error, just silent data loss if not updated.
-
-**Consequences:**
-- Total API outage for all CRM endpoints during the deploy gap
-- Silent silent data loss if any client writes to `status` field after rename
-- Pipeline frontend breaks (reads `item.status` from API response)
+**Consequences:** Lost outreach context. Duplicate pipeline entries for the same company. Broken dedup constraints on the new table.
 
 **Prevention:**
-Use a two-phase migration:
-1. Phase A (additive): Add `pipeline_stage`, `relationship_type`, `relationship_status`,
-   `entity_level` as new columns. Copy data: `UPDATE accounts SET pipeline_stage = status`.
-   Deploy code that writes to BOTH `status` AND `pipeline_stage`, reads from `pipeline_stage`.
-2. Phase B (cleanup): After Phase A is stable for ≥1 deploy cycle, drop `status` column.
-   Remove dual-write code. Remove `status` field from all Pydantic models.
+1. Map every column from both source tables to the target schema BEFORE writing migration SQL. Create a column mapping spreadsheet. Fields without a direct target go into `metadata JSONB`.
+2. Handle graduated leads explicitly: when `Lead.account_id IS NOT NULL`, merge lead-specific data INTO the corresponding account row (now pipeline_entry), do NOT create a second row.
+3. Run the migration on a Supabase branch or local copy first. Compare row counts: `SELECT count(*) FROM pipeline_entries` should equal `(SELECT count(*) FROM accounts) + (SELECT count(*) FROM leads WHERE account_id IS NULL)`.
+4. Keep the old tables (renamed with `_legacy` suffix) for 30 days before dropping.
 
-Never do a single-phase rename in a brownfield system with live traffic.
+**Detection:** Post-migration audit query: `SELECT normalized_name, tenant_id, count(*) FROM pipeline_entries GROUP BY 1,2 HAVING count(*) > 1;` should return zero rows (unless legitimate duplicates exist across entity types).
 
-**Detection:**
-- Any Alembic migration that calls `op.alter_column(..., new_column_name='...')` without a
-  matching same-commit ORM model update.
-- SQLAlchemy errors containing `column "status" does not exist` in staging logs.
-- `grep -r "Account.status" backend/src/` should return zero results after Phase A deploy.
-
-**Phase to address:** Data Model phase (first phase of milestone). Phase A migration must be
-deployed and verified before any relationship API code is written. Phase B is a cleanup task
-in a later phase or a follow-up commit.
+**Which phase should address:** Phase 1 (data migration script). Must be the most thoroughly tested plan in the milestone.
 
 ---
 
-### Pitfall 2: Array Column Filter Without GIN Index — Silent Full Table Scan
+### Pitfall 3: Contact Deduplication Conflicts When Merging lead_contacts + account_contacts
 
-**What goes wrong:**
-The new `relationship_type text[]` column is added. The relationships API filters with
-`WHERE 'advisor' = ANY(relationship_type)`. PostgreSQL executes this correctly but performs a
-full sequential scan on the `accounts` table for every request. At 206 rows this is imperceptible.
-At 2,000+ rows (after sales and seeding cycles), list page latency crosses 300ms. By 5,000 rows
-it is visibly slow. The query never shows up in slow-query logs because it is measured in
-milliseconds per row, not absolute time — until it isn't.
+**What goes wrong:** The same person exists in both `lead_contacts` (linked to a lead) and `account_contacts` (linked to the graduated account). Current graduation code in `leads.py:822-859` already handles this by matching on email, but:
+- Some lead_contacts have no email (scraped from LinkedIn with only name + title).
+- Name-only matching produces false positives ("John Smith" at two different companies).
+- The `lead_contacts` row has `pipeline_stage` (scraped/scored/drafted/sent/replied) while `account_contacts` has `role_in_deal` — different semantic fields.
+- `lead_contacts` has a `messages` relationship to `lead_messages`; `account_contacts` links to `outreach_activities`. Merging contacts means re-parenting these child records.
 
-**Why it happens:**
-PostgreSQL's standard B-tree index does not support the `ANY()` operator on arrays. The GIN
-(Generalized Inverted Index) index is required. Without it, every relationship type filter
-is a full table scan. This is a well-documented PostgreSQL behavior that developers miss because
-the query "works" without the index — it just doesn't scale.
+**Why it happens:** The dual-table design was intentional: leads and accounts represent different lifecycle stages. The contact models diverged to serve different purposes. LeadContact tracks outreach progression; AccountContact tracks deal roles.
 
-**Consequences:**
-- Relationship list page degrades progressively as account count grows
-- Signal computation (which queries across all accounts by type) hits the same problem
-- Performance cliff is invisible in dev/staging with small datasets
+**Consequences:** Duplicate contacts in the unified table. Lost outreach sequence data if lead_messages are not migrated. Broken FK references from outreach records to the wrong contact ID.
 
 **Prevention:**
-Add the GIN index in the same Alembic migration that creates `relationship_type`:
-```sql
-CREATE INDEX idx_account_relationship_type
-  ON accounts USING GIN (relationship_type);
-```
+1. Dedup strategy: Match by (tenant_id, email) first (high confidence), then (tenant_id, normalized_name, company_normalized_name) as fallback (medium confidence, flag for review).
+2. For contacts with no email AND no unique name match, preserve both rows — over-retaining is safer than data loss.
+3. Merge child records: for each deduped contact, update `lead_messages.contact_id` and `outreach_activities.contact_id` to point to the surviving unified contact ID.
+4. Preserve BOTH `pipeline_stage` and `role_in_deal` as separate columns on the unified contacts table. Do not force one into the other.
+5. Add a `source` column tracking origin (`lead_contact`, `account_contact`, `meeting`, `email`).
 
-In Alembic:
-```python
-op.create_index(
-    'idx_account_relationship_type',
-    'accounts',
-    ['relationship_type'],
-    postgresql_using='gin'
-)
-```
+**Detection:** Post-migration: `SELECT tenant_id, email, count(*) FROM contacts WHERE email IS NOT NULL GROUP BY 1,2 HAVING count(*) > 1;` — review each duplicate.
 
-Also index `(tenant_id, relationship_type)` for the most common query pattern
-(all queries are scoped by tenant first).
-
-Note on GIN index cost: GIN indexes are larger than the table itself and updates are
-more expensive than B-tree (`UPDATE` to an array-indexed column is effectively a DELETE
-+ INSERT in the index). For 200-2000 accounts with infrequent type changes, this is
-completely acceptable. Flag for reconsideration at 100K+ rows.
-
-**Detection:**
-- `EXPLAIN ANALYZE SELECT * FROM accounts WHERE 'advisor' = ANY(relationship_type)` shows
-  `Seq Scan` instead of `Bitmap Index Scan`.
-- Missing `postgresql_using='gin'` in the migration that adds `relationship_type`.
-
-**Phase to address:** Data Model phase. The GIN index must ship in the same migration as
-the column. Do not add it as a "follow-up optimization."
+**Which phase should address:** Phase 1 (data migration). Contact dedup should be a separate, auditable step within the migration script, not buried in a giant INSERT-SELECT.
 
 ---
 
-### Pitfall 3: Account Appears in Both Pipeline AND Relationship Surface Simultaneously
+### Pitfall 4: Breaking FK References from Meetings, Tasks, and Context Entries
 
-**What goes wrong:**
-The pipeline query filters on `pipeline_stage IN ('prospect', 'sent', 'awaiting')`. The
-relationships query filters on `relationship_type`. After graduation, an account has
-`relationship_type = ['customer']` AND `pipeline_stage = 'engaged'`. Both queries match it.
-The account appears in the Pipeline grid AND the Customers list. A founder graduates a company,
-navigates to Customers, sees it there — then goes back to Pipeline and finds it still listed.
-They graduate it again. The graduation endpoint returns 409 (already has this type), but the
-frontend shows no clear explanation.
+**What goes wrong:** Three high-traffic tables have `account_id` FK references that must be updated atomically:
+- `meetings.account_id` → references `accounts.id` (used by meeting processing, calendar sync, flywheel ritual, meeting prep)
+- `tasks.account_id` → references `accounts.id` (used by task extraction, task API, flywheel ritual)
+- `context_entries.account_id` → references `accounts.id` (used by 6+ engines and APIs)
 
-**Why it happens:**
-The partition between Pipeline and Relationship surfaces is defined by business logic in the
-API query, not enforced by the data model. If the query predicates are not precisely defined
-and enforced consistently in BOTH the pipeline and relationships endpoints, accounts leak across
-surfaces.
+If the `accounts` table is renamed/dropped before FK references are updated, all meeting processing, task creation, and context writes fail with FK violation errors.
 
-**Consequences:**
-- Data integrity confusion — the same account appears in two places
-- Double-graduation attempts cause confusing 409 errors
-- React Query caches both surfaces independently; after graduation one cache is stale
+**Why it happens:** FK constraints are enforced at the DB level. You cannot DROP or RENAME the referenced table while active FKs point to it. The migration must update the FK target before changing the source table.
+
+**Consequences:** Complete system halt. No meetings process. No tasks extract. No context entries write. The daily flywheel ritual fails entirely. This is the highest-blast-radius failure mode.
 
 **Prevention:**
-Define the partition predicate once and use it in both endpoints:
-- **Pipeline:** accounts where `relationship_type = '{prospect}'` (exactly, no other types)
-  AND `pipeline_stage NOT IN ('engaged')`, OR `relationship_type @> '{prospect}'` AND
-  no other type AND `pipeline_stage` is pre-engagement.
-- **Relationships:** accounts where `relationship_type && ARRAY['customer','advisor','investor']`
-  OR (`relationship_type = '{prospect}'` AND `pipeline_stage = 'engaged'`).
+1. Migration order MUST be: (a) Create `pipeline_entries` table, (b) Migrate data from accounts+leads INTO pipeline_entries, (c) Update FK references on meetings/tasks/context_entries to point to pipeline_entries, (d) Drop old FK constraints, (e) Add new FK constraints, (f) ONLY THEN rename/drop old tables.
+2. Each step is a separate DDL statement with its own commit (Supabase PgBouncer constraint).
+3. Use `ALTER TABLE meetings ADD COLUMN pipeline_entry_id UUID REFERENCES pipeline_entries(id)` first, populate it, verify, THEN drop the old `account_id` column. Never do an in-place rename.
+4. During the transition, both columns exist simultaneously. Backend code checks both: `COALESCE(pipeline_entry_id, account_id)`.
 
-The cleanest implementation: add a `graduated_at timestamp` column. When `graduated_at IS NOT
-NULL`, the account is a relationship. Pipeline filters `WHERE graduated_at IS NULL`.
+**Detection:** Before dropping old columns, verify: `SELECT count(*) FROM meetings WHERE pipeline_entry_id IS NULL AND account_id IS NOT NULL;` should return 0.
 
-After graduation mutation, React Query must invalidate BOTH `['pipeline']` and `['relationships']`
-query keys in the same `onSuccess` callback.
-
-**Detection:**
-- Test: graduate an account; assert it no longer appears in `GET /pipeline/`; assert it does
-  appear in `GET /relationships/?type=customer`.
-- Frontend: after graduation modal confirm, check that `usePipeline` and `useRelationships`
-  both re-fetch.
-
-**Phase to address:** Backend API phase (relationships endpoint). The Pipeline endpoint must
-also be updated in the same phase to filter graduated accounts out.
+**Which phase should address:** Phase 1 (schema migration), with FK update as a distinct, separately-verified step.
 
 ---
 
-### Pitfall 4: Person vs Company Entity Confusion — The Self-Contact Trap
+### Pitfall 5: Breaking MCP Tools and Background Engines During Migration
 
-**What goes wrong:**
-An advisor is created as a person-level account (`entity_level = 'person'`). The spec says
-"a single AccountContact exists where the contact IS the relationship (self-contact pattern)."
-In practice, a developer creates the AccountContact for the advisor but uses the advisor's
-own name/email. Later, the People tab queries contacts for this account and shows one card.
-Another developer adds the graduation flow: when graduating a company as "Advisor", the UI
-asks "Who is the advisor?" and creates a second AccountContact with the same person's details.
-Now there are two identical contacts for the same person-level account, and the dedup logic
-doesn't exist.
+**What goes wrong:** Multiple backend engines query `accounts`, `leads`, `lead_contacts`, and `account_contacts` directly:
+- `meeting_processor_web.py` — joins `AccountContact` to match attendees to accounts (line 173)
+- `channel_task_extractor.py` — queries `Account` by normalized_name and `AccountContact` by email to resolve entities (lines 387-402)
+- `flywheel_ritual.py` — imports `LeadContact`, `LeadMessage` for lead pipeline stage computation (line 22)
+- `skill_executor.py` — queries `Account` by ID for meeting-to-account linking (line 1806)
+- `synthesis_engine.py` — queries `Account` and `ContextEntry` for AI summary generation (lines 122, 207)
+- `context_store_writer.py` — accepts `account_id` parameter throughout (6 functions)
 
-A related failure: a prospect has a contact named "Laurie Chen" (CFO at Howden). Laurie
-becomes an advisor. The team creates a new person-level account for "Laurie Chen (Advisor)".
-Now Laurie appears in two places — as a contact under Howden (company) and as a standalone
-advisor account. In v2.1 these are intentionally not linked. But if the graduation flow
-incorrectly creates a NEW account instead of a NEW contact entry on the same account, the
-person-level logic is broken.
+If the ORM models change before the migration is complete, OR if the migration completes before the code deploys, you get a window where either old code hits new schema or new code hits old schema.
 
-**Why it happens:**
-The `entity_level` column is a convention, not a database constraint. There is no FK linking
-a person-level account to the contact who IS that account. The self-contact pattern is
-implicit — it relies on the application layer to maintain the invariant.
+**Why it happens:** This is a live system with background workers (gmail sync, calendar sync, flywheel ritual) that run continuously. There is no maintenance window — the daily user is actively using the system.
 
-**Consequences:**
-- Duplicate contacts for the same person-level account
-- People tab rendering shows 2 identical cards (confusing UX)
-- AI synthesis pulls duplicate context and double-counts interactions
-- The advisor/investor graduation flow creates a dangling person-level account with no self-contact
+**Consequences:** Meeting processing fails silently (no crash, but meetings are not linked to accounts). Task extraction cannot resolve entities. The flywheel ritual produces broken HTML briefings. Context entries are written without account links.
 
 **Prevention:**
-- Add a `primary_contact_id UUID FK -> account_contacts.id` nullable column to `accounts`.
-  For person-level accounts, this FK points to the self-contact. This makes the relationship
-  explicit and queryable.
-- In the graduation flow: when graduating as advisor/investor, create the person-level
-  `AccountContact` first, then set `accounts.primary_contact_id` to that contact's ID.
-- Add a uniqueness constraint or application-layer guard: person-level accounts may not have
-  more than one `AccountContact` of type `self`.
-- Test: graduate a company as Advisor → verify exactly 1 contact created → verify
-  `primary_contact_id` is set on the account.
+1. **Dual-read period:** ORM models support BOTH old and new table names during transition. Use a compatibility layer: `PipelineEntry` model with `__tablename__ = "pipeline_entries"` but also register views or aliases for `accounts` and `leads`.
+2. **Feature flag:** Add a `UNIFIED_PIPELINE` feature flag. All engine code checks the flag and uses the appropriate model/table. Roll forward one engine at a time.
+3. **API backward compatibility:** Keep old endpoints (`/accounts/*`, `/leads/*`) working during transition by routing to the new unified service layer. Deprecate after all consumers are migrated.
+4. **Deploy order:** (a) Deploy migration, (b) Deploy code with dual-read, (c) Verify all engines work, (d) Remove old code paths.
 
-**Detection:**
-- `SELECT account_id, COUNT(*) FROM account_contacts GROUP BY account_id HAVING COUNT(*) > 1`
-  on person-level accounts (should always be 1).
-- Missing `primary_contact_id` FK on `accounts` table.
+**Detection:** Monitor the flywheel ritual output. If meeting counts drop to zero or account links are missing, the engine-to-schema mismatch has occurred.
 
-**Phase to address:** Data Model phase (schema) + Graduation API phase (enforcement).
-The `primary_contact_id` column should be added in the schema migration. The graduation
-endpoint must create the self-contact atomically.
-
----
-
-### Pitfall 5: AI Synthesis Cost Runaway — LLM Called on Cache Miss, Not on Request
-
-**What goes wrong:**
-The detail page loads. `ai_summary` is NULL (account has never been synthesized). The API
-automatically calls the LLM to generate a summary and blocks the response until generation
-completes (5-15 seconds). The user sees a spinner. Meanwhile, 8 other detail pages load —
-same behavior. 8 LLM calls in parallel, each with full account context (10-20KB of context
-per call). The Anthropic bill for that hour is $12. Multiplied by daily usage, the monthly
-AI synthesis bill exceeds the product's ARR.
-
-A more subtle variant: the synthesis endpoint has no rate limiting. A bug in the frontend
-calls `POST /relationships/{id}/synthesize` in a `useEffect` with a dependency that fires on
-every render. Each account detail load triggers 3-5 synthesis calls before the user even
-reads the page.
-
-**Why it happens:**
-"Cached AI synthesis" sounds solved at architecture time but implementation defaults to
-"generate if null." The cache invalidation logic is undefined. The spec says "regenerated on
-new data arrival" — but no one defines what "new data arrival" means as a trigger. Without
-explicit triggers, the path of least resistance is to always regenerate.
-
-**Consequences:**
-- Unbounded LLM cost correlated with page loads (not user value)
-- Detail page latency of 5-15 seconds for first-time loads (cold cache = slow page)
-- Synthesis rate limiter (1 per account per 5 min) is the only guard, but frontend bugs
-  bypass it via multiple parallel calls
-
-**Prevention:**
-- `ai_summary` being NULL should return NULL, not trigger generation. The page renders with
-  a "Generate summary" CTA.
-- Synthesis is ALWAYS explicit: user clicks a button OR a background job runs after
-  new data arrives. Never auto-triggered on page load.
-- Background trigger: after `POST /relationships/{id}/notes` or `POST /relationships/{id}/files`
-  or graduation, enqueue a synthesis job. Do not block the response.
-- The `/synthesize` endpoint must be rate-limited at the DB level: store `synthesis_requested_at`,
-  return 429 if within 5 minutes of last request (not just last completion).
-- Frontend: call synthesis only from an explicit user action (button click), never from
-  `useEffect` or query lifecycle hooks.
-- Token budget guard: count context tokens before LLM call. If context is under a minimum
-  threshold (< 3 meaningful entries), return a template string without an LLM call.
-
-**Detection:**
-- LLM call count per hour exceeds (number of active users × 2). Any higher indicates
-  automated triggering.
-- Any `useEffect` or `useQuery` in frontend code that calls `/synthesize` without a user
-  interaction event as its trigger.
-- Synthesis endpoint logs showing multiple calls per account within seconds.
-
-**Phase to address:** AI Synthesis phase. Rate limiting and explicit-trigger-only must be
-designed before the endpoint is built, not added afterward.
+**Which phase should address:** Phase 2 (backend migration). This is the riskiest phase and should be split into multiple plans: one per engine.
 
 ---
 
 ## Moderate Pitfalls
 
-Mistakes that cause rework or significant UX degradation without data loss.
+### Pitfall 6: RLS Policy Gaps on New Tables
+
+**What goes wrong:** The current RLS policies are table-specific:
+- `accounts` has a custom `visibility_isolation` policy (migration 042) that checks `visibility = 'team' OR owner_id = app.user_id`.
+- `leads` has standard `tenant_isolation` policies (migration 040) with separate INSERT/UPDATE/SELECT/DELETE.
+- `lead_contacts`, `lead_messages`, `account_contacts`, `outreach_activities` have standard tenant-only isolation.
+
+The unified `pipeline_entries` table needs the MOST restrictive policy from any source table (visibility-aware), but if you create it with only tenant isolation, personal entries become visible to the entire team.
+
+**Why it happens:** Copy-paste from a simpler table's migration. The visibility-aware policy from accounts migration 042 is easy to miss.
+
+**Consequences:** Privacy breach: personal pipeline entries visible to all team members. Depending on data sensitivity, this could expose draft outreach, advisor relationships, or investor conversations.
+
+**Prevention:**
+1. The `pipeline_entries` RLS policy MUST include visibility awareness: `(visibility = 'team' OR owner_id = current_setting('app.user_id')::uuid)`.
+2. The unified `contacts` table needs tenant isolation only (contacts are always team-visible).
+3. The unified `activities` table needs tenant isolation only.
+4. Write RLS policies FIRST, before migrating data. Test with a non-owner user.
+
+**Detection:** After migration, connect as a different user and verify: `SET app.tenant_id = '...'; SET app.user_id = '<non-owner-id>'; SELECT * FROM pipeline_entries WHERE visibility = 'personal';` should return zero rows.
+
+**Which phase should address:** Phase 1 (schema creation). RLS is part of table creation, not a follow-up.
 
 ---
 
-### Pitfall 6: Signal Computation on Every Request — Scan-on-Read Anti-Pattern
+### Pitfall 7: Frontend State Fragmentation — Three Query Caches Becoming One
 
-**What goes wrong:**
-`GET /api/v1/signals/` is called on app mount and polled every 60 seconds. Each call computes
-signals by scanning `outreach_activities` for overdue follow-ups, `context_entries` for stale
-relationships, and `accounts` for next_action_due dates. At 206 accounts with ~1 outreach
-activity each, this is ~3 table scans per poll cycle. At 1,000 accounts across multiple users,
-the signal endpoint becomes the most expensive API call in the system, running every 60 seconds
-per connected user.
+**What goes wrong:** The frontend currently maintains separate React Query caches:
+- `['leads', params]` — LeadsPage
+- `['accounts', params]` — AccountsPage
+- `['pipeline', params]` — PipelinePage
+- `['lead-detail', id]` — LeadSidePanel
+- `['account', id]` — AccountDetailPage
+- `['leads-pipeline']` — LeadsFunnel
+- `['timeline', accountId, params]` — TimelineFeed
 
-**Why it happens:**
-Signal computation seems simple when the data is small. The temptation is to compute signals
-in real-time as a query so they're always fresh. The problem is that "fresh every 60 seconds"
-does not require "computed on every request" — these are different things.
+The graduation flow in `useLeadGraduate.ts` and `useGraduate.ts` invalidates BOTH leads and accounts caches. If you replace these with a single `['pipeline-entries', params]` cache, mutations that previously invalidated one list now invalidate the shared list, causing unnecessary re-renders for the entire pipeline.
+
+**Why it happens:** Cache invalidation scope changes when you merge entities. A lead update that previously only invalidated the leads list now invalidates the unified list that includes all pipeline entries.
+
+**Consequences:** Sluggish UI — every mutation causes a full list re-fetch. If the unified list has 500+ entries, this is noticeable. Worse: stale data if you keep old cache keys and the old endpoints are removed.
 
 **Prevention:**
-- For v2.1 at 206 accounts: accept real-time computation. Add `EXPLAIN ANALYZE` to the
-  signal query before shipping to verify it uses existing indexes.
-- Add a defensive cap: `LIMIT 50` on signal results. Never scan unboundedly.
-- Ensure `idx_account_next_action` partial index (already exists from migration 027) is
-  used by the query.
-- Design the signal count response as a separate lightweight query (just counts, no full
-  objects) for the sidebar badges. The full signal list is only fetched when the user opens
-  a signal drawer.
-- Document the scale threshold: at >500 accounts, move signal computation to a background
-  job that writes to a `signals` table, polled by the API. Do not wait until you hit the
-  wall to plan the migration.
+1. Use React Query's `queryKey` factory pattern: `['pipeline-entries', { view: 'leads', ...params }]` so view-specific filters are cache-isolated.
+2. Use `queryClient.setQueryData` for optimistic updates on mutations instead of full invalidation.
+3. During transition, keep old query hooks working (they call the new API but use renamed keys) and migrate page-by-page.
+4. Graduation becomes a simple PATCH to change `stage` — no cross-cache invalidation needed.
 
-**Detection:**
-- Signal endpoint p95 latency exceeds 200ms with < 1000 accounts.
-- `EXPLAIN ANALYZE` shows sequential scans on `outreach_activities` or `accounts` without
-  index usage during signal computation.
+**Detection:** Chrome DevTools React Query Devtools extension. Watch for cache keys being invalidated unnecessarily after mutations.
 
-**Phase to address:** Backend API phase (signals endpoint). Add EXPLAIN verification before
-declaring the endpoint done.
+**Which phase should address:** Phase 3 (frontend rebuild). Plan the cache key structure BEFORE building components.
 
 ---
 
-### Pitfall 7: React Query Key Collision — Pipeline and Relationships Share Stale Cache
+### Pitfall 8: Entity Resolution Conflicts — Same Company from Multiple Sources
 
-**What goes wrong:**
-The graduation mutation completes. The success handler calls
-`queryClient.invalidateQueries(['pipeline'])`. The Relationships list page is open in another
-tab. The `['relationships', 'advisor']` query key is NOT invalidated. The Relationships page
-still shows 0 advisors (the just-graduated account is not there yet). The user thinks
-graduation failed. They try again — the second call hits the graduation endpoint with the
-same type, gets 409, and the frontend shows an unhelpful error.
+**What goes wrong:** The same company can enter the system from 5+ sources: GTM scrape (seed_crm.py), meeting processing (attendee domain matching), email context extraction (company mentions), LinkedIn scrape (lead contacts), and manual entry. Each source may use different name variants:
+- Seed: "Satguru Ventures Pvt. Ltd."
+- Meeting: "Satguru"
+- Email: "satguru ventures"
+- LinkedIn: "SATGURU VENTURES PVT LTD"
 
-A related variant: the existing `useAccounts` hook in `features/accounts/` uses query key
-`['accounts']`. The new relationships endpoint is `['relationships']`. These are separate caches.
-If any legacy code path writes to an account via the old `/accounts/PATCH` endpoint, the
-`['relationships']` cache is not invalidated, and the relationship detail shows stale data.
+The `normalize_company_name()` function in `utils/normalize.py` handles most suffixes, but edge cases remain:
+- "A.I. Solutions" vs "AI Solutions" (periods removed, but the output differs from "ai solutions" vs "a i solutions" — wait, actually periods ARE removed in the normalizer, so both become "ai")
+- "The Boston Group" vs "Boston Group" ("the" prefix stripped)
+- "McKinsey & Company" vs "McKinsey" (suffix stripped, but "&" handling varies)
 
-**Why it happens:**
-React Query's cache invalidation requires exact key matching by default. When query keys
-evolve across a brownfield migration (old `['accounts']` plus new `['relationships']` plus
-`['pipeline']`), no single mutation knows to invalidate all affected caches.
+**Why it happens:** No authoritative entity registry exists. `normalize_company_name()` is good but not perfect. The `companies` table (global intel cache, line 85-104 of models.py) is keyed on `domain`, not `normalized_name`. Pipeline entries are keyed on `(tenant_id, normalized_name)`. If a meeting creates a pipeline entry before the domain is known, and a later scrape creates another entry with the domain, you get duplicates.
+
+**Consequences:** Duplicate pipeline entries for the same company. Meeting history split across two entries. AI summaries missing data from one of the duplicates.
 
 **Prevention:**
-- Define a query key factory in a single file (`queryKeys.ts`):
-  ```typescript
-  export const queryKeys = {
-    pipeline: () => ['pipeline'],
-    relationships: (type?: string) => ['relationships', type].filter(Boolean),
-    relationshipDetail: (id: string) => ['relationships', 'detail', id],
-    signals: () => ['signals'],
-  }
-  ```
-- Graduation mutation invalidates all three: `pipeline`, `relationships`, `signals`.
-- Use `queryClient.invalidateQueries({ queryKey: ['relationships'], exact: false })` to
-  invalidate ALL relationship queries regardless of type parameter.
-- After any account mutation (PATCH, graduation, note-add), run:
-  `['pipeline', 'relationships', 'signals'].forEach(key => queryClient.invalidateQueries(key))`
-- Remove or redirect the old `useAccounts` hook so it does not exist in parallel with
-  `useRelationships`.
+1. Two-pass dedup: normalize_company_name FIRST, then domain match SECOND. If domain matches but name differs, merge into the domain-matched entry.
+2. Add a `domain` uniqueness constraint on `pipeline_entries`: `UNIQUE(tenant_id, domain) WHERE domain IS NOT NULL`. This prevents domain-level duplicates.
+3. During migration, run a dedup pass: group by `(tenant_id, domain)` and merge entries with matching domains but different normalized names.
+4. For meeting processing and email extraction, always check domain first (from attendee email domain), normalized name second.
 
-**Detection:**
-- After graduation, manually check: does the item disappear from Pipeline list? Does it
-  appear in the target Relationship list? Both must be true within the same 200ms window.
-- Search frontend code for any component that reads `queryClient.getQueryData(['accounts'])`
-  — these are stale cache reads that bypass the new key structure.
+**Detection:** Periodic audit: `SELECT tenant_id, domain, count(*) FROM pipeline_entries WHERE domain IS NOT NULL GROUP BY 1,2 HAVING count(*) > 1;`
 
-**Phase to address:** Frontend Pipeline Grid phase (graduation flow). The query key factory
-must be established before any mutation hooks are written.
+**Which phase should address:** Phase 1 (migration dedup) and Phase 2 (engine updates must use domain-first resolution).
 
 ---
 
-### Pitfall 8: Multi-Type Display — Account Appears in Two Sidebar Sections, UI Looks Broken
+### Pitfall 9: The Person-Who-Is-Also-A-Company-Contact Dual-Entity Problem
 
-**What goes wrong:**
-An account has `relationship_type = ['advisor', 'investor']`. It correctly appears in both the
-Advisors list and the Investors list. The user opens Advisors, clicks the account, sees the
-detail page. The detail page back-link shows "← Advisors." The user then opens Investors,
-clicks the same account — same detail page, but the back-link still says "← Advisors" (cached
-from the previous navigation). The tab configuration shows advisor-specific tabs, not investor-
-specific tabs. The user thinks the investor view is broken.
+**What goes wrong:** An advisor like "Laurie" is a person-level entity (entity_type='person' in pipeline_entries) BUT also a contact at a company like "Howden" (a company-level pipeline entry). In the unified schema:
+- Laurie has her own row in `pipeline_entries` (type=person, relationship_type includes 'advisor')
+- Howden has a row in `pipeline_entries` (type=company, relationship_type includes 'customer')
+- Laurie should appear in Howden's contacts panel
+- Laurie's own pipeline entry should show her advisory relationship context
 
-**Why it happens:**
-The detail page is shared across all relationship types. When it receives an account with
-`relationship_type = ['advisor', 'investor']`, it must know WHICH type context the user
-arrived from to render the correct tabs and back-link. Without navigation state tracking,
-the detail page either picks one type arbitrarily or shows all tabs from all types mixed
-together.
+If the `contacts` table only links to pipeline_entries via `pipeline_entry_id` (replacing `account_id`), then Laurie-as-advisor and Laurie-as-Howden-contact are two separate records with no link. Updates to one don't flow to the other. The user sees stale data on one of the surfaces.
+
+**Why it happens:** The current schema has no cross-reference between `AccountContact` and `Account` at the person level. The CRM redesign concept brief (line 96-99) explicitly called out this pattern but did not resolve it architecturally.
+
+**Consequences:** Data divergence. The user updates Laurie's email on her advisor page, but Howden's contact panel still shows the old email. Meeting notes tagged to Laurie-as-advisor don't appear on Howden's timeline.
 
 **Prevention:**
-- Pass `fromType` as a URL query parameter: `/relationships/{id}?from=investor`
-- The detail page reads `fromType` from the URL to:
-  1. Render the back-link as "← Investors"
-  2. Show the tab set for investor context first
-  3. Still show type badges indicating all types (advisor, investor both badged)
-- If `fromType` is absent (e.g., direct link or signal navigation), default to the first
-  type in `relationship_type` array.
-- On graduation modal confirm, the navigation `push` must include `?from={type}`.
+1. Add a `person_entry_id UUID REFERENCES pipeline_entries(id)` column on the `contacts` table. When a contact matches a person-type pipeline entry, link them.
+2. Person-type pipeline entries get a self-referencing contact row (as specified in STATE.md decision: "contacts table always has rows for person-type entries").
+3. When displaying a contact, check if `person_entry_id` is set. If so, pull name/email/title from the pipeline entry (single source of truth), not from the contacts row.
+4. Write a sync trigger or application-level hook: when a person pipeline entry is updated, propagate changes to all linked contact rows.
 
-**Detection:**
-- Create a test account with `relationship_type = ['advisor', 'investor']`.
-- Navigate to it from Advisors — verify back-link says "← Advisors", tabs show advisor config.
-- Navigate to it from Investors — verify back-link says "← Investors", tabs show investor config.
+**Detection:** After migration: `SELECT c.id, c.name, pe.name FROM contacts c JOIN pipeline_entries pe ON c.person_entry_id = pe.id WHERE c.name != pe.name;` should return zero rows.
 
-**Phase to address:** Frontend Relationship Surfaces phase (detail page). The `fromType`
-routing pattern must be designed before the detail page is built.
+**Which phase should address:** Phase 1 (schema design) and Phase 2 (backend logic for person-entry linking).
 
 ---
 
-### Pitfall 9: Configurable Grid Column State Not Persisted — Lost on Navigation
+### Pitfall 10: Performance Regression on Unified Table
 
-**What goes wrong:**
-The user opens Pipeline, adds the "Industry" column, resizes the "Company" column to 250px,
-reorders "Fit Tier" to the third position. They click a row to open the preview card, close it,
-and navigate to Briefing. They come back to Pipeline. All column customizations are gone.
-The grid is back to its 8-column default. The user configures it again. This happens every
-session. The "configurable grid" feature feels like a toy, not a tool.
+**What goes wrong:** Currently:
+- `leads` has ~200 rows with GIN index on `purpose` array
+- `accounts` has ~20 rows with composite indexes on `(tenant_id, status)`, `(tenant_id, pipeline_stage)`, `(tenant_id, relationship_status)`, and a GIN index on `relationship_type` array
 
-**Why it happens:**
-Column state (visible columns, order, widths) is stored in React local state. React state is
-destroyed on component unmount. Pipeline unmounts on navigation. Even if state is lifted to
-Zustand or a React context, the default Vite/React setup does not persist across page refreshes.
+Merging into one `pipeline_entries` table creates ~220 rows (small now, but grows). The current Pipeline grid query in `outreach.py:440-480` joins `Account` with `OutreachActivity`, `AccountContact`, and subqueries for last status and primary contact. This query already has 4 subqueries and 3 joins. On a unified table, the WHERE clause must include `entity_type` filtering, which adds a seq scan if not indexed.
+
+**Why it happens:** Index design for separate tables doesn't transfer to a combined table. The `idx_account_tenant_status` index assumes all rows are accounts. On a unified table, the most common query pattern is `WHERE tenant_id = ? AND entity_type = ?` — this needs a composite index that includes `entity_type`.
+
+**Consequences:** At 200 rows, negligible. At 2,000+ rows (reasonable after a year of use), the pipeline grid query slows noticeably. At 10,000+ rows (unlikely but possible with aggressive scraping), sub-second response time is at risk.
 
 **Prevention:**
-- Store column state in `localStorage` under a key like `flywheel:pipeline:columns`.
-- Shape: `{ visible: string[], widths: Record<string, number>, order: string[] }`.
-- Load from localStorage on grid mount as initial state.
-- Debounce writes to localStorage (don't write on every pixel of column drag).
-- Provide a "Reset to defaults" button that clears the localStorage key and resets state.
-- Do NOT persist column state to the backend for v2.1 — localStorage per browser is
-  acceptable for a single-user founder tool.
+1. Every index on `pipeline_entries` should include `entity_type` in the composite: `INDEX idx_pe_tenant_type_stage ON pipeline_entries(tenant_id, entity_type, stage)`.
+2. Add partial indexes for common filtered views: `INDEX idx_pe_active ON pipeline_entries(tenant_id, stage) WHERE retired_at IS NULL`.
+3. The `last_activity_at` denormalized column (from STATE.md decisions) should have an index: `INDEX idx_pe_activity ON pipeline_entries(tenant_id, last_activity_at DESC) WHERE retired_at IS NULL`.
+4. Run `EXPLAIN ANALYZE` on the pipeline grid query BEFORE and AFTER migration. Ensure no seq scans on the unified table.
 
-**Detection:**
-- Configure columns; navigate away and back; verify configuration is preserved.
-- Hard-refresh the page; verify configuration is preserved (requires localStorage, not just Zustand).
+**Detection:** Add query timing logging to the pipeline API. Alert if P95 exceeds 200ms.
 
-**Phase to address:** Frontend Pipeline Grid phase. localStorage persistence must be
-built into the initial grid implementation, not added later.
-
----
-
-### Pitfall 10: Drag-and-Drop Column Reorder Conflicts with Column Resize Handles
-
-**What goes wrong:**
-The grid has both column resize (drag on column edge) and column reorder (drag on column header).
-When the user tries to resize the "Company" column by dragging the right edge, the drag
-event is captured by the header's drag-to-reorder handler first. The column reorders instead
-of resizes. The user has to click precisely on the 4px resize handle border — but at 56px row
-height, the resize zone is tiny and the drag start ambiguity triggers reorder instead.
-
-**Why it happens:**
-TanStack Table's column resizing and drag-based column reordering both listen to `onMouseDown`
-or `onPointerDown` events on the `<th>` element. When both are active, the event propagation
-order determines which wins. If the resize handler does not properly `stopPropagation`, the
-reorder handler fires.
-
-**Prevention:**
-- Implement resize handles as a distinct child element inside `<th>` with explicit event
-  capture and `stopPropagation`:
-  ```tsx
-  <th onMouseDown={header.getResizeHandler()}>
-    <div className="header-content" onMouseDown={handleReorderDragStart}>
-      {header.column.columnDef.header}
-    </div>
-    <div
-      className="resize-handle"
-      onMouseDown={(e) => { e.stopPropagation(); header.getResizeHandler()(e); }}
-    />
-  </th>
-  ```
-- Make the resize zone visually obvious: 8-12px wide, with a distinct cursor and a visible
-  separator line on hover.
-- Test the interaction explicitly: click anywhere in the header text → triggers reorder.
-  Click on the right-edge resize zone → triggers resize, not reorder.
-
-**Detection:**
-- Manual test: attempt to resize a column by clicking 3px from the right edge of the header.
-  Verify it resizes, not reorders.
-- Browser DevTools: add `console.log` to both handlers and verify only the correct one fires.
-
-**Phase to address:** Frontend Pipeline Grid phase. The resize/reorder interaction must be
-tested before the grid is declared done.
+**Which phase should address:** Phase 1 (index design as part of schema creation).
 
 ---
 
 ## Minor Pitfalls
 
-Mistakes that cause small regressions or cosmetic issues.
+### Pitfall 11: Alembic Revision Chain Breakage
+
+**What goes wrong:** The current latest revision is `043_fix_context_entries_rls_soft_delete`. Adding a new migration for the unified pipeline must correctly set `down_revision`. If multiple developers (or parallel agent sessions) create migrations simultaneously, the revision chain breaks.
+
+**Prevention:** Always check `alembic heads` before creating a new migration. Use sequential numbering (044, 045, etc.) consistent with the project convention. Create all unified-pipeline migrations in sequence within a single session.
+
+**Which phase should address:** Phase 1.
 
 ---
 
-### Pitfall 11: AI Summary Preview Truncation at Wrong Boundary
+### Pitfall 12: Losing the Graduation History
 
-**What goes wrong:**
-`ai_summary_preview` is defined as "first 200 chars" of `ai_summary`. A 200-character slice
-mid-word produces: "Satguru Industries has been in engaged outreach since January. Key champion
-is Rajiv Mehta (CFO). Last interaction was a demo call where they expressed interest in
-enterprise tier. Budget convers..." — truncated mid-word. The card reads awkwardly.
+**What goes wrong:** The current `Lead.graduated_at` and `Lead.account_id` fields record when and where a lead was promoted. In the unified schema, there is no "graduation" — entries just change stage. If the `graduated_at` timestamp is not preserved, the history of when pipeline entries were promoted is lost.
 
-**Prevention:**
-Truncate at the last word boundary before 200 characters:
-```python
-def truncate_at_word(text: str, limit: int = 200) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit].rsplit(' ', 1)[0] + '…'
-```
+**Prevention:** Preserve `graduated_at` as a column on `pipeline_entries`. Or better: log stage changes as activity records (type='stage_change' as specified in STATE.md decisions) which provides a full audit trail.
+
+**Which phase should address:** Phase 1 (schema design).
 
 ---
 
-### Pitfall 12: Relationship Status vs Pipeline Stage Semantic Confusion in API Responses
+### Pitfall 13: MCP Tool Descriptions Referencing Old Table Names
 
-**What goes wrong:**
-The API response for `GET /relationships/` includes both `pipeline_stage` and
-`relationship_status` fields. Frontend developers misread `relationship_status` (which means
-`active|inactive|churned`) as a status indicator for filtering in the Pipeline grid. They
-wire the Pipeline's "Outreach Status" column to `relationship_status` instead of
-`last_outreach_status`. The Pipeline shows "active" for every company. The status filter
-does nothing useful.
+**What goes wrong:** MCP tool descriptions and help text may reference "leads" and "accounts" as separate concepts. Users who have built muscle memory around "graduate a lead" will be confused when the concept disappears.
 
-**Prevention:**
-- Name fields unambiguously in the response schemas:
-  - `pipeline_stage`: only present in Pipeline endpoint responses
-  - `relationship_status`: only present in Relationship endpoint responses
-  - `outreach_status`: the latest outreach activity status (sent/replied/bounced)
-- Do not return `pipeline_stage` in relationship responses or vice versa.
-- Write an API contract test that verifies the Pipeline response does NOT contain
-  `relationship_status` and the Relationships response does NOT contain `pipeline_stage`.
+**Prevention:** Update all MCP tool descriptions. Rename `graduate` to `advance_stage` or similar. Add aliases for backward compatibility during transition.
+
+**Which phase should address:** Phase 2 (backend migration) or Phase 4 (cleanup).
 
 ---
 
-### Pitfall 13: RLS Bypass When Querying for Signal Counts
+### Pitfall 14: Seed Script Breaks
 
-**What goes wrong:**
-The signals endpoint aggregates counts across accounts. A developer writes:
-```python
-result = await db.execute(
-    select(func.count()).select_from(Account).where(
-        Account.relationship_type.any("prospect")
-    )
-)
-```
-This uses `db` which is the tenant-scoped session (RLS enforced). But if the developer uses
-`db` from a different dependency (e.g., a shared session not from `get_tenant_db`), the
-RLS `app.tenant_id` setting is not applied and the query returns counts across ALL tenants.
+**What goes wrong:** `seed_crm.py` directly creates `Account`, `AccountContact`, and `OutreachActivity` ORM instances. After the migration, these models no longer exist or are renamed. Running the seed script on a fresh database fails.
 
-**Prevention:**
-- Signal computation must always use `db: AsyncSession = Depends(get_tenant_db)`.
-- Add a CI test: create two tenants with accounts, call signals endpoint as tenant A,
-  verify total count is only tenant A's accounts.
-- The signal computation code must never use a raw `engine.connect()` or any session
-  obtained outside the `get_tenant_db` dependency.
+**Prevention:** Update `seed_crm.py` to use the new models immediately after Phase 1. This is a low-effort change but easy to forget.
 
----
-
-### Pitfall 14: Stale Sidebar Badge Count After In-Page Actions
-
-**What goes wrong:**
-The user opens the Advisors list. One advisor has a stale relationship signal (badge count: 1).
-The user opens the advisor detail, adds a note (which resolves the staleness). Navigates back to
-Advisors list. The badge still shows 1. The signal was resolved but the badge count didn't
-update until the 60-second poll cycle.
-
-**Prevention:**
-- After any note-add, file-add, or synthesis call, also invalidate the `['signals']` query key.
-- The signal polling is 60 seconds — this is acceptable as documented in the spec. But
-  explicit mutations that clearly resolve a signal should trigger an immediate re-fetch.
-- `queryClient.invalidateQueries({ queryKey: ['signals'] })` must be called from the same
-  mutation `onSuccess` callbacks as relationship invalidation.
+**Which phase should address:** Phase 1 (schema migration) — update seed script in the same plan.
 
 ---
 
 ## Phase-Specific Warnings
 
-| Phase Topic | Likely Pitfall | Mitigation |
-|-------------|---------------|------------|
-| Data model migration | Atomic rename causes API outage | Two-phase migration: add columns first, rename later |
-| Data model migration | Missing GIN index on `relationship_type` | Add `CREATE INDEX ... USING GIN` in same migration |
-| Data model migration | Person-level accounts missing self-contact FK | Add `primary_contact_id` FK to `accounts` table now |
-| Backend relationships API | Accounts in both Pipeline and Relationships | Strictly defined partition predicate; test both endpoints |
-| Backend graduation endpoint | Person-level entity_level not set atomically | Graduation endpoint sets `entity_level`, creates self-contact, sets `primary_contact_id` in one transaction |
-| Backend signals API | Full table scan on every 60-second poll | Add EXPLAIN ANALYZE; verify GIN index usage; separate count vs full signals queries |
-| Backend AI synthesis | LLM called on cache miss automatically | NULL summary → return NULL; synthesis always explicit; rate limit at DB level |
-| Frontend pipeline grid | Column state lost on navigation | localStorage persistence from day one |
-| Frontend pipeline grid | Drag reorder conflicts with column resize | Explicit resize handle zones; stopPropagation from resize handler |
-| Frontend pipeline grid | Graduation: stale pipeline and relationships caches | Query key factory; invalidate pipeline + relationships + signals on graduation success |
-| Frontend relationship detail | Multi-type accounts show wrong tabs/back-link | `?from=type` URL param; detail page renders based on fromType |
-| Frontend relationship detail | AI synthesis triggered on page load | Synthesis only via explicit user action; never from useEffect or query lifecycle |
-| Signal layer | Sidebar badge stale after in-page resolution | Invalidate signals on every mutation that could resolve a signal |
+| Phase Topic | Likely Pitfall | Severity | Mitigation |
+|-------------|---------------|----------|------------|
+| Schema creation (DDL) | PgBouncer silent rollback (Pitfall 1) | CRITICAL | Per-statement commits via SQL Editor or direct connection |
+| Data migration script | Data loss on merge (Pitfall 2) | CRITICAL | Column mapping, graduated-lead handling, row count verification |
+| Data migration script | Contact dedup conflicts (Pitfall 3) | CRITICAL | Email-first matching, preserve-both-on-ambiguity, child record re-parenting |
+| FK reference updates | Breaking meetings/tasks/context (Pitfall 4) | CRITICAL | Add new column first, populate, verify, then drop old column |
+| Backend engine migration | Engine-to-schema mismatch (Pitfall 5) | CRITICAL | Dual-read period, feature flag, one-engine-at-a-time rollout |
+| RLS policy creation | Privacy breach (Pitfall 6) | HIGH | Visibility-aware policy from day one, test with non-owner user |
+| Frontend rebuild | Cache fragmentation (Pitfall 7) | MODERATE | QueryKey factory pattern, optimistic updates, page-by-page migration |
+| Entity resolution | Duplicate entries (Pitfall 8) | MODERATE | Domain-first resolution, uniqueness constraint on domain |
+| Person-as-contact pattern | Data divergence (Pitfall 9) | MODERATE | person_entry_id FK, single source of truth for person data |
+| Index design | Query regression (Pitfall 10) | LOW (at current scale) | Composite indexes with entity_type, EXPLAIN ANALYZE verification |
+| Alembic management | Chain breakage (Pitfall 11) | LOW | Check `alembic heads` before creating migrations |
+| History preservation | Lost graduation timestamps (Pitfall 12) | LOW | Preserve graduated_at or use activity-based stage change log |
 
----
+## Supabase-Specific Gotchas Summary
 
-## "Looks Done But Isn't" Checklist
-
-- [ ] **Migration**: Phase A migration adds columns AND copies `status → pipeline_stage` data in same transaction
-- [ ] **Migration**: GIN index on `relationship_type` created in same migration as the column
-- [ ] **Migration**: All 206 existing accounts have `relationship_type = '{prospect}'` after migration (verify with count query)
-- [ ] **Migration**: `PATCH /accounts/{id}` no longer accepts `status` field (field removed from Pydantic model)
-- [ ] **Pipeline API**: `GET /pipeline/` returns zero results for graduated accounts (verify with post-graduation query)
-- [ ] **Pipeline API**: `GET /pipeline/` uses `pipeline_stage`, not `status`, in WHERE clause
-- [ ] **Relationships API**: `GET /relationships/?type=advisor` returns ONLY accounts where `'advisor' = ANY(relationship_type)`, scoped by tenant
-- [ ] **Graduation**: After graduation, account disappears from Pipeline list AND appears in target Relationship list (test both in sequence)
-- [ ] **Graduation**: Person-level graduation creates exactly 1 self-contact and sets `primary_contact_id`
-- [ ] **AI synthesis**: `GET /relationships/{id}` returns `ai_summary: null` for unsynthesized accounts without triggering LLM call
-- [ ] **AI synthesis**: `POST /relationships/{id}/synthesize` returns 429 if called within 5 minutes of previous call
-- [ ] **AI synthesis**: Accounts with < 3 context entries return template string, not LLM call
-- [ ] **Signals**: Signal count query uses existing `idx_account_next_action` index (verify with EXPLAIN)
-- [ ] **Signals**: Signal counts are tenant-scoped (two-tenant isolation test)
-- [ ] **Grid**: Column config survives page navigation (localStorage write verified in Network tab)
-- [ ] **Grid**: Column config survives hard refresh (localStorage read on mount verified)
-- [ ] **Grid**: Column resize does not accidentally trigger column reorder (manual interaction test)
-- [ ] **Frontend**: `fromType` URL param drives back-link and initial tab on detail page
-- [ ] **Frontend**: Query key factory used for all pipeline/relationships/signals queries
-- [ ] **Frontend**: Graduation success invalidates pipeline, relationships (all types), and signals simultaneously
-
----
-
-## Recovery Strategies
-
-When pitfalls occur despite prevention.
-
-| Pitfall | Recovery Cost | Recovery Steps |
-|---------|---------------|----------------|
-| Atomic rename caused API outage | HIGH | Roll back migration (downgrade removes new columns, restores status column); revert code deploy; execute two-phase approach |
-| Missing GIN index on production | LOW | `CREATE INDEX CONCURRENTLY idx_account_relationship_type ON accounts USING GIN (relationship_type);` — CONCURRENTLY avoids table lock |
-| Account stuck in both Pipeline and Relationships | LOW | Direct DB fix: verify `relationship_type` is correct; query returns correct results after fix |
-| Self-contact not created during graduation | MEDIUM | Write a backfill script: for each person-level account missing a contact, create one from the account's own data; set `primary_contact_id` |
-| AI synthesis runaway cost | MEDIUM | Kill frontend query triggering synthesis; add rate limiter retroactively; review Anthropic bill for unbounded calls |
-| Column state not persisting | LOW | Add localStorage persistence in a hotfix; no data loss, only UX regression |
-| Wrong partition logic — graduated account in Pipeline | LOW | Update Pipeline query predicate; no data migration needed, just query fix |
-
----
+1. **PgBouncer DDL transactions** (Pitfall 1): The single most dangerous gotcha. Every DDL statement must be its own commit. Use SQL Editor or direct connection string.
+2. **FK to `profiles` table**: Alembic cannot see the `profiles` table (it exists but is invisible to Alembic's connection context). The `pipeline_entries.owner_id` FK must be added via raw SQL, not Alembic's `ForeignKey()`.
+3. **RLS policy creation order**: Policies must be created AFTER the table but BEFORE data migration. If data is migrated without RLS, a brief window exists where all data is visible to any authenticated user.
+4. **Index creation on large tables**: `CREATE INDEX CONCURRENTLY` is not supported through Alembic and must be run as raw SQL. For the migration of 220 rows this is irrelevant, but worth noting for future index additions.
+5. **Trigger functions**: The `last_activity_at` DB trigger (from STATE.md decisions) must be created via raw SQL. Supabase supports triggers but they must be created through the SQL Editor, not through the Alembic pooled connection.
 
 ## Sources
 
-- Codebase inspection: `backend/src/flywheel/api/accounts.py` — existing `status` field usage in Pydantic models, ORM queries, and serializers
-- Codebase inspection: `backend/alembic/versions/027_crm_tables.py` — `status` column definition and existing indexes
-- Codebase inspection: `frontend/src/features/pipeline/types/pipeline.ts` — `status: string` field in TypeScript type
-- Codebase inspection: `backend/src/flywheel/api/outreach.py` — `GET /pipeline/` filters on `Account.status`
-- PostgreSQL GIN indexes: [Optimizing Array Queries With GIN Indexes in PostgreSQL](https://www.tigerdata.com/learn/optimizing-array-queries-with-gin-indexes-in-postgresql) — `ANY()` operator requires GIN, not B-tree
-- PostgreSQL GIN performance: [Understanding Postgres GIN Indexes: The Good and the Bad](https://pganalyze.com/blog/gin-index) — update cost analysis
-- PostgreSQL backward-compatible migration: [Using PostgreSQL views for non-breaking migrations](https://medium.com/ovrsea/using-postgresql-views-to-ensure-backwards-compatible-non-breaking-migrations-017288e77f06) — two-phase rename pattern
-- PostgreSQL migration safety: [How to Rename Tables and Columns Safely in PostgreSQL](https://oneuptime.com/blog/post/2026-01-21-postgresql-rename-tables-columns/view) — ACCESS EXCLUSIVE lock during rename
-- TanStack Table virtualization: [TanStack Virtual issue #685](https://github.com/TanStack/virtual/issues/685) — rendering lag with both row and column virtualization
-- TanStack Table virtualization: [Virtualization Guide](https://tanstack.com/table/v8/docs/guide/virtualization) — 50+ rows threshold for virtualization benefit
-- React Query cache invalidation: [Concurrent Optimistic Updates in React Query](https://tkdodo.eu/blog/concurrent-optimistic-updates-in-react-query) — race condition with optimistic updates
-- React Query cache invalidation: [Cache Invalidation Why UI Doesn't Update](https://medium.com/@kennediowusu/react-query-cache-invalidation-why-your-mutations-work-but-your-ui-doesnt-update-a1ad23bc7ef1) — exact key matching pitfall
-- LLM cost control: [LLM Cost Optimization: Complete Guide](https://ai.koombea.com/blog/llm-cost-optimization) — context window overload as primary cost driver
-- LLM cost control: [Practical LLMOps Cost Control](https://radicalbit.ai/resources/blog/cost-control/) — per-account budget controls and runaway cost patterns
-- Two-phase migration pattern: [Alembic Complete Developer's Guide](https://medium.com/@tejpal.abhyuday/alembic-database-migrations-the-complete-developers-guide-d3fc852a6a9e) — add/copy/remove pattern for zero-downtime renames
-- Multi-type entity design: [CRM Database Schema Example](https://www.dragonflydb.io/databases/schema/crm) — normalization principles for entity type hierarchies
-
----
-
-*Pitfalls research for: CRM Redesign — Multi-type relationships, AI synthesis, configurable grid*
-*Researched: 2026-03-27*
-*Codebase: brownfield FastAPI + SQLAlchemy 2.0 async + PostgreSQL + React + shadcn/ui*
+- Direct codebase analysis: `db/models.py` (6 CRM table definitions), `api/leads.py` (10 endpoints), `api/accounts.py` (8 endpoints), `api/relationships.py` (8 endpoints), `api/outreach.py` (pipeline grid queries), `api/timeline.py` (FK joins), `api/meetings.py` (account linking), `api/tasks.py` (account FK)
+- Engine analysis: `meeting_processor_web.py`, `channel_task_extractor.py`, `flywheel_ritual.py`, `skill_executor.py`, `synthesis_engine.py`, `context_store_writer.py`
+- Migration history: 43 Alembic migrations, specifically `040_create_leads_tables.py`, `041_lead_user_scoping.py`, `042_accounts_visibility_rls_and_constraints.py`
+- Project decisions: `.planning/STATE.md` (v9.0 design decisions), `.planning/CONCEPT-BRIEF-crm-redesign.md` (dual-entity pattern), `.planning/PROJECT.md` (unified pipeline spec)
+- Known constraints: `CLAUDE.md` Supabase DDL workaround, `feedback_supabase_ddl.md`

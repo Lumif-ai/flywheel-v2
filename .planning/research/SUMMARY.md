@@ -1,17 +1,17 @@
 # Project Research Summary
 
-**Project:** Flywheel v2.1 — Intelligence-First CRM Redesign
-**Domain:** Brownfield CRM migration — multi-type relationships, AI synthesis, configurable pipeline grid
-**Researched:** 2026-03-27
-**Confidence:** HIGH (stack + architecture verified against codebase; features MEDIUM from industry survey)
+**Project:** Unified Pipeline Schema & UI
+**Domain:** CRM schema migration + AG Grid UX overhaul on live FastAPI + Supabase system
+**Researched:** 2026-04-06
+**Confidence:** HIGH
 
 ## Executive Summary
 
-Flywheel v2.1 adds an intelligence surface layer on top of a functioning v2.0 CRM. The core design decision is a two-paradigm layout: a configurable data grid for pipeline triage (Airtable-style) and intelligence journals for graduated relationships (cards with AI panels, type-driven tabs, commitment tracking). No competitor cleanly separates these two modes — Attio and Folk use uniform record layouts; Airtable feels clinical for investor journals. This separation is the product's conceptual differentiator and must be preserved as a design constraint throughout implementation.
+This milestone replaces Flywheel's fragmented 6-table CRM (leads, lead_contacts, lead_messages, accounts, account_contacts, outreach_activities) with a unified 3-table schema (pipeline_companies, pipeline_contacts, pipeline_activities) and rebuilds the frontend as a single Airtable-style AG Grid view. Every major CRM in this space — Attio, Folk, Pipedrive — centers on a single company-first grid with continuous stage progression. Flywheel's current graduation wall (lead → account promotion) is its biggest UX friction point, and this milestone eliminates it entirely.
 
-The recommended approach is strictly additive. The existing FastAPI + SQLAlchemy + React + Supabase stack is sound and must not be disrupted. New stack additions are minimal: AG Grid Community for the configurable pipeline grid, Motion for spring animations, react-dropzone for file attachments, pgvector for future embeddings (deferred past MVP), and openai for text-embedding-3-small if and when RAG quality requires it. The AI synthesis layer uses vanilla Python over the existing Anthropic SDK — LangChain and LlamaIndex are explicitly rejected as bloated for this use case.
+The recommended approach is strictly incremental: create new tables first (additive, nothing breaks), migrate data with explicit dedup handling, introduce a new `/pipeline/` API namespace alongside old endpoints as thin wrappers, then migrate the frontend feature by feature. The existing stack requires zero new packages — AG Grid Community 35.2.0 already supports inline cell editing, and pg_trgm (one-time Supabase extension enable) handles fuzzy company name matching. The only significant technical constraint is Supabase's PgBouncer, which silently rolls back multi-statement DDL transactions; every DDL statement must be its own commit via SQL Editor or direct connection.
 
-The biggest risk is the `status` to `pipeline_stage` column rename. This is a brownfield migration with 206 live accounts and existing API code that references `Account.status` on every request. A naive single-phase rename causes a complete API outage during the deploy gap. The mitigation is mandatory: a two-phase migration where the new column is added and data is copied before the old column is ever dropped. The second critical risk is AI synthesis cost runaway — the synthesis endpoint must never auto-trigger on page load, must rate-limit at the DB level, and must return `null` (not call the LLM) when `ai_summary` is NULL. These two risks are architectural, not implementation details, and must be designed in before any code is written.
+The highest risks are data integrity during migration (graduated leads exist in both tables; contacts with no email are hard to dedup) and breaking FK references from meetings, tasks, and context_entries to the old `accounts` table. Both are preventable with explicit migration sequencing and a dual-read period where old API endpoints are thin wrappers over the new service layer. The daily dogfooding constraint — this is a live, actively-used system — makes incremental migration non-optional.
 
 ---
 
@@ -19,146 +19,116 @@ The biggest risk is the `status` to `pipeline_stage` column rename. This is a br
 
 ### Recommended Stack
 
-The existing stack (React 19, Vite, Tailwind v4, shadcn/ui, TanStack Query v5, Zustand, FastAPI, SQLAlchemy 2.0 async, Alembic, Anthropic SDK) requires four targeted additions. Nothing should be replaced.
+Zero new packages required on either frontend or backend. The entire milestone runs on the existing stack: FastAPI + SQLAlchemy 2.0 async (backend), AG Grid Community 35.2.0 + React 19 + React Query 5.91.2 (frontend), and Supabase PostgreSQL 15. The only infrastructure addition is enabling the `pg_trgm` PostgreSQL extension (pre-installed in Supabase, disabled by default) via one SQL statement in the Dashboard. PostgreSQL PL/pgSQL triggers handle denormalized field sync (`last_activity_at`, `contact_count`) with SECURITY DEFINER to bypass RLS on cross-table updates.
 
-**New dependencies — frontend:**
-- `ag-grid-community` + `ag-grid-react` v35.2.0 — configurable pipeline grid with column resize, reorder, hide, inline editing, and filters; the only community-edition library providing all these without an enterprise license; React 19 compatible since v34.3.0
-- `motion` v12 — spring animations and micro-interactions; Framer Motion is now deprecated (`framer-motion` package abandoned); import from `motion/react` exclusively
-- `react-dropzone` — headless file drop zone hook; integrates with existing Supabase Storage and FastAPI `/files/upload` endpoint without new upload infrastructure
-
-**New dependencies — backend:**
-- `pgvector>=0.4.2` — vector storage in Supabase PostgreSQL; sufficient for CRM scale (<100k documents per tenant); integrates with SQLAlchemy 2.0 async via `Vector` type; avoids separate vector DB infrastructure
-- `openai>=1.0` — embeddings only (`text-embedding-3-small`); Anthropic SDK does not provide embeddings; needed only if full-text search proves insufficient for Q&A retrieval (deferred to post-MVP)
-
-**Explicitly rejected:** LangChain (bloated, conflicts with existing Anthropic SDK), LlamaIndex (overkill for per-relationship summaries), Pinecone/Qdrant (unnecessary infrastructure at CRM scale), `framer-motion` (deprecated).
-
-See `.planning/research/STACK.md` for full rationale and version verification.
+**Core technologies:**
+- **Alembic (existing):** Migration file authoring and version tracking only — actual DDL runs via SQL Editor due to PgBouncer constraint
+- **AG Grid Community 35.2.0 (existing):** Inline cell editing (`editable`, `cellEditor`, `cellEditorPopup`), column operations — all Community features, no Enterprise needed
+- **pg_trgm (enable only):** Fuzzy company name matching with trigram similarity; 0.6 threshold for near-duplicate detection
+- **PostgreSQL triggers (new SQL):** Auto-update `last_activity_at`, `contact_count`, `activity_count` on `pipeline_companies` for consistency across direct DB edits and bulk imports
+- **React Query (existing):** Optimistic updates on inline cell edits with revert-on-error pattern
 
 ### Expected Features
 
-The feature landscape divides into three tiers. The table stakes are non-negotiable for the product to feel complete. The differentiators are what justify adoption over Attio or Folk. The anti-features are explicitly out of scope and must not be built.
+Research benchmarked against Attio, Folk, Pipedrive, and HubSpot. The CRM market has converged on company-first grids with continuous stage progression — any fragmentation into separate views is a UX regression.
 
 **Must have (table stakes):**
-- Separate list pages per relationship type (Prospects, Customers, Advisors, Investors) — every CRM since Salesforce segments by type; founders cannot manage advisors and prospects in a single table
-- AI summary on relationship detail page (cached, not on-demand) — users expect synthesis; raw timeline is too slow to read
-- Graceful degradation when AI summary is empty — never show a blank panel; return template string when context entries < 3
-- Configurable Pipeline columns (show/hide) — any power user of CRMs expects Airtable-style column management
-- Signal count badges on sidebar — users need ambient awareness of where attention is needed
-- Graduation flow with type selection modal — the explicit promotion action from prospect to relationship
-- Commitments tab (What You Owe / What They Owe) — the primary founder cognitive burden after a meeting that no existing tool addresses
+- Single grid showing all entity types — the entire premise; missing = product feels broken
+- Continuous stage column with no graduation wall — biggest current friction point
+- Merged side panel handling all entity types — click-to-expand is expected in every modern CRM
+- Full-text search across all records (name, domain, contact name, notes)
+- Filter bar with multi-select facets (stage, fit tier, relationship type, source, last activity)
+- Column sorting and reordering — standard spreadsheet behavior
+- Row click → side panel → full profile navigation (two-level progressive disclosure)
 
 **Should have (differentiators):**
-- Multi-type account (one entity = Advisor + Investor simultaneously) — Attio's primary differentiator for startup use cases; no other lightweight CRM does this cleanly
-- Interactive AI panel with Q&A about a relationship — RAG over account context; Folk offers draft-from-thread but not open Q&A
-- Type-specific tab sets per relationship (Advisor tabs differ from Investor tabs differ from Prospect tabs) — Attio and Folk use uniform layouts for all types
-- Stale relationship detection with ambient visual tint — glanceable staleness signals rather than disruptive notifications
-- File attachment on relationship (investor deck to investor record, NDA to customer record) — neither Attio nor Folk have this natively; Supabase Storage already exists
+- Inline cell editing for high-frequency fields (stage dropdown, fit tier, next action date)
+- Saved views (personal) — Attio's most-cited feature; hardcoded tabs become configurable
+- Quick-add row with dedup check at bottom of grid (Airtable pattern)
+- Unified activity timeline in side panel aggregating emails, meetings, notes, stage changes
+- AI-computed stage suggestions based on email replies and meeting bookings
+- Keyboard navigation (arrow keys, Enter to open, Escape to close, Cmd+K search)
 
-**Defer to patch/v2.2:**
-- File attachments (API-06) — note capture delivers higher value per effort; files add storage wiring that should not block main surfaces
-- Full signal taxonomy beyond `stale_relationship` — `reply_received` and `commitment_due` require richer event wiring
-- Column drag-to-reorder — show/hide is sufficient for v2.1; reorder is polish
-- Action bar skill triggers — stubs with "Coming soon" toasts acceptable in v2.1
-
-**Anti-features (do not build):**
-- Custom pipeline stages, kanban drag-and-drop, bulk outreach sending, NLP auto-extraction of commitments from freeform notes, free-text contact creation from UI, mobile-responsive layout, Slack/email notification delivery — all explicitly out of scope per PROJECT.md
-
-See `.planning/research/FEATURES.md` for full feature dependency graph and complexity assessment.
+**Defer to v2+:**
+- Kanban board view — wrong data density for 200+ relationship management
+- Custom objects / field builder — JSONB covers extensibility needs adequately
+- Shared/team saved views with permissions — personal views sufficient for solo-founder use case
+- Full email compose inside grid — existing email feature handles this
+- Real-time collaboration / multiplayer — engineering cost is enormous for single-user value
 
 ### Architecture Approach
 
-The architecture is strictly additive to the existing system. Every new capability integrates into existing infrastructure (FastAPI router pattern, SQLAlchemy models, React Query + Zustand state management, Supabase Realtime) rather than introducing parallel systems. Three schema additions power the feature: `account_syntheses` table, `relationship_types` array column on accounts, and `account_id` FK on uploaded_files. All follow established Alembic migration patterns. The AI synthesis engine is a new service module (`services/synthesis_engine.py`) that hooks into two existing write paths to invalidate its cache automatically.
+The migration strategy is incremental with a compatibility view layer. New tables are created alongside old tables (additive Phase 1), data migrated with deterministic UUID preservation for accounts (so FK references to meetings/tasks/context_entries need only constraint retargeting, not data migration), compatibility views provide old table names during transition, and old API endpoints become thin wrappers calling `pipeline_service.py`. Frontend rebuilds feature-by-feature against the new `/pipeline/` namespace. Old tables and deprecated wrappers drop only after all consumers are verified migrated.
 
 **Major components:**
-1. **SynthesisEngine** (`services/synthesis_engine.py`) — generates, caches (24h TTL), and invalidates account summaries; hooks into `storage.append_entry()` and outreach status writes; uses Haiku-4-5 at ~300 token budget per synthesis
-2. **AccountQA endpoint** (`POST /accounts/{id}/ask`) — RAG Q&A using existing full-text search on `context_entries` (TSVECTOR already indexed); vanilla Python + Anthropic SDK; no orchestration framework needed
-3. **GridView** (`features/accounts/components/GridView.tsx`) — TanStack Table v8 wrapper or AG Grid wrapper with column state persisted to localStorage; Zustand store for in-memory column state between navigations
-4. **Signal computation** — stays real-time SQL on GET /pulse for v2.1 at 206 accounts; background job pre-computation deferred until >1,000 accounts or push notifications are needed
-5. **Multi-type relationship model** — `accounts.relationship_types text[]` with GIN index; partition predicate between Pipeline (un-graduated) and Relationships (graduated) defined once and enforced in both endpoints
-
-**Key patterns:**
-- Synthesis is never auto-triggered on page load — NULL summary returns NULL, not an LLM call
-- Two-phase migration for `status` to `pipeline_stage` rename — additive first, cleanup after stable deploy
-- Query key factory in `queryKeys.ts` — graduation invalidates pipeline + relationships + signals simultaneously
-- `fromType` URL parameter drives tab config and back-link on the shared relationship detail page
-
-See `.planning/research/ARCHITECTURE.md` for component boundary tables, data flow diagrams, and suggested build order.
+1. `pipeline_companies` table — single source of truth for all company entities; absorbs leads + accounts
+2. `pipeline_contacts` table — unified persons; absorbs lead_contacts + account_contacts; `person_entry_id` FK handles advisor dual-entity pattern
+3. `pipeline_activities` table — unified touchpoints; absorbs lead_messages + outreach_activities
+4. `pipeline_stages` reference table — stage definitions, ordering, display config
+5. Compatibility views (`accounts_compat`, `leads_compat`) — old API code reads these during transition window
+6. `api/pipeline.py` (new) — unified CRUD replacing leads.py, accounts.py, outreach.py, relationships.py
+7. `services/pipeline_service.py` (new) — business logic for stage transitions, dedup, scoring; called by API and MCP tools
+8. `features/pipeline/` (rebuilt) — unified AG Grid + side panel + filter bar; replaces 4 frontend feature directories
 
 ### Critical Pitfalls
 
-1. **Atomic column rename causes API outage** — Never rename `status` to `pipeline_stage` in a single migration. Use two phases: add `pipeline_stage`, copy data, deploy code that reads from `pipeline_stage`, then drop `status` in a follow-up migration. A single-phase rename causes a complete API outage during the deploy gap for all CRM endpoints.
+1. **Supabase PgBouncer silently rolls back multi-statement DDL** — Never run `alembic upgrade head` for DDL on Supabase. Execute each statement via SQL Editor or direct connection string with individual commits. Use `alembic stamp <revision>` after execution to sync state. Verify schema with direct SQL after every migration step.
 
-2. **AI synthesis cost runaway** — NULL `ai_summary` must return NULL, not trigger an LLM call. Synthesis must be explicit (user action or background job trigger), never from a `useEffect` or query lifecycle hook. Rate limit at the DB level (`synthesis_requested_at`; return 429 within 5 minutes). Context under 3 meaningful entries gets a template string, not an LLM call.
+2. **Data loss during table merge — graduated leads exist in both tables** — When `Lead.account_id IS NOT NULL`, the lead was graduated; merge its data INTO the corresponding accounts row, do NOT create a second pipeline_companies row. Map all 15 lead-only fields (purpose, campaign, fit_rationale, etc.) to target columns or JSONB metadata before writing migration SQL. Verify: `(count accounts) + (count leads WHERE account_id IS NULL)` must equal `count pipeline_companies`.
 
-3. **Missing GIN index on relationship_types array** — Without a GIN index, `WHERE 'advisor' = ANY(relationship_types)` is a full table scan. At 206 rows it is invisible; at 5,000 rows it is visibly slow. The GIN index must ship in the same migration that adds the column — not as a follow-up optimization.
+3. **Breaking FK references from meetings, tasks, context_entries** — These three tables have `account_id` FKs to the `accounts` table. Migration order must be: create new tables → migrate data (preserving account UUIDs) → retarget FK constraints to `pipeline_companies` → ONLY THEN rename/drop old tables. Add `pipeline_company_id` column first, populate it, verify completeness, then drop `account_id`.
 
-4. **Account leaks across Pipeline and Relationships surfaces** — After graduation, an account can appear in both surfaces if the partition predicate is not precisely defined. Define the predicate once; add `graduated_at` timestamp as the cleanest partition signal. Test both endpoints after every graduation.
+4. **Breaking background engines during migration** — `meeting_processor_web.py`, `channel_task_extractor.py`, `flywheel_ritual.py`, `skill_executor.py`, and `synthesis_engine.py` all query `accounts`/`leads` directly. Use a `UNIFIED_PIPELINE` feature flag and dual-read period. Migrate one engine at a time. Deploy order: (a) migration, (b) code with dual-read, (c) verify engines, (d) remove old paths.
 
-5. **React Query key collision after graduation** — The graduation mutation must invalidate `['pipeline']`, `['relationships']` (all type variants), and `['signals']` simultaneously. Use a query key factory; invalidate with `exact: false` for the relationships key.
+5. **RLS policy gaps — privacy breach on new tables** — The unified `pipeline_companies` table needs visibility-aware RLS (matching accounts migration 042): `visibility = 'team' OR owner_id = current_setting('app.user_id')::uuid`. Create RLS policies BEFORE migrating data to prevent even a brief window of unrestricted visibility.
 
 ---
 
 ## Implications for Roadmap
 
-Based on combined research, the build order is dictated by three rules: (1) schema migrations before service or API code, (2) backend before frontend, (3) independent features before integrated features. The suggested phase structure below respects all feature dependency constraints from FEATURES.md and the pitfall mitigation requirements from PITFALLS.md.
+Based on dependency analysis and pitfall severity, the research points to a clear 4-phase structure:
 
-### Phase 1: Data Model Foundation
+### Phase 1: Schema Foundation
+**Rationale:** All subsequent work depends on the new tables existing. This must be the most carefully executed phase — errors here (data loss, broken FKs, RLS gaps) have the highest blast radius. The Supabase PgBouncer constraint makes every DDL statement a deliberate, individually-verified operation.
+**Delivers:** New tables (`pipeline_companies`, `pipeline_contacts`, `pipeline_activities`, `pipeline_stages`) with correct RLS, indexes, triggers, and compatibility views. Data migrated from all 6 source tables. FK references retargeted on meetings, tasks, context_entries. Old tables preserved as `_legacy` for 30 days.
+**Addresses:** Unified data model, continuous stage column (schema level), dedup infrastructure (pg_trgm enabled, domain uniqueness constraint)
+**Avoids:** Pitfalls 1 (PgBouncer), 2 (data loss), 3 (contact dedup), 4 (FK references), 6 (RLS gaps), 10 (index design), 11 (Alembic chain), 12 (graduation history)
 
-**Rationale:** Every other feature blocks on the schema. The column rename, new columns, and new table must be stable before any API code is written. This is also where the two most critical pitfalls are addressed — the atomic rename risk and the missing GIN index.
-**Delivers:** `pipeline_stage` column via two-phase migration, `relationship_types text[]` with GIN index, `account_syntheses` table, `entity_level` column, `primary_contact_id` FK on accounts, `account_id` FK on uploaded_files, ORM model updates for all changes
-**Addresses:** DM-01 through DM-04 from FEATURES.md (all data model work)
-**Avoids:** Pitfall 1 (atomic rename outage), Pitfall 2 (missing GIN index), Pitfall 4 (self-contact trap on person-level accounts)
-**Research flag:** Standard Alembic patterns — skip research-phase. Use the two-phase migration template documented in PITFALLS.md.
+### Phase 2: Backend Service Layer + API
+**Rationale:** Frontend cannot be built until the API returns a stable, unified shape. Old endpoints must continue working for background engines during this phase. This phase is itself incremental: new `/pipeline/` namespace first, then one-engine-at-a-time migration of background workers.
+**Delivers:** `api/pipeline.py` with full CRUD for companies/contacts/activities/stages. `services/pipeline_service.py` with stage transitions, dedup logic, and entity resolution. Old endpoints as thin wrappers. `UNIFIED_PIPELINE` feature flag. Background engines (meeting processor, task extractor, flywheel ritual, synthesis engine) migrated to new models.
+**Uses:** SQLAlchemy 2.0 async patterns (existing), pg_trgm fuzzy matching, PostgreSQL triggers
+**Implements:** `pipeline_service.py` architecture, compatibility view layer, dual-write period
+**Avoids:** Pitfall 5 (engine-to-schema mismatch), Pitfall 8 (entity resolution), Pitfall 9 (person-as-contact), Pitfall 13 (MCP tool descriptions)
 
-### Phase 2: Relationship and Signals APIs
+### Phase 3: Frontend Rebuild — Unified Grid
+**Rationale:** With a stable API, the frontend can be rebuilt against the new data shape. The research is explicit: rebuild, don't adapt. The existing leads/, accounts/, relationships/ feature directories each have incompatible data shapes and cell renderers. A single unified `features/pipeline/` view is less work than adapting 4 diverged views.
+**Delivers:** Single AG Grid view replacing leads/accounts/relationships/pipeline pages. Unified side panel. Unified filter bar. Continuous stage column with inline dropdown editing. Column sorting/reordering. Keyboard navigation. React Query cache with queryKey factory pattern.
+**Uses:** AG Grid Community inline editing (`editable`, `agSelectCellEditor`, `cellEditorPopup`), optimistic updates via React Query, Zustand for side panel state
+**Implements:** Unified grid architecture; side panel merge pattern; cache invalidation design
+**Avoids:** Pitfall 7 (frontend cache fragmentation), Anti-pattern 4 (simultaneous front/back changes)
 
-**Rationale:** Backend API contracts must be stable before any frontend component is built. This phase also defines the partition predicate that prevents accounts leaking across surfaces (Pitfall 3) and enforces the synthesis rate limiting that prevents cost runaway (Pitfall 5).
-**Delivers:** `GET /relationships/?type=` (filtered by type, tenant-scoped), `PATCH /accounts/{id}` with relationship_types, `GET /relationships/{id}` with synthesis + files, `POST /relationships/{id}/synthesize` (explicit trigger only, rate-limited), `POST /relationships/{id}/ask` (Q&A), signals count endpoint, graduation endpoint with type assignment and self-contact creation
-**Uses:** FastAPI router pattern (existing), SynthesisEngine service (new), full-text search on context_entries (existing TSVECTOR)
-**Avoids:** Pitfall 3 (dual-surface account appearance), Pitfall 5 (synthesis cost runaway), Pitfall 13 (RLS bypass on signals)
-**Research flag:** Standard FastAPI patterns — skip research-phase. Synthesis rate limiting and partition predicate require careful implementation review before the endpoints are declared done.
-
-### Phase 3: Pipeline Grid (Frontend)
-
-**Rationale:** The configurable pipeline grid is self-contained and does not depend on relationship surfaces. It can ship independently and unblock founder use of the pipeline before relationship views are complete. The query key factory (Pitfall 7 mitigation) must be established in this phase before any mutation hooks are written.
-**Delivers:** AG Grid-based Pipeline page with column show/hide, filter tabs (All / Strong Fit / Needs Follow-up / Stale), stale relationship ambient tint, graduation modal with type selection, localStorage column state persistence
-**Uses:** ag-grid-community, motion (entrance animations), query key factory (`queryKeys.ts`)
-**Avoids:** Pitfall 7 (React Query key collision), Pitfall 9 (column state lost on navigation), Pitfall 10 (drag/resize conflict)
-**Research flag:** AG Grid CSS variable overrides against Tailwind v4 may need a 1-hour implementation spike. Tailwind v4's new Vite-plugin architecture (no config file) has not been tested against AG Grid's class-based theme system. Spike before committing to the theming approach.
-
-### Phase 4: Relationship Surfaces (Frontend)
-
-**Rationale:** After the relationship APIs are stable (Phase 2), the four relationship list pages and the shared detail page can be built. The `fromType` URL parameter pattern must be established before the detail page is built to avoid the multi-type tab/back-link confusion (Pitfall 8).
-**Delivers:** Sidebar with 5 sections and signal badge counts (Supabase Realtime), 4 relationship type list pages (card grid), shared RelationshipDetail with type-driven tab configs (Advisor / Investor / Customer / Prospect), AI synthesis panel (read-only display with skeleton on load, never auto-triggered), Commitments tab (two-column What You Owe / What They Owe), Timeline renderer with optimistic note-add
-**Uses:** motion (card entrance animations), react-dropzone (file attachment panel), `fromType` URL param routing
-**Avoids:** Pitfall 8 (multi-type detail page tab confusion), Pitfall 5 (synthesis auto-trigger on load), Pitfall 14 (stale sidebar badge after in-page action)
-**Research flag:** Standard React patterns for type-driven component config maps. The AskPanel conversational UI is the highest-complexity component in the milestone — consider a focused implementation spike before building.
-
-### Phase 5: AI Q&A Panel
-
-**Rationale:** Q&A depends on Phase 2 (the ask endpoint) and Phase 4 (the detail page it lives in). It also benefits from Phase 4's relationship surfaces being stable so the panel has rich account data to query. Q&A is a differentiator, not table stakes — it can slip to v2.2 if Phase 4 is late without blocking the core product.
-**Delivers:** AskPanel component with conversational Q&A, source citations showing which context entries informed the answer, question history (local state, not persisted), graceful degradation when context is thin (< 3 entries shows a "not enough context yet" state)
-**Uses:** `POST /relationships/{id}/ask` endpoint (Phase 2), existing Anthropic SDK, TSVECTOR full-text retrieval
-**Avoids:** Pitfall 5 (cost runaway — same discipline applies to Q&A call volume; never auto-trigger)
-**Research flag:** RAG retrieval quality needs validation mid-phase. TSVECTOR full-text search is the MVP strategy, but its adequacy for temporal questions ("what did we discuss last month") against 20-100 context entries per account is MEDIUM confidence. Plan a quality checkpoint at mid-phase; pgvector embeddings are the verified fallback.
+### Phase 4: Rich Interactions + AI Layer
+**Rationale:** These features depend on Phase 3's grid being stable and Phase 2's activity data being unified. AI stage suggestions require the unified activity timeline. Saved views require the filter state shape to be finalized.
+**Delivers:** Saved views (personal, configurable). Quick-add row with dedup dialog. Unified activity timeline in side panel. AI stage suggestions as subtle nudges. Outreach sequence status column. Smart dedup on all entry points.
+**Implements:** `saved_views` table + tab bar UI. `GET /api/pipeline/companies/:id/timeline` aggregation endpoint. Stage suggestion signal detection.
 
 ### Phase Ordering Rationale
 
-- Schema-first is non-negotiable: the `status` rename affects every existing API endpoint and must be stable before any new code references account fields
-- Phase 2 (APIs) before Phases 3 and 4 (frontends): stable API contracts prevent frontend rework when response shapes change
-- Phases 3 and 4 can overlap if two engineers are available — Pipeline grid has no dependency on relationship surfaces
-- Phase 5 (Q&A) is last because it benefits from rich context data accumulated across other phases, and it can be deferred without blocking the core product
+- Phase 1 before everything: no code change is safe until new tables exist with correct RLS and FK references are retargeted
+- Phase 2 before Phase 3: frontend must have a stable API contract; building UI against shifting schema compounds bugs
+- Phase 3 before Phase 4: saved views, quick-add, and AI suggestions all depend on the grid's filter state shape and query key design being finalized
+- This ordering minimizes the blast radius of the highest-severity pitfalls (1-5) by addressing them all before touching the frontend
 
 ### Research Flags
 
-**Phases needing deeper research during planning:**
-- **Phase 3 (Pipeline Grid):** AG Grid CSS variable theming against Tailwind v4 Vite plugin architecture — integration is documented but the combination has not been tested in this codebase. Recommend a 1-hour spike before committing to the theming approach.
-- **Phase 5 (AI Q&A):** RAG retrieval quality with TSVECTOR for temporal and conceptual questions — MEDIUM confidence. Plan a quality review checkpoint mid-phase before completing the frontend integration.
+Phases likely needing deeper research during planning:
+- **Phase 1 (Schema):** Contact dedup strategy for name-only matches needs explicit decision rules before migration SQL is written. The person-type entity pattern (person rows in pipeline_companies vs separate table) needs an architectural decision before schema is finalized.
+- **Phase 2 (Backend):** Engine-by-engine migration is complex enough that meeting processor, task extractor, flywheel ritual, and synthesis engine each deserve their own research pass. Context entity bridging strategy (pipeline_companies ↔ context_entities via `context_entity_id` FK) needs implementation design.
 
-**Phases with standard patterns (skip research-phase):**
-- **Phase 1 (Data Model):** Standard Alembic two-phase migration pattern; all SQL is documented in PITFALLS.md
-- **Phase 2 (APIs):** Standard FastAPI CRUD patterns; existing codebase has 8 endpoints to reference
-- **Phase 4 (Relationship Surfaces):** Standard React Query + Zustand patterns; motion animations follow existing project conventions
+Phases with standard patterns (skip research):
+- **Phase 3 (Frontend):** AG Grid inline editing is well-documented with code examples in STACK.md. React Query optimistic update pattern is standard. The design decision (rebuild vs adapt) is resolved — rebuild.
+- **Phase 4 (Rich Interactions):** Saved views pattern is standard (JSONB column + tab UI). Timeline aggregation is a union query — well-understood pattern.
 
 ---
 
@@ -166,52 +136,42 @@ Based on combined research, the build order is dictated by three rules: (1) sche
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All versions verified against npm registry and PyPI. AG Grid React 19 compatibility confirmed in changelog. Motion rebranding verified from official blog. pgvector SQLAlchemy integration verified from GitHub. |
-| Features | MEDIUM | Table stakes derived from Attio, Folk, HubSpot, Zoho comparison (credible industry sources). Differentiator value claims are practitioner consensus, not quantitative user research. Anti-features verified against PROJECT.md decisions. |
-| Architecture | HIGH | Based on direct codebase inspection of models.py, storage.py, skill_executor.py, existing API routers, and migration 027. Integration points are grounded in actual code, not assumptions. |
-| Pitfalls | HIGH (backend) / MEDIUM (frontend) | Backend pitfalls (column rename, GIN index, RLS) verified against PostgreSQL docs and actual codebase. Frontend pitfalls (TanStack Table interaction, React Query keys) from official docs and community patterns. |
+| Stack | HIGH | Verified against AG Grid v35 Community vs Enterprise matrix; Supabase DDL pattern confirmed against 43 existing migrations; pg_trgm availability confirmed in Supabase docs |
+| Features | HIGH | Benchmarked against Attio, Folk, Pipedrive, HubSpot help docs; feature recommendations grounded in competitive research |
+| Architecture | HIGH | Based on direct codebase analysis of all ORM models, API files, engine files, and migrations; not external sources |
+| Pitfalls | HIGH | Based on direct codebase analysis of 6 CRM models, 12 API files, 8 engine files, 43 migrations, and known Supabase constraints from project memory |
 
-**Overall confidence:** HIGH for technical approach; MEDIUM for feature prioritization (user value ranking is informed judgment, not user research data)
+**Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Q&A retrieval quality:** TSVECTOR full-text search adequacy for temporal and conceptual Q&A questions is assumed based on the small context size (20-100 entries per account). Validate with real account data during Phase 5 implementation before committing to the retrieval architecture. pgvector is the verified fallback.
-- **AG Grid + Tailwind v4 theming:** Tailwind v4 uses a fundamentally different configuration model (Vite plugin, CSS-first config). AG Grid's theming uses CSS custom properties, which should be compatible, but the interaction with Tailwind v4's build pipeline has not been tested in this codebase. Spike before Phase 3 implementation.
-- **Synthesis quality at thin context:** The template-string fallback for accounts with fewer than 3 context entries is the right UX decision, but the threshold of 3 entries is an estimate. Adjust based on early synthesis output quality during Phase 2 API development.
-- **Signal computation at scale:** Current real-time SQL computation is adequate at 206 accounts. The scale threshold (>500 accounts triggers background job pre-computation) is documented in ARCHITECTURE.md but the migration path has not been designed. Low urgency for v2.1, but should be addressed before any significant customer onboarding.
+- **Contact dedup threshold for name-only matches:** Email-first strategy is clear, but name-only matching needs a decision — auto-merge on (tenant_id, normalized_name, company_normalized_name) or always flag for review. Recommendation: flag for review during migration; auto-link going forward on email match only.
+- **pg_trgm similarity threshold:** The 0.6 threshold is a starting point, not validated against this tenant's data. Expose as a config value and tune post-migration.
+- **Person-type entity design:** ARCHITECTURE.md references `entity_type = 'person'` rows in `pipeline_companies`. This needs a schema decision in Phase 1 planning: discriminator column on pipeline_companies vs separate pipeline_people table.
+- **Compatibility view naming conflict:** Cannot name a view `accounts` while the `accounts` table exists. The rename of the old table to `accounts_old` must be the first DDL step and requires verifying no consumer breaks on that rename alone.
 
 ---
 
 ## Sources
 
-### Primary (HIGH confidence — direct codebase inspection)
-- `backend/src/flywheel/db/models.py` — Account model, column names, existing indexes
-- `backend/src/flywheel/storage.py` — `append_entry()` signature; invalidation hook location
-- `backend/src/flywheel/services/skill_executor.py` — Anthropic SDK usage pattern, BYOK context
-- `backend/src/flywheel/api/accounts.py`, `outreach.py`, `timeline.py` — existing endpoint patterns, Pydantic models
-- `backend/alembic/versions/027_crm_tables.py` — current schema, index definitions
-- `frontend/src/features/accounts/` — existing component structure, React Query hooks, TypeScript types
+### Primary (HIGH confidence)
+- Direct codebase: `db/models.py`, all `api/*.py` files, `engines/`, `alembic/versions/` (43 migrations) — architecture and pitfall analysis
+- [AG Grid Community vs Enterprise feature matrix](https://www.ag-grid.com/javascript-data-grid/community-vs-enterprise/) — confirmed inline editing is Community
+- [AG Grid Cell Editing docs](https://www.ag-grid.com/react-data-grid/cell-editing/) — implementation patterns
+- [Supabase Triggers docs](https://supabase.com/docs/guides/database/postgres/triggers) — SECURITY DEFINER pattern
+- Project memory: `CLAUDE.md` Supabase DDL workaround, `feedback_supabase_ddl.md`
+- [Attio Help Center](https://attio.com/help/) — views, filters, table views, workflows
+- [Folk CRM Help](https://help.folk.app/) — views, email sequences
 
-### Primary (HIGH confidence — official documentation)
-- [AG Grid React Compatibility](https://www.ag-grid.com/react-data-grid/compatibility/) — React 19 support from v34.3.0
-- [Motion Installation Docs](https://motion.dev/docs/react-installation) — v12, import from `motion/react`
-- [pgvector Python PyPI](https://pypi.org/project/pgvector/) — v0.4.2, SQLAlchemy 2.0 integration
-- [TanStack Table Column Visibility API](https://tanstack.com/table/v8/docs/api/features/column-visibility)
-- [PostgreSQL GIN Indexes — pganalyze](https://pganalyze.com/blog/gin-index) — update cost analysis
+### Secondary (MEDIUM confidence)
+- [Crunchy Data: Fuzzy Name Matching in PostgreSQL](https://www.crunchydata.com/blog/fuzzy-name-matching-in-postgresql) — pg_trgm threshold recommendations
+- [Pipedrive Pipeline View](https://support.pipedrive.com/en/article/pipeline-view) — UX pattern reference
+- [HubSpot Pipeline Management](https://www.hubspot.com/products/crm/pipeline-management) — feature benchmarking
+- [CRM Deduplication Guide 2025](https://www.rtdynamic.com/blog/crm-deduplication-guide-2025/) — dedup strategy patterns
 
-### Secondary (MEDIUM confidence — industry survey and community patterns)
-- [Attio CRM Review 2026 — Authencio](https://www.authencio.com/blog/attio-crm-review-features-pricing-customization-alternatives) — multi-type account differentiator
-- [Folk CRM AI Features](https://www.folk.app/articles/folk-crm-ai-features) — AI enrichment patterns, Q&A comparison
-- [Zoho CRM Signals Overview](https://help.zoho.com/portal/en/kb/crm/experience-center/salessignals/articles/signals-an-overview) — signal taxonomy reference
-- [React Query Cache Invalidation — tkdodo](https://tkdodo.eu/blog/concurrent-optimistic-updates-in-react-query) — query key factory pattern
-- [LLM Cost Optimization — Koombea AI](https://ai.koombea.com/blog/llm-cost-optimization) — runaway cost patterns
-- [PostgreSQL backward-compatible migration — Ovrsea/Medium](https://medium.com/ovrsea/using-postgresql-views-to-ensure-backwards-compatible-non-breaking-migrations-017288e77f06) — two-phase rename pattern
-
-### Tertiary (MEDIUM confidence — practitioner consensus)
-- [LangChain too complex for simple RAG — GitHub discussion #182015](https://github.com/orgs/community/discussions/182015) — community consensus 2025; no single authoritative reference
-- [Personal CRM Guide 2025 — folk.app](https://www.folk.app/articles/personal-crm-guide) — stale contact detection patterns
-- [4Degrees CRM Features for PE](https://www.4degrees.ai/blog/essential-crm-features-for-private-equity-firms-in-2025-streamline-deal-flow-relationships-and-data-driven-decisions) — founder/VC segmentation best practices
+### Tertiary (LOW confidence)
+- [Folk CRM Review 2026](https://hackceleration.com/folk-crm-review/) — UX pattern comparisons, needs validation against direct Folk usage
 
 ---
-*Research completed: 2026-03-27*
+*Research completed: 2026-04-06*
 *Ready for roadmap: yes*

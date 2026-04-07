@@ -12,6 +12,16 @@ description: >
   Requires: Playwright MCP server to be connected and active.
 compatibility: "Requires Playwright MCP server to be connected and active in Claude Code or Claude.ai."
 version: "1.2"
+triggers:
+  - "extract contacts from"
+  - "scrape this page"
+  - "pull all attendees"
+  - "grab listings from"
+  - "export these results to CSV"
+  - "web scraper"
+tags:
+  - gtm
+  - web-research
 context-aware: true
 recipe-aware: true
 web_tier: 3
@@ -839,3 +849,14 @@ Update memory with new preferences. Edit existing entries, never duplicate.
 | 1.0 | 2026-03-13 | Pre-Flywheel baseline (existing behavior, no standard sections) |
 | 1.1 | 2026-03-13 | Added Standards 5 (Resume & Checkpoint), 7 (Idempotency), 11 (Context Management) |
 | 1.2 | 2026-03-14 | Added recipe-aware support: Step 2c.5 (recipe lookup) and Step 5.5 (recipe save) |
+
+## Flywheel MCP Integration
+
+When connected to the Flywheel MCP server, persist scraped data to the GTM leads pipeline:
+
+### After scraping each company:
+1. Call `flywheel_upsert_lead(name, domain, source="gtm-web-scraper", intel={industry, description, ...})`
+2. For each contact found, call `flywheel_add_lead_contact(lead_name, contact_name, email, title, linkedin_url)`
+
+This enables downstream skills (scorer, researcher, drafter) to pick up leads automatically.
+If Flywheel MCP is not connected, skip these steps silently and use local file output.

@@ -1,5 +1,6 @@
 ---
 name: content-critic
+enabled: false
 version: "1.0"
 description: >
   Quality gate for social media drafts before they get finalized. Runs a systematic

@@ -1,5 +1,6 @@
 ---
 name: pii-redactor
+enabled: false
 version: "1.0"
 description: "Document anonymization using Microsoft Presidio. Detects and removes PII from documents before sharing or processing."
 web_tier: 1

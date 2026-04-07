@@ -72,6 +72,9 @@ export function AuthCallback() {
               provider_token: session.provider_token ?? '',
               provider_refresh_token: session.provider_refresh_token ?? null,
               email: session.user?.email ?? '',
+              display_name: session.user?.user_metadata?.full_name
+                ?? session.user?.user_metadata?.name
+                ?? null,
             })
           } catch (err: any) {
             const detail = err?.response?.data?.detail ?? err?.message ?? String(err)

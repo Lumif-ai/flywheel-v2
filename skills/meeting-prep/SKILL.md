@@ -12,7 +12,16 @@ description: >
   intelligence back to 4 context files.
 context-aware: true
 triggers:
-  - manual
+  - "prep for meeting"
+  - "meeting prep"
+  - "prepare for call"
+  - "brief me on"
+  - "who am I meeting"
+  - "prepare for my meeting with"
+  - "meeting brief"
+tags:
+  - meetings
+  - preparation
 dependencies:
   skills: []
   files:

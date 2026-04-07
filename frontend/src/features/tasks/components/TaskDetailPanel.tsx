@@ -601,8 +601,8 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                 />
               </div>
 
-              {/* Skill Execution (conditional) */}
-              {task.suggested_skill && (
+              {/* Skills hidden from user-facing UI */}
+              {false && task.suggested_skill && (
                 <div
                   style={{
                     marginTop: '24px',

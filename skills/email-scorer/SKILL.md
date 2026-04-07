@@ -1,5 +1,6 @@
 ---
 name: email-scorer
+enabled: false
 version: "1.0"
 description: >
   Background email priority scorer. Scores each synced email 1-5 using

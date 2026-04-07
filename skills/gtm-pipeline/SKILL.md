@@ -7,8 +7,15 @@ description: >
   and writes outreach-discovered data back to the context store.
 context-aware: true
 triggers:
-  - manual
-  - after outreach outcomes updated in tracker
+  - "run GTM pipeline"
+  - "enrich outreach"
+  - "outreach with context"
+  - "pipeline run"
+  - "write back outreach results"
+  - "GTM feedback loop"
+tags:
+  - gtm
+  - pipeline
 dependencies:
   skills: []
   files:
@@ -275,3 +282,17 @@ This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/co
 - Effectiveness scoring is handled separately (Plan 05-02) -- this skill only captures raw outcomes
 - All context store writes follow the entry format in `~/.claude/skills/_shared/context-protocol.md`
 - Outcome entries start at confidence "low" -- confidence upgrades happen based on evidence accumulation
+
+## Flywheel MCP Integration
+
+When connected to the Flywheel MCP server, orchestrate the GTM pipeline using lead data:
+
+### Pipeline orchestration:
+1. Use `flywheel_list_leads(pipeline_stage="scraped")` to find leads needing scoring
+2. Use `flywheel_list_leads(pipeline_stage="scored", fit_tier="Strong Fit")` to find leads needing research
+3. Use `flywheel_list_leads(pipeline_stage="researched")` to find leads needing outreach drafts
+4. Use `flywheel_list_leads(pipeline_stage="drafted")` to find leads ready to send
+5. Use `flywheel_list_leads(pipeline_stage="sent")` to check for replies
+
+Each sub-skill (scraper, scorer, researcher, drafter, sender) should use its own MCP integration to persist results.
+If Flywheel MCP is not connected, fall back to local file-based pipeline orchestration.

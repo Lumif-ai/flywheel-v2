@@ -1,582 +1,504 @@
-# Architecture Patterns: AI Synthesis + Premium CRM Integration
+# Architecture Patterns: Unified Pipeline Schema Migration
 
-**Domain:** Adding AI synthesis, configurable grid, and multi-type relationships to existing Flywheel CRM
-**Researched:** 2026-03-27
-**Confidence:** HIGH — direct codebase inspection supplemented by verified patterns
-
----
-
-## Existing Architecture Baseline
-
-Before documenting integration points, here is what already exists (v2.0 CRM milestone):
-
-```
-FRONTEND (React + Vite)
-  routes.tsx               -- lazy-loaded page routes
-  features/accounts/       -- AccountsPage, AccountDetailPage, Pipeline
-    api.ts                 -- fetchAccounts, fetchAccountDetail, fetchTimeline
-    hooks/                 -- useAccounts, useAccountDetail, useTimeline (React Query)
-    components/            -- AccountsPage, AccountDetailPage, ContactsPanel,
-                              TimelineFeed, IntelSidebar, ActionBar
-    types/accounts.ts      -- AccountListItem, AccountDetail, TimelineItem etc.
-  stores/ui.ts             -- Zustand: sidebarOpen, commandPalette
-  stores/auth.ts           -- Zustand: JWT token
-  stores/focus.ts          -- Zustand: activeFocus
-  lib/api.ts               -- Central fetch wrapper (Bearer + X-Focus-Id headers)
-  lib/realtime.ts          -- Supabase Realtime for skill_run completion events
-
-BACKEND (FastAPI + SQLAlchemy 2.0 async)
-  main.py                  -- lifespan: job_queue_loop, calendar_sync_loop,
-                              email_sync_loop, cleanup tasks
-  api/accounts.py          -- GET/POST/PATCH accounts, contacts CRUD (8 endpoints)
-  api/outreach.py          -- Outreach CRUD, pipeline view, graduation (7 endpoints)
-  api/timeline.py          -- Unified timeline + pulse signals (2 endpoints)
-  api/context.py           -- Context entries CRUD, full-text search (10 endpoints)
-  api/files.py             -- File upload + extraction (3 endpoints)
-  api/chat.py              -- Haiku intent routing -> SkillRun (1 endpoint)
-  services/skill_executor.py -- AsyncAnthropic tool-use loop + streaming
-  services/job_queue.py    -- FOR UPDATE SKIP LOCKED background worker (5s poll)
-  storage.py               -- context read/append/query/batch with evidence dedup
-  storage_backend.py       -- strangler fig: flatfile / postgres / remote routing
-
-DATABASE (PostgreSQL with RLS)
-  accounts                 -- tenant_id, name, normalized_name, domain, status,
-                              fit_score, fit_tier, intel JSONB, source,
-                              last_interaction_at, next_action_due
-  account_contacts         -- tenant_id, account_id FK, name, email, title,
-                              role_in_deal, linkedin_url, notes
-  outreach_activities      -- tenant_id, account_id FK, contact_id FK, channel,
-                              direction, status, subject, body_preview, sent_at, metadata JSONB
-  context_entries          -- tenant_id, file_name, content, source, detail,
-                              confidence, focus_id, account_id FK, search_vector TSVECTOR,
-                              metadata JSONB
-  uploaded_files           -- tenant_id, filename, mimetype, storage_path,
-                              extracted_text, metadata JSONB
-  enrichment_cache         -- tenant_id, query_hash, results JSONB, created_at
-  skill_runs               -- tenant_id, skill_name, input_text, output,
-                              events_log JSONB, status, scheduled_for
-```
+**Domain:** Schema refactor -- merging 6 CRM tables into 3+1 within a live FastAPI + Supabase system
+**Researched:** 2026-04-06
+**Overall confidence:** HIGH (based on direct codebase analysis, not external sources)
 
 ---
 
-## Feature 1: AI Synthesis Engine
+## Current State Analysis
 
-### What it needs to do
+### Tables Being Merged
 
-Generate, cache, and serve LLM-written summaries per account relationship. A summary
-synthesizes context_entries (linked via account_id), outreach history, and intel JSONB
-into 2-3 sentences like "Acme Corp is an engaged prospect — last replied 6 days ago.
-3 open loop items. CEO conversation tracked in June."
+**Source tables (6):**
+1. `leads` -- pre-relationship prospects (scraped/scored/researched/drafted/sent/replied)
+2. `lead_contacts` -- people at lead companies
+3. `lead_messages` -- outreach sequence per lead contact
+4. `accounts` -- post-graduation companies (prospect/engaged/customer/advisor/investor)
+5. `account_contacts` -- people at account companies
+6. `outreach_activities` -- touchpoints on accounts
 
-### Integration Point: New DB Table
+**Target tables (3+1):**
+1. `pipeline_companies` -- unified company entity (replaces leads + accounts)
+2. `pipeline_contacts` -- unified person entity (replaces lead_contacts + account_contacts)
+3. `pipeline_activities` -- unified touchpoint/message entity (replaces lead_messages + outreach_activities)
+4. `pipeline_stages` -- reference table for stage definitions and ordering
 
-Add `account_syntheses` table. Do NOT store synthesis in the `accounts.intel` JSONB
-column — that field is for structured key-value intel (industry, funding, etc.), not
-prose. Separate table allows versioning and explicit invalidation.
+### FK Dependencies on Current Tables
 
-```sql
-CREATE TABLE account_syntheses (
-    id          uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id   uuid NOT NULL REFERENCES tenants(id),
-    account_id  uuid NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
-    synthesis   text NOT NULL,
-    model       text NOT NULL DEFAULT 'claude-haiku-4-5',
-    tokens_used int,
-    generated_at timestamptz NOT NULL DEFAULT now(),
-    invalidated_at timestamptz,        -- null = current/valid
-    trigger     text NOT NULL          -- 'manual' | 'context_write' | 'outreach_write' | 'ttl'
-);
-CREATE UNIQUE INDEX idx_synthesis_current
-    ON account_syntheses (account_id)
-    WHERE invalidated_at IS NULL;
-CREATE INDEX idx_synthesis_tenant ON account_syntheses (tenant_id, account_id);
+| Table | FK to `accounts` | FK to `leads` | Notes |
+|-------|-------------------|---------------|-------|
+| `meetings` | `account_id` | -- | Critical: meeting-to-company link |
+| `tasks` | `account_id` | -- | Critical: task-to-company link |
+| `context_entries` | `account_id` | -- | Many rows, used for intel aggregation |
+| `outreach_activities` | `account_id`, `contact_id` | -- | Being replaced |
+| `account_contacts` | `account_id` | -- | Being replaced |
+| `lead_contacts` | -- | `lead_id` | Being replaced |
+| `lead_messages` | -- | `contact_id` (lead_contacts) | Being replaced |
+| `email_scores` | -- | -- | `sender_entity_id` FK to context_entities, not accounts |
+| `leads` | `account_id` | -- | Self-reference for graduated leads |
+
+### API Surface Being Changed
+
+| File | Endpoints | Imports from models | Must change |
+|------|-----------|---------------------|-------------|
+| `api/leads.py` | 10 endpoints under `/leads/` | Lead, LeadContact, LeadMessage, Account, AccountContact, OutreachActivity | YES - replace entirely |
+| `api/accounts.py` | 8 endpoints under `/accounts/` | Account, AccountContact, ContextEntry, OutreachActivity | YES - replace entirely |
+| `api/relationships.py` | 8 endpoints (no prefix) | Account, AccountContact, ContextEntry, Meeting, SkillRun | YES - replace entirely |
+| `api/outreach.py` | 5 endpoints under `/accounts/` and `/pipeline/` | Account, AccountContact, OutreachActivity, ContextEntry | YES - replace entirely |
+| `api/meetings.py` | 7 endpoints under `/meetings/` | Account, Meeting, SkillRun | PARTIAL - update FK references |
+| `api/tasks.py` | 7 endpoints under `/tasks/` | Task | PARTIAL - Task model has account_id |
+| `api/context.py` | 10 endpoints under `/context/` | ContextEntry (has account_id) | PARTIAL - update FK references |
+| `api/timeline.py` | unknown | likely Account | CHECK |
+| `api/signals.py` | unknown | likely Account | CHECK |
+
+### Frontend Surface Being Changed
+
+| Feature dir | Components | API calls | Must change |
+|-------------|------------|-----------|-------------|
+| `features/pipeline/` | PipelinePage, PipelineFilterBar, PipelineSidePanel, PipelineViewTabs, GraduationModal, cell-renderers | `/pipeline/`, `/relationships/{id}/graduate` | YES - rebuild |
+| `features/leads/` | LeadsPage, LeadSidePanel, LeadsFilterBar, LeadsFunnel, ContactCard, MessageThread, cell-renderers | `/leads/*` | YES - replace with unified |
+| `features/accounts/` | AccountsPage, AccountDetailPage, ActionBar, ContactsPanel, IntelSidebar, TimelineFeed | `/accounts/*` | YES - replace with unified |
+| `features/relationships/` | RelationshipListPage, RelationshipDetail, RelationshipTable, RelationshipCard, tabs, etc. | `/relationships/*` | YES - replace with unified |
+| `features/meetings/` | unknown | `/meetings/*` | PARTIAL - update company references |
+| `features/tasks/` | unknown | `/tasks/*` | PARTIAL - update company references |
+
+---
+
+## Recommended Architecture
+
+### Migration Strategy: Incremental with Compatibility Views
+
+**Use incremental migration, NOT big bang.** Rationale:
+
+1. **Supabase PgBouncer constraint** -- multi-statement DDL transactions silently roll back. Each DDL statement must be its own commit. A big-bang migration with 20+ DDL statements is extremely fragile.
+2. **Active daily dogfooding** -- the founder uses this daily. Zero-downtime is not optional.
+3. **25K LOC backend, 15K LOC frontend** -- too many consumers to update atomically.
+
+**The approach: Create new tables first, then migrate data, then create compatibility views over old table names, then update consumers incrementally, then drop views.**
+
+```
+Phase 1: Create new tables (additive only, nothing breaks)
+    |
+Phase 2: Data migration + dual-write layer
+    |
+Phase 3: API migration (new /pipeline/ namespace + old endpoints become thin wrappers)
+    |
+Phase 4: Frontend migration (feature by feature)
+    |
+Phase 5: Cleanup (drop old tables, remove compatibility layer)
 ```
 
-RLS follows the same pattern as accounts — tenant_isolation_select/insert/update/delete
-using `current_setting('app.tenant_id', true)::uuid`.
+### Component Boundaries
 
-### Integration Point: Invalidation Triggers
-
-The synthesis goes stale when its source data changes. Two trigger locations exist in
-the current codebase:
-
-1. `storage.append_entry()` — called when a context_entry is written. If the entry
-   has `account_id` set, invalidate that account's synthesis. This is the right place
-   because all skill writes go through this function.
-
-2. `api/outreach.py` (PATCH outreach status, POST create outreach) — after any write
-   to outreach_activities for an account, invalidate that account's synthesis.
-
-Both locations should call a shared `invalidate_synthesis(session, account_id)` helper
-that sets `invalidated_at = now()` on the current row without deleting it (preserves
-history).
-
-### Integration Point: New Service
-
-New `services/synthesis_engine.py`:
-
-```
-generate_synthesis(session, account_id) -> str
-  1. Load account row + contacts
-  2. Load context_entries WHERE account_id = ? ORDER BY date DESC LIMIT 20
-  3. Load outreach_activities WHERE account_id = ? ORDER BY created_at DESC LIMIT 10
-  4. Call AsyncAnthropic (haiku-4-5, ~300 token budget) with prompt
-  5. INSERT into account_syntheses
-  6. Return synthesis text
-
-get_or_generate_synthesis(session, account_id) -> str
-  1. SELECT from account_syntheses WHERE account_id = ? AND invalidated_at IS NULL
-  2. If found AND age < 24h: return cached
-  3. Else: call generate_synthesis, return result
-```
-
-The 24-hour TTL is an additional freshness gate even when not explicitly invalidated.
-Use `haiku-4-5` (not sonnet) — synthesis is a brief summarization task.
-
-### Integration Point: API
-
-Extend `GET /accounts/{account_id}` response to include `synthesis: str | null`.
-The AccountDetail Pydantic model gains one optional field. The endpoint calls
-`get_or_generate_synthesis(session, account_id)` before returning — this is
-synchronous from the client's perspective but generation adds ~1-2s on cache miss.
-Frontend can show a skeleton for the synthesis panel while the detail request resolves.
-
-Do NOT add a separate `/synthesis` endpoint unless the AI panel needs on-demand
-regeneration (which is a legitimate separate endpoint: `POST /accounts/{id}/synthesis/regenerate`).
+| Component | Responsibility | Communicates With |
+|-----------|---------------|-------------------|
+| `pipeline_companies` table | Single source of truth for all company entities | meetings, tasks, context_entries via FK |
+| `pipeline_contacts` table | Single source of truth for all people | pipeline_companies via FK |
+| `pipeline_activities` table | All outreach/messages unified | pipeline_contacts, pipeline_companies via FK |
+| `pipeline_stages` ref table | Stage definitions, ordering, display config | pipeline_companies (stage FK) |
+| Compatibility views | `accounts` and `leads` as views over `pipeline_companies` | Old API code reads from views during transition |
+| `api/pipeline.py` (new) | Unified CRUD for companies, contacts, activities | Replaces leads.py, accounts.py, outreach.py, relationships.py |
+| `services/pipeline_service.py` (new) | Business logic: stage transitions, graduation, scoring | Called by API and MCP tools |
+| Frontend `features/pipeline/` | Unified grid + detail views | New API namespace |
 
 ### Data Flow
 
 ```
-User opens AccountDetailPage
-  -> GET /accounts/{id}  (existing)
-  -> FastAPI calls get_or_generate_synthesis(session, account_id)
-      -> DB hit: return cached synthesis (fast, <5ms)
-      -> DB miss / stale: call Anthropic Haiku (~1.5s), write, return
-  -> Response includes synthesis field
-  -> Frontend renders synthesis in IntelSidebar or new SynthesisPanel
-
-Background invalidation:
-  append_entry(..., account_id=X) in storage.py
-    -> invalidate_synthesis(session, account_id=X)
-
-PATCH /outreach/{id} with status='replied'
-    -> update outreach_activities
-    -> invalidate_synthesis(session, account_id=outreach.account_id)
+[MCP Tools / Skills] --> [pipeline_service.py] --> [pipeline_companies/contacts/activities]
+                                                         |
+[meetings.py] --> FK to pipeline_companies.id            |
+[tasks.py]    --> FK to pipeline_companies.id            |
+[context.py]  --> FK to pipeline_companies.id            |
+                                                         |
+[Compatibility views] <-- reads during transition -------+
+     |
+[Old API endpoints] (thin wrappers, deprecated)
 ```
 
 ---
 
-## Feature 2: AI Q&A Panel (RAG)
+## Migration Strategy Detail
 
-### What it needs to do
+### Phase 1: New Tables (Additive)
 
-User types a question about an account ("What did we discuss with their CTO?") and
-gets a contextual answer grounded in context_entries and outreach for that account.
+Create `pipeline_companies`, `pipeline_contacts`, `pipeline_activities`, `pipeline_stages` alongside existing tables. No FKs to old tables, no drops.
 
-### Integration Point: Existing Full-Text Search
-
-The `context_entries` table has a persisted `search_vector TSVECTOR` column computed
-from `detail || content`. The existing `GET /context/search` endpoint already performs
-`ts_rank` queries. This is the retrieval layer — no pgvector/embeddings needed for MVP.
-
-Retrieval strategy: hybrid — full-text search for keyword matching + recency filter
-for temporal questions. This is adequate for the account-scoped knowledge base (typically
-20-100 entries per account) and avoids adding pgvector as a dependency.
-
-If pgvector becomes necessary later (>500 entries per account, multi-lingual content),
-it can be added as a column to context_entries without schema changes to the rest of
-the system. MEDIUM confidence that full-text is sufficient for v3.0 scope.
-
-### Integration Point: New Endpoint
-
-New endpoint in `api/accounts.py` (or new `api/account_qa.py`):
-
+**pipeline_companies schema:**
+```sql
+CREATE TABLE pipeline_companies (
+    id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL REFERENCES tenants(id),
+    owner_id        UUID REFERENCES profiles(id),
+    visibility      TEXT DEFAULT 'team',
+    name            TEXT NOT NULL,
+    normalized_name TEXT NOT NULL,
+    domain          TEXT,
+    -- Unified stage replaces leads.purpose + accounts.status + accounts.pipeline_stage
+    stage           TEXT NOT NULL DEFAULT 'prospect',
+    -- Preserves relationship semantics from accounts
+    relationship_type   TEXT[] DEFAULT '{prospect}'::text[],
+    entity_level        TEXT DEFAULT 'company',
+    relationship_status TEXT DEFAULT 'active',
+    -- Scoring
+    fit_score       NUMERIC,
+    fit_tier        TEXT,
+    fit_rationale   TEXT,
+    -- Intel
+    intel           JSONB NOT NULL DEFAULT '{}'::jsonb,
+    ai_summary      TEXT,
+    ai_summary_updated_at TIMESTAMP WITH TIME ZONE,
+    -- Source tracking
+    source          TEXT NOT NULL,
+    campaign        TEXT,
+    purpose         TEXT[] DEFAULT '{sales}'::text[],
+    -- Lifecycle timestamps
+    graduated_at    TIMESTAMP WITH TIME ZONE,
+    last_interaction_at TIMESTAMP WITH TIME ZONE,
+    next_action_due TIMESTAMP WITH TIME ZONE,
+    next_action_type TEXT,
+    -- Standard
+    created_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(),
+    CONSTRAINT uq_pipeline_co_tenant_normalized UNIQUE (tenant_id, normalized_name)
+);
 ```
-POST /accounts/{account_id}/ask
-  body: { question: str, history: list[dict] | None }
-  response: { answer: str, sources: list[{ id, file_name, detail, date }] }
+
+Key design decisions:
+- **`stage` column** replaces the multi-table lifecycle. Values: `scraped`, `scored`, `researched`, `prospecting`, `outreach`, `engaged`, `customer`, `churned`, `lost`.
+- **`purpose` array preserved** from leads for campaign tracking.
+- **`graduated_at` preserved** as a lifecycle marker but no longer triggers a table move.
+- **`owner_id` nullable** -- team-visible companies may not have an owner (accounts didn't require one).
+
+**Supabase DDL execution approach:**
+```python
+# Each statement as its own commit via session.execute + session.commit
+# Then alembic stamp to sync revision
+# OR paste into Supabase SQL Editor statement by statement
 ```
 
-The endpoint:
-1. Performs `ts_query` on context_entries WHERE account_id = ? using the question text
-2. Fetches top 10 matching entries + 5 most recent outreach activities
-3. Builds RAG prompt: system context + retrieved snippets + question
-4. Calls AsyncAnthropic (haiku-4-5 for speed) with streaming or sync
-5. Returns answer + source citations
+### Phase 2: Data Migration + Dual Write
 
-This reuses the existing `_execute_with_tools` pattern from skill_executor, but as a
-direct API call (not a SkillRun job) because Q&A is interactive and needs low latency.
+1. **Migrate existing data** into new tables with deterministic ID mapping:
+   - `accounts` rows --> `pipeline_companies` (preserve UUIDs so FK references survive)
+   - `leads` rows --> `pipeline_companies` (new UUIDs, store mapping in temp table)
+   - Handle name collisions: same company in both `leads` and `accounts` --> merge into single `pipeline_companies` row, keep the `accounts` UUID.
+   
+2. **Create compatibility views:**
+   ```sql
+   CREATE VIEW accounts_compat AS
+   SELECT id, tenant_id, owner_id, visibility, name, normalized_name, domain,
+          stage AS status, fit_score, fit_tier, intel, source,
+          relationship_type, entity_level, ai_summary, ai_summary_updated_at,
+          graduated_at, relationship_status, stage AS pipeline_stage,
+          last_interaction_at, next_action_due, next_action_type,
+          created_at, updated_at
+   FROM pipeline_companies
+   WHERE graduated_at IS NOT NULL OR stage NOT IN ('scraped', 'scored', 'researched');
+   ```
+   
+   Note: Cannot name the view `accounts` while the table still exists. Use `accounts_compat` during transition, or drop the old table first (risky). Better approach: rename old table to `accounts_old`, create view as `accounts`.
 
-### Integration Point: Frontend
+3. **Update FKs on meetings, tasks, context_entries** to point to `pipeline_companies.id`:
+   - Since we preserve account UUIDs, the FK column values don't change -- only the constraint target changes.
+   - For leads that had no account_id in meetings/tasks, this is a no-op.
 
-New `AskPanel` component in `features/accounts/components/`. It renders as a drawer
-or expandable section in `AccountDetailPage`. State is local (useState for messages),
-not React Query (conversational, not cacheable). The `POST /accounts/{id}/ask` call
-goes through the central `api.post()` wrapper.
+4. **Dual-write layer** in `pipeline_service.py`: writes to new tables, the views handle reads from old API code.
+
+### Phase 3: API Migration
+
+**Use a new `/pipeline/` namespace. Do NOT try to modify existing endpoints in-place.**
+
+Rationale:
+- Existing `/leads/`, `/accounts/`, `/relationships/` have different response shapes.
+- A unified API can return a consistent shape with a `stage` field.
+- Old endpoints become thin wrappers that call `pipeline_service.py` and reshape responses.
+- Frontend can migrate feature-by-feature to the new API.
+
+**New endpoint structure:**
+```
+POST   /pipeline/companies/                -- create/upsert company
+GET    /pipeline/companies/                -- list with filters (stage, type, search, sort)
+GET    /pipeline/companies/{id}            -- detail with contacts, activities, intel
+PATCH  /pipeline/companies/{id}            -- update fields
+POST   /pipeline/companies/{id}/advance    -- advance stage (replaces graduate)
+
+POST   /pipeline/companies/{id}/contacts   -- add contact
+PATCH  /pipeline/contacts/{id}             -- update contact
+DELETE /pipeline/contacts/{id}             -- remove contact
+
+POST   /pipeline/companies/{id}/activities -- create activity
+PATCH  /pipeline/activities/{id}           -- update activity
+GET    /pipeline/companies/{id}/activities -- list activities
+
+GET    /pipeline/stages                    -- stage definitions + counts (funnel)
+GET    /pipeline/industries                -- distinct industries for filtering
+```
+
+**Old endpoints kept as deprecated wrappers:**
+```python
+# api/accounts.py becomes:
+@router.get("/accounts/")
+async def list_accounts(...):
+    """DEPRECATED: Use /pipeline/companies/?stage=engaged,customer"""
+    return await pipeline_service.list_companies(
+        filters={"stage": ["engaged", "customer", ...]},
+        response_shape="account",  # reshape for backward compat
+    )
+```
+
+### Phase 4: Frontend Migration
+
+**Rebuild, don't adapt.** The existing AG Grid components in leads/, accounts/, relationships/ each have their own column definitions, cell renderers, filter bars, and side panels. Trying to make them work with the new data shape would be more work than building a single unified pipeline view.
+
+**Migration order:**
+1. `features/pipeline/` -- already exists as a thin wrapper. Rebuild as the primary view.
+2. `features/relationships/` -- relationship detail page becomes the company detail page.
+3. `features/leads/` -- leads-specific views (funnel, message thread) fold into pipeline.
+4. `features/accounts/` -- accounts page becomes a filtered view of pipeline.
+5. `features/meetings/` -- update company reference display.
+6. `features/tasks/` -- update company reference display.
+
+### Phase 5: Cleanup
+
+- Drop compatibility views
+- Drop old tables (`leads`, `lead_contacts`, `lead_messages`, `accounts`, `account_contacts`, `outreach_activities`)
+- Remove deprecated API endpoints
+- Remove old frontend feature directories
 
 ---
 
-## Feature 3: Multi-Type Relationship Model
+## RLS Policy Design for New Tables
 
-### What it needs to do
-
-An account can be: prospect, customer, partner, investor, advisor, vendor — potentially
-multiple simultaneously. Current schema has a single `status` text column ('prospect',
-'engaged', 'customer', 'churned', 'disqualified') which models pipeline stage, not
-relationship type.
-
-These are orthogonal concerns: pipeline stage (status) vs relationship type (customer
-AND partner simultaneously is valid).
-
-### Integration Point: Schema Addition
-
-Add `relationship_types` ARRAY(Text) column to `accounts` table. Preserve `status`
-as-is — it models lifecycle stage, which remains useful. The new column models the
-classification taxonomy.
+Use the identical pattern from `040_create_leads_tables.py` (proven working):
 
 ```sql
-ALTER TABLE accounts
-ADD COLUMN relationship_types text[] NOT NULL DEFAULT '{}'::text[];
+-- For each new table:
+ALTER TABLE pipeline_companies ENABLE ROW LEVEL SECURITY;
+ALTER TABLE pipeline_companies FORCE ROW LEVEL SECURITY;
+GRANT SELECT, INSERT, UPDATE, DELETE ON pipeline_companies TO app_user;
 
-CREATE INDEX idx_account_rel_types ON accounts
-    USING GIN (relationship_types);
+-- Four policies per table:
+CREATE POLICY tenant_isolation_select ON pipeline_companies
+    FOR SELECT USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY tenant_isolation_insert ON pipeline_companies
+    FOR INSERT WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY tenant_isolation_update ON pipeline_companies
+    FOR UPDATE
+    USING (tenant_id = current_setting('app.tenant_id', true)::uuid)
+    WITH CHECK (tenant_id = current_setting('app.tenant_id', true)::uuid);
+
+CREATE POLICY tenant_isolation_delete ON pipeline_companies
+    FOR DELETE USING (tenant_id = current_setting('app.tenant_id', true)::uuid);
 ```
 
-GIN index on the array enables efficient `WHERE 'partner' = ANY(relationship_types)`
-queries for filtering the grid by relationship type.
+**Important: RLS on views.** PostgreSQL applies RLS on the underlying table, not the view. So the compatibility views will automatically inherit RLS from `pipeline_companies`. No extra policy needed on views.
 
-### Integration Point: API
-
-Extend `CreateAccountRequest` and `UpdateAccountRequest` in `api/accounts.py` to include
-`relationship_types: list[str] | None`. The `AccountListItem` and `AccountDetail`
-Pydantic models gain `relationship_types: list[str]`.
-
-Extend `GET /accounts/` list endpoint filter to accept `relationship_type: str` query
-parameter (filters for accounts where that type is in the array).
-
-### Integration Point: Frontend
-
-`AccountListItem` type in `features/accounts/types/accounts.ts` gains `relationship_types: string[]`.
-The `AccountsPage` filter bar adds a relationship type multi-select. The `AccountDetailPage`
-header renders relationship type badges alongside the existing status badge.
-
-The `IntelSidebar` component or a new `RelationshipPanel` renders and allows inline
-editing of relationship types via PATCH account.
+**Caveat:** Views cannot have their own RLS policies. If the old code does `SET app.tenant_id` before queries (which it does via `get_tenant_db`), this works transparently.
 
 ---
 
-## Feature 4: Configurable Grid State
+## MCP Tool Updates
 
-### What it needs to do
+The 10+ registered MCP tools and their impact:
 
-Users can show/hide columns, reorder them, resize them, and save named views
-("My Pipeline View", "Customer Accounts"). State persists across sessions per user.
+| Tool | Current behavior | Change needed |
+|------|-----------------|---------------|
+| `context_read` | Reads context_entries by file_name | NO CHANGE -- context_entries unchanged |
+| `context_write` | Writes to context_entries with optional account_id | MINOR -- rename `account_id` param to `company_id`, add alias |
+| `context_query` | Full-text search on context_entries | NO CHANGE |
+| `web_search` | Tavily search | NO CHANGE |
+| `web_fetch` | URL fetch | NO CHANGE |
+| `file_read` | Reads tenant files | NO CHANGE |
+| `file_write` | Writes tenant files | NO CHANGE |
+| `python_execute` | Sandbox execution | NO CHANGE |
+| `browser_*` (5 tools) | Browser automation | NO CHANGE |
 
-### Integration Point: Where to Store State
+**Only `context_write` needs updating** because it accepts an `account_id` parameter. The fix is trivial: rename to `company_id` in the schema, map internally to `pipeline_companies.id`.
 
-Two options exist in this codebase:
-
-**Option A: profiles.settings JSONB** — The `profiles` table already has a `settings JSONB`
-column. Grid state can be stored as a nested key:
-`settings.grid_views.accounts = { columns: [...], saved_views: [...] }`.
-Requires no new table, no new migration, but mixes UI preferences with account settings.
-
-**Option B: New `user_grid_prefs` table** — Clean separation, RLS enforceable, queryable.
-
-Recommendation: Use `profiles.settings` for MVP. The profiles.settings JSONB is already
-used by the app for other preferences (HIGH confidence from models.py inspection). Grid
-state is genuinely a user preference. Add a new table only if the number of saved views
-per user grows large (>20) or if multi-tenant sharing of views becomes a requirement.
-
-Grid state shape stored in `profiles.settings.grid_views`:
-```json
-{
-  "accounts": {
-    "column_visibility": { "fit_score": false, "source": false },
-    "column_order": ["name", "status", "relationship_types", "contact_count", ...],
-    "saved_views": [
-      { "id": "uuid", "name": "Pipeline View", "filters": {...}, "columns": {...} }
-    ],
-    "active_view_id": "uuid | null"
-  }
-}
-```
-
-### Integration Point: API
-
-New endpoints on existing `api/profile.py` router (already exists):
-```
-GET  /profile/grid-prefs/{grid_name}     -- returns grid state for named grid
-PATCH /profile/grid-prefs/{grid_name}    -- saves partial update (column state only,
-                                            or saved views, not full overwrite)
-```
-
-Alternatively, reuse `PATCH /profile` if it already accepts a `settings` field. Check
-existing profile endpoint before adding new ones.
-
-### Integration Point: Frontend Library
-
-The existing `AccountsPage` uses a hand-rolled table (useState + manual column rendering).
-For a configurable grid, use **TanStack Table v8** — it is already the industry standard
-for this pattern, has column visibility + ordering APIs built-in, and integrates cleanly
-with React Query.
-
-Column state management flow:
-```
-TanStack Table instance
-  -> columnVisibility, columnOrder state (initialized from React Query cache)
-  -> onColumnVisibilityChange / onColumnOrderChange callbacks
-  -> debounced PATCH /profile/grid-prefs/accounts (save to DB)
-  -> React Query invalidates 'grid-prefs' query key on success
-```
-
-Do not use localStorage for persistence — the existing architecture uses the DB for all
-persistent state, and localStorage creates cross-device inconsistency. Use localStorage
-only as a write-through cache for instant initialization before the API response.
-
-### Integration Point: Zustand
-
-Add a `useGridPrefsStore` Zustand store that holds column state in-memory. Initialize
-it from the React Query fetch of `/profile/grid-prefs/accounts`. Updates flow:
-`user interaction -> Zustand update (instant) -> debounced DB write`.
+However, **skills that reference accounts/leads by name** in their prompts or context file conventions will need prompt updates. This is a content change, not a code change. Affected services:
+- `engines/meeting_processor_web.py` (writes to account-linked context entries via `auto_link_meeting_to_account`)
+- `engines/company_intel.py` (enriches account intel)
+- Any GTM pipeline skill (creates leads, not pipeline_companies)
 
 ---
 
-## Feature 5: Signal Computation
+## Context Entity Bridging Strategy
 
-### What it needs to do
+### The Overlap Problem
 
-Compute "attention signals" — accounts needing action: reply received, follow-up overdue,
-bump suggested, relationship gone cold. Currently the pulse endpoint computes these
-at read time (on each GET /pulse request).
+`context_entities` (knowledge graph) and `pipeline_companies` (CRM) both represent companies:
+- `context_entities` with `entity_type = 'company'` stores mention-based knowledge graph nodes
+- `pipeline_companies` stores CRM lifecycle data
 
-### Existing Foundation
+These MUST be linked, not merged, because:
+1. Context entities also include people, products, technologies -- not just companies.
+2. A context entity is mention-driven (auto-created from meeting transcripts), while a pipeline company is intentionally tracked.
+3. The knowledge graph has relationships (entity_a <--> entity_b), which CRM companies don't.
 
-`GET /pulse/` in `api/timeline.py` already exists and computes signals in Python at
-request time by querying outreach_activities for overdue actions and recent replies.
-This is the "real-time computation" pattern.
+### Bridging Approach
 
-### Recommendation: Keep Real-Time Computation for MVP
-
-The current approach (compute on request) is correct for <500 accounts per tenant.
-The computation is simple SQL — a few index scans — and completes in <50ms. Background
-pre-computation adds operational complexity (worker scheduling, cache invalidation)
-without meaningful benefit at this scale.
-
-Pre-computation becomes worthwhile when:
-- Tenant has >1,000 accounts and pulse load is >10 requests/minute
-- Signals require expensive LLM calls (they currently don't)
-- Push notifications are needed (which require background computation anyway)
-
-If push notifications are added (a separate feature), introduce a `pulse_signals` table
-that caches computed signals. The job_queue worker (already running) can populate it.
-The GET /pulse endpoint then reads from the cache table instead of computing live.
-
-### Signal Computation Logic (current, verified from codebase)
-
-```
-followup_overdue:  accounts WHERE next_action_due < now() AND status = 'prospect'
-reply_received:    outreach WHERE status = 'replied' AND created_at > now() - 7d
-                   AND account.status = 'prospect'
-bump_suggested:    outreach WHERE status = 'sent' AND sent_at < now() - 5d
-                   AND no subsequent outreach for same account
-```
-
-These run as SQL queries in the pulse endpoint handler. No new infrastructure needed.
-
----
-
-## Feature 6: File Attachments to Relationships
-
-### What it needs to do
-
-Link uploaded files (already in `uploaded_files` table + Supabase Storage) to specific
-accounts. Currently files are tenant-scoped with no account link.
-
-### Integration Point: Schema Addition
-
-Add `account_id` nullable FK to `uploaded_files`:
+Add a `context_entity_id` FK to `pipeline_companies`:
 
 ```sql
-ALTER TABLE uploaded_files
-ADD COLUMN account_id uuid REFERENCES accounts(id) ON DELETE SET NULL;
-
-CREATE INDEX idx_files_account ON uploaded_files (account_id)
-    WHERE account_id IS NOT NULL;
+ALTER TABLE pipeline_companies
+    ADD COLUMN context_entity_id UUID REFERENCES context_entities(id) ON DELETE SET NULL;
+CREATE INDEX idx_pipeline_co_entity ON pipeline_companies (context_entity_id)
+    WHERE context_entity_id IS NOT NULL;
 ```
 
-### Integration Point: API
+**Auto-linking logic** (in `pipeline_service.py`):
+```python
+async def link_company_to_entity(company_id, session):
+    """Find or create a context_entity for this pipeline company."""
+    company = await session.get(PipelineCompany, company_id)
+    entity = await session.execute(
+        select(ContextEntity).where(
+            ContextEntity.tenant_id == company.tenant_id,
+            ContextEntity.entity_type == 'company',
+            func.lower(ContextEntity.name) == company.normalized_name,
+        )
+    )
+    # Link if found, create if not
+```
 
-Extend `POST /files/upload` to accept optional `account_id` query parameter or form
-field. Extend `GET /files/` to accept `account_id` filter. Add to `AccountDetail`
-response a `files: list[FileMetadata]` field populated by querying `uploaded_files
-WHERE account_id = ?`.
+This preserves the graph's independence while enabling rich queries like:
+- "Show me the knowledge graph around Acme Corp" (traverse from pipeline_company.context_entity_id)
+- "Which pipeline companies are connected to this person?" (join through context_relationships)
 
-### Integration Point: Frontend
+### Migration of Existing Links
 
-New `FilesPanel` component in account detail page. Renders a file list with upload
-button. Reuses the existing file upload flow (already implemented in the frontend for
-the context store) with an additional `account_id` parameter passed on upload.
+`context_entries.account_id` already links context to accounts. Since we preserve account UUIDs in `pipeline_companies`, this FK just needs its constraint retargeted:
+
+```sql
+ALTER TABLE context_entries DROP CONSTRAINT context_entries_account_id_fkey;
+ALTER TABLE context_entries ADD CONSTRAINT context_entries_company_id_fkey
+    FOREIGN KEY (account_id) REFERENCES pipeline_companies(id) ON DELETE SET NULL;
+-- Optionally rename the column later during API migration:
+ALTER TABLE context_entries RENAME COLUMN account_id TO company_id;
+```
 
 ---
 
-## Component Boundaries: New vs Modified
+## Meeting and Task FK Migration
 
-### New Components (Backend)
+### Strategy: Preserve UUIDs, Retarget Constraints
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| SynthesisEngine | `services/synthesis_engine.py` | generate/cache/invalidate account summaries |
-| AccountQA endpoint | `api/accounts.py` or `api/account_qa.py` | RAG Q&A for account context |
-| Synthesis migration | `alembic/versions/028_account_syntheses.py` | account_syntheses table |
-| RelTypes migration | `alembic/versions/029_account_rel_types.py` | relationship_types column |
-| FileAccount migration | `alembic/versions/030_file_account_fk.py` | account_id on uploaded_files |
-| Grid prefs endpoints | `api/profile.py` (extend) | GET/PATCH grid state |
+Since `pipeline_companies` will contain all former `accounts` rows with the **same UUIDs**, the FK migration is a constraint swap, not a data migration.
 
-### New Components (Frontend)
+**For `meetings.account_id`:**
+```sql
+ALTER TABLE meetings DROP CONSTRAINT meetings_account_id_fkey;
+ALTER TABLE meetings ADD CONSTRAINT meetings_company_id_fkey
+    FOREIGN KEY (account_id) REFERENCES pipeline_companies(id) ON DELETE SET NULL;
+-- Rename column later during API migration phase:
+ALTER TABLE meetings RENAME COLUMN account_id TO company_id;
+```
 
-| Component | File | Purpose |
-|-----------|------|---------|
-| SynthesisPanel | `features/accounts/components/SynthesisPanel.tsx` | display AI summary |
-| AskPanel | `features/accounts/components/AskPanel.tsx` | Q&A chat interface |
-| FilesPanel | `features/accounts/components/FilesPanel.tsx` | file list + upload |
-| useGridPrefs | `features/accounts/hooks/useGridPrefs.ts` | React Query for grid state |
-| useGridPrefsStore | `stores/gridPrefs.ts` | Zustand for in-memory column state |
-| GridView | `features/accounts/components/GridView.tsx` | TanStack Table wrapper |
+**For `tasks.account_id`:**
+```sql
+ALTER TABLE tasks DROP CONSTRAINT tasks_account_id_fkey;
+ALTER TABLE tasks ADD CONSTRAINT tasks_company_id_fkey
+    FOREIGN KEY (account_id) REFERENCES pipeline_companies(id) ON DELETE SET NULL;
+ALTER TABLE tasks RENAME COLUMN account_id TO company_id;
+```
 
-### Modified Components (Backend)
+**Column rename consideration:** Renaming `account_id` to `company_id` across meetings, tasks, and context_entries improves clarity but requires updating every ORM model and API that references these columns. Do this in Phase 3 (API migration) when those files are already being rewritten.
 
-| Component | Change | Risk |
-|-----------|--------|------|
-| `storage.py:append_entry()` | Call `invalidate_synthesis()` if account_id set | Low — additive |
-| `api/outreach.py` | Call `invalidate_synthesis()` after status write | Low — additive |
-| `api/accounts.py` | Add `synthesis`, `files`, `relationship_types` to AccountDetail | Low — additive |
-| `api/files.py` | Accept `account_id` on upload, filter by it | Low — additive |
-| `db/models.py:Account` | Add `relationship_types: ARRAY(Text)` mapped column | Low — additive |
-| `db/models.py:UploadedFile` | Add `account_id` FK mapped column | Low — additive |
+### Meetings API Impact
 
-### Modified Components (Frontend)
+`api/meetings.py` imports `Account` and `Meeting`. Changes needed:
+1. Replace `Account` import with `PipelineCompany`
+2. Update `auto_link_meeting_to_account` function to `auto_link_meeting_to_company`
+3. Update response serialization to use company name/domain
 
-| Component | Change | Risk |
-|-----------|--------|------|
-| `AccountDetailPage.tsx` | Add SynthesisPanel, AskPanel, FilesPanel to layout | Low |
-| `AccountsPage.tsx` | Replace hand-rolled table with TanStack Table GridView | Medium — rewrite |
-| `types/accounts.ts` | Add synthesis, files, relationship_types to AccountDetail | Low |
-| `features/accounts/api.ts` | Add askAccount(), getGridPrefs(), saveGridPrefs() | Low |
+### Tasks API Impact
+
+`api/tasks.py` imports `Task` only. The `Task` model has `account_id` FK. Changes:
+1. Update `Task` model to reference `pipeline_companies`
+2. Update any response that includes account info
 
 ---
 
-## Data Flow Changes
+## Anti-Patterns to Avoid
 
-### Synthesis Write Path
+### Anti-Pattern 1: Big-Bang Table Swap
+**What:** Drop old tables and create new ones in a single migration.
+**Why bad:** On Supabase PgBouncer, multi-DDL transactions silently roll back. A 20-statement migration will appear to succeed but actually do nothing. Also blocks the founder from using the app during migration.
+**Instead:** Additive-only migrations. Create new tables, migrate data, swap FKs, then drop old tables in separate migrations.
 
-```
-Before (v2.0):
-  POST /context/entries  ->  storage.append_entry()  ->  context_entries row
+### Anti-Pattern 2: In-Place Column Renames on Live Tables
+**What:** `ALTER TABLE accounts RENAME TO pipeline_companies` while the app is running.
+**Why bad:** Every running query against `accounts` immediately breaks. ORM models become invalid.
+**Instead:** Create new table, copy data, create view with old name, migrate consumers, drop view.
 
-After (new):
-  POST /context/entries  ->  storage.append_entry()
-                          ->  if account_id: invalidate_synthesis(account_id)
-                          ->  context_entries row
-```
+### Anti-Pattern 3: Shared Mutable Service Layer Too Early
+**What:** Creating `pipeline_service.py` before the new tables exist, trying to abstract over both old and new.
+**Why bad:** The service layer becomes a translation mess. Two different data shapes, two different stage models, conditional logic everywhere.
+**Instead:** Create new tables first. Then write `pipeline_service.py` that ONLY talks to new tables. Old endpoints call the service and reshape output.
 
-### Account Detail Read Path
+### Anti-Pattern 4: Migrating Frontend and Backend Simultaneously
+**What:** Updating AG Grid column definitions while the API response shape is still changing.
+**Why bad:** Frontend and backend changes compound. A bug could be in either layer. Debugging is painful.
+**Instead:** Backend first (new API namespace), verify with curl/httpie, then frontend.
 
-```
-Before (v2.0):
-  GET /accounts/{id}  ->  SELECT account + contacts + timeline  ->  AccountDetail response
+### Anti-Pattern 5: Deleting Old Endpoints Before Frontend Migrates
+**What:** Removing `/leads/` and `/accounts/` endpoints before all frontend code is updated.
+**Why bad:** Hard-to-catch 404s in production. Features silently break.
+**Instead:** Keep old endpoints as deprecated wrappers. Add `X-Deprecated: true` header. Remove only after frontend is fully migrated and tested.
 
-After (new):
-  GET /accounts/{id}  ->  SELECT account + contacts + timeline
-                      ->  get_or_generate_synthesis(account_id)   [+0-2s on miss]
-                      ->  SELECT uploaded_files WHERE account_id
-                      ->  Extended AccountDetail response
-```
+---
 
-### Grid Initialization Path
+## Scalability Considerations
 
-```
-Mount AccountsPage
-  ->  React Query: GET /profile/grid-prefs/accounts
-  ->  Initialize useGridPrefsStore with DB state
-  ->  TanStack Table reads column state from store
-  ->  Render grid with persisted configuration
-```
+| Concern | Current (100s of records) | At 10K companies | At 100K companies |
+|---------|---------------------------|-------------------|---------------------|
+| Pipeline grid load | Fine with full table scan | Need cursor pagination + server-side sort | Need virtual scrolling + search index |
+| Stage transition | Single UPDATE | Fine | Fine (single row) |
+| Funnel counts | COUNT(*) GROUP BY | Add materialized view | Materialized view + background refresh |
+| Company detail | 3-4 JOINs | Fine with indexes | Fine with indexes |
+| Data migration | Minutes | 10-15 minutes | Background job with progress |
+
+At current scale (100s of records), none of these are concerns. The architecture supports growth without redesign.
 
 ---
 
 ## Suggested Build Order
 
-Build order is driven by three rules:
-1. Data model first — schema migrations before any service or API code
-2. Backend before frontend — stable API contracts before UI components
-3. Independent features before integrated features — synthesis before Q&A (synthesis
-   provides the summary panel that makes Q&A contextually richer)
+Based on dependency analysis:
 
 ```
-Phase A: Schema + Model Additions (1 migration per concern)
-  028_account_syntheses.py    -- new table
-  029_account_rel_types.py    -- ADD COLUMN to accounts
-  030_file_account_fk.py      -- ADD COLUMN to uploaded_files
-  db/models.py                -- add mapped columns for all three
-
-Phase B: AI Synthesis Engine
-  services/synthesis_engine.py    -- generate + cache + invalidate
-  storage.py                      -- hook invalidation into append_entry
-  api/outreach.py                 -- hook invalidation into outreach writes
-  api/accounts.py                 -- add synthesis to AccountDetail response
-  SynthesisPanel.tsx              -- read-only display in account detail
-
-Phase C: Multi-Type Relationships
-  api/accounts.py                 -- relationship_types in create/update/list
-  AccountsPage.tsx                -- add relationship type filter
-  AccountDetailPage.tsx           -- show badges + inline edit
-
-Phase D: Configurable Grid
-  api/profile.py                  -- GET/PATCH grid prefs endpoints
-  stores/gridPrefs.ts             -- Zustand store
-  GridView.tsx                    -- TanStack Table wrapper
-  AccountsPage.tsx                -- replace hand-rolled table with GridView
-
-Phase E: File Attachments
-  api/files.py                    -- account_id on upload + filter
-  api/accounts.py                 -- files in AccountDetail response
-  FilesPanel.tsx                  -- file list + upload in account detail
-
-Phase F: AI Q&A Panel
-  api/accounts.py (or account_qa.py)  -- POST /accounts/{id}/ask
-  AskPanel.tsx                        -- conversational UI in account detail
+1. pipeline_companies + pipeline_contacts + pipeline_activities tables (no deps)
+   |
+2. Data migration script (depends on new tables)
+   |
+3. pipeline_service.py business logic (depends on new tables + data)
+   |
+4. Retarget meetings.account_id + tasks.account_id FKs (depends on data migration)
+   |
+5. New /pipeline/ API endpoints (depends on service layer)
+   |
+6. Deprecated wrappers for old endpoints (depends on new API)
+   |
+7. Frontend pipeline rebuild (depends on new API being stable)
+   |
+8. Frontend meetings/tasks updates (depends on FK retargeting)
+   |
+9. Cleanup: drop old tables, remove wrappers (depends on all consumers migrated)
 ```
 
-Phases B and C have no dependency on each other and can be built in parallel.
-Phase D (configurable grid) depends on Phase C completing relationship_types schema
-so the grid has all columns available to configure.
-Phase F (Q&A) should come last — it reuses synthesis infrastructure from Phase B
-and benefits from having richer account data from C and E already indexed.
-
----
-
-## Scalability Notes
-
-| Concern | Current approach | Threshold to revisit |
-|---------|-----------------|---------------------|
-| Synthesis generation latency | Synchronous on GET /accounts/{id}, Haiku ~1.5s | >200 accounts loaded in list view (then pre-warm on list load) |
-| Signal computation | Real-time SQL on GET /pulse | >1,000 accounts per tenant, >10 req/min |
-| Grid state storage | profiles.settings JSONB | >20 saved views per user or view sharing needed |
-| Q&A retrieval | PostgreSQL full-text search | >500 context entries per account or multilingual content |
-| File-to-account linking | FK on uploaded_files | No scale concern at CRM scale |
+Steps 1-3 can be one phase. Steps 4-6 can be one phase. Steps 7-8 can be one phase. Step 9 is a separate phase.
 
 ---
 
 ## Sources
 
-- Codebase inspection: `/backend/src/flywheel/db/models.py` (direct read)
-- Codebase inspection: `/backend/src/flywheel/storage.py` (direct read)
-- Codebase inspection: `/backend/src/flywheel/services/skill_executor.py` (direct read)
-- Codebase inspection: `/backend/src/flywheel/api/accounts.py`, `outreach.py`, `timeline.py` (direct read)
-- Codebase inspection: `/backend/alembic/versions/027_crm_tables.py` (direct read)
-- Codebase inspection: `/frontend/src/features/accounts/` (direct read)
-- [TanStack Table Column Visibility API](https://tanstack.com/table/v8/docs/api/features/column-visibility) — HIGH confidence
-- [TanStack Table State Guide](https://tanstack.com/table/v8/docs/framework/react/guide/table-state) — HIGH confidence
-- [pgvector PostgreSQL vector search](https://calmops.com/database/postgresql-vector-search-pgvector-2026/) — MEDIUM confidence (for if/when embeddings needed)
-- [LLM caching strategies 2026](https://dasroot.net/posts/2026/02/caching-strategies-for-llm-responses/) — MEDIUM confidence (informed synthesis cache TTL decision)
+- Direct codebase analysis of `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/db/models.py` (all ORM models)
+- Direct analysis of all API files in `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/api/`
+- Direct analysis of MCP tools in `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/tools/`
+- Direct analysis of frontend feature directories
+- RLS pattern from `/Users/sharan/Projects/flywheel-v2/backend/alembic/versions/040_create_leads_tables.py`
+- Supabase PgBouncer constraint from project memory (CLAUDE.md)
+- PostgreSQL documentation: RLS on views inherits from base tables (HIGH confidence, well-documented behavior)

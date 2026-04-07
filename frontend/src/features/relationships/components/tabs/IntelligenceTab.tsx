@@ -1,10 +1,14 @@
 import { useState } from 'react'
-import { Brain, Edit2 } from 'lucide-react'
+import { Brain, Edit2, Check, X } from 'lucide-react'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { EmptyState } from '@/components/ui/empty-state'
+import { Textarea } from '@/components/ui/textarea'
+import { updateAccount, queryKeys } from '../../api'
 
 interface IntelligenceTabProps {
+  accountId: string
   intel: Record<string, unknown>
 }
 
@@ -39,13 +43,73 @@ function lookupValue(intel: Record<string, unknown>, keys: string[]): string | n
   return null
 }
 
-function IntelCard({ field, intel }: { field: IntelField; intel: Record<string, unknown> }) {
+function IntelCard({ accountId, field, intel }: { accountId: string; field: IntelField; intel: Record<string, unknown> }) {
   const [hovered, setHovered] = useState(false)
+  const [editing, setEditing] = useState(false)
   const value = lookupValue(intel, field.keys)
+  const [editValue, setEditValue] = useState(value ?? '')
+  const queryClient = useQueryClient()
 
-  function handleEdit(e: React.MouseEvent) {
+  const mutation = useMutation({
+    mutationFn: () => {
+      // Use the first key as the canonical key
+      const key = field.keys[0]
+      const updated = { ...intel, [key]: editValue.trim() || undefined }
+      // Remove empty values
+      for (const k of field.keys.slice(1)) {
+        delete updated[k]
+      }
+      return updateAccount(accountId, { intel: updated })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.relationships.detail(accountId) })
+      toast.success(`${field.label} updated`)
+      setEditing(false)
+    },
+    onError: () => toast.error(`Failed to update ${field.label}`),
+  })
+
+  function startEdit(e: React.MouseEvent) {
     e.stopPropagation()
-    toast.info('Intelligence editing coming soon')
+    setEditValue(value ?? '')
+    setEditing(true)
+  }
+
+  if (editing) {
+    return (
+      <BrandedCard variant="info" hoverable={false}>
+        <span
+          className="text-xs font-semibold uppercase tracking-wider mb-1.5 block"
+          style={{ color: 'var(--secondary-text)' }}
+        >
+          {field.label}
+        </span>
+        <Textarea
+          value={editValue}
+          onChange={(e) => setEditValue(e.target.value)}
+          rows={3}
+          className="text-sm mb-2"
+          autoFocus
+        />
+        <div className="flex justify-end gap-1">
+          <button
+            onClick={() => setEditing(false)}
+            className="p-1 rounded hover:bg-muted"
+            style={{ color: 'var(--secondary-text)' }}
+          >
+            <X className="size-4" />
+          </button>
+          <button
+            onClick={() => mutation.mutate()}
+            disabled={mutation.isPending}
+            className="p-1 rounded hover:bg-muted"
+            style={{ color: 'var(--brand-coral)' }}
+          >
+            <Check className="size-4" />
+          </button>
+        </div>
+      </BrandedCard>
+    )
   }
 
   return (
@@ -67,7 +131,7 @@ function IntelCard({ field, intel }: { field: IntelField; intel: Record<string, 
         </span>
         {hovered && (
           <button
-            onClick={handleEdit}
+            onClick={startEdit}
             className="p-0.5 rounded transition-opacity hover:opacity-70"
             style={{ color: 'var(--secondary-text)' }}
             aria-label={`Edit ${field.label}`}
@@ -77,38 +141,27 @@ function IntelCard({ field, intel }: { field: IntelField; intel: Record<string, 
         )}
       </div>
       {value ? (
-        <p className="text-sm" style={{ color: 'var(--body-text)' }}>
+        <p className="text-sm cursor-pointer" style={{ color: 'var(--body-text)' }} onClick={startEdit}>
           {value}
         </p>
       ) : (
         <p
-          className="text-sm italic"
+          className="text-sm italic cursor-pointer"
           style={{ color: 'var(--secondary-text)' }}
+          onClick={startEdit}
         >
-          Not yet captured
+          Not yet captured — click to add
         </p>
       )}
     </BrandedCard>
   )
 }
 
-export function IntelligenceTab({ intel }: IntelligenceTabProps) {
-  const hasAnyData = INTEL_FIELDS.some((f) => lookupValue(intel, f.keys) !== null)
-
-  if (!hasAnyData) {
-    return (
-      <EmptyState
-        icon={Brain}
-        title="No intelligence gathered yet"
-        description="Add notes to build this profile. Pain points, budget, competition, and fit reasoning will appear here."
-      />
-    )
-  }
-
+export function IntelligenceTab({ accountId, intel }: IntelligenceTabProps) {
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
       {INTEL_FIELDS.map((field) => (
-        <IntelCard key={field.label} field={field} intel={intel} />
+        <IntelCard key={field.label} accountId={accountId} field={field} intel={intel} />
       ))}
     </div>
   )

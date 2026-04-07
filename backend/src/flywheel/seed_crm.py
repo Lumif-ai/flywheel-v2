@@ -33,6 +33,49 @@ logger = logging.getLogger("flywheel.seed_crm")
 
 
 # ---------------------------------------------------------------------------
+# Fit-tier normalization — canonical set: Strong Fit, Good Fit, Moderate Fit,
+# Weak Fit, No Fit, Disqualified.  Handles agent outputs like "Tier 1",
+# "Excellent", "Strong", "Strong Fit", case-insensitively.
+# ---------------------------------------------------------------------------
+
+_TIER_MAP: dict[str, str] = {
+    # Tier-based outputs
+    "tier 1": "Strong Fit",
+    "tier 2": "Good Fit",
+    "tier 3": "Moderate Fit",
+    "tier 4": "Weak Fit",
+    "tier 5": "No Fit",
+    # Short-form agent outputs
+    "excellent": "Strong Fit",
+    "strong": "Strong Fit",
+    "good": "Good Fit",
+    "moderate": "Moderate Fit",
+    "fair": "Moderate Fit",
+    "weak": "Weak Fit",
+    "low": "Weak Fit",
+    "poor": "No Fit",
+    "no fit": "No Fit",
+    "none": "No Fit",
+    "disqualified": "Disqualified",
+    # Already canonical (with " Fit" suffix)
+    "strong fit": "Strong Fit",
+    "good fit": "Good Fit",
+    "moderate fit": "Moderate Fit",
+    "weak fit": "Weak Fit",
+    "low fit": "Weak Fit",
+    "no fit": "No Fit",
+}
+
+
+def normalize_fit_tier(raw: str | None) -> str | None:
+    """Normalize a fit-tier string to the canonical set."""
+    if not raw:
+        return None
+    key = raw.strip().lower()
+    return _TIER_MAP.get(key, raw.strip())  # pass-through unknown values as-is
+
+
+# ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
 
@@ -49,6 +92,9 @@ class AccountData:
     description: str | None = None
     fit_reasoning: str | None = None
     sources: list[str] = field(default_factory=list)
+
+    def __post_init__(self) -> None:
+        self.fit_tier = normalize_fit_tier(self.fit_tier)
 
 
 @dataclass
@@ -148,9 +194,10 @@ def _merge_account(existing: AccountData, new_name: str, new_source: str,
         if existing.fit_score is None or fit_score > existing.fit_score:
             existing.fit_score = fit_score
 
-    # Keep fit_tier from highest-scoring source
-    if fit_tier and existing.fit_tier is None:
-        existing.fit_tier = fit_tier
+    # Keep fit_tier from highest-scoring source (normalized)
+    normalized_tier = normalize_fit_tier(fit_tier)
+    if normalized_tier and existing.fit_tier is None:
+        existing.fit_tier = normalized_tier
 
     # Keep first non-null domain
     if domain and not existing.domain:
@@ -593,6 +640,8 @@ async def upsert_accounts(
             intel=intel,
             source=source_str,
             status="prospect",
+            relationship_status="active",
+            pipeline_stage="prospect",
         )
 
         # ON CONFLICT: merge — keep higher fit_score, merge intel, keep first domain/name

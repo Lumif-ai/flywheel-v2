@@ -1,9 +1,9 @@
-"""Accounts and Contacts REST API — API-01 and API-02.
+"""Accounts and Contacts REST API — Legacy endpoints backed by unified pipeline_entries.
 
-8 endpoints:
+8 endpoints (response shapes preserved from pre-migration):
 - GET    /accounts/                          -- paginated, filterable, searchable, sortable list
 - GET    /accounts/{account_id}             -- full detail with contacts + timeline preview
-- POST   /accounts/                          -- create account with normalized_name dedup
+- POST   /accounts/                          -- create account (PipelineEntry)
 - PATCH  /accounts/{account_id}             -- update account fields
 - GET    /accounts/{account_id}/contacts    -- list contacts for an account
 - POST   /accounts/{account_id}/contacts    -- create a contact under an account
@@ -24,14 +24,27 @@ from sqlalchemy.orm import selectinload
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Account, AccountContact, ContextEntry, OutreachActivity
+from flywheel.db.models import Activity, Contact, ContextEntry, PipelineEntry
 from flywheel.utils.normalize import normalize_company_name
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
 
+# ---------------------------------------------------------------------------
+# Stage mapping: unified stages -> old account status
+# ---------------------------------------------------------------------------
+
+_STAGE_TO_STATUS = {
+    "identified": "prospect",
+    "contacted": "engaged",
+    "engaged": "engaged",
+    "qualified": "engaged",
+    "committed": "engaged",
+    "closed": "engaged",
+}
+
 
 # ---------------------------------------------------------------------------
-# Request / Response models
+# Request / Response models (unchanged contracts)
 # ---------------------------------------------------------------------------
 
 
@@ -69,6 +82,7 @@ class UpdateAccountRequest(BaseModel):
     name: str | None = None
     domain: str | None = None
     status: str | None = None
+    relationship_status: str | None = None
     fit_score: float | None = None
     fit_tier: str | None = None
     intel: dict | None = None
@@ -95,7 +109,7 @@ class CreateContactRequest(BaseModel):
     role_in_deal: str | None = None
     linkedin_url: str | None = None
     notes: str | None = None
-    source: str
+    source: str = "manual"
 
 
 class UpdateContactRequest(BaseModel):
@@ -108,55 +122,59 @@ class UpdateContactRequest(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Serialization helpers
+# Serialization helpers — map PipelineEntry/Contact to old response shapes
 # ---------------------------------------------------------------------------
 
 
-def _account_to_list_item(a: Account, contact_count: int) -> dict:
-    """Serialize an Account ORM object to AccountListItem dict shape."""
+def _pipeline_to_account_list_item(entry: PipelineEntry, contact_count: int) -> dict:
+    """Serialize a PipelineEntry to AccountListItem dict shape."""
     return {
-        "id": str(a.id),
-        "name": a.name,
-        "domain": a.domain,
-        "status": a.status,
-        "fit_score": float(a.fit_score) if a.fit_score is not None else None,
-        "fit_tier": a.fit_tier,
+        "id": str(entry.id),
+        "name": entry.name,
+        "domain": entry.domain,
+        "status": _STAGE_TO_STATUS.get(entry.stage, "prospect"),
+        "fit_score": float(entry.fit_score) if entry.fit_score is not None else None,
+        "fit_tier": entry.fit_tier,
         "contact_count": contact_count,
-        "last_interaction_at": a.last_interaction_at.isoformat() if a.last_interaction_at else None,
-        "next_action_due": a.next_action_due.isoformat() if a.next_action_due else None,
-        "next_action_type": a.next_action_type,
-        "source": a.source,
-        "relationship_type": a.relationship_type,
-        "entity_level": a.entity_level,
-        "relationship_status": a.relationship_status,
-        "pipeline_stage": a.pipeline_stage,
+        "last_interaction_at": entry.last_activity_at.isoformat() if entry.last_activity_at else None,
+        "next_action_due": None,  # dropped field
+        "next_action_type": None,  # dropped field
+        "source": entry.source,
+        "relationship_type": entry.relationship_type,
+        "entity_level": entry.entity_type,
+        "relationship_status": (entry.relationship_type[0] if entry.relationship_type else None),
+        "pipeline_stage": entry.stage,
+        "visibility": "team",  # hardcoded, field dropped
+        "owner_id": str(entry.owner_id) if entry.owner_id else None,
     }
 
 
-def _account_to_detail(a: Account, contacts: list, timeline: list) -> dict:
-    """Serialize an Account ORM object to AccountDetail dict shape."""
-    base = _account_to_list_item(a, len(contacts))
+def _pipeline_to_account_detail(
+    entry: PipelineEntry, contacts: list, timeline: list
+) -> dict:
+    """Serialize a PipelineEntry to AccountDetail dict shape."""
+    base = _pipeline_to_account_list_item(entry, len(contacts))
     return {
         **base,
-        "intel": a.intel or {},
+        "intel": entry.intel or {},
         "contacts": contacts,
         "recent_timeline": timeline,
-        "ai_summary": a.ai_summary,
-        "ai_summary_updated_at": a.ai_summary_updated_at.isoformat() if a.ai_summary_updated_at else None,
+        "ai_summary": entry.ai_summary,
+        "ai_summary_updated_at": None,  # field not on PipelineEntry
     }
 
 
-def _contact_to_dict(c: AccountContact) -> dict:
-    """Serialize an AccountContact ORM object to ContactResponse dict shape."""
+def _contact_to_account_contact(c: Contact) -> dict:
+    """Serialize a Contact to the old AccountContact response shape."""
     return {
         "id": str(c.id),
         "name": c.name,
         "email": c.email,
         "title": c.title,
-        "role_in_deal": c.role_in_deal,
+        "role_in_deal": c.role,  # Contact.role maps to old role_in_deal
         "linkedin_url": c.linkedin_url,
         "notes": c.notes,
-        "source": c.source,
+        "source": "manual",  # Contact has no source field; default
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -178,11 +196,11 @@ def _paginated_response(items: list, total: int, offset: int, limit: int) -> dic
 
 
 _SORT_COLUMNS = {
-    "name": Account.name,
-    "fit_score": Account.fit_score,
-    "last_interaction_at": Account.last_interaction_at,
-    "next_action_due": Account.next_action_due,
-    "created_at": Account.created_at,
+    "name": PipelineEntry.name,
+    "fit_score": PipelineEntry.fit_score,
+    "last_interaction_at": PipelineEntry.last_activity_at,
+    "next_action_due": PipelineEntry.created_at,  # fallback (field dropped)
+    "created_at": PipelineEntry.created_at,
 }
 
 
@@ -201,19 +219,27 @@ async def list_accounts(
     limit = min(limit, 100)
 
     # Validate sort_by
-    sort_col = _SORT_COLUMNS.get(sort_by, Account.created_at)
+    sort_col = _SORT_COLUMNS.get(sort_by, PipelineEntry.created_at)
     order_expr = sort_col.desc() if sort_dir.lower() != "asc" else sort_col.asc()
 
-    # Base query
-    base = select(Account)
+    # Base query — exclude retired entries
+    base = select(PipelineEntry).where(PipelineEntry.retired_at.is_(None))
 
+    # Map old status filter to stage
     if status is not None:
-        base = base.where(Account.status == status)
+        # Reverse map: prospect -> identified, engaged -> contacted/engaged/qualified/committed/closed
+        if status == "prospect":
+            base = base.where(PipelineEntry.stage == "identified")
+        elif status == "engaged":
+            base = base.where(PipelineEntry.stage.in_(["contacted", "engaged", "qualified", "committed", "closed"]))
+        else:
+            # Try direct stage match as fallback
+            base = base.where(PipelineEntry.stage == status)
 
     if search is not None:
         pattern = f"%{search}%"
         base = base.where(
-            Account.name.ilike(pattern) | Account.domain.ilike(pattern)
+            PipelineEntry.name.ilike(pattern) | PipelineEntry.domain.ilike(pattern)
         )
 
     # Count total matching rows
@@ -224,30 +250,37 @@ async def list_accounts(
     # Fetch page with contact counts via correlated subquery
     contact_count_subq = (
         select(func.count())
-        .where(AccountContact.account_id == Account.id)
-        .correlate(Account)
+        .where(Contact.pipeline_entry_id == PipelineEntry.id)
+        .correlate(PipelineEntry)
         .scalar_subquery()
     )
 
     data_stmt = (
-        select(Account, contact_count_subq.label("contact_count"))
+        select(PipelineEntry, contact_count_subq.label("contact_count"))
+        .where(PipelineEntry.retired_at.is_(None))
         .order_by(order_expr)
         .offset(offset)
         .limit(limit)
     )
 
+    # Re-apply filters to data query
     if status is not None:
-        data_stmt = data_stmt.where(Account.status == status)
+        if status == "prospect":
+            data_stmt = data_stmt.where(PipelineEntry.stage == "identified")
+        elif status == "engaged":
+            data_stmt = data_stmt.where(PipelineEntry.stage.in_(["contacted", "engaged", "qualified", "committed", "closed"]))
+        else:
+            data_stmt = data_stmt.where(PipelineEntry.stage == status)
     if search is not None:
         pattern = f"%{search}%"
         data_stmt = data_stmt.where(
-            Account.name.ilike(pattern) | Account.domain.ilike(pattern)
+            PipelineEntry.name.ilike(pattern) | PipelineEntry.domain.ilike(pattern)
         )
 
     result = await db.execute(data_stmt)
     rows = result.all()
 
-    items = [_account_to_list_item(row[0], row[1] or 0) for row in rows]
+    items = [_pipeline_to_account_list_item(row[0], row[1] or 0) for row in rows]
 
     return _paginated_response(items, total, offset, limit)
 
@@ -265,57 +298,57 @@ async def get_account(
 ):
     """Full account detail with contacts and recent timeline entries."""
     result = await db.execute(
-        select(Account)
-        .where(Account.id == account_id)
-        .options(selectinload(Account.contacts))
+        select(PipelineEntry)
+        .where(PipelineEntry.id == account_id)
+        .options(selectinload(PipelineEntry.contacts))
     )
-    account = result.scalar_one_or_none()
+    entry = result.scalar_one_or_none()
 
-    if account is None:
+    if entry is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    contacts = [_contact_to_dict(c) for c in account.contacts]
+    contacts = [_contact_to_account_contact(c) for c in entry.contacts]
 
-    # Build timeline: 3 separate queries, merge+sort in Python
+    # Build timeline: Activities + ContextEntries, merge+sort in Python
     timeline_entries: list[dict] = []
 
-    # 1. Outreach activities
-    outreach_result = await db.execute(
-        select(OutreachActivity)
-        .where(OutreachActivity.account_id == account_id)
-        .order_by(OutreachActivity.sent_at.desc().nulls_last(), OutreachActivity.created_at.desc())
+    # 1. Activities (replaces OutreachActivity)
+    activity_result = await db.execute(
+        select(Activity)
+        .where(Activity.pipeline_entry_id == account_id)
+        .order_by(Activity.occurred_at.desc(), Activity.created_at.desc())
         .limit(10)
     )
-    for act in outreach_result.scalars().all():
-        entry_date = act.sent_at or act.created_at
+    for act in activity_result.scalars().all():
+        entry_date = act.occurred_at or act.created_at
         timeline_entries.append({
             "id": str(act.id),
-            "type": "outreach",
-            "title": act.subject or f"{act.channel} {act.direction}",
+            "type": "outreach" if act.type == "message" else act.type,
+            "title": act.subject or f"{act.channel or act.type} {act.direction or ''}".strip(),
             "date": entry_date.isoformat() if entry_date else None,
             "summary": act.body_preview,
             "channel": act.channel,
             "direction": act.direction,
         })
 
-    # 2. Context entries linked to this account
+    # 2. Context entries linked to this pipeline entry
     context_result = await db.execute(
         select(ContextEntry)
         .where(
-            ContextEntry.account_id == account_id,
+            ContextEntry.pipeline_entry_id == account_id,
             ContextEntry.deleted_at.is_(None),
         )
         .order_by(ContextEntry.created_at.desc())
         .limit(10)
     )
-    for entry in context_result.scalars().all():
+    for ce in context_result.scalars().all():
         timeline_entries.append({
-            "id": str(entry.id),
+            "id": str(ce.id),
             "type": "context",
-            "title": entry.detail or entry.file_name,
-            "date": entry.created_at.isoformat() if entry.created_at else None,
-            "summary": entry.content[:200] if entry.content else None,
-            "file_name": entry.file_name,
+            "title": ce.detail or ce.file_name,
+            "date": ce.created_at.isoformat() if ce.created_at else None,
+            "summary": ce.content[:200] if ce.content else None,
+            "file_name": ce.file_name,
         })
 
     # Sort merged timeline by date descending, take top 10
@@ -328,7 +361,7 @@ async def get_account(
     timeline_entries.sort(key=_sort_key, reverse=True)
     recent_timeline = timeline_entries[:10]
 
-    return _account_to_detail(account, contacts, recent_timeline)
+    return _pipeline_to_account_detail(entry, contacts, recent_timeline)
 
 
 # ---------------------------------------------------------------------------
@@ -342,26 +375,30 @@ async def create_account(
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ):
-    """Create a new account with normalized_name for dedup."""
+    """Create a new account (PipelineEntry) with normalized_name for dedup."""
     normalized_name = normalize_company_name(body.name)
 
-    new_account = Account(
+    # Map old status to stage
+    stage_map = {"prospect": "identified", "engaged": "engaged"}
+    stage = stage_map.get(body.status, "identified")
+
+    new_entry = PipelineEntry(
         tenant_id=user.tenant_id,
         name=body.name,
         normalized_name=normalized_name,
         domain=body.domain,
-        status=body.status,
+        stage=stage,
         fit_score=body.fit_score,
         fit_tier=body.fit_tier,
         intel=body.intel or {},
         source=body.source,
     )
-    db.add(new_account)
+    db.add(new_entry)
     await db.flush()
-    await db.refresh(new_account)
+    await db.refresh(new_entry)
     await db.commit()
 
-    return _account_to_list_item(new_account, 0)
+    return _pipeline_to_account_list_item(new_entry, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -378,44 +415,44 @@ async def update_account(
 ):
     """Update account fields. Recomputes normalized_name if name changes."""
     result = await db.execute(
-        select(Account).where(Account.id == account_id)
+        select(PipelineEntry).where(PipelineEntry.id == account_id)
     )
-    account = result.scalar_one_or_none()
+    entry = result.scalar_one_or_none()
 
-    if account is None:
+    if entry is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
     if body.name is not None:
-        account.name = body.name
-        account.normalized_name = normalize_company_name(body.name)
+        entry.name = body.name
+        entry.normalized_name = normalize_company_name(body.name)
     if body.domain is not None:
-        account.domain = body.domain
+        entry.domain = body.domain
     if body.status is not None:
-        account.status = body.status
+        # Map old status to stage
+        stage_map = {"prospect": "identified", "engaged": "engaged"}
+        entry.stage = stage_map.get(body.status, body.status)
+    if body.relationship_status is not None:
+        entry.relationship_type = [body.relationship_status]
     if body.fit_score is not None:
-        account.fit_score = body.fit_score
+        entry.fit_score = body.fit_score
     if body.fit_tier is not None:
-        account.fit_tier = body.fit_tier
+        entry.fit_tier = body.fit_tier
     if body.intel is not None:
-        account.intel = body.intel
-    if body.next_action_due is not None:
-        # Accept ISO string or None
-        account.next_action_due = datetime.datetime.fromisoformat(body.next_action_due)
-    if body.next_action_type is not None:
-        account.next_action_type = body.next_action_type
+        entry.intel = body.intel
+    # next_action_due / next_action_type are dropped — silently ignored
 
-    account.updated_at = datetime.datetime.now(datetime.timezone.utc)
+    entry.updated_at = datetime.datetime.now(datetime.timezone.utc)
 
     await db.commit()
-    await db.refresh(account)
+    await db.refresh(entry)
 
     # Get contact count for response
     cc_result = await db.execute(
-        select(func.count()).where(AccountContact.account_id == account_id)
+        select(func.count()).where(Contact.pipeline_entry_id == account_id)
     )
     contact_count = cc_result.scalar() or 0
 
-    return _account_to_list_item(account, contact_count)
+    return _pipeline_to_account_list_item(entry, contact_count)
 
 
 # ---------------------------------------------------------------------------
@@ -430,21 +467,21 @@ async def list_contacts(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """List all contacts for an account."""
-    # Verify account exists
+    # Verify entry exists
     acc_result = await db.execute(
-        select(Account.id).where(Account.id == account_id)
+        select(PipelineEntry.id).where(PipelineEntry.id == account_id)
     )
     if acc_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
     result = await db.execute(
-        select(AccountContact)
-        .where(AccountContact.account_id == account_id)
-        .order_by(AccountContact.created_at.asc())
+        select(Contact)
+        .where(Contact.pipeline_entry_id == account_id)
+        .order_by(Contact.created_at.asc())
     )
     contacts = result.scalars().all()
 
-    return {"items": [_contact_to_dict(c) for c in contacts]}
+    return {"items": [_contact_to_account_contact(c) for c in contacts]}
 
 
 # ---------------------------------------------------------------------------
@@ -460,30 +497,29 @@ async def create_contact(
     db: AsyncSession = Depends(get_tenant_db),
 ):
     """Create a contact under an account."""
-    # Verify account exists
+    # Verify entry exists
     acc_result = await db.execute(
-        select(Account.id).where(Account.id == account_id)
+        select(PipelineEntry.id).where(PipelineEntry.id == account_id)
     )
     if acc_result.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Account not found")
 
-    new_contact = AccountContact(
+    new_contact = Contact(
         tenant_id=user.tenant_id,
-        account_id=account_id,
+        pipeline_entry_id=account_id,
         name=body.name,
         email=body.email,
         title=body.title,
-        role_in_deal=body.role_in_deal,
+        role=body.role_in_deal,  # old role_in_deal maps to Contact.role
         linkedin_url=body.linkedin_url,
         notes=body.notes,
-        source=body.source,
     )
     db.add(new_contact)
     await db.flush()
     await db.refresh(new_contact)
     await db.commit()
 
-    return _contact_to_dict(new_contact)
+    return _contact_to_account_contact(new_contact)
 
 
 # ---------------------------------------------------------------------------
@@ -501,9 +537,9 @@ async def update_contact(
 ):
     """Update a contact. Verifies the contact belongs to the given account."""
     result = await db.execute(
-        select(AccountContact).where(
-            AccountContact.id == contact_id,
-            AccountContact.account_id == account_id,
+        select(Contact).where(
+            Contact.id == contact_id,
+            Contact.pipeline_entry_id == account_id,
         )
     )
     contact = result.scalar_one_or_none()
@@ -518,7 +554,7 @@ async def update_contact(
     if body.title is not None:
         contact.title = body.title
     if body.role_in_deal is not None:
-        contact.role_in_deal = body.role_in_deal
+        contact.role = body.role_in_deal  # old role_in_deal maps to Contact.role
     if body.linkedin_url is not None:
         contact.linkedin_url = body.linkedin_url
     if body.notes is not None:
@@ -529,7 +565,7 @@ async def update_contact(
     await db.commit()
     await db.refresh(contact)
 
-    return _contact_to_dict(contact)
+    return _contact_to_account_contact(contact)
 
 
 # ---------------------------------------------------------------------------
@@ -546,9 +582,9 @@ async def delete_contact(
 ):
     """Hard-delete a contact from an account."""
     result = await db.execute(
-        select(AccountContact).where(
-            AccountContact.id == contact_id,
-            AccountContact.account_id == account_id,
+        select(Contact).where(
+            Contact.id == contact_id,
+            Contact.pipeline_entry_id == account_id,
         )
     )
     contact = result.scalar_one_or_none()
