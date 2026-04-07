@@ -447,7 +447,10 @@ async def analyze_document(
         raise HTTPException(status_code=400, detail="Invalid file_id format")
 
     uploaded = (await db.execute(
-        select(UploadedFile).where(UploadedFile.id == file_uuid)
+        select(UploadedFile).where(
+            UploadedFile.id == file_uuid,
+            UploadedFile.tenant_id == user.tenant_id,
+        )
     )).scalar_one_or_none()
 
     if uploaded is None:
@@ -491,8 +494,12 @@ async def refresh_profile(
         select(Tenant).where(Tenant.id == user.tenant_id)
     )).scalar_one_or_none()
 
-    # Get all profile-linked files
-    all_files = (await db.execute(select(UploadedFile))).scalars().all()
+    # Get all profile-linked files for this tenant, ordered deterministically
+    all_files = (await db.execute(
+        select(UploadedFile)
+        .where(UploadedFile.tenant_id == user.tenant_id)
+        .order_by(UploadedFile.created_at)
+    )).scalars().all()
     linked_files = [
         f for f in all_files
         if (f.metadata_ or {}).get("profile_linked") is True

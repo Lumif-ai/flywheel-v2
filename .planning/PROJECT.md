@@ -118,7 +118,17 @@ Ten milestones shipped. The platform is functionally complete for single-founder
 
 ### Active
 
-(No active requirements — next milestone not yet planned)
+## Current Milestone: v10.0 Contact Outreach Pipeline
+
+**Goal:** Person-first pipeline grid as the default view, with a contact detail panel showing editable outreach sequences (email + LinkedIn), AI-computed next steps, and company as a secondary toggle — turning the CRM into an outreach command center.
+
+**Target features:**
+- Contact-first grid: 317 rows showing contact name, company, title, channel, variant, step, status, next step, subject
+- Contact detail panel: full outreach sequence (N steps), editable message bodies (email + LinkedIn), field editing, action buttons
+- AI-computed "Next Step" column: derived from activity status + elapsed time (Ready to send / Follow up in Nd / Replied - engage)
+- Contacts | Companies view toggle (contacts default, companies secondary)
+- MCP tool extensions: `flywheel_list_pipeline_contacts` (flattened contact view), `flywheel_create_outreach_step` (generate step N)
+- Dynamic sequence length: step_number is an integer, UI shows "Step X of N", "Generate next step" always available
 
 ### Out of Scope
 
@@ -132,13 +142,14 @@ Ten milestones shipped. The platform is functionally complete for single-founder
 
 **Existing architecture:** FastAPI + PostgreSQL (async, tenant-isolated, RLS), Supabase Storage, multi-provider OAuth (Google, Microsoft, Slack), skill-based execution (async tool loops with context weighting), context store (atomic facts + full-text search + entity graph).
 
-**CRM design principles (evolved in v2.1 brainstorm):**
-- Company-first for Prospects/Customers, person-first for Advisors/Angel investors
-- Five distinct JTBD: triage (Pipeline), nurture prospects, manage customers, maintain advisors, manage investors
-- View layer over accumulated intelligence — not a database to fill
-- Manual context capture allowed (notes, files) alongside skill-generated data
-- Two paradigms: Pipeline is a data grid (Airtable), Relationships are intelligence journals (warmth)
-- AI synthesis is the product differentiator, not just the UI
+**CRM design principles (evolved through v2.1 → v10.0 brainstorm):**
+- Person-first for outreach execution, company-first for relationship management
+- The JTBD is always person-level: "Who needs my attention right now?"
+- Grid is a command center (scan + filter + select), not a workbench (no inline editing of messages)
+- Detail panel is the editing surface (full message bodies, field editing, action buttons)
+- AI-first execution: Claude Code sends emails, generates follow-ups, schedules sequences
+- Sequences are emergent (activities sorted by step_number), not configured (no sequence builder)
+- The moat compounds: every send/reply/bounce enriches context, AI uses it for better follow-ups
 
 **Specs:**
 - `.planning/SPEC-ai-native-crm.md` (v2.0)
@@ -209,4 +220,4 @@ Ten milestones shipped. The platform is functionally complete for single-founder
 | Fit tier renamed Strong/Medium/Weak | A/B/C not intuitive for non-technical founders | ✓ Good — shipped in v9.0 grid |
 
 ---
-*Last updated: 2026-04-06 after v9.0 Unified Pipeline shipped*
+*Last updated: 2026-04-07 after v10.0 Contact Outreach Pipeline milestone start*

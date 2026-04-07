@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-04-07)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v10.0 Contact Outreach Pipeline — Phase 93 (Contact Detail Panel)
+**Current focus:** v10.0 Contact Outreach Pipeline — Phase 94 (MCP Contact Tools)
 
 ## Current Position
 
 Milestone: v10.0 Contact Outreach Pipeline
-Phase: 93 of 94 (Contact Detail Panel)
-Plan: 2 of 2
-Status: Phase 093 complete (contact detail panel UI + data layer)
-Last activity: 2026-04-07 — Plan 093-02 complete (ContactDetailPanel + PipelinePage integration)
+Phase: 94 of 94 (MCP Contact Tools) -- COMPLETE
+Plan: 1 of 1 (done)
+Status: Phase 94 complete -- v10.0 Contact Outreach Pipeline milestone finished
+Last activity: 2026-04-07 — Phase 94 executed (MCP contact listing + outreach step tools)
 
 Progress: [██████████] 100%
 
@@ -54,6 +54,7 @@ v10.0 design decisions:
 - Contact panel 480px width (wider than company panel 420px) for textarea editing comfort
 - EditableField: click-to-edit with blur-save, pencil icon on hover
 - Action buttons contextual to status: Approve for drafted, Skip for drafted/approved, Mark Replied for sent
+- MCP outreach tools are ID-based (not name-based) for batch workflows: list returns IDs, create accepts IDs
 
 ### Pending Todos
 
@@ -73,5 +74,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-07
-Stopped at: Completed 093-02-PLAN.md (contact detail panel UI)
+Stopped at: Completed 094-01-PLAN.md (MCP contact tools) -- milestone v10.0 complete
 Resume file: None

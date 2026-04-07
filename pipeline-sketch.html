@@ -1,0 +1,727 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flywheel — Pipeline</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+*{margin:0;padding:0;box-sizing:border-box;}
+body{font-family:'Inter',-apple-system,system-ui,sans-serif;background:#fff;color:#181d26;height:100vh;overflow:hidden;font-size:13px;-webkit-font-smoothing:antialiased;letter-spacing:0.01em;}
+
+.app{display:flex;height:100vh;}
+
+/* ── Sidebar ── */
+.sb{width:220px;background:#f8f8f8;border-right:1px solid #e8e8e8;padding:10px 0;flex-shrink:0;display:flex;flex-direction:column;user-select:none;}
+.sb-logo{padding:6px 16px 16px;display:flex;align-items:center;gap:7px;font-weight:600;font-size:14px;color:#181d26;letter-spacing:-0.02em;}
+.sb-mark{width:20px;height:20px;background:#E94D35;border-radius:5px;}
+.sb-g{padding:2px 8px;}
+.sb-lbl{font-size:11px;font-weight:500;color:#aaa;padding:10px 8px 4px;letter-spacing:0.02em;}
+.sb-i{display:flex;align-items:center;gap:7px;padding:5px 8px;border-radius:5px;font-size:13px;color:#777;cursor:pointer;font-weight:450;}
+.sb-i:hover{background:rgba(0,0,0,0.04);color:#444;}
+.sb-i.on{background:#fff;color:#181d26;font-weight:500;box-shadow:0 0 0 1px rgba(0,0,0,0.06),0 1px 2px rgba(0,0,0,0.04);}
+.sb-i svg{width:15px;height:15px;stroke-width:1.6;flex-shrink:0;opacity:0.4;}
+.sb-i.on svg{opacity:0.65;}
+.sb-n{margin-left:auto;font-size:12px;color:#bbb;font-variant-numeric:tabular-nums;}
+.sb-sp{flex:1;}
+
+/* ── Main ── */
+.mn{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0;}
+
+/* ── Toolbar ── */
+.tb{padding:10px 16px;display:flex;align-items:center;gap:6px;border-bottom:1px solid #e8e8e8;background:#fff;}
+.tb-title{font-size:14px;font-weight:600;color:#181d26;letter-spacing:-0.01em;margin-right:12px;}
+.tb-sep{width:1px;height:18px;background:#e0e0e0;margin:0 4px;}
+.tb-btn{padding:4px 8px;border-radius:4px;font-size:12px;font-weight:450;cursor:pointer;border:none;color:#666;background:none;font-family:inherit;display:flex;align-items:center;gap:4px;}
+.tb-btn:hover{background:rgba(0,0,0,0.04);color:#333;}
+.tb-btn.on{color:#181d26;font-weight:500;}
+.tb-btn svg{width:13px;height:13px;stroke-width:1.7;opacity:0.5;}
+.tb-right{margin-left:auto;display:flex;gap:4px;align-items:center;}
+.tb-search{padding:4px 8px 4px 26px;border-radius:4px;border:1px solid #e0e0e0;font-size:12px;width:160px;font-family:inherit;background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23bbb' stroke-width='2'%3E%3Ccircle cx='11' cy='11' r='8'/%3E%3Cline x1='21' y1='21' x2='16.65' y2='16.65'/%3E%3C/svg%3E") 7px center no-repeat;color:#181d26;}
+.tb-search:focus{outline:none;border-color:#aaa;}
+.tb-search::placeholder{color:#bbb;}
+.tb-add{padding:4px 10px;border-radius:4px;font-size:12px;font-weight:500;cursor:pointer;border:none;background:#E94D35;color:#fff;font-family:inherit;}
+.tb-add:hover{background:#d4412e;}
+
+/* ── View tabs (like Airtable's view bar) ── */
+.vb{padding:0 16px;display:flex;align-items:center;border-bottom:1px solid #e8e8e8;background:#fafafa;gap:0;}
+.vb-tab{padding:7px 12px;font-size:12px;font-weight:450;cursor:pointer;color:#888;background:none;border:none;border-bottom:2px solid transparent;font-family:inherit;margin-bottom:-1px;}
+.vb-tab:hover{color:#555;}
+.vb-tab.on{color:#181d26;font-weight:500;border-bottom-color:#E94D35;background:#fff;}
+.vb-tab .ct{color:#bbb;margin-left:3px;font-weight:400;}
+.vb-right{margin-left:auto;display:flex;gap:3px;padding:4px 0;}
+.vb-dd{padding:3px 7px;border-radius:3px;font-size:11px;font-weight:450;border:1px solid #ddd;color:#888;background:#fff;cursor:pointer;font-family:inherit;appearance:none;padding-right:16px;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='8' height='8' viewBox='0 0 24 24' fill='none' stroke='%23bbb' stroke-width='2.5'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:calc(100% - 4px) center;}
+
+/* ── AI row (inside grid, like a formula bar) ── */
+.ai-row{padding:5px 16px;background:#fffbfa;border-bottom:1px solid #f0e8e6;display:flex;align-items:center;gap:6px;font-size:12px;color:#888;}
+.ai-row strong{color:#555;font-weight:500;}
+.ai-dot{width:5px;height:5px;background:#E94D35;border-radius:99px;flex-shrink:0;}
+.ai-more{margin-left:auto;font-size:11px;color:#ccc;cursor:pointer;font-weight:450;}
+.ai-more:hover{color:#888;}
+
+/* ── Grid ── */
+.grid-wrap{flex:1;overflow:auto;position:relative;}
+.grid{width:100%;border-collapse:collapse;table-layout:fixed;}
+
+/* Row number gutter */
+.rn{width:40px;min-width:40px;max-width:40px;text-align:center;font-size:11px;color:#ccc;font-variant-numeric:tabular-nums;border-right:1px solid #e8e8e8;background:#fafafa;padding:0 4px;}
+thead .rn{background:#f3f3f3;}
+
+/* Column header */
+.grid thead{position:sticky;top:0;z-index:3;}
+.grid th{padding:0 10px;text-align:left;font-size:11px;font-weight:500;color:#888;background:#f3f3f3;border-bottom:1px solid #ddd;border-right:1px solid #e8e8e8;white-space:nowrap;user-select:none;height:28px;vertical-align:middle;letter-spacing:0.02em;}
+.grid th:last-child{border-right:none;}
+
+/* Cells */
+.grid td{padding:0 10px;border-bottom:1px solid #eee;border-right:1px solid #f0f0f0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;height:34px;vertical-align:middle;}
+.grid td:last-child{border-right:none;}
+.grid tr.r{cursor:pointer;}
+.grid tr.r:hover td{background:#f8f9fa;}
+.grid tr.r.sel td{background:#fff8f6;}
+
+/* ── Cell types ── */
+.c-nm{display:flex;align-items:center;gap:7px;}
+.ico{width:18px;height:18px;border-radius:4px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:8px;flex-shrink:0;background:#f0f0f0;color:#999;}
+.ico.p{border-radius:99px;}
+.nm-t{font-size:13px;font-weight:500;color:#181d26;overflow:hidden;text-overflow:ellipsis;}
+
+.c-sub{font-size:12px;color:#aaa;}
+.c-txt{font-size:12px;color:#555;}
+.c-txt-m{font-size:12px;color:#bbb;}
+
+/* Stage pill — Airtable colored pill style */
+.pill{display:inline-flex;padding:2px 8px;border-radius:12px;font-size:11px;font-weight:500;line-height:1.4;}
+.pill-scraped{background:#f0f0f0;color:#999;}
+.pill-scored{background:#e8f0fe;color:#4a7fd4;}
+.pill-contacted{background:#fef3e0;color:#c77d1a;}
+.pill-replied{background:#e6f5ea;color:#2e8b46;}
+.pill-prospect{background:#fde8e4;color:#d04030;}
+.pill-customer{background:#e6f5ea;color:#1a7a35;}
+.pill-advisor{background:#f0ebff;color:#7c5cc4;}
+.pill-investor{background:#eaecff;color:#5558c8;}
+
+.c-fit{font-size:11px;font-weight:500;color:#888;text-align:center;}
+.c-fit.strong{color:#2e8b46;}
+.c-fit.med{color:#c77d1a;}
+.c-fit.weak{color:#bbb;}
+
+.c-ins{font-size:12px;color:#888;overflow:hidden;text-overflow:ellipsis;}
+
+.c-act{font-size:12px;color:#E94D35;font-weight:450;cursor:pointer;}
+.c-act:hover{text-decoration:underline;}
+.c-act-urg{color:#c4211b;}
+
+.c-time{font-size:11px;color:#ccc;font-variant-numeric:tabular-nums;}
+
+/* ── Expand row (like Airtable row expand) ── */
+.expand-icon{width:16px;height:16px;display:none;cursor:pointer;opacity:0.3;margin-left:auto;}
+.expand-icon:hover{opacity:0.6;}
+tr.r:hover .expand-icon{display:block;}
+
+/* ── Detail / Expand Panel (slide-out) ── */
+.dp{width:420px;border-left:1px solid #e8e8e8;overflow-y:auto;flex-shrink:0;display:none;background:#fafafa;}
+.dp.open{display:flex;flex-direction:column;}
+
+.dp-hd{padding:16px 18px 12px;background:#fff;border-bottom:1px solid #eee;}
+.dp-x{float:right;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;border-radius:3px;line-height:1;}
+.dp-x:hover{color:#888;background:#f0f0f0;}
+.dp-row1{display:flex;align-items:center;gap:8px;margin-bottom:3px;}
+.dp-ico{width:28px;height:28px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-weight:600;font-size:11px;background:#f0f0f0;color:#999;}
+.dp-nm{font-size:16px;font-weight:600;color:#181d26;letter-spacing:-0.02em;}
+.dp-sub{font-size:12px;color:#888;margin-top:1px;}
+.dp-pills{display:flex;gap:5px;margin-top:8px;align-items:center;}
+.dp-open{display:inline-flex;align-items:center;gap:3px;font-size:11px;color:#888;cursor:pointer;margin-top:10px;padding:4px 8px;border-radius:4px;border:1px solid #e0e0e0;background:#fff;font-family:inherit;font-weight:450;}
+.dp-open:hover{color:#555;border-color:#ccc;}
+.dp-open svg{width:10px;height:10px;stroke-width:2;}
+
+.dp-sec{padding:12px 18px;border-bottom:1px solid #f0f0f0;background:#fff;}
+.dp-sec:last-child{border-bottom:none;}
+.dp-sec-t{font-size:11px;font-weight:500;color:#999;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:6px;}
+
+.dp-ai-box{padding:8px 10px;background:#fafafa;border:1px solid #eee;border-radius:6px;font-size:12px;color:#555;line-height:1.55;}
+
+/* Insight rows */
+.dp-ir{display:flex;gap:6px;padding:4px 0;align-items:baseline;}
+.dp-ir+.dp-ir{border-top:1px solid #f7f7f7;}
+.dp-ir-tag{font-size:10px;font-weight:550;color:#999;width:50px;flex-shrink:0;text-transform:uppercase;letter-spacing:0.02em;}
+.dp-ir-bd{font-size:12px;color:#555;line-height:1.4;}
+.dp-ir-src{font-size:10px;color:#aaa;margin-top:1px;}
+
+/* Tasks */
+.dp-tk{display:flex;align-items:flex-start;gap:6px;padding:4px 0;}
+.dp-tk+.dp-tk{border-top:1px solid #f7f7f7;}
+.dp-ck{width:13px;height:13px;border-radius:3px;border:1.5px solid #ddd;flex-shrink:0;margin-top:1px;cursor:pointer;}
+.dp-ck.auto{border-color:rgba(233,77,53,0.35);}
+.dp-tk-t{font-size:12px;color:#444;}
+.dp-tk-m{font-size:10px;color:#aaa;}
+.dp-tk-a{font-size:9px;font-weight:600;color:#E94D35;opacity:0.5;}
+
+/* Contacts */
+.dp-ct{display:flex;align-items:center;gap:7px;padding:4px 0;}
+.dp-ct+.dp-ct{border-top:1px solid #f7f7f7;}
+.dp-ct-av{width:20px;height:20px;border-radius:99px;background:#f0f0f0;display:flex;align-items:center;justify-content:center;font-size:8px;font-weight:600;color:#aaa;flex-shrink:0;}
+.dp-ct-nm{font-size:12px;font-weight:500;color:#333;flex:1;}
+.dp-ct-ti{font-size:11px;color:#888;flex:1;}
+.dp-ct-role{font-size:10px;color:#888;font-weight:450;}
+
+/* Activity */
+.dp-ac{display:flex;gap:6px;padding:5px 0;}
+.dp-ac+.dp-ac{border-top:1px solid #f7f7f7;}
+.dp-ac-d{width:6px;height:6px;border-radius:99px;flex-shrink:0;margin-top:5px;background:#ddd;}
+.dp-ac-d.reply{background:#2e8b46;}
+.dp-ac-d.meeting{background:#E94D35;}
+.dp-ac-bd{flex:1;min-width:0;}
+.dp-ac-w{font-size:12px;color:#555;}
+.dp-ac-w strong{color:#333;font-weight:550;}
+.dp-ac-t{font-size:10px;color:#aaa;margin-top:1px;}
+.dp-ac-p{font-size:11px;color:#777;background:#f7f7f7;padding:4px 8px;border-radius:4px;margin-top:3px;line-height:1.4;}
+
+/* Outreach column */
+.c-ch{display:flex;gap:3px;align-items:center;}
+.ch-ico{width:18px;height:18px;border-radius:3px;display:flex;align-items:center;justify-content:center;background:#f3f3f3;flex-shrink:0;}
+.ch-ico svg{width:11px;height:11px;stroke-width:1.8;color:#999;}
+.ch-ico.sent svg{color:#2e8b46;}
+.ch-ico.draft svg{color:#c77d1a;}
+.ch-cnt{font-size:10px;color:#aaa;margin-left:1px;}
+.c-next{font-size:11.5px;color:#555;}
+.c-next-date{font-size:10px;color:#aaa;}
+
+/* Outreach section in detail panel */
+.dp-outreach{display:flex;flex-direction:column;gap:6px;}
+.dp-msg{border:1px solid #eee;border-radius:6px;overflow:hidden;}
+.dp-msg-hd{display:flex;align-items:center;gap:6px;padding:7px 10px;background:#fafafa;border-bottom:1px solid #f0f0f0;cursor:pointer;}
+.dp-msg-hd:hover{background:#f5f5f5;}
+.dp-msg-step{font-size:10px;font-weight:600;color:#aaa;width:38px;flex-shrink:0;}
+.dp-msg-ch{display:flex;align-items:center;gap:3px;}
+.dp-msg-ch svg{width:12px;height:12px;stroke-width:1.7;color:#888;}
+.dp-msg-ch-label{font-size:11px;color:#666;font-weight:450;}
+.dp-msg-status{margin-left:auto;font-size:10px;font-weight:500;padding:1px 6px;border-radius:3px;}
+.dp-msg-status.sent{background:#e6f5ea;color:#2e8b46;}
+.dp-msg-status.draft{background:#fef3e0;color:#c77d1a;}
+.dp-msg-status.replied{background:#e6f5ea;color:#2e8b46;}
+.dp-msg-status.queued{background:#f0f0f0;color:#999;}
+.dp-msg-date{font-size:10px;color:#aaa;margin-left:6px;}
+.dp-msg-body{padding:8px 10px;font-size:12px;color:#555;line-height:1.5;display:none;}
+.dp-msg.open .dp-msg-body{display:block;}
+.dp-msg-subj{font-size:11px;font-weight:500;color:#333;margin-bottom:3px;}
+.dp-msg-text{font-size:12px;color:#666;line-height:1.5;}
+.dp-msg-edit{margin-top:6px;font-size:11px;color:#E94D35;cursor:pointer;font-weight:450;display:inline-flex;align-items:center;gap:3px;}
+.dp-msg-edit:hover{text-decoration:underline;}
+.dp-msg-edit svg{width:10px;height:10px;stroke-width:2;}
+
+/* Full profile page */
+.full-profile{display:none;position:fixed;inset:0;z-index:100;background:#fff;overflow-y:auto;}
+.full-profile.open{display:block;}
+.fp-bar{padding:10px 20px;border-bottom:1px solid #e8e8e8;display:flex;align-items:center;gap:8px;position:sticky;top:0;background:#fff;z-index:1;}
+.fp-back{display:flex;align-items:center;gap:4px;font-size:12px;color:#888;cursor:pointer;border:none;background:none;font-family:inherit;font-weight:450;padding:4px 8px;border-radius:4px;}
+.fp-back:hover{color:#333;background:#f5f5f5;}
+.fp-back svg{width:14px;height:14px;stroke-width:2;}
+.fp-content{max-width:800px;margin:0 auto;padding:24px 20px 60px;}
+.fp-header{margin-bottom:24px;}
+.fp-name{font-size:22px;font-weight:600;color:#181d26;letter-spacing:-0.02em;}
+.fp-meta{font-size:13px;color:#888;margin-top:3px;}
+.fp-pills{display:flex;gap:6px;margin-top:10px;}
+.fp-section{margin-bottom:24px;}
+.fp-section-t{font-size:12px;font-weight:550;color:#999;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:10px;padding-bottom:6px;border-bottom:1px solid #f0f0f0;}
+.fp-ai{padding:12px 14px;background:#fafafa;border:1px solid #eee;border-radius:6px;font-size:13px;color:#555;line-height:1.6;}
+.fp-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.fp-card{padding:10px 12px;border:1px solid #eee;border-radius:6px;}
+.fp-card-label{font-size:10px;font-weight:550;color:#aaa;text-transform:uppercase;letter-spacing:0.03em;margin-bottom:4px;}
+.fp-card-val{font-size:13px;color:#444;line-height:1.45;}
+
+/* + row at bottom */
+.add-row td{color:#ccc;font-size:12px;cursor:pointer;height:30px;border-bottom:none;}
+.add-row:hover td{color:#999;background:#fafafa;}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- Sidebar -->
+  <div class="sb">
+    <div class="sb-logo"><div class="sb-mark"></div>Flywheel</div>
+    <div class="sb-g">
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>Briefing</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>Company Profile</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/></svg>Library</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg>Email</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>Meetings</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 01-2 2H5a2 2 0 01-2-2V5a2 2 0 012-2h11"/></svg>Tasks<span class="sb-n">4</span></div>
+    </div>
+    <div class="sb-g" style="margin-top:6px;">
+      <div class="sb-lbl">Pipeline</div>
+      <div class="sb-i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>All<span class="sb-n">47</span></div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M20.84 4.61a5.5 5.5 0 00-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 00-7.78 7.78L12 21.23l8.84-8.84a5.5 5.5 0 000-7.78z"/></svg>Customers<span class="sb-n">8</span></div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4-4v2"/><circle cx="9" cy="7" r="4"/></svg>Advisors<span class="sb-n">4</span></div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6"/></svg>Investors<span class="sb-n">3</span></div>
+    </div>
+    <div class="sb-g" style="margin-top:6px;">
+      <div class="sb-lbl">Saved views</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/></svg>Series A Targets</div>
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="10"/></svg>US Expansion</div>
+    </div>
+    <div class="sb-sp"></div>
+    <div class="sb-g">
+      <div class="sb-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 01-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4"/></svg>Settings</div>
+    </div>
+  </div>
+
+  <!-- Main -->
+  <div class="mn">
+    <!-- Toolbar -->
+    <div class="tb">
+      <span class="tb-title">Pipeline</span>
+      <div class="tb-sep"></div>
+      <button class="tb-btn on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>Grid</button>
+      <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/><line x1="3" y1="15" x2="21" y2="15"/><line x1="9" y1="3" x2="9" y2="21"/></svg>Board</button>
+      <div class="tb-sep"></div>
+      <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>Filter</button>
+      <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="14" y2="15"/><line x1="4" y1="3" x2="20" y2="3"/><line x1="4" y1="21" x2="8" y2="21"/></svg>Sort</button>
+      <button class="tb-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/><line x1="9" y1="3" x2="9" y2="21"/></svg>Group</button>
+      <div class="tb-right">
+        <input type="text" class="tb-search" placeholder="Search..." />
+        <button class="tb-add">+ New</button>
+      </div>
+    </div>
+
+    <!-- View tabs -->
+    <div class="vb">
+      <button class="vb-tab on">All<span class="ct">47</span></button>
+      <button class="vb-tab">Needs action<span class="ct">6</span></button>
+      <button class="vb-tab">Replied<span class="ct">3</span></button>
+      <button class="vb-tab">Stale<span class="ct">5</span></button>
+      <div class="vb-right">
+        <select class="vb-dd"><option>Stage</option></select>
+        <select class="vb-dd"><option>Fit</option><option>Strong</option><option>Medium</option><option>Weak</option></select>
+        <select class="vb-dd"><option>Source</option></select>
+      </div>
+    </div>
+
+    <!-- AI brief row -->
+    <div class="ai-row">
+      <div class="ai-dot"></div>
+      <span><strong>Acme replied</strong> — Sarah wants pricing. 3 follow-ups due today. Stripe meeting in 2h.</span>
+      <span class="ai-more">View all →</span>
+    </div>
+
+    <!-- Grid -->
+    <div class="grid-wrap">
+      <table class="grid">
+        <colgroup>
+          <col style="width:40px"/>
+          <col style="width:180px"/>
+          <col style="width:95px"/>
+          <col style="width:120px"/>
+          <col style="width:85px"/>
+          <col style="width:55px"/>
+          <col style="width:70px"/>
+          <col style="width:85px"/>
+          <col/>
+          <col style="width:120px"/>
+          <col style="width:48px"/>
+        </colgroup>
+        <thead>
+          <tr>
+            <th class="rn"></th>
+            <th>Name</th>
+            <th>Domain</th>
+            <th>Primary contact</th>
+            <th>Stage</th>
+            <th>Fit</th>
+            <th>Channels</th>
+            <th>Next outreach</th>
+            <th>AI Insight</th>
+            <th>Next action</th>
+            <th>Active</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr class="r sel" onclick="sel(this)">
+            <td class="rn">1</td>
+            <td><div class="c-nm"><div class="ico">AC</div><span class="nm-t">Acme Corp</span></div></td>
+            <td><span class="c-sub">acmecorp.com</span></td>
+            <td><span class="c-txt">Sarah Chen</span></td>
+            <td><span class="pill pill-replied">Replied</span></td>
+            <td class="c-fit strong">Strong</td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">2</span><div class="ch-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-4 0v7h-4v-7a6 6 0 016-6z"/><circle cx="4" cy="9" r="2"/><path d="M0 21v-4a2 2 0 012-2h2"/></svg></div><span class="ch-cnt">1</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Replied 2h ago — wants pricing, case study</span></td>
+            <td><span class="c-act">Send case study</span></td>
+            <td><span class="c-time">2h</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">2</td>
+            <td><div class="c-nm"><div class="ico">ST</div><span class="nm-t">Stripe</span></div></td>
+            <td><span class="c-sub">stripe.com</span></td>
+            <td><span class="c-txt">James Park</span></td>
+            <td><span class="pill pill-prospect">Prospect</span></td>
+            <td class="c-fit strong">Strong</td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">3</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Meeting in 2h — evaluating 3 competitors</span></td>
+            <td><span class="c-act">Prep meeting</span></td>
+            <td><span class="c-time">1d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">3</td>
+            <td><div class="c-nm"><div class="ico p">RK</div><span class="nm-t">Rajeev Kumar</span></div></td>
+            <td><span class="c-txt-m">—</span></td>
+            <td><span class="c-txt-m">Individual</span></td>
+            <td><span class="pill pill-advisor">Advisor</span></td>
+            <td class="c-fit"></td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">4</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Offered 3 CTO intros — ICP doc overdue 3d</span></td>
+            <td><span class="c-act c-act-urg">Send ICP doc</span></td>
+            <td><span class="c-time">5d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">4</td>
+            <td><div class="c-nm"><div class="ico">NX</div><span class="nm-t">Nexus Insurance</span></div></td>
+            <td><span class="c-sub">nexusinsurance.com</span></td>
+            <td><span class="c-txt">Priya Mehta</span></td>
+            <td><span class="pill pill-scored">Scored</span></td>
+            <td class="c-fit strong">Strong</td>
+            <td><span class="c-txt-m">—</span></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Hiring AI/ML — signals investment.</span></td>
+            <td><span class="c-act">Draft outreach</span></td>
+            <td><span class="c-time">1d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">5</td>
+            <td><div class="c-nm"><div class="ico">LM</div><span class="nm-t">Lemonade</span></div></td>
+            <td><span class="c-sub">lemonade.com</span></td>
+            <td><span class="c-txt">David Gomez</span></td>
+            <td><span class="pill pill-customer">Customer</span></td>
+            <td class="c-fit strong">Strong</td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">8</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Renewal in 45d. Usage up 30%. No check-in 12d.</span></td>
+            <td><span class="c-act">Send check-in</span></td>
+            <td><span class="c-time">12d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">6</td>
+            <td><div class="c-nm"><div class="ico p">AP</div><span class="nm-t">Anita Patel</span></div></td>
+            <td><span class="c-txt-m">—</span></td>
+            <td><span class="c-txt-m">Individual</span></td>
+            <td><span class="pill pill-investor">Investor</span></td>
+            <td class="c-fit"></td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">1</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Warm intro via Rajeev. Wants call Tuesday.</span></td>
+            <td><span class="c-act">Confirm call</span></td>
+            <td><span class="c-time">3d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">7</td>
+            <td><div class="c-nm"><div class="ico">GD</div><span class="nm-t">Go Digit</span></div></td>
+            <td><span class="c-sub">godigit.com</span></td>
+            <td><span class="c-txt">Kamesh Goyal</span></td>
+            <td><span class="pill pill-replied">Replied</span></td>
+            <td class="c-fit strong">Strong</td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">2</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Replied yesterday — wants a demo next week</span></td>
+            <td><span class="c-act">Schedule demo</span></td>
+            <td><span class="c-time">1d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">8</td>
+            <td><div class="c-nm"><div class="ico">PB</div><span class="nm-t">Policybazaar</span></div></td>
+            <td><span class="c-sub">policybazaar.com</span></td>
+            <td><span class="c-txt">Amit Sharma</span></td>
+            <td><span class="pill pill-contacted">Contacted</span></td>
+            <td class="c-fit strong">Strong</td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">1</span></div></td>
+            <td><div><span class="c-next">Apr 8</span><br/><span class="c-next-date">Email follow-up</span></div></td>
+            <td><span class="c-ins">Email sent 4d ago. No reply yet.</span></td>
+            <td><span class="c-act">Follow up</span></td>
+            <td><span class="c-time">4d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">9</td>
+            <td><div class="c-nm"><div class="ico">BF</div><span class="nm-t">BrightFlag</span></div></td>
+            <td><span class="c-sub">brightflag.com</span></td>
+            <td><span class="c-txt-m">No contacts</span></td>
+            <td><span class="pill pill-scraped">Scraped</span></td>
+            <td class="c-fit med">Medium</td>
+            <td><span class="c-txt-m">—</span></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">YC directory. Legal-adjacent, not core ICP.</span></td>
+            <td><span class="c-act">Enrich</span></td>
+            <td><span class="c-time">Today</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">10</td>
+            <td><div class="c-nm"><div class="ico">TM</div><span class="nm-t">Turtlemint</span></div></td>
+            <td><span class="c-sub">turtlemint.com</span></td>
+            <td><span class="c-txt">Dhirendra M.</span></td>
+            <td><span class="pill pill-scored">Scored</span></td>
+            <td class="c-fit med">Medium</td>
+            <td><span class="c-txt-m">—</span></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">InsurTech distribution. B2B2C model.</span></td>
+            <td><span class="c-act">Draft outreach</span></td>
+            <td><span class="c-time">2d</span></td>
+          </tr>
+          <tr class="r" onclick="sel(this)">
+            <td class="rn">11</td>
+            <td><div class="c-nm"><div class="ico p">MT</div><span class="nm-t">Michael Torres</span></div></td>
+            <td><span class="c-txt-m">—</span></td>
+            <td><span class="c-txt-m">Individual</span></td>
+            <td><span class="pill pill-advisor">Advisor</span></td>
+            <td class="c-fit"></td>
+            <td><div class="c-ch"><div class="ch-ico sent"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg></div><span class="ch-cnt">5</span></div></td>
+            <td><span class="c-next">—</span></td>
+            <td><span class="c-ins">Monthly sync due. Suggested pricing pivot.</span></td>
+            <td><span class="c-act">Schedule sync</span></td>
+            <td><span class="c-time">14d</span></td>
+          </tr>
+          <tr class="add-row">
+            <td class="rn">+</td>
+            <td colspan="10">Add a row</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Detail Panel -->
+  <div class="dp open" id="dp">
+    <div class="dp-hd">
+      <button class="dp-x" onclick="document.getElementById('dp').classList.remove('open')">×</button>
+      <div class="dp-row1">
+        <div class="dp-ico">AC</div>
+        <div>
+          <div class="dp-nm">Acme Corp</div>
+          <div class="dp-sub">acmecorp.com · SaaS · Series B · 280 emp</div>
+        </div>
+      </div>
+      <div class="dp-pills">
+        <span class="pill pill-replied">Replied</span>
+        <span style="font-size:11px;font-weight:500;color:#2e8b46;margin-left:4px;">Strong fit</span>
+      </div>
+      <button class="dp-open" onclick="document.getElementById('fullProfile').classList.add('open')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M18 13v6a2 2 0 01-2 2H5a2 2 0 01-2-2V8a2 2 0 012-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+        Full profile
+      </button>
+    </div>
+
+    <div class="dp-sec">
+      <div class="dp-sec-t">AI Summary</div>
+      <div class="dp-ai-box">Series B SaaS evaluating insurance automation for Q3. Sarah Chen (VP Ops) is champion. Vendor expires Aug 2026. Budget pre-approved. Competing with Guidewire at $180k/yr. Decision by end of Q2.</div>
+    </div>
+
+    <div class="dp-sec">
+      <div class="dp-sec-t">Key Insights</div>
+      <div class="dp-ir"><span class="dp-ir-tag">Signal</span><div><div class="dp-ir-bd">Hiring 3 ML engineers — signals AI investment</div><div class="dp-ir-src">LinkedIn · 3 days ago</div></div></div>
+      <div class="dp-ir"><span class="dp-ir-tag">Pain</span><div><div class="dp-ir-bd">"Our claims process takes 45 days average"</div><div class="dp-ir-src">Sarah, discovery call · Mar 28</div></div></div>
+      <div class="dp-ir"><span class="dp-ir-tag">Commit</span><div><div class="dp-ir-bd">You promised to send fintech case study</div><div class="dp-ir-src">Email reply · 2 hours ago</div></div></div>
+      <div class="dp-ir"><span class="dp-ir-tag">Context</span><div><div class="dp-ir-bd">Guidewire pitched at $180k/yr — "too heavy"</div><div class="dp-ir-src">Discovery call · Mar 28</div></div></div>
+    </div>
+
+    <div class="dp-sec">
+      <div class="dp-sec-t">Outreach Sequence</div>
+      <div class="dp-outreach">
+        <div class="dp-msg open">
+          <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+            <span class="dp-msg-step">Step 1</span>
+            <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><span class="dp-msg-ch-label">Email</span></div>
+            <span class="dp-msg-status sent">Sent</span>
+            <span class="dp-msg-date">Mar 25</span>
+          </div>
+          <div class="dp-msg-body">
+            <div class="dp-msg-subj">Re: Claims automation for Acme</div>
+            <div class="dp-msg-text">Hi Sarah — saw your post about claims automation challenges. We've helped companies like yours reduce processing time by 60%. Would love to share a quick case study...</div>
+          </div>
+        </div>
+        <div class="dp-msg">
+          <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+            <span class="dp-msg-step">Step 2</span>
+            <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-4 0v7h-4v-7a6 6 0 016-6z"/><circle cx="4" cy="9" r="2"/><path d="M0 21v-4a2 2 0 012-2h2"/></svg><span class="dp-msg-ch-label">LinkedIn</span></div>
+            <span class="dp-msg-status sent">Sent</span>
+            <span class="dp-msg-date">Mar 28</span>
+          </div>
+          <div class="dp-msg-body">
+            <div class="dp-msg-text">Hi Sarah, just wanted to follow up on my email — would love to connect and share how we're helping insurers like Acme streamline claims.</div>
+          </div>
+        </div>
+        <div class="dp-msg">
+          <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+            <span class="dp-msg-step">Step 3</span>
+            <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><span class="dp-msg-ch-label">Email</span></div>
+            <span class="dp-msg-status draft">Draft</span>
+            <span class="dp-msg-date">Apr 10</span>
+          </div>
+          <div class="dp-msg-body">
+            <div class="dp-msg-subj">Following up — Acme + Flywheel</div>
+            <div class="dp-msg-text">Hi Sarah, wanted to circle back on the case study I shared. Happy to walk through it live if that's easier — any time next week work?</div>
+            <div class="dp-msg-edit" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit message</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="dp-sec">
+      <div class="dp-sec-t">Tasks</div>
+      <div class="dp-tk"><div class="dp-ck auto"></div><div><div class="dp-tk-t">Send fintech case study to Sarah <span class="dp-tk-a">AUTO</span></div><div class="dp-tk-m">Due today · From email</div></div></div>
+      <div class="dp-tk"><div class="dp-ck auto"></div><div><div class="dp-tk-t">Prepare pricing under $180k <span class="dp-tk-a">AUTO</span></div><div class="dp-tk-m">Due Apr 10</div></div></div>
+      <div class="dp-tk"><div class="dp-ck"></div><div><div class="dp-tk-t">Schedule demo with technical team</div><div class="dp-tk-m">Due Apr 12</div></div></div>
+    </div>
+
+    <div class="dp-sec">
+      <div class="dp-sec-t">Contacts</div>
+      <div class="dp-ct"><div class="dp-ct-av">SC</div><div class="dp-ct-nm">Sarah Chen</div><div class="dp-ct-ti">VP Operations</div><span class="dp-ct-role">Champion</span></div>
+      <div class="dp-ct"><div class="dp-ct-av">MJ</div><div class="dp-ct-nm">Mike Johnson</div><div class="dp-ct-ti">CTO</div><span class="dp-ct-role">Decision Maker</span></div>
+    </div>
+
+    <div class="dp-sec">
+      <div class="dp-sec-t">Activity</div>
+      <div class="dp-ac"><div class="dp-ac-d reply"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>Sarah replied</strong> to your outreach</div><div class="dp-ac-t">Today, 9:34 AM</div><div class="dp-ac-p">"Could you share a case study from a fintech client?"</div></div></div>
+      <div class="dp-ac"><div class="dp-ac-d meeting"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>Discovery call</strong> with Sarah · 32 min</div><div class="dp-ac-t">Mar 28, 3:00 PM</div></div></div>
+      <div class="dp-ac"><div class="dp-ac-d"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>Email sent</strong> to Sarah Chen</div><div class="dp-ac-t">Mar 25</div></div></div>
+      <div class="dp-ac"><div class="dp-ac-d"></div><div class="dp-ac-bd"><div class="dp-ac-w">Auto-scored · A-tier (92/100)</div><div class="dp-ac-t">Mar 23</div></div></div>
+    </div>
+  </div>
+
+  <!-- Full Profile Page -->
+  <div class="full-profile" id="fullProfile">
+    <div class="fp-bar">
+      <button class="fp-back" onclick="document.getElementById('fullProfile').classList.remove('open')">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><polyline points="15 18 9 12 15 6"/></svg>
+        Back to Pipeline
+      </button>
+    </div>
+    <div class="fp-content">
+      <div class="fp-header">
+        <div class="fp-name">Acme Corp</div>
+        <div class="fp-meta">acmecorp.com · SaaS · Series B · 280 employees · Founded 2019</div>
+        <div class="fp-pills">
+          <span class="pill pill-replied">Replied</span>
+          <span style="font-size:11px;font-weight:500;color:#2e8b46;margin-left:2px;">Strong fit (92/100)</span>
+        </div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">AI Summary</div>
+        <div class="fp-ai">Acme Corp is a Series B SaaS company ($65M raised, a16z-led) evaluating insurance automation solutions for Q3 2026. Sarah Chen (VP Operations) is the internal champion — she initiated contact after seeing your LinkedIn post about claims automation. Their current vendor contract expires August 2026, and budget is pre-approved at "six figures." The primary competitor in this deal is Guidewire, who pitched at $180k/yr but Sarah described them as "too heavy for our size." Key decision maker is CTO Mike Johnson, who has not yet been engaged. Decision timeline is end of Q2.</div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Key Insights</div>
+        <div class="fp-grid">
+          <div class="fp-card"><div class="fp-card-label">Signal</div><div class="fp-card-val">Hiring 3 ML engineers — signals serious AI investment and budget allocation for automation.</div></div>
+          <div class="fp-card"><div class="fp-card-label">Pain Point</div><div class="fp-card-val">"Our current claims process takes 45 days average" — Sarah Chen, during discovery call Mar 28.</div></div>
+          <div class="fp-card"><div class="fp-card-label">Commitment</div><div class="fp-card-val">You promised to send the fintech case study. Extracted from Sarah's email reply 2 hours ago.</div></div>
+          <div class="fp-card"><div class="fp-card-label">Competitive Intel</div><div class="fp-card-val">Guidewire pitched at $180k/yr with 6-month implementation. Also looked at Shift Technology — "too narrow, just fraud detection."</div></div>
+        </div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Outreach Sequence — Sarah Chen</div>
+        <div class="dp-outreach">
+          <div class="dp-msg open">
+            <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+              <span class="dp-msg-step">Step 1</span>
+              <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:12px;height:12px;stroke-width:1.7;"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><span class="dp-msg-ch-label">Email</span></div>
+              <span class="dp-msg-status sent">Sent</span>
+              <span class="dp-msg-date">Mar 25, 2:15 PM</span>
+            </div>
+            <div class="dp-msg-body">
+              <div class="dp-msg-subj">Claims automation for mid-market insurers</div>
+              <div class="dp-msg-text">Hi Sarah — saw your post about claims automation challenges at Acme. We've been working with mid-market insurers to reduce claims processing time by 60%, without the heavy implementation cycles of legacy vendors like Guidewire.<br/><br/>Would love to share a quick case study from a fintech client that looks a lot like Acme — similar scale, similar pain points. Would that be useful?<br/><br/>Best,<br/>Sharan</div>
+            </div>
+          </div>
+          <div class="dp-msg open">
+            <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+              <span class="dp-msg-step">Step 2</span>
+              <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:12px;height:12px;stroke-width:1.7;"><path d="M16 8a6 6 0 016 6v7h-4v-7a2 2 0 00-4 0v7h-4v-7a6 6 0 016-6z"/><circle cx="4" cy="9" r="2"/><path d="M0 21v-4a2 2 0 012-2h2"/></svg><span class="dp-msg-ch-label">LinkedIn</span></div>
+              <span class="dp-msg-status sent">Sent</span>
+              <span class="dp-msg-date">Mar 28, 10:00 AM</span>
+            </div>
+            <div class="dp-msg-body">
+              <div class="dp-msg-text">Hi Sarah, just sent you an email about how we're helping insurers like Acme streamline claims automation. Would love to connect here as well — happy to share more context on what we're building.</div>
+            </div>
+          </div>
+          <div class="dp-msg open">
+            <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+              <span class="dp-msg-step">Reply</span>
+              <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:12px;height:12px;stroke-width:1.7;"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><span class="dp-msg-ch-label">Email</span></div>
+              <span class="dp-msg-status replied">Replied</span>
+              <span class="dp-msg-date">Today, 9:34 AM</span>
+            </div>
+            <div class="dp-msg-body">
+              <div class="dp-msg-subj">Re: Claims automation for mid-market insurers</div>
+              <div class="dp-msg-text">Hi Sharan — thanks for reaching out! We're actively looking at solutions for our claims workflow. Could you share a case study from a fintech client? We'd love to see how the implementation went and what kind of timeline we're looking at.<br/><br/>Also, our current vendor contract expires in August, so we're hoping to have something in place by Q3.<br/><br/>Best,<br/>Sarah</div>
+            </div>
+          </div>
+          <div class="dp-msg open">
+            <div class="dp-msg-hd" onclick="this.parentElement.classList.toggle('open')">
+              <span class="dp-msg-step">Step 3</span>
+              <div class="dp-msg-ch"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" style="width:12px;height:12px;stroke-width:1.7;"><rect x="2" y="4" width="20" height="16" rx="2"/><path d="M22 7l-10 7L2 7"/></svg><span class="dp-msg-ch-label">Email</span></div>
+              <span class="dp-msg-status draft">Draft</span>
+              <span class="dp-msg-date">Scheduled Apr 10</span>
+            </div>
+            <div class="dp-msg-body">
+              <div class="dp-msg-subj">Following up — Acme + Flywheel</div>
+              <div class="dp-msg-text">Hi Sarah, wanted to circle back on the case study. Happy to walk through it live if that's easier — any time next week work for a 20-min call?</div>
+              <div class="dp-msg-edit" onclick="event.stopPropagation()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z"/></svg> Edit message</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Contacts</div>
+        <div class="fp-grid">
+          <div class="fp-card">
+            <div class="fp-card-label">Champion</div>
+            <div class="fp-card-val"><strong>Sarah Chen</strong><br/>VP Operations<br/>sarah@acmecorp.com<br/>Outreach: 2 sent, 1 replied</div>
+          </div>
+          <div class="fp-card">
+            <div class="fp-card-label">Decision Maker</div>
+            <div class="fp-card-val"><strong>Mike Johnson</strong><br/>CTO<br/>mike@acmecorp.com<br/>Not yet engaged</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Company Research</div>
+        <div class="fp-ai">Founded 2019. 280 employees. Raised $65M total (Series B led by a16z). Core product is claims management SaaS for mid-market insurers. Recent pivot toward AI-assisted underwriting. Key verticals: P&C, health insurance. Headquartered in San Francisco with engineering team in Bangalore.</div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Meeting Notes</div>
+        <div class="fp-card" style="margin-bottom:8px;">
+          <div class="fp-card-label">Discovery Call · Mar 28 · 32 min</div>
+          <div class="fp-card-val">Sarah walked through their current claims workflow. Manual review takes 45 days on average. They tried building in-house ML but team of 2 couldn't ship. CEO pushing for Q3 launch of automated claims. Budget: "six figures, already approved." Red flag: CTO Mike wasn't on the call — need to loop him in for technical validation. Sarah seemed genuinely frustrated with their current process.</div>
+        </div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Tasks</div>
+        <div class="dp-tk"><div class="dp-ck auto"></div><div><div class="dp-tk-t">Send fintech case study to Sarah <span class="dp-tk-a">AUTO</span></div><div class="dp-tk-m">Due today · From email commitment</div></div></div>
+        <div class="dp-tk"><div class="dp-ck auto"></div><div><div class="dp-tk-t">Prepare pricing proposal under $180k <span class="dp-tk-a">AUTO</span></div><div class="dp-tk-m">Due Apr 10 · Competitor benchmark</div></div></div>
+        <div class="dp-tk"><div class="dp-ck"></div><div><div class="dp-tk-t">Schedule demo with technical team (include Mike)</div><div class="dp-tk-m">Due Apr 12 · Added manually</div></div></div>
+      </div>
+
+      <div class="fp-section">
+        <div class="fp-section-t">Activity Timeline</div>
+        <div class="dp-ac"><div class="dp-ac-d reply"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>Sarah replied</strong> to your outreach email</div><div class="dp-ac-t">Today, 9:34 AM</div><div class="dp-ac-p">"Could you share a case study from a fintech client? We'd love to see how the implementation went..."</div></div></div>
+        <div class="dp-ac"><div class="dp-ac-d meeting"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>Discovery call</strong> with Sarah Chen · 32 min</div><div class="dp-ac-t">Mar 28, 3:00 PM</div><div class="dp-ac-p">Discussed claims workflow, timeline, budget. She needs CTO buy-in. Competitive intel: Guidewire at $180k.</div></div></div>
+        <div class="dp-ac"><div class="dp-ac-d"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>LinkedIn message sent</strong> to Sarah Chen</div><div class="dp-ac-t">Mar 28, 10:00 AM</div></div></div>
+        <div class="dp-ac"><div class="dp-ac-d"></div><div class="dp-ac-bd"><div class="dp-ac-w"><strong>Email sent</strong> to Sarah Chen — "Claims automation for mid-market insurers"</div><div class="dp-ac-t">Mar 25, 2:15 PM</div></div></div>
+        <div class="dp-ac"><div class="dp-ac-d"></div><div class="dp-ac-bd"><div class="dp-ac-w">Auto-enriched — company intel updated</div><div class="dp-ac-t">Mar 24</div></div></div>
+        <div class="dp-ac"><div class="dp-ac-d"></div><div class="dp-ac-bd"><div class="dp-ac-w">Auto-scored — <strong>Strong fit</strong> (92/100)</div><div class="dp-ac-t">Mar 23</div></div></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+<script>
+function sel(tr){document.querySelectorAll('tr.r').forEach(r=>r.classList.remove('sel'));tr.classList.add('sel');document.getElementById('dp').classList.add('open');}
+</script>
+</body>
+</html>

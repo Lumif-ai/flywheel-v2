@@ -544,10 +544,15 @@ export interface ContactDetailPanelProps {
 
 export function ContactDetailPanel({ contact, onClose }: ContactDetailPanelProps) {
   const navigate = useNavigate()
-  const { data: activitiesData, isLoading: activitiesLoading } = useContactActivities(
+  const { data: activitiesData, isLoading: activitiesLoading, error: activitiesError } = useContactActivities(
     contact.pipeline_entry_id,
     contact.id,
   )
+  // Debug: log if activities fetch fails
+  useEffect(() => {
+    if (activitiesError) console.error('[ContactDetailPanel] activities fetch error:', activitiesError, { entryId: contact.pipeline_entry_id, contactId: contact.id })
+    if (activitiesData) console.log('[ContactDetailPanel] activities:', activitiesData.items?.length ?? 0, 'items')
+  }, [activitiesError, activitiesData, contact.pipeline_entry_id, contact.id])
   const contactMutation = useContactMutation()
   const activityMutation = useActivityMutation()
 
@@ -716,7 +721,11 @@ export function ContactDetailPanel({ contact, onClose }: ContactDetailPanelProps
           Outreach Sequence
         </h3>
 
-        {activitiesLoading ? (
+        {activitiesError ? (
+          <p style={{ fontSize: '13px', color: '#DC2626', margin: '0 0 16px 0' }}>
+            Failed to load activities: {(activitiesError as Error).message}
+          </p>
+        ) : activitiesLoading ? (
           <div className="flex items-center gap-2" style={{ padding: '8px 0' }}>
             <Loader2
               style={{ width: '14px', height: '14px', color: '#D1D5DB', animation: 'spin 1s linear infinite' }}

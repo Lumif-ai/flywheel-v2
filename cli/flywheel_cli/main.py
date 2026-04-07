@@ -679,15 +679,38 @@ def setup_claude_code() -> None:
 
     # 6. Install CLAUDE.md template (Flywheel-first routing rules)
     console.print("[bold]Installing CLAUDE.md template...[/bold]")
+    claude_md_ok = False
     try:
         if _install_claude_md_template():
             console.print("[green]  Flywheel rules added to ~/.claude/CLAUDE.md[/green]")
         else:
             console.print("[dim]  Flywheel rules already present in ~/.claude/CLAUDE.md[/dim]")
+        claude_md_ok = True
     except Exception as exc:
         console.print(f"[red]  Failed to install CLAUDE.md template:[/red] {exc}")
+        console.print(
+            "[yellow]  ⚠ Claude Code won't know how to route to Flywheel without this.[/yellow]\n"
+            "[yellow]  Run 'flywheel setup-claude-code' again or manually copy the template.[/yellow]"
+        )
 
     # 7. Summary
+    if claude_md_ok:
+        claude_md_status = (
+            "  [bold]CLAUDE.md[/bold] (routing rules)\n"
+            "    - Always check Flywheel context store before answering\n"
+            "    - Save business intelligence to Flywheel automatically\n"
+            "    - Route to Flywheel skills before general Claude\n\n"
+        )
+        panel_title = "Setup Complete"
+        panel_border = "green"
+    else:
+        claude_md_status = (
+            "  [bold red]CLAUDE.md[/bold red] (FAILED — routing rules not installed)\n"
+            "    - Run 'flywheel setup-claude-code' again to retry\n\n"
+        )
+        panel_title = "Setup Incomplete"
+        panel_border = "yellow"
+
     console.print(
         Panel(
             "[bold]MCP servers configured for Claude Code:[/bold]\n\n"
@@ -697,15 +720,12 @@ def setup_claude_code() -> None:
             "    - flywheel_write_context: Store business intelligence\n\n"
             "  [bold]granola[/bold] (HTTP)\n"
             "    - get_meetings: Access meeting transcripts from Granola\n\n"
-            "  [bold]CLAUDE.md[/bold] (routing rules)\n"
-            "    - Always check Flywheel context store before answering\n"
-            "    - Save business intelligence to Flywheel automatically\n"
-            "    - Route to Flywheel skills before general Claude\n\n"
+            + claude_md_status +
             "[dim]Optional: Enable Apollo MCP plugin in Claude Code settings "
             "for lead enrichment tools.[/dim]\n\n"
             "[dim]Restart Claude Code to activate.[/dim]",
-            title="Setup Complete",
-            border_style="green",
+            title=panel_title,
+            border_style=panel_border,
         )
     )
 

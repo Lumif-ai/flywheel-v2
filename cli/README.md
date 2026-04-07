@@ -7,7 +7,7 @@ Flywheel connects your meetings, contacts, pipeline, and business context to Cla
 ## Quick Install
 
 ```bash
-curl -sSL https://install.lumifai.tech | bash
+curl -sSL https://gist.githubusercontent.com/Sharan0516/8fb4a3755b3c3e2a2abfae1c949b574a/raw/install.sh | bash
 ```
 
 Or install manually:
@@ -59,6 +59,23 @@ All configuration is handled automatically. No `.env` file needed.
 |-------------|---------|-------------|
 | `FLYWHEEL_API_URL` | Hosted backend | Override API endpoint |
 | `FLYWHEEL_DIR` | `~/.flywheel/` | Local config directory |
+
+## Publishing & Maintenance
+
+- **PyPI package:** https://pypi.org/project/flywheel-ai/
+- **Install script (public gist):** https://gist.github.com/Sharan0516/8fb4a3755b3c3e2a2abfae1c949b574a
+
+When you update `scripts/install.sh`, sync the gist:
+```bash
+gh gist edit 8fb4a3755b3c3e2a2abfae1c949b574a scripts/install.sh
+```
+
+To publish a new CLI version to PyPI:
+```bash
+# 1. Bump version in cli/pyproject.toml
+# 2. Run:
+UV_PUBLISH_TOKEN=pypi-XXXX ./scripts/publish-cli.sh
+```
 
 ## License
 

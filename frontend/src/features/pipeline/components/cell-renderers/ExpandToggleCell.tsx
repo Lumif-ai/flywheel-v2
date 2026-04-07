@@ -22,7 +22,7 @@ export function ExpandToggleCell(props: ExpandToggleCellProps) {
         props.onToggle?.(data.id)
       }}
     >
-      <Icon size={14} style={{ color: '#9CA3AF' }} />
+      <Icon size={16} style={{ color: '#6B7280' }} />
     </div>
   )
 }

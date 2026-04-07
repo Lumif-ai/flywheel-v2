@@ -12,6 +12,7 @@
 - ✅ **v7.0 Email Voice & Intelligence Overhaul** — Phases 69–75 (shipped 2026-03-30)
 - ✅ **v8.0 Flywheel Platform Architecture — Wave 0** — Phases 76–82 (shipped 2026-04-05)
 - ✅ **v9.0 Unified Pipeline** — Phases 83–90 (shipped 2026-04-06)
+- ✅ **v10.0 Contact Outreach Pipeline** — Phases 91–94 (shipped 2026-04-07)
 
 ## Phases
 
@@ -152,8 +153,8 @@
 
 - [x] **Phase 91: Contacts API** — Backend endpoints for flattened contact list, contact editing, activity editing, and computed next_step field (4 requirements)
 - [x] **Phase 92: Contact Grid** — Person-first AG Grid with contact columns, view toggle, filtering, and sorting (5 requirements)
-- [ ] **Phase 93: Contact Detail Panel** — Outreach sequence editing, action buttons, and step generation (6 requirements)
-- [ ] **Phase 94: MCP Contact Tools** — CLI tools for listing contacts and creating outreach steps (2 requirements)
+- [x] **Phase 93: Contact Detail Panel** — Outreach sequence editing, action buttons, and step generation (6 requirements)
+- [x] **Phase 94: MCP Contact Tools** — CLI tools for listing contacts and creating outreach steps (2 requirements)
 
 ## Phase Details
 
@@ -197,8 +198,8 @@ Plans:
   5. A "Generate Next Step" button creates a placeholder activity (step_number = N+1) for Claude Code to populate via MCP, and the new step appears in the sequence immediately
 **Plans**: 2 plans
 Plans:
-- [ ] 093-01-PLAN.md — Backend contact_id filter + frontend API functions and mutation hooks
-- [ ] 093-02-PLAN.md — ContactDetailPanel component with outreach timeline, inline editing, action buttons, PipelinePage integration
+- [x] 093-01-PLAN.md — Backend contact_id filter + frontend API functions and mutation hooks
+- [x] 093-02-PLAN.md — ContactDetailPanel component with outreach timeline, inline editing, action buttons, PipelinePage integration
 
 ### Phase 94: MCP Contact Tools
 **Goal**: Claude Code can list contacts with outreach status and create new outreach steps directly from the CLI, enabling batch operations like "generate step 2 for all variant A contacts"
@@ -207,7 +208,9 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `flywheel_list_pipeline_contacts` returns a flattened contact list with outreach status, filterable by company, status, channel, and variant — usable by Claude Code for batch selection
   2. `flywheel_create_outreach_step` creates a new activity with the correct step_number for a given contact, including channel, subject, and body — and the new step appears in the contact detail panel
-**Plans**: TBD
+**Plans**: 1 plan
+Plans:
+- [x] 094-01-PLAN.md — flywheel_list_pipeline_contacts + flywheel_create_outreach_step MCP tools
 
 ## Progress
 
@@ -268,8 +271,8 @@ Plans:
 | 90. Retirement Flow | v9.0 | 2/2 | ✓ Complete | 2026-04-06 |
 | 91. Contacts API | v10.0 | 1/1 | ✓ Complete | 2026-04-07 |
 | 92. Contact Grid | v10.0 | 3/3 | ✓ Complete | 2026-04-07 |
-| 93. Contact Detail Panel | v10.0 | 0/2 | Planning complete | — |
-| 94. MCP Contact Tools | v10.0 | 0/TBD | Not started | — |
+| 93. Contact Detail Panel | v10.0 | 2/2 | ✓ Complete | 2026-04-07 |
+| 94. MCP Contact Tools | v10.0 | 1/1 | ✓ Complete | 2026-04-07 |
 
 ---
 *Roadmap created: 2026-03-24*

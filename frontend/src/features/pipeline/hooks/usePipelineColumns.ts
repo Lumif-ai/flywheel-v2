@@ -18,7 +18,10 @@ const columnDefs: ColDef<PipelineListItem>[] = [
   // 0. Expand toggle — pinned left
   {
     headerName: '',
-    width: 36,
+    colId: 'expand',
+    width: 40,
+    minWidth: 40,
+    maxWidth: 40,
     pinned: 'left',
     sortable: false,
     resizable: false,

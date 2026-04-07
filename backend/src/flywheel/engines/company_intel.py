@@ -46,7 +46,7 @@ MAX_FILE_SIZE = 10 * 1024 * 1024  # 10MB
 AGENT_ID = "company-intel"
 
 MAX_LLM_RETRIES = 2
-LLM_TIMEOUT = 30  # seconds
+LLM_TIMEOUT = 120  # seconds – document extraction can process 50-100K+ chars
 
 # Intelligence output keys (shared schema across all tiers)
 INTELLIGENCE_KEYS = [
@@ -538,7 +538,7 @@ def enrich_with_web_research(
         "What we already know from their website:\n%s\n\n"
         "%s"
         "Search for ALL of these:\n"
-        "1. %sLeadership team — CEO, founders, key executives with their titles\n"
+        "1. %sLeadership team — ONLY C-suite (CEO, CTO, CFO, COO, CPO), founders, and VP/SVP-level executives. Do NOT include junior employees, managers, or individual contributors.\n"
         "2. %sCompany size — employee count, offices, global presence\n"
         "3. Funding — investors, rounds, amounts raised\n"
         "4. %sHeadquarters location\n"
@@ -553,8 +553,8 @@ def enrich_with_web_research(
         "- competitors: list of 3-5 competitors\n"
         "- employees: string estimate (e.g. '150+', '~200')\n"
         "- headquarters: string (city, country)\n"
-        "- key_people: list of leaders, each as {name, title, linkedin (real URL or null), "
-        "email_pattern (or null)}\n"
+        "- key_people: list of C-suite/founder/VP+ leaders ONLY, each as {name, title, linkedin (real URL or null), "
+        "email_pattern (or null)}. Exclude anyone below VP level.\n"
         "- funding: string summary (e.g. 'Series B, $50M' or 'Bootstrapped')\n"
         "- recent_news: list of {title, date} objects\n"
         "- tech_stack: list of technologies\n"
