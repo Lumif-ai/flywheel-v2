@@ -11,6 +11,7 @@ import socket
 import subprocess
 import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 import click
@@ -562,7 +563,7 @@ def setup_claude_code() -> None:
     if not mcp_path:
         console.print(
             "[red]flywheel-mcp not found on PATH. "
-            "Install with: uv tool install flywheel-cli[/red]"
+            "Install with: uv tool install flywheel-ai[/red]"
         )
         raise SystemExit(1)
 
@@ -618,7 +619,63 @@ def setup_claude_code() -> None:
             f"--scope user granola --url {granola_url}"
         )
 
-    # 5. Install CLAUDE.md template (Flywheel-first routing rules)
+    # 5. Auto-allow Flywheel MCP tool permissions (non-destructive only)
+    console.print("[bold]Configuring MCP tool permissions...[/bold]")
+    _AUTO_ALLOW_TOOLS = [
+        "mcp__flywheel__flywheel_read_context",
+        "mcp__flywheel__flywheel_write_context",
+        "mcp__flywheel__flywheel_fetch_skills",
+        "mcp__flywheel__flywheel_fetch_skill_prompt",
+        "mcp__flywheel__flywheel_run_skill",
+        "mcp__flywheel__flywheel_fetch_meetings",
+        "mcp__flywheel__flywheel_fetch_upcoming",
+        "mcp__flywheel__flywheel_fetch_tasks",
+        "mcp__flywheel__flywheel_sync_meetings",
+        "mcp__flywheel__flywheel_save_document",
+        "mcp__flywheel__flywheel_save_meeting_summary",
+        "mcp__flywheel__flywheel_update_task",
+        "mcp__flywheel__flywheel_fetch_account",
+        "mcp__flywheel__flywheel_list_leads",
+        "mcp__flywheel__flywheel_upsert_lead",
+        "mcp__flywheel__flywheel_add_lead_contact",
+        "mcp__flywheel__flywheel_draft_lead_message",
+        "mcp__flywheel__flywheel_upsert_pipeline_entry",
+        "mcp__flywheel__flywheel_list_pipeline",
+        "mcp__flywheel__flywheel_fetch_pipeline_entry",
+        "mcp__flywheel__flywheel_add_pipeline_contact",
+        "mcp__flywheel__flywheel_draft_pipeline_message",
+        "mcp__flywheel__flywheel_list_pipeline_contacts",
+        "mcp__flywheel__flywheel_create_outreach_step",
+        "mcp__granola__get_meetings",
+    ]
+    # Destructive tools NOT auto-allowed (require user confirmation):
+    #   flywheel_send_lead_message, flywheel_send_pipeline_message,
+    #   flywheel_graduate_lead
+    try:
+        settings_path = Path.home() / ".claude" / "settings.json"
+        settings_path.parent.mkdir(parents=True, exist_ok=True)
+        if settings_path.exists():
+            settings = json.loads(settings_path.read_text())
+        else:
+            settings = {}
+
+        allow_list = settings.setdefault("permissions", {}).setdefault("allow", [])
+        added = 0
+        for tool in _AUTO_ALLOW_TOOLS:
+            if tool not in allow_list:
+                allow_list.append(tool)
+                added += 1
+
+        settings_path.write_text(json.dumps(settings, indent=2) + "\n")
+        if added:
+            console.print(f"[green]  Auto-allowed {added} Flywheel MCP tools[/green]")
+            console.print("[dim]  Destructive actions (send message, graduate) still require approval[/dim]")
+        else:
+            console.print("[dim]  All Flywheel MCP tools already allowed[/dim]")
+    except Exception as exc:
+        console.print(f"[red]  Failed to configure permissions:[/red] {exc}")
+
+    # 6. Install CLAUDE.md template (Flywheel-first routing rules)
     console.print("[bold]Installing CLAUDE.md template...[/bold]")
     try:
         if _install_claude_md_template():
@@ -628,7 +685,7 @@ def setup_claude_code() -> None:
     except Exception as exc:
         console.print(f"[red]  Failed to install CLAUDE.md template:[/red] {exc}")
 
-    # 6. Summary
+    # 7. Summary
     console.print(
         Panel(
             "[bold]MCP servers configured for Claude Code:[/bold]\n\n"
@@ -649,6 +706,41 @@ def setup_claude_code() -> None:
             border_style="green",
         )
     )
+
+
+# ---------------------------------------------------------------------------
+# Upgrade
+# ---------------------------------------------------------------------------
+
+
+@cli.command()
+def upgrade() -> None:
+    """Upgrade Flywheel CLI to the latest version."""
+    console.print("[bold]Upgrading flywheel-ai...[/bold]")
+    result = subprocess.run(
+        ["uv", "tool", "upgrade", "flywheel-ai"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        console.print(f"[green]{result.stdout.strip() or 'flywheel-ai upgraded'}[/green]")
+        console.print("[dim]Restart Claude Code to pick up changes.[/dim]")
+    else:
+        # Fallback to pip if uv not available
+        result2 = subprocess.run(
+            ["pip", "install", "--upgrade", "flywheel-ai"],
+            capture_output=True,
+            text=True,
+        )
+        if result2.returncode == 0:
+            console.print("[green]flywheel-ai upgraded via pip[/green]")
+        else:
+            console.print(f"[red]Upgrade failed:[/red]\n{result.stderr or result2.stderr}")
+            console.print(
+                "\n[yellow]Try manually:[/yellow]\n"
+                "  uv tool upgrade flywheel-ai\n"
+                "  # or: pip install --upgrade flywheel-ai"
+            )
 
 
 # ---------------------------------------------------------------------------

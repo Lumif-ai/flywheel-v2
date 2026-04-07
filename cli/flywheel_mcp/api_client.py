@@ -26,8 +26,9 @@ class FlywheelClient:
     def __init__(self) -> None:
         self._token = get_token()
         self._api_url = get_api_url()
+        # Frontend is hosted at the same origin as the API
         self.frontend_url = os.environ.get(
-            "FLYWHEEL_FRONTEND_URL", "http://localhost:5173"
+            "FLYWHEEL_FRONTEND_URL", self._api_url
         )
         self._client = httpx.Client(
             base_url=self._api_url,

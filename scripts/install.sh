@@ -3,17 +3,18 @@
 # Flywheel Installer — one-liner setup for a fresh Mac
 #
 # Usage:
-#   curl -sSL https://raw.githubusercontent.com/Sharan0516/flywheel-v2/main/scripts/install.sh | bash
+#   curl -sSL https://gist.githubusercontent.com/Sharan0516/8fb4a3755b3c3e2a2abfae1c949b574a/raw/install.sh | bash
 #
 # What it does:
 #   1. Checks/installs Homebrew
 #   2. Checks/installs Python 3.10+ (via brew)
 #   3. Checks/installs uv (Python package manager)
-#   4. Installs flywheel-cli (flywheel + flywheel-mcp commands)
+#   4. Installs flywheel-ai from PyPI (flywheel + flywheel-mcp commands)
 #   5. Installs Playwright Chromium (for browser agent)
-#   6. Checks for Claude Code CLI
-#   7. Registers MCP servers: flywheel (stdio) + granola (HTTP)
-#   8. Runs flywheel login (Google OAuth)
+#   6. Checks/installs Node.js (needed for Claude Code)
+#   7. Checks/installs Claude Code CLI
+#   8. Runs flywheel setup-claude-code (MCP servers + CLAUDE.md + permissions)
+#   9. Runs flywheel login (Google OAuth)
 # -----------------------------------------------------------------------
 
 set -euo pipefail
@@ -34,7 +35,6 @@ step()    { echo -e "\n${BOLD}==> $*${NC}"; }
 
 # -- Config --------------------------------------------------------------
 PYPI_PACKAGE="flywheel-ai"
-GRANOLA_MCP_URL="https://mcp.granola.ai/mcp"
 MIN_PYTHON_MAJOR=3
 MIN_PYTHON_MINOR=10
 
@@ -93,14 +93,13 @@ else
         brew install uv
     else
         curl -LsSf https://astral.sh/uv/install.sh | sh
-        # Add to PATH
         export PATH="$HOME/.local/bin:$PATH"
     fi
     success "uv installed: $(uv --version)"
 fi
 
 # ========================================================================
-# Step 4: Install flywheel-cli
+# Step 4: Install flywheel-ai from PyPI
 # ========================================================================
 step "Installing Flywheel CLI"
 
@@ -111,84 +110,94 @@ uv tool uninstall flywheel-cli 2>/dev/null || true  # legacy name
 info "Installing $PYPI_PACKAGE from PyPI ..."
 uv tool install "$PYPI_PACKAGE"
 
-# Verify
-if command -v flywheel &>/dev/null; then
-    success "flywheel CLI installed: $(which flywheel)"
-else
-    # uv tool bin may not be on PATH yet
-    UV_TOOL_BIN="$HOME/.local/bin"
+# Ensure uv tool bin is on PATH
+UV_TOOL_BIN="$HOME/.local/bin"
+if ! command -v flywheel &>/dev/null; then
     if [[ -f "$UV_TOOL_BIN/flywheel" ]]; then
         export PATH="$UV_TOOL_BIN:$PATH"
-        warn "Added $UV_TOOL_BIN to PATH. Add this to your shell profile:"
-        echo -e "  ${BOLD}export PATH=\"\$HOME/.local/bin:\$PATH\"${NC}"
-        success "flywheel CLI installed: $UV_TOOL_BIN/flywheel"
+        warn "Added $UV_TOOL_BIN to PATH (add to your shell profile for permanence)"
     else
         fail "flywheel command not found after install. Check uv tool install output above."
     fi
 fi
+success "flywheel CLI installed: $(which flywheel)"
 
-if command -v flywheel-mcp &>/dev/null; then
-    success "flywheel-mcp installed: $(which flywheel-mcp)"
-else
+if ! command -v flywheel-mcp &>/dev/null; then
     fail "flywheel-mcp command not found after install."
 fi
+success "flywheel-mcp installed: $(which flywheel-mcp)"
 
 # ========================================================================
-# Step 5: Playwright Chromium
+# Step 5: Playwright Chromium (for browser agent)
 # ========================================================================
 step "Installing Playwright Chromium (for browser agent)"
 
-flywheel agent setup 2>/dev/null || {
-    info "Fallback: running playwright install chromium directly..."
-    uv run playwright install chromium 2>/dev/null || warn "Playwright install failed — browser agent may not work. You can retry: flywheel agent setup"
-}
-success "Playwright Chromium ready"
+# Playwright is inside the uv tool venv — find it there
+FLYWHEEL_VENV="$(dirname "$(which flywheel)")/../lib/python*/site-packages"
+PLAYWRIGHT_BIN="$(dirname "$(which flywheel)")/../lib/python*/site-packages/playwright"
+
+# Use the flywheel tool's python to run playwright install
+FLYWHEEL_PYTHON="$(dirname "$(which flywheel)")/python3"
+if [[ -f "$FLYWHEEL_PYTHON" ]]; then
+    "$FLYWHEEL_PYTHON" -m playwright install chromium 2>/dev/null && \
+        success "Playwright Chromium ready" || \
+        warn "Playwright install failed — browser agent may not work. Retry: flywheel agent setup"
+else
+    # Fallback: try via uv tool run
+    uv tool run --from flywheel-ai playwright install chromium 2>/dev/null && \
+        success "Playwright Chromium ready" || \
+        warn "Playwright install failed — browser agent may not work. Retry: flywheel agent setup"
+fi
 
 # ========================================================================
-# Step 6: Claude Code CLI
+# Step 6: Node.js (needed for Claude Code)
+# ========================================================================
+step "Checking Node.js"
+
+if command -v node &>/dev/null; then
+    success "Node.js found: $(node --version)"
+else
+    info "Installing Node.js via Homebrew..."
+    brew install node
+    success "Node.js installed: $(node --version)"
+fi
+
+# ========================================================================
+# Step 7: Claude Code CLI
 # ========================================================================
 step "Checking Claude Code CLI"
 
 if command -v claude &>/dev/null; then
     success "Claude Code found: $(which claude)"
 else
-    warn "Claude Code CLI not found."
-    echo -e "  Install it from: ${BOLD}https://claude.ai/download${NC}"
-    echo -e "  Or via npm:      ${BOLD}npm install -g @anthropic-ai/claude-code${NC}"
-    echo ""
-    echo -e "  After installing Claude Code, run: ${BOLD}flywheel setup-claude-code${NC}"
-    echo -e "  to register MCP servers."
-    echo ""
-    # Don't exit — CLI is still usable without Claude Code
+    info "Installing Claude Code CLI..."
+    npm install -g @anthropic-ai/claude-code 2>/dev/null && \
+        success "Claude Code installed: $(which claude)" || {
+        warn "Claude Code auto-install failed."
+        echo -e "  Install manually from: ${BOLD}https://claude.ai/download${NC}"
+        echo -e "  Or via npm:            ${BOLD}npm install -g @anthropic-ai/claude-code${NC}"
+        echo ""
+        echo -e "  After installing, run: ${BOLD}flywheel setup-claude-code${NC}"
+    }
 fi
 
 # ========================================================================
-# Step 7: Register MCP servers (only if Claude Code is available)
+# Step 8: Setup Claude Code (MCP servers + CLAUDE.md + permissions)
 # ========================================================================
 if command -v claude &>/dev/null; then
-    step "Registering MCP servers with Claude Code"
-
-    # 7a. Flywheel MCP (stdio)
-    MCP_PATH=$(which flywheel-mcp)
-    info "Registering flywheel MCP (stdio) ..."
-    claude mcp add --transport stdio --scope user flywheel -- "$MCP_PATH" 2>/dev/null && \
-        success "Flywheel MCP registered" || \
-        warn "Flywheel MCP registration failed — run manually: claude mcp add --transport stdio --scope user flywheel -- $MCP_PATH"
-
-    # 7b. Granola MCP (HTTP)
-    info "Registering Granola MCP (HTTP) ..."
-    claude mcp add --transport http --scope user granola --url "$GRANOLA_MCP_URL" 2>/dev/null && \
-        success "Granola MCP registered" || \
-        warn "Granola MCP registration failed — run manually: claude mcp add --transport http --scope user granola --url $GRANOLA_MCP_URL"
+    step "Setting up Claude Code integration"
+    flywheel setup-claude-code || {
+        warn "Claude Code setup had issues. Run manually: flywheel setup-claude-code"
+    }
 fi
 
 # ========================================================================
-# Step 8: Create ~/.flywheel directory
+# Step 9: Create ~/.flywheel directory
 # ========================================================================
 mkdir -p "$HOME/.flywheel"
 
 # ========================================================================
-# Step 9: Login
+# Step 10: Login
 # ========================================================================
 step "Logging in to Flywheel"
 
@@ -209,11 +218,13 @@ echo -e "  ${BOLD}Commands available:${NC}"
 echo -e "    flywheel status        Check login & tenant info"
 echo -e "    flywheel focus list    List your focuses"
 echo -e "    flywheel agent start   Start browser agent"
+echo -e "    flywheel upgrade       Update to latest version"
 echo ""
 if command -v claude &>/dev/null; then
-    echo -e "  ${BOLD}MCP servers registered:${NC}"
-    echo -e "    flywheel    Your business intelligence tools"
-    echo -e "    granola     Meeting transcripts from Granola"
+    echo -e "  ${BOLD}Claude Code integration:${NC}"
+    echo -e "    MCP servers: flywheel (business intel) + granola (meetings)"
+    echo -e "    CLAUDE.md:   Flywheel-first routing rules installed"
+    echo -e "    Permissions: Read/write auto-allowed, destructive actions ask first"
     echo ""
     echo -e "  ${BOLD}Optional:${NC} Enable Apollo MCP plugin in Claude Code settings"
     echo -e "  for lead enrichment tools."
