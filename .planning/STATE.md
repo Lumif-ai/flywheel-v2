@@ -2,20 +2,20 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-07)
+See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v10.0 Contact Outreach Pipeline — Phase 94 (MCP Contact Tools)
+**Current focus:** v11.0 Briefing Page Redesign — Phase 96: Backend API Foundation
 
 ## Current Position
 
-Milestone: v10.0 Contact Outreach Pipeline
-Phase: 94 of 94 (MCP Contact Tools) -- COMPLETE
-Plan: 1 of 1 (done)
-Status: Phase 94 complete -- v10.0 Contact Outreach Pipeline milestone finished
-Last activity: 2026-04-07 — Phase 94 executed (MCP contact listing + outreach step tools)
+Milestone: v11.0 Briefing Page Redesign
+Phase: 96 of 100 (Backend API Foundation)
+Plan: 1 of 2
+Status: Executing
+Last activity: 2026-04-08 — Plan 01 complete (BriefingV2 endpoint + today section)
 
-Progress: [██████████] 100%
+Progress: [█░░░░░░░░░] 10%
 
 ## Performance Metrics
 
@@ -30,6 +30,7 @@ Progress: [██████████] 100%
 - v7.0: 7 phases, 13 plans
 - v8.0: 7 phases, 14 plans
 - v9.0: 8 phases, 25 plans
+- v10.0: 5 phases, 7 plans
 
 ## Accumulated Context
 
@@ -55,6 +56,17 @@ v10.0 design decisions:
 - EditableField: click-to-edit with blur-save, pencil icon on hover
 - Action buttons contextual to status: Approve for drafted, Skip for drafted/approved, Mark Replied for sent
 - MCP outreach tools are ID-based (not name-based) for batch workflows: list returns IDs, create accepts IDs
+- Skill protection: fail-closed boolean (protected=true default), frontmatter public flag inverted to protected in DB
+
+v11.0 design decisions:
+- /briefing/v2 is a new endpoint (not a breaking change to existing /briefing) — old endpoint stays until cleanup phase
+- Narrative summary generated server-side via LLM (not streamed) to keep Phase 96 self-contained
+- Chat panel navigates to /chat on submit (inline streaming deferred to future CHAT-F01)
+- Phase 98 and Phase 99 are independently shippable from the same shell — parallel execution possible
+- Cold start detection is client-side (all sections empty = show card), not a separate API flag
+- Reused existing briefing router with /v2 sub-path (not a separate router)
+- Company resolution: joinedload on pipeline_entry and account to avoid N+1
+- prep_status derived from skill_run_id OR ai_summary presence
 
 ### Pending Todos
 
@@ -65,14 +77,13 @@ v10.0 design decisions:
 
 None active.
 
-### Quick Tasks Completed
+### Roadmap Evolution
 
-| # | Description | Date | Commit | Directory |
-|---|-------------|------|--------|-----------|
-| 3 | Pipeline grid UX: merge Name+Domain, outreach status column, expandable detail rows | 2026-04-07 | 26428ae | [3-pipeline-grid-ux-fixes](./quick/3-pipeline-grid-ux-fixes-merge-name-domain/) |
+- Phase 95 added: Skill IP Protection
+- v11.0 roadmap created: Phases 96–100
 
 ## Session Continuity
 
-Last session: 2026-04-07
-Stopped at: Completed 094-01-PLAN.md (MCP contact tools) -- milestone v10.0 complete
+Last session: 2026-04-08
+Stopped at: Completed 096-01-PLAN.md (BriefingV2 endpoint foundation)
 Resume file: None
