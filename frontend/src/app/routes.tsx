@@ -13,6 +13,9 @@ function RelationshipRedirect() {
 const BriefingPage = lazy(() =>
   import('@/features/briefing/components/BriefingPage').then((m) => ({ default: m.BriefingPage }))
 )
+const BriefingPageV2 = lazy(() =>
+  import('@/features/briefing/components/BriefingPageV2').then((m) => ({ default: m.BriefingPageV2 }))
+)
 const BriefingFullViewer = lazy(() =>
   import('@/features/briefing/components/BriefingFullViewer').then((m) => ({ default: m.BriefingFullViewer }))
 )
@@ -80,6 +83,12 @@ const TasksPage = lazy(() =>
 )
 
 // Lazy-loaded public pages (infrequently accessed)
+const LoginPage = lazy(() =>
+  import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage }))
+)
+const LandingPage = lazy(() =>
+  import('@/pages/LandingPage').then((m) => ({ default: m.LandingPage }))
+)
 const TermsPage = lazy(() =>
   import('@/pages/TermsPage').then((m) => ({ default: m.TermsPage }))
 )
@@ -91,6 +100,7 @@ const SpinnerPreview = lazy(() =>
 )
 
 export function AppRoutes() {
+  const briefingV2Enabled = useFeatureFlag('briefing_v2')
   const emailEnabled = useFeatureFlag('email')
   const tasksEnabled = useFeatureFlag('tasks')
   const pipelineEnabled = useFeatureFlag('pipeline')
@@ -99,12 +109,12 @@ export function AppRoutes() {
   return (
     <Routes>
       {/* Primary routes — all lazy-loaded */}
-      <Route path="/" element={<Suspense fallback={null}><BriefingPage /></Suspense>} />
+      <Route path="/" element={<Suspense fallback={null}>{briefingV2Enabled ? <BriefingPageV2 /> : <BriefingPage />}</Suspense>} />
       <Route path="/streams/:id" element={<Suspense fallback={null}><StreamDetailPage /></Suspense>} />
       <Route path="/chat" element={<Suspense fallback={null}><ActPage /></Suspense>} />
       {emailEnabled && <Route path="/email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />}
       {!emailEnabled && <Route path="/email" element={<Navigate to="/" replace />} />}
-      <Route path="/settings" element={<Suspense fallback={null}><SettingsPage /></Suspense>} />
+      <Route path="/settings/*" element={<Suspense fallback={null}><SettingsPage /></Suspense>} />
       <Route path="/briefing/:runId" element={<Suspense fallback={null}><BriefingFullViewer /></Suspense>} />
       <Route path="/onboarding" element={<Suspense fallback={null}><OnboardingPage /></Suspense>} />
       <Route path="/auth/callback" element={<AuthCallback />} />
@@ -132,6 +142,8 @@ export function AppRoutes() {
       <Route path="/accounts/:id" element={<Navigate to="/pipeline" replace />} />
       <Route path="/documents" element={<Suspense fallback={null}><DocumentLibrary /></Suspense>} />
       <Route path="/documents/:id" element={<Suspense fallback={null}><DocumentViewer /></Suspense>} />
+      <Route path="/login" element={<Suspense fallback={null}><LoginPage /></Suspense>} />
+      <Route path="/landing" element={<Suspense fallback={null}><LandingPage /></Suspense>} />
       <Route path="/terms" element={<Suspense fallback={null}><TermsPage /></Suspense>} />
       <Route path="/privacy" element={<Suspense fallback={null}><PrivacyPage /></Suspense>} />
 
