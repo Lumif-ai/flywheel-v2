@@ -13,6 +13,7 @@
 - ✅ **v8.0 Flywheel Platform Architecture — Wave 0** — Phases 76–82 (shipped 2026-04-05)
 - ✅ **v9.0 Unified Pipeline** — Phases 83–90 (shipped 2026-04-06)
 - ✅ **v10.0 Contact Outreach Pipeline** — Phases 91–94 (shipped 2026-04-07)
+- 🚧 **v11.0 Briefing Page Redesign** — Phases 96–100 (in progress)
 
 ## Phases
 
@@ -147,14 +148,28 @@
 
 ---
 
-### v10.0 Contact Outreach Pipeline
+<details>
+<summary>✅ v10.0 Contact Outreach Pipeline (Phases 91–95) — SHIPPED 2026-04-07</summary>
 
-**Milestone Goal:** Person-first pipeline grid as the default view, with a contact detail panel showing editable outreach sequences (email + LinkedIn), AI-computed next steps, and company as a secondary toggle — turning the CRM into an outreach command center.
+- [x] Phase 91: Contacts API (1/1 plan)
+- [x] Phase 92: Contact Grid (3/3 plans)
+- [x] Phase 93: Contact Detail Panel (2/2 plans)
+- [x] Phase 94: MCP Contact Tools (1/1 plan)
+- [x] Phase 95: Skill IP Protection (2/2 plans)
 
-- [x] **Phase 91: Contacts API** — Backend endpoints for flattened contact list, contact editing, activity editing, and computed next_step field (4 requirements)
-- [x] **Phase 92: Contact Grid** — Person-first AG Grid with contact columns, view toggle, filtering, and sorting (5 requirements)
-- [x] **Phase 93: Contact Detail Panel** — Outreach sequence editing, action buttons, and step generation (6 requirements)
-- [x] **Phase 94: MCP Contact Tools** — CLI tools for listing contacts and creating outreach steps (2 requirements)
+</details>
+
+---
+
+### v11.0 Briefing Page Redesign
+
+**Milestone Goal:** When a founder opens Flywheel at 8am, they see a morning standup view — a narrative brief, today's meetings and tasks, attention items requiring replies, AI team activity since last visit — with a persistent chat panel always one message away.
+
+- [x] **Phase 96: Backend API Foundation** — New /briefing/v2 endpoint with all five sections, last-visit tracking, graceful degradation (7 requirements)
+- [x] **Phase 97: Page Shell, Layout, Daily Brief, and Chat Panel** — Two-column shell, branded layout, narrative brief display, persistent chat panel (12 requirements)
+- [ ] **Phase 98: Today and Tasks Sections** — Meeting cards with prep button, tasks due today with quick-add and completion (10 requirements)
+- [ ] **Phase 99: Needs Attention and Team Activity Sections** — Attention feed with one-click actions, grouped AI team activity feed (10 requirements)
+- [ ] **Phase 100: Cold Start and Cleanup** — Consolidated get-started card, remove legacy briefing components (10 requirements)
 
 ## Phase Details
 
@@ -219,12 +234,89 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 95-01-PLAN.md — Data layer: protected column on skill_definitions, seed pipeline frontmatter parsing, Alembic migration
-- [ ] 95-02-PLAN.md — Security layer: prompt endpoint gating with orchestrator stub, access logging, rate limiting, anti-extraction prefix, error sanitization
+- [x] 95-01-PLAN.md — Data layer: protected column on skill_definitions, seed pipeline frontmatter parsing, Alembic migration
+- [x] 95-02-PLAN.md — Security layer: prompt endpoint gating with orchestrator stub, access logging, rate limiting, anti-extraction prefix, error sanitization
+
+### Phase 96: Backend API Foundation
+**Goal**: The backend serves a unified /briefing/v2 endpoint that assembles all five morning standup sections — narrative summary, today, attention items, team activity, and tasks — with per-user last-visit tracking and section-level graceful degradation
+**Depends on**: Phase 95 (last shipped phase)
+**Requirements**: API-01, API-02, API-03, API-04, API-05, API-06, API-07
+**Success Criteria** (what must be TRUE):
+  1. `GET /briefing/v2` returns a JSON response with five top-level keys: `narrative_summary` (string), `today` (meetings array + tasks array), `attention_items` (replies, follow-ups, drafts arrays), `team_activity` (grouped items array), `tasks_today` (array) — all within a single authenticated request
+  2. The narrative_summary is a 2-3 sentence LLM-generated string that references real data from the user's calendar events, pipeline signals, and skill run history — not a static template
+  3. Each section returns an empty array (not an HTTP error) when its data source is unavailable: today.meetings is `[]` when no calendar is connected, attention_items.replies is `[]` when no pipeline entries exist
+  4. `GET /briefing/v2` updates the `last_briefing_visit` timestamp on the calling user's profiles row, and the team_activity section only returns items created after that previous timestamp
+  5. The team_activity section groups skill runs, context writes, and document creates by type with counts (e.g., `{type: "skill_runs", count: 3, items: [...]}`) rather than a flat list
+**Plans**: 2 plans
+
+Plans:
+- [x] 096-01-PLAN.md — BriefingV2Response schema, /briefing/v2 router, last-visit tracking on profiles, section assembler skeleton
+- [x] 096-02-PLAN.md — Narrative summary LLM generation, attention items query (replies/follow-ups/drafts), team activity aggregation query
+
+### Phase 97: Page Shell, Layout, Daily Brief, and Chat Panel
+**Goal**: A founder navigates to /briefing and sees the new two-column morning standup layout — branded with Lumif.ai design tokens, narrative brief at top, persistent chat panel on the right — ready to hold the remaining sections
+**Depends on**: Phase 96 (briefing/v2 endpoint must exist to drive the page)
+**Requirements**: LAY-01, LAY-02, LAY-03, LAY-04, BRIEF-01, BRIEF-02, BRIEF-03, CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05
+**Success Criteria** (what must be TRUE):
+  1. The briefing page renders a two-column layout: left content column (~65% width) and right chat panel (~35% width); the chat panel remains fixed while the left column scrolls independently
+  2. The page applies Lumif.ai design tokens throughout — coral accent (#E94D35) for highlights, Inter font, correct heading and body text colors, 12px card radius — matching the brand design system
+  3. The Daily Brief section displays the LLM-generated narrative at the top of the left column in a warm, readable style, updating automatically on each page load with a skeleton loading state while the API call is in flight
+  4. The chat panel shows a "Your team" header, a message input placeholder "Ask your team anything...", and on submit navigates to /chat with the message pre-filled
+  5. New users see 2-3 suggested question chips in the chat panel based on what data is available (e.g., "What happened in my last meeting?" when skill runs exist)
+**Plans**: 2 plans
+
+Plans:
+- [x] 097-01-PLAN.md — BriefingPageV2 route + two-column layout shell + design token application + useBriefingV2 hook
+- [x] 097-02-PLAN.md — DailyBriefSection component (narrative display, skeleton state) + ChatPanelV2 component (header, input, suggested questions, navigate-on-submit)
+
+### Phase 98: Today and Tasks Sections
+**Goal**: A founder can see all meetings scheduled for today with one-click prep access and all tasks due today with the ability to check them off or add new ones — the complete "what do I do today" answer
+**Depends on**: Phase 97 (page shell must exist to mount sections into)
+**Requirements**: TODAY-01, TODAY-02, TODAY-03, TODAY-04, TASK-01, TASK-02, TASK-03, TASK-04, TASK-05, TASK-06
+**Success Criteria** (what must be TRUE):
+  1. The Today section shows meeting cards with attendee names, company, and time; each card has a "Prep" button that either opens the existing meeting briefing document or triggers the meeting-prep skill
+  2. Tasks due today appear below meetings as a checklist showing title, due date (if set), and a source badge (manual / from meeting / from email)
+  3. Checking a task checkbox marks it complete immediately (optimistic UI) and persists the update via the tasks API
+  4. A quick-add input at the top of the Tasks section lets the founder type a task title and press Enter to create it — the new task appears in the list instantly
+  5. When no meetings are scheduled, the Today section shows "No meetings today. Connect your calendar to see upcoming calls." with a link to /settings/integrations
+**Plans**: 2 plans
+
+Plans:
+- [ ] 098-01-PLAN.md — TodaySection component (meeting cards, prep button, empty state)
+- [ ] 098-02-PLAN.md — TasksSection component (quick-add input, task checklist, source badges, optimistic completion, empty state)
+
+### Phase 99: Needs Attention and Team Activity Sections
+**Goal**: A founder sees everything that needs their direct response — replies received, overdue follow-ups, drafts to approve — and a grouped feed of what their AI team accomplished since last visit, making the briefing page a complete async catch-up
+**Depends on**: Phase 97 (page shell must exist; Phase 98 can run in parallel)
+**Requirements**: ATTN-01, ATTN-02, ATTN-03, ATTN-04, ATTN-05, TEAM-01, TEAM-02, TEAM-03, TEAM-04, TEAM-05
+**Success Criteria** (what must be TRUE):
+  1. The Needs Attention section shows three item types — replies received (contact name, company, message preview, link), follow-ups overdue >3 days (with suggested bump action), and drafts awaiting review (with link to review) — each in a visually distinct row
+  2. Every attention item has a one-click action button (open, follow up, approve, or dismiss) that either navigates to the relevant record or updates its status via API
+  3. The Team Activity section shows a reverse-chronological grouped feed covering the last 24-48 hours: groups like "Processed 3 meetings", "Scored 12 leads", "Drafted 5 messages" with expand/collapse to see individual items and links to outputs
+  4. When no attention items exist, the section shows "Nothing needs your attention right now." — not an error or empty container
+  5. When no team activity exists, the section shows "Your team is standing by. Try asking something in the chat." — not an empty container
+**Plans**: 2 plans
+
+Plans:
+- [ ] 099-01-PLAN.md — NeedsAttentionSection component (replies, follow-ups, drafts rows, action buttons, empty state) + TeamActivitySection component (grouped feed, expand/collapse, item links, empty state)
+
+### Phase 100: Cold Start and Cleanup
+**Goal**: New users without any connected data see a single welcoming "Get Started" card instead of four empty states, and the briefing page no longer renders any legacy components — leaving a clean, coherent codebase
+**Depends on**: Phases 97, 98, 99 (all sections must exist before cold-start detection can evaluate them)
+**Requirements**: COLD-01, COLD-02, COLD-03, COLD-04, CLN-01, CLN-02, CLN-03, CLN-04, CLN-05, CLN-06
+**Success Criteria** (what must be TRUE):
+  1. When a user has no calendar connected, zero skill runs, and zero tasks, the briefing page renders a single "Get Started" card offering three paths: connect calendar, run meeting-processor, and ask team in chat — instead of four separate empty states
+  2. As soon as any section has data (calendar event, skill run, or task), the page switches automatically to the full section layout with per-section empty states for any still-empty sections
+  3. The briefing page no longer imports or renders KnowledgeHealthBar, NudgeCard, CalendarNudge, MeetingClassificationCard, focus areas grid, or PulseSignals standalone component
+  4. The separate first-visit layout branch is removed — all users (new and returning) see the same briefing page structure, differentiated only by the cold-start card vs. section layout
+**Plans**: 2 plans
+
+Plans:
+- [ ] 100-01-PLAN.md — ColdStartCard component (detection logic, three-path card) + removal of all six legacy briefing components + first-visit layout unification
 
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75 → 76 → 77 → 78 → 79 → 80 → 81 → 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75 → 76 → 77 → 78 → 79 → 80 → 81 → 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96 → 97 → 98 → 99 → 100
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -283,6 +375,12 @@ Plans:
 | 92. Contact Grid | v10.0 | 3/3 | ✓ Complete | 2026-04-07 |
 | 93. Contact Detail Panel | v10.0 | 2/2 | ✓ Complete | 2026-04-07 |
 | 94. MCP Contact Tools | v10.0 | 1/1 | ✓ Complete | 2026-04-07 |
+| 95. Skill IP Protection | v10.0 | 2/2 | ✓ Complete | 2026-04-08 |
+| 96. Backend API Foundation | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
+| 97. Page Shell, Layout, Daily Brief, and Chat Panel | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
+| 98. Today and Tasks Sections | v11.0 | 0/2 | Not started | — |
+| 99. Needs Attention and Team Activity Sections | v11.0 | 0/TBD | Not started | — |
+| 100. Cold Start and Cleanup | v11.0 | 0/TBD | Not started | — |
 
 ---
 *Roadmap created: 2026-03-24*
@@ -298,3 +396,4 @@ Plans:
 *v8.0 milestone added: 2026-03-31 — Flywheel Platform Architecture Wave 0 (6 phases, 24 requirements)*
 *v9.0 milestone added: 2026-04-06 — Unified Pipeline (8 phases, 71 requirements)*
 *v10.0 milestone added: 2026-04-07 — Contact Outreach Pipeline (4 phases, 17 requirements)*
+*v11.0 milestone added: 2026-04-08 — Briefing Page Redesign (5 phases, 49 requirements)*
