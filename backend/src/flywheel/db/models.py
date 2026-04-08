@@ -82,6 +82,9 @@ class Profile(Base):
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+    last_briefing_visit: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
 
 
 class Company(Base):

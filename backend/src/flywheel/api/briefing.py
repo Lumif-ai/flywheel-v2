@@ -26,6 +26,7 @@ from flywheel.db.models import (
     WorkStream,
 )
 from flywheel.services.briefing import assemble_briefing
+from flywheel.services.briefing_v2 import assemble_briefing_v2
 from flywheel.services.meeting_classifier import (
     get_domain_rules,
     record_classification,
@@ -152,6 +153,85 @@ class NudgeResearchRequest(BaseModel):
 class NudgeResearchResponse(BaseModel):
     triggered: bool
     work_item_id: str
+
+
+# ---------------------------------------------------------------------------
+# Briefing V2 Pydantic models
+# ---------------------------------------------------------------------------
+
+
+class MeetingItem(BaseModel):
+    id: str
+    title: str | None = None
+    time: str  # ISO datetime
+    attendees: list[dict] | None = None
+    company: str | None = None
+    # Derivation: "available" if the meeting has a skill_run_id (prep ran)
+    # or ai_summary (briefing exists), else "none"
+    prep_status: str | None = None  # "available" | "none"
+
+
+class TaskItem(BaseModel):
+    id: str
+    title: str
+    due_date: str | None = None
+    source: str  # "manual" | "meeting" | "email"
+    status: str
+
+
+class AttentionItem(BaseModel):
+    id: str
+    type: str  # "reply" | "follow_up" | "draft"
+    title: str
+    preview: str | None = None
+    contact_name: str | None = None
+    company_name: str | None = None
+    days_overdue: int | None = None
+    link: str | None = None
+
+
+class TeamActivityGroup(BaseModel):
+    type: str  # "skill_runs" | "context_writes" | "documents"
+    count: int
+    items: list[dict]
+
+
+class TodaySection(BaseModel):
+    meetings: list[MeetingItem] = []
+    tasks: list[TaskItem] = []
+
+
+class AttentionSection(BaseModel):
+    replies: list[AttentionItem] = []
+    follow_ups: list[AttentionItem] = []
+    drafts: list[AttentionItem] = []
+
+
+class BriefingV2Response(BaseModel):
+    narrative_summary: str
+    today: TodaySection
+    attention_items: AttentionSection
+    team_activity: list[TeamActivityGroup] = []
+    # tasks_today is a CONVENIENCE COPY of today.tasks at the top level.
+    # Both contain identical data. This duplication is intentional per API-01
+    # so consumers can access tasks either via today.tasks (contextual) or
+    # tasks_today (flat shortcut) without extra navigation.
+    tasks_today: list[TaskItem] = []
+
+
+# ---------------------------------------------------------------------------
+# GET /briefing/v2
+# ---------------------------------------------------------------------------
+
+
+@router.get("/v2", response_model=BriefingV2Response)
+async def get_briefing_v2(
+    token: TokenPayload = Depends(require_tenant),
+    session: AsyncSession = Depends(get_tenant_db),
+):
+    """Morning standup briefing -- unified five-section response."""
+    result = await assemble_briefing_v2(session, token.sub, token.tenant_id)
+    return result
 
 
 # ---------------------------------------------------------------------------
