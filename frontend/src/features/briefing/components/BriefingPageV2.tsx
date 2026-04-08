@@ -1,4 +1,6 @@
 import { useBriefingV2 } from '@/features/briefing/hooks/useBriefingV2'
+import { DailyBriefSection } from '@/features/briefing/components/DailyBriefSection'
+import { ChatPanelV2 } from '@/features/briefing/components/ChatPanelV2'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 
 /**
@@ -51,33 +53,11 @@ export function BriefingPageV2() {
             {greeting}
           </h1>
 
-          {/* Narrative summary placeholder — DailyBriefSection mounts here in Plan 02 */}
-          {isLoading && (
-            <p style={{ color: colors.secondaryText, fontSize: typography.body.size }}>
-              Loading your briefing...
-            </p>
-          )}
+          {/* Daily Brief narrative section */}
+          <DailyBriefSection narrative={data?.narrative_summary} isLoading={isLoading} />
 
-          {/* Section slots for Plans 02 and Phases 98-99:
-              - DailyBriefSection (narrative summary)
-              - TodaySection (meetings + tasks)
-              - AttentionSection (replies, follow-ups, drafts)
-              - TasksSection
-              - TeamActivitySection
-          */}
-
-          {/* Temporary: show narrative if data loaded (proves hook works) */}
-          {data && !isLoading && (
-            <p
-              style={{
-                color: colors.bodyText,
-                fontSize: typography.body.size,
-                lineHeight: typography.body.lineHeight,
-              }}
-            >
-              {data.narrative_summary}
-            </p>
-          )}
+          {/* Phase 98: TodaySection, TasksSection */}
+          {/* Phase 99: NeedsAttentionSection, TeamActivitySection */}
         </div>
       </div>
 
@@ -91,7 +71,7 @@ export function BriefingPageV2() {
           flexDirection: 'column',
         }}
       >
-        {/* ChatPanelV2 placeholder */}
+        <ChatPanelV2 data={data} />
       </div>
     </div>
   )
