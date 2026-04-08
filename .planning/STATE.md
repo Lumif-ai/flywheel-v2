@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v11.0 Briefing Page Redesign — Phase 96: Backend API Foundation
+**Current focus:** v11.0 Briefing Page Redesign — Phase 98: Today and Tasks Sections
 
 ## Current Position
 
 Milestone: v11.0 Briefing Page Redesign
-Phase: 96 of 100 (Backend API Foundation)
-Plan: 1 of 2
-Status: Executing
-Last activity: 2026-04-08 — Plan 01 complete (BriefingV2 endpoint + today section)
+Phase: 98 of 100 (Today and Tasks Sections)
+Plan: 2 of 2 (complete)
+Status: Phase Complete
+Last activity: 2026-04-08 — Plan 02 complete (TasksSection with quick-add and checklist)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -63,10 +63,24 @@ v11.0 design decisions:
 - Narrative summary generated server-side via LLM (not streamed) to keep Phase 96 self-contained
 - Chat panel navigates to /chat on submit (inline streaming deferred to future CHAT-F01)
 - Phase 98 and Phase 99 are independently shippable from the same shell — parallel execution possible
+- BriefingPageV2 uses 100dvh with overflow:hidden for independent column scrolling inside sidebar shell
+- Right panel hidden on mobile via Tailwind hidden lg:flex (responsive breakpoint at 1024px)
+- briefing_v2 flag defaults to true (active dev) — controlled via VITE_FEATURE_BRIEFING_V2 env var
+- Time-of-day greeting (morning/afternoon/evening) in BriefingPageV2
 - Cold start detection is client-side (all sections empty = show card), not a separate API flag
+- Coral left-border accent on loaded narrative BrandedCard for visual warmth
+- Suggested questions derived from live briefing data (meetings/replies/tasks) with sensible defaults
+- Chat panel submit follows GlobalChatInput pattern: sendMessage + navigate('/chat')
 - Reused existing briefing router with /v2 sub-path (not a separate router)
 - Company resolution: joinedload on pipeline_entry and account to avoid N+1
 - prep_status derived from skill_run_id OR ai_summary presence
+- TodaySection: inline MeetingCard/PrepButton (not exported), NavLink for View Prep, useNavigate for Prep with chat prefill
+- LLM narrative uses func.distinct for skill_name dedup in data gathering
+- EmailDraft query uses tuple select pattern to avoid N+1 on Email join
+- Team activity defaults to 24h lookback when last_visit is None (first-time users)
+- TasksSection: local component state for checkbox optimism (not cache manipulation), two-step mutation chain for status transitions
+- Filter done/dismissed/deferred tasks from display rather than disabling checkboxes
+- Cast TaskItem.status (string) to TaskStatus at call site for type-safe transition logic
 
 ### Pending Todos
 
@@ -85,5 +99,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-08
-Stopped at: Completed 096-01-PLAN.md (BriefingV2 endpoint foundation)
+Stopped at: Completed 098-02-PLAN.md (TasksSection with quick-add and checklist — Phase 98 complete)
 Resume file: None
