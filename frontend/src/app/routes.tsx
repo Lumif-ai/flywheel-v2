@@ -10,9 +10,6 @@ function RelationshipRedirect() {
 }
 
 // All page components lazy-loaded — keeps main bundle lean
-const BriefingPage = lazy(() =>
-  import('@/features/briefing/components/BriefingPage').then((m) => ({ default: m.BriefingPage }))
-)
 const BriefingPageV2 = lazy(() =>
   import('@/features/briefing/components/BriefingPageV2').then((m) => ({ default: m.BriefingPageV2 }))
 )
@@ -100,7 +97,6 @@ const SpinnerPreview = lazy(() =>
 )
 
 export function AppRoutes() {
-  const briefingV2Enabled = useFeatureFlag('briefing_v2')
   const emailEnabled = useFeatureFlag('email')
   const tasksEnabled = useFeatureFlag('tasks')
   const pipelineEnabled = useFeatureFlag('pipeline')
@@ -109,7 +105,7 @@ export function AppRoutes() {
   return (
     <Routes>
       {/* Primary routes — all lazy-loaded */}
-      <Route path="/" element={<Suspense fallback={null}>{briefingV2Enabled ? <BriefingPageV2 /> : <BriefingPage />}</Suspense>} />
+      <Route path="/" element={<Suspense fallback={null}><BriefingPageV2 /></Suspense>} />
       <Route path="/streams/:id" element={<Suspense fallback={null}><StreamDetailPage /></Suspense>} />
       <Route path="/chat" element={<Suspense fallback={null}><ActPage /></Suspense>} />
       {emailEnabled && <Route path="/email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />}

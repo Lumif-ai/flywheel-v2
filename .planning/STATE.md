@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-08)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v11.0 Briefing Page Redesign — Phase 98: Today and Tasks Sections
+**Current focus:** v11.0 Briefing Page Redesign — Phase 99: Needs Attention and Team Activity Sections
 
 ## Current Position
 
 Milestone: v11.0 Briefing Page Redesign
-Phase: 98 of 100 (Today and Tasks Sections)
+Phase: 99 of 100 (Needs Attention and Team Activity Sections)
 Plan: 2 of 2 (complete)
-Status: Phase Complete
-Last activity: 2026-04-08 — Plan 02 complete (TasksSection with quick-add and checklist)
+Status: Complete
+Last activity: 2026-04-08 — Plan 02 complete (TeamActivitySection with grouped feed and expand/collapse)
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 ## Performance Metrics
 
@@ -79,8 +79,14 @@ v11.0 design decisions:
 - EmailDraft query uses tuple select pattern to avoid N+1 on Email join
 - Team activity defaults to 24h lookback when last_visit is None (first-time users)
 - TasksSection: local component state for checkbox optimism (not cache manipulation), two-step mutation chain for status transitions
+- Client-side dismiss for reply/follow_up attention items via local Set state (no server persistence for v1)
+- Sub-section type labels shown only when multiple attention types have items
+- Cross-cache invalidation: draft mutations invalidate both email and briefing-v2 query keys
 - Filter done/dismissed/deferred tasks from display rather than disabling checkboxes
 - Cast TaskItem.status (string) to TaskStatus at call site for type-safe transition logic
+- Activity items not clickable for v1 (navigation targets unclear per research)
+- formatTimeAgo copied locally in TeamActivitySection (PulseSignals being removed in Phase 100)
+- Groups default collapsed for scannable feed
 
 ### Pending Todos
 
@@ -99,5 +105,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-08
-Stopped at: Completed 098-02-PLAN.md (TasksSection with quick-add and checklist — Phase 98 complete)
+Stopped at: Completed 099-02-PLAN.md (TeamActivitySection with grouped feed, Phase 99 complete)
 Resume file: None

@@ -167,7 +167,7 @@
 
 - [x] **Phase 96: Backend API Foundation** — New /briefing/v2 endpoint with all five sections, last-visit tracking, graceful degradation (7 requirements)
 - [x] **Phase 97: Page Shell, Layout, Daily Brief, and Chat Panel** — Two-column shell, branded layout, narrative brief display, persistent chat panel (12 requirements)
-- [ ] **Phase 98: Today and Tasks Sections** — Meeting cards with prep button, tasks due today with quick-add and completion (10 requirements)
+- [x] **Phase 98: Today and Tasks Sections** — Meeting cards with prep button, tasks due today with quick-add and completion (10 requirements)
 - [ ] **Phase 99: Needs Attention and Team Activity Sections** — Attention feed with one-click actions, grouped AI team activity feed (10 requirements)
 - [ ] **Phase 100: Cold Start and Cleanup** — Consolidated get-started card, remove legacy briefing components (10 requirements)
 
@@ -282,8 +282,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 098-01-PLAN.md — TodaySection component (meeting cards, prep button, empty state)
-- [ ] 098-02-PLAN.md — TasksSection component (quick-add input, task checklist, source badges, optimistic completion, empty state)
+- [x] 098-01-PLAN.md — TodaySection component (meeting cards, prep button, empty state)
+- [x] 098-02-PLAN.md — TasksSection component (quick-add input, task checklist, source badges, optimistic completion, empty state)
 
 ### Phase 99: Needs Attention and Team Activity Sections
 **Goal**: A founder sees everything that needs their direct response — replies received, overdue follow-ups, drafts to approve — and a grouped feed of what their AI team accomplished since last visit, making the briefing page a complete async catch-up
@@ -298,7 +298,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 099-01-PLAN.md — NeedsAttentionSection component (replies, follow-ups, drafts rows, action buttons, empty state) + TeamActivitySection component (grouped feed, expand/collapse, item links, empty state)
+- [x] 099-01-PLAN.md — NeedsAttentionSection component (replies, follow-ups, drafts rows, action buttons, empty state)
+- [x] 099-02-PLAN.md — TeamActivitySection component (grouped feed, expand/collapse, item links, empty state)
 
 ### Phase 100: Cold Start and Cleanup
 **Goal**: New users without any connected data see a single welcoming "Get Started" card instead of four empty states, and the briefing page no longer renders any legacy components — leaving a clean, coherent codebase
@@ -378,8 +379,8 @@ Plans:
 | 95. Skill IP Protection | v10.0 | 2/2 | ✓ Complete | 2026-04-08 |
 | 96. Backend API Foundation | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
 | 97. Page Shell, Layout, Daily Brief, and Chat Panel | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
-| 98. Today and Tasks Sections | v11.0 | 0/2 | Not started | — |
-| 99. Needs Attention and Team Activity Sections | v11.0 | 0/TBD | Not started | — |
+| 98. Today and Tasks Sections | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
+| 99. Needs Attention and Team Activity Sections | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
 | 100. Cold Start and Cleanup | v11.0 | 0/TBD | Not started | — |
 
 ---
