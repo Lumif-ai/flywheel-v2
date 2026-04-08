@@ -515,7 +515,7 @@ export function MeetingDetailPage() {
                 >
                   <Users className="size-3 shrink-0" style={{ color: 'var(--secondary-text)' }} />
                   <span style={{ color: 'var(--heading-text)' }}>
-                    {att.name ?? att.email ?? 'Unknown'}
+                    {att.name || att.email || 'Unknown'}
                   </span>
                   {att.is_external && (
                     <span className="text-xs" style={{ color: '#2563eb' }}>external</span>

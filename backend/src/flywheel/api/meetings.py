@@ -22,10 +22,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Account, Meeting, SkillRun
+from flywheel.db.models import Account, Integration, Meeting, SkillRun
 from flywheel.db.session import get_session_factory
 from flywheel.engines.meeting_processor_web import auto_link_meeting_to_account
 from flywheel.services.meeting_sync import sync_granola_meetings
+from flywheel.services.calendar_sync import sync_calendar
 
 router = APIRouter(prefix="/meetings", tags=["meetings"])
 
@@ -54,19 +55,50 @@ VALID_PROCESSING_STATUSES = {
 @router.post("/sync")
 async def sync_meetings(
     user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
-    """Pull meetings from Granola for the authenticated user.
+    """Pull meetings from all connected providers (Google Calendar + Granola).
 
-    Delegates to sync_granola_meetings() which manages its own session.
-
-    Returns:
-        synced: count of new meetings inserted with processing_status="pending"
-        skipped: count of new meetings inserted with processing_status="skipped"
-        already_seen: count of meetings already in DB (not re-inserted)
-        total_from_provider: raw count from Granola API
+    Syncs each connected provider independently. Returns combined results.
+    Neither provider is required — syncs whichever is connected.
     """
     factory = get_session_factory()
-    return await sync_granola_meetings(factory, user.tenant_id, user.sub)
+    results: dict = {"providers": []}
+
+    # 1. Google Calendar sync
+    cal_integration = (await db.execute(
+        select(Integration).where(
+            Integration.tenant_id == user.tenant_id,
+            Integration.user_id == user.sub,
+            Integration.provider == "google-calendar",
+            Integration.status == "connected",
+        ).limit(1)
+    )).scalar_one_or_none()
+
+    if cal_integration:
+        try:
+            count = await sync_calendar(db, cal_integration)
+            results["providers"].append({"provider": "google-calendar", "events": count})
+        except Exception as e:
+            results["providers"].append({"provider": "google-calendar", "error": str(e)})
+
+    # 2. Granola sync (independent — doesn't fail if not connected)
+    try:
+        granola_result = await sync_granola_meetings(factory, user.tenant_id, user.sub)
+        results["providers"].append({"provider": "granola", **granola_result})
+    except HTTPException:
+        # Granola not connected — skip silently
+        pass
+    except Exception as e:
+        results["providers"].append({"provider": "granola", "error": str(e)})
+
+    if not results["providers"]:
+        raise HTTPException(
+            status_code=400,
+            detail="No meeting providers connected. Connect Google Calendar or Granola in Settings.",
+        )
+
+    return results
 
 
 @router.post("/process-pending")
@@ -132,6 +164,7 @@ async def list_meetings(
     db: AsyncSession = Depends(get_tenant_db),
     processing_status: str | None = None,
     time: str | None = None,
+    show_hidden: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> dict:
@@ -157,6 +190,8 @@ async def list_meetings(
         Meeting.tenant_id == user.tenant_id,
         Meeting.deleted_at.is_(None),
     ]
+    if not show_hidden:
+        filters.append(Meeting.hidden.is_(False))
     if processing_status is not None:
         filters.append(Meeting.processing_status == processing_status)
 
@@ -199,12 +234,85 @@ async def list_meetings(
             "provider": m.provider,
             "location": m.location,
             "calendar_event_id": m.calendar_event_id,
+            "recurring_event_id": m.recurring_event_id,
+            "hidden": m.hidden,
             "created_at": m.created_at.isoformat() if m.created_at else None,
         }
         for m in meetings
     ]
 
     return {"items": items, "total": total, "limit": limit, "offset": offset}
+
+
+@router.post("/{meeting_id}/hide")
+async def hide_meeting(
+    meeting_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Hide a meeting. If it's part of a recurring series, hide all instances."""
+    meeting = (await db.execute(
+        select(Meeting).where(
+            Meeting.id == meeting_id,
+            Meeting.tenant_id == user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    count = 0
+    if meeting.recurring_event_id:
+        # Hide all instances of this recurring series
+        result = await db.execute(
+            select(Meeting).where(
+                Meeting.tenant_id == user.tenant_id,
+                Meeting.recurring_event_id == meeting.recurring_event_id,
+            )
+        )
+        for m in result.scalars().all():
+            m.hidden = True
+            count += 1
+    else:
+        meeting.hidden = True
+        count = 1
+
+    await db.commit()
+    return {"hidden": count, "recurring_event_id": meeting.recurring_event_id}
+
+
+@router.post("/{meeting_id}/unhide")
+async def unhide_meeting(
+    meeting_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Unhide a meeting and its recurring series."""
+    meeting = (await db.execute(
+        select(Meeting).where(
+            Meeting.id == meeting_id,
+            Meeting.tenant_id == user.tenant_id,
+        )
+    )).scalar_one_or_none()
+    if not meeting:
+        raise HTTPException(status_code=404, detail="Meeting not found")
+
+    count = 0
+    if meeting.recurring_event_id:
+        result = await db.execute(
+            select(Meeting).where(
+                Meeting.tenant_id == user.tenant_id,
+                Meeting.recurring_event_id == meeting.recurring_event_id,
+            )
+        )
+        for m in result.scalars().all():
+            m.hidden = False
+            count += 1
+    else:
+        meeting.hidden = False
+        count = 1
+
+    await db.commit()
+    return {"unhidden": count, "recurring_event_id": meeting.recurring_event_id}
 
 
 @router.get("/{meeting_id}")

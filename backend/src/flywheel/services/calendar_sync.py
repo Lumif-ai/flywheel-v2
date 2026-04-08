@@ -30,7 +30,7 @@ from flywheel.services.google_calendar import (
 
 logger = logging.getLogger(__name__)
 
-SYNC_INTERVAL = 300  # 5 minutes
+SYNC_INTERVAL = 14400  # 4 hours — calendar data changes infrequently
 LOOKAHEAD_DAYS = 14  # sync 2 weeks ahead
 SUGGESTION_WINDOW_HOURS = 48
 
@@ -96,17 +96,25 @@ async def upsert_meeting_row(
         meeting_date = datetime.now(timezone.utc)
 
     # Parse attendees into Meeting-compatible format
+    # Determine the organizer's domain to classify internal vs external
     attendees_raw = event.get("attendees", [])
+    organizer_email = event.get("organizer", {}).get("email", "")
+    org_domain = organizer_email.split("@")[-1].lower() if "@" in organizer_email else ""
     attendees = [
         {
             "email": a.get("email", ""),
             "name": a.get("displayName", ""),
-            "is_external": not a.get("self", False) and not a.get("organizer", False),
+            "is_external": (
+                a.get("email", "").split("@")[-1].lower() != org_domain
+                if "@" in a.get("email", "") and org_domain
+                else not a.get("self", False)
+            ),
         }
         for a in attendees_raw
     ]
 
     title = event.get("summary") or "Untitled Meeting"
+    recurring_id = event.get("recurringEventId")
 
     if existing is not None:
         # Update existing meeting row
@@ -115,8 +123,23 @@ async def upsert_meeting_row(
         existing.attendees = attendees
         existing.location = event.get("location")
         existing.description = event.get("description")
+        existing.recurring_event_id = recurring_id
         existing.processing_status = "scheduled"
     else:
+        # Check if this recurring series is hidden
+        is_hidden = False
+        if recurring_id:
+            hidden_check = await db.execute(
+                select(Meeting.id).where(
+                    and_(
+                        Meeting.tenant_id == tenant_id,
+                        Meeting.recurring_event_id == recurring_id,
+                        Meeting.hidden.is_(True),
+                    )
+                ).limit(1)
+            )
+            is_hidden = hidden_check.scalar_one_or_none() is not None
+
         # Create new meeting row
         meeting = Meeting(
             tenant_id=tenant_id,
@@ -124,6 +147,8 @@ async def upsert_meeting_row(
             provider="google-calendar",
             external_id=f"gcal:{cal_event_id}",
             calendar_event_id=cal_event_id,
+            recurring_event_id=recurring_id,
+            hidden=is_hidden,
             title=title,
             meeting_date=meeting_date,
             attendees=attendees,

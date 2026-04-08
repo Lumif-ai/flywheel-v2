@@ -91,6 +91,11 @@ def exchange_code(code: str, code_verifier: str | None = None) -> Credentials:
     """
     flow = create_oauth_flow()
     flow.code_verifier = code_verifier
+    # Google returns all previously granted scopes when
+    # include_granted_scopes=true (set during auth URL generation).
+    # oauthlib raises an error on scope mismatch. Relax the check.
+    import os
+    os.environ["OAUTHLIB_RELAX_TOKEN_SCOPE"] = "1"
     flow.fetch_token(code=code)
     creds = flow.credentials
     if creds.refresh_token is None:

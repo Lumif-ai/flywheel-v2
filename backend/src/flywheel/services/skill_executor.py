@@ -1316,32 +1316,12 @@ async def _execute_company_intel(
     _parsed = _urlparse.urlparse(url if url.startswith("http") else f"https://{url}")
     company_domain = (_parsed.hostname or url).removeprefix("www.").lower()
 
-    # Soft-delete stale static section entries before writing fresh ones
-    static_files = [fn.replace(".md", "") for fn in section_map.keys()]
-    try:
-        async with factory() as _static_cleanup:
-            await _static_cleanup.execute(
-                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                {"tid": str(tenant_id)},
-            )
-            _uid_cleanup = str(user_id) if user_id else str(tenant_id)
-            await _static_cleanup.execute(
-                sa_text("SELECT set_config('app.user_id', :uid, true)"),
-                {"uid": _uid_cleanup},
-            )
-            from sqlalchemy.dialects.postgresql import array as pg_array
-            await _static_cleanup.execute(
-                sa_text(
-                    "UPDATE context_entries SET deleted_at = now() "
-                    "WHERE file_name = ANY(:names) "
-                    "AND source = :source "
-                    "AND deleted_at IS NULL"
-                ),
-                {"names": static_files, "source": source},
-            )
-            await _static_cleanup.commit()
-    except Exception as e:
-        logger.warning("Failed to clean up stale static entries: %s", e)
+    # No pre-delete needed for static sections: append_entry() already
+    # upserts by (tenant_id, file_name, source, detail).  Deleting first
+    # is destructive — it wipes enrichments accumulated over time and,
+    # without a tenant_id guard, can cross tenant boundaries.
+    # The explicit "Reset" button on the profile page is the only path
+    # that should bulk-delete company-intel entries.
 
     files_written = 0
     for filename, (content_lines, detail) in section_map.items():
@@ -1382,33 +1362,12 @@ async def _execute_company_intel(
 
     tool_calls.append({"tool": "write_context", "input": str(list(section_map.keys())), "result_length": files_written})
 
-    # --- Soft-delete stale product entries before writing new ones ---
-    # This prevents duplicates when the LLM returns differently-slugged
-    # products across runs (e.g. "WC Premium Audit" vs "Workers Comp Premium Audit").
-    try:
-        async with factory() as _cleanup_sess:
-            await _cleanup_sess.execute(
-                sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
-                {"tid": str(tenant_id)},
-            )
-            _uid = str(user_id) if user_id else str(tenant_id)
-            await _cleanup_sess.execute(
-                sa_text("SELECT set_config('app.user_id', :uid, true)"),
-                {"uid": _uid},
-            )
-            await _cleanup_sess.execute(
-                sa_text(
-                    "UPDATE context_entries SET deleted_at = now() "
-                    "WHERE file_name LIKE 'product:%' "
-                    "AND source = :source "
-                    "AND deleted_at IS NULL"
-                ),
-                {"source": source},
-            )
-            await _cleanup_sess.commit()
-        logger.info("Cleaned up stale product entries for tenant %s", tenant_id)
-    except Exception as e:
-        logger.warning("Failed to clean up stale product entries: %s", e)
+    # Collect new product slugs so we can clean up stale ones AFTER writing.
+    # append_entry() upserts matching slugs, but if the LLM returns a
+    # differently-slugged product across runs (e.g. "WC Premium Audit" vs
+    # "Workers Comp Premium Audit"), the old slug becomes orphaned.
+    # We only delete orphans — not everything — to preserve accumulated data.
+    _new_product_file_names: set[str] = set()
 
     # --- Per-product structured writes ---
     import re as _re
@@ -1463,6 +1422,7 @@ async def _execute_company_intel(
         for file_key, (content_lines, detail) in product_entries.items():
             if not content_lines:
                 continue
+            _new_product_file_names.add(file_key)
             entry = {
                 "detail": detail,
                 "confidence": "medium",
@@ -1490,6 +1450,37 @@ async def _execute_company_intel(
                 files_written += 1
             except Exception as e:
                 logger.error("Product context write failed for %s: %s", file_key, e)
+
+    # Clean up orphaned product entries (slugs from previous runs that the
+    # current run didn't reproduce).  Scoped to this tenant only.
+    if _new_product_file_names:
+        try:
+            async with factory() as _cleanup_sess:
+                await _cleanup_sess.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                _uid = str(user_id) if user_id else str(tenant_id)
+                await _cleanup_sess.execute(
+                    sa_text("SELECT set_config('app.user_id', :uid, true)"),
+                    {"uid": _uid},
+                )
+                await _cleanup_sess.execute(
+                    sa_text(
+                        "UPDATE context_entries SET deleted_at = now() "
+                        "WHERE file_name LIKE 'product:%%' "
+                        "AND source = :source "
+                        "AND tenant_id = :tid "
+                        "AND deleted_at IS NULL "
+                        "AND file_name != ALL(:keep)"
+                    ),
+                    {"source": source, "tid": str(tenant_id),
+                     "keep": list(_new_product_file_names)},
+                )
+                await _cleanup_sess.commit()
+            logger.info("Cleaned up orphaned product entries for tenant %s", tenant_id)
+        except Exception as e:
+            logger.warning("Failed to clean up orphaned product entries: %s", e)
 
     # Build output summary
     output_parts.append(f"# Company Intelligence: {company_name}")

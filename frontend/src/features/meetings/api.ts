@@ -29,9 +29,9 @@ export interface MeetingListResponse {
 // API functions
 // ---------------------------------------------------------------------------
 
-export function fetchMeetings(params?: { status?: string; time?: string }): Promise<MeetingListResponse> {
+export function fetchMeetings(params?: { status?: string; time?: string; show_hidden?: boolean }): Promise<MeetingListResponse> {
   return api.get<MeetingListResponse>('/meetings/', {
-    params: { limit: 50, ...params },
+    params: { limit: 200, ...params },
   })
 }
 
@@ -49,4 +49,12 @@ export function processMeeting(id: string): Promise<{ run_id: string }> {
 
 export function prepMeeting(id: string): Promise<PrepResult> {
   return api.post<PrepResult>(`/meetings/${id}/prep`)
+}
+
+export function hideMeeting(id: string): Promise<{ hidden: number; recurring_event_id: string | null }> {
+  return api.post(`/meetings/${id}/hide`)
+}
+
+export function unhideMeeting(id: string): Promise<{ unhidden: number; recurring_event_id: string | null }> {
+  return api.post(`/meetings/${id}/unhide`)
 }

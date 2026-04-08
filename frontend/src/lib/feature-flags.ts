@@ -17,7 +17,7 @@ import { useTenantStore } from '@/stores/tenant'
 
 /** Compile-time defaults — enabled unless explicitly "false" */
 const COMPILE_TIME: Record<string, boolean> = {
-  email: import.meta.env.VITE_FEATURE_EMAIL !== 'false',
+  email: import.meta.env.VITE_FEATURE_EMAIL === 'true',
   tasks: import.meta.env.VITE_FEATURE_TASKS !== 'false',
   leads: true,
   pipeline: true,

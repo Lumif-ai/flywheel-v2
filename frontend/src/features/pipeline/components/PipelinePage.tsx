@@ -604,7 +604,7 @@ export function PipelinePage() {
           <>
             <div
               style={{
-                height: 'calc(100vh - 240px)',
+                height: 'calc(100dvh - 160px)',
                 width: (!isContactMode && selectedItem) ? 'calc(100% - 420px)' : (isContactMode && selectedContact) ? 'calc(100% - 480px)' : '100%',
                 overflow: 'hidden',
                 transition: 'width 200ms ease-out',

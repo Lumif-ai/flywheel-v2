@@ -1,4 +1,4 @@
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink, useNavigate } from 'react-router'
 import { format } from 'date-fns'
 import { BrandedCard } from '@/components/ui/branded-card'
 import { Skeleton } from '@/components/ui/skeleton'

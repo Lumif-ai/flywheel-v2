@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-08)
 ## Current Position
 
 Milestone: v11.0 Briefing Page Redesign
-Phase: 99 of 100 (Needs Attention and Team Activity Sections)
+Phase: 100 of 100 (Cold Start and Cleanup)
 Plan: 2 of 2 (complete)
 Status: Complete
-Last activity: 2026-04-08 — Plan 02 complete (TeamActivitySection with grouped feed and expand/collapse)
+Last activity: 2026-04-08 — Plan 02 complete (removed 14 legacy v1 briefing files, feature flag toggle)
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -85,8 +85,10 @@ v11.0 design decisions:
 - Filter done/dismissed/deferred tasks from display rather than disabling checkboxes
 - Cast TaskItem.status (string) to TaskStatus at call site for type-safe transition logic
 - Activity items not clickable for v1 (navigation targets unclear per research)
+- Kept useFeatureFlag import in routes.tsx — email/tasks/pipeline/meetings flags still active
 - formatTimeAgo copied locally in TeamActivitySection (PulseSignals being removed in Phase 100)
 - Groups default collapsed for scannable feed
+- Cold-start detection waits for both useBriefingV2 and useLifecycleState to resolve before evaluating (loading guard prevents flash)
 
 ### Pending Todos
 
@@ -105,5 +107,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-08
-Stopped at: Completed 099-02-PLAN.md (TeamActivitySection with grouped feed, Phase 99 complete)
+Stopped at: Completed 100-01-PLAN.md (ColdStartCard and cold-start detection in BriefingPageV2)
 Resume file: None

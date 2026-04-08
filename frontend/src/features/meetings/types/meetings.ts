@@ -30,6 +30,8 @@ export interface MeetingListItem {
   provider: string                   // "google-calendar" or "granola"
   location: string | null            // meeting location from calendar
   calendar_event_id: string | null   // present for calendar-sourced meetings
+  recurring_event_id: string | null  // present for recurring calendar events
+  hidden: boolean                    // hidden by user (recurring series hide)
   account_id: string | null
   summary: MeetingSummary | null     // JSONB: {tldr, key_decisions, action_items, pain_points, attendee_roles, meeting_type}
   created_at: string
@@ -49,9 +51,16 @@ export interface PrepResult {
   stream_url: string
 }
 
+export interface SyncProviderResult {
+  provider: string
+  events?: number
+  synced?: number
+  skipped?: number
+  already_seen?: number
+  total_from_provider?: number
+  error?: string
+}
+
 export interface SyncResult {
-  synced: number
-  skipped: number
-  already_seen: number
-  total_from_provider: number
+  providers: SyncProviderResult[]
 }

@@ -208,15 +208,6 @@ export function MeetingCard({ meeting }: MeetingCardProps) {
         </div>
       )}
 
-      {/* Calendar source badge for scheduled meetings */}
-      {status === 'scheduled' && (
-        <div className="mt-1">
-          <span className="text-xs flex items-center gap-1" style={{ color: '#3B82F6' }}>
-            <CalendarDays className="size-3" />
-            Calendar
-          </span>
-        </div>
-      )}
     </BrandedCard>
   )
 }

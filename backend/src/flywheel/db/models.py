@@ -1520,6 +1520,10 @@ class Meeting(Base):
     provider: Mapped[str] = mapped_column(Text, nullable=False)
     external_id: Mapped[str | None] = mapped_column(Text)
     calendar_event_id: Mapped[str | None] = mapped_column(Text)
+    recurring_event_id: Mapped[str | None] = mapped_column(Text, index=True)
+    hidden: Mapped[bool] = mapped_column(
+        server_default=text("false"), nullable=False
+    )
     granola_note_id: Mapped[str | None] = mapped_column(Text)
     title: Mapped[str | None] = mapped_column(Text)
     meeting_date: Mapped[datetime.datetime] = mapped_column(
