@@ -1,10 +1,12 @@
 import { useBriefingV2 } from '@/features/briefing/hooks/useBriefingV2'
+import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { DailyBriefSection } from '@/features/briefing/components/DailyBriefSection'
 import { TodaySection } from '@/features/briefing/components/TodaySection'
 import { TasksSection } from '@/features/briefing/components/TasksSection'
 import { NeedsAttentionSection } from '@/features/briefing/components/NeedsAttentionSection'
 import { TeamActivitySection } from '@/features/briefing/components/TeamActivitySection'
 import { ChatPanelV2 } from '@/features/briefing/components/ChatPanelV2'
+import { ColdStartCard } from '@/features/briefing/components/ColdStartCard'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 
 /**
@@ -19,6 +21,12 @@ import { spacing, typography, colors } from '@/lib/design-tokens'
  */
 export function BriefingPageV2() {
   const { data, isLoading } = useBriefingV2()
+  const { hasCalendar, runCount, isLoading: lifecycleLoading } = useLifecycleState()
+
+  // Only evaluate cold-start after both queries resolve (prevents flash)
+  const bothLoaded = !isLoading && !lifecycleLoading
+  const isColdStart =
+    bothLoaded && !hasCalendar && runCount === 0 && (data?.today?.tasks?.length ?? 0) === 0
 
   // Greeting based on time of day
   const hour = new Date().getHours()
@@ -57,28 +65,34 @@ export function BriefingPageV2() {
             {greeting}
           </h1>
 
-          {/* Daily Brief narrative section */}
-          <DailyBriefSection narrative={data?.narrative_summary} isLoading={isLoading} />
+          {isColdStart ? (
+            <ColdStartCard />
+          ) : (
+            <>
+              {/* Daily Brief narrative section */}
+              <DailyBriefSection narrative={data?.narrative_summary} isLoading={isLoading} />
 
-          {/* Today's meetings */}
-          <div style={{ marginTop: spacing.section }}>
-            <TodaySection meetings={data?.today?.meetings} isLoading={isLoading} />
-          </div>
+              {/* Today's meetings */}
+              <div style={{ marginTop: spacing.section }}>
+                <TodaySection meetings={data?.today?.meetings} isLoading={isLoading} />
+              </div>
 
-          {/* Tasks due today */}
-          <div style={{ marginTop: spacing.section }}>
-            <TasksSection tasks={data?.today?.tasks} isLoading={isLoading} />
-          </div>
+              {/* Tasks due today */}
+              <div style={{ marginTop: spacing.section }}>
+                <TasksSection tasks={data?.today?.tasks} isLoading={isLoading} />
+              </div>
 
-          {/* Needs Attention */}
-          <div style={{ marginTop: spacing.section }}>
-            <NeedsAttentionSection attention={data?.attention_items} isLoading={isLoading} />
-          </div>
+              {/* Needs Attention */}
+              <div style={{ marginTop: spacing.section }}>
+                <NeedsAttentionSection attention={data?.attention_items} isLoading={isLoading} />
+              </div>
 
-          {/* Team Activity */}
-          <div style={{ marginTop: spacing.section }}>
-            <TeamActivitySection activity={data?.team_activity} isLoading={isLoading} />
-          </div>
+              {/* Team Activity */}
+              <div style={{ marginTop: spacing.section }}>
+                <TeamActivitySection activity={data?.team_activity} isLoading={isLoading} />
+              </div>
+            </>
+          )}
         </div>
       </div>
 
