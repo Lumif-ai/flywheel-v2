@@ -3,6 +3,7 @@ import { DailyBriefSection } from '@/features/briefing/components/DailyBriefSect
 import { TodaySection } from '@/features/briefing/components/TodaySection'
 import { TasksSection } from '@/features/briefing/components/TasksSection'
 import { NeedsAttentionSection } from '@/features/briefing/components/NeedsAttentionSection'
+import { TeamActivitySection } from '@/features/briefing/components/TeamActivitySection'
 import { ChatPanelV2 } from '@/features/briefing/components/ChatPanelV2'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 
@@ -74,7 +75,10 @@ export function BriefingPageV2() {
             <NeedsAttentionSection attention={data?.attention_items} isLoading={isLoading} />
           </div>
 
-          {/* Phase 99 Plan 02: TeamActivitySection */}
+          {/* Team Activity */}
+          <div style={{ marginTop: spacing.section }}>
+            <TeamActivitySection activity={data?.team_activity} isLoading={isLoading} />
+          </div>
         </div>
       </div>
 
