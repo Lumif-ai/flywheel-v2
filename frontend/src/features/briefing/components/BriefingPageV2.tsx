@@ -1,5 +1,6 @@
 import { useBriefingV2 } from '@/features/briefing/hooks/useBriefingV2'
 import { DailyBriefSection } from '@/features/briefing/components/DailyBriefSection'
+import { TodaySection } from '@/features/briefing/components/TodaySection'
 import { ChatPanelV2 } from '@/features/briefing/components/ChatPanelV2'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 
@@ -56,7 +57,12 @@ export function BriefingPageV2() {
           {/* Daily Brief narrative section */}
           <DailyBriefSection narrative={data?.narrative_summary} isLoading={isLoading} />
 
-          {/* Phase 98: TodaySection, TasksSection */}
+          {/* Today's meetings */}
+          <div style={{ marginTop: spacing.section }}>
+            <TodaySection meetings={data?.today?.meetings} isLoading={isLoading} />
+          </div>
+
+          {/* Phase 98 Plan 02: TasksSection */}
           {/* Phase 99: NeedsAttentionSection, TeamActivitySection */}
         </div>
       </div>
