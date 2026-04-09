@@ -6,8 +6,10 @@ import logging
 import sys
 import time
 
+import mcp.types as mt
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
+from fastmcp.tools.tool import ToolResult
 
 from flywheel_mcp.api_client import FlywheelAPIError, FlywheelClient
 
@@ -52,7 +54,95 @@ class InvocationLogger(Middleware):
             raise
 
 
+# --------------------------------------------------------------------------
+# Onboarding guard — guides first-time users to populate context store
+# --------------------------------------------------------------------------
+
+_ONBOARDING_MESSAGE = """\
+Welcome to Flywheel! Your context store is empty — skills work best \
+with business context loaded first.
+
+RECOMMENDED SETUP (one-time, ~15 min):
+
+1. /meeting-processor — Process your past sales/advisory calls. \
+Extracts ICP profiles, pain points, contacts, and positioning \
+automatically from transcripts.
+
+2. /gtm-my-company — Build your company profile (who you are, \
+what you sell, ideal customer).
+
+After setup, all GTM skills auto-load this context for better results.
+
+Proceeding with your request below — but results will improve \
+significantly once context is populated.
+"""
+
+# Tools that benefit from a populated context store
+_GTM_TOOLS = frozenset({
+    "flywheel_run_skill",
+    "flywheel_fetch_skills",
+    "flywheel_fetch_skill_prompt",
+    "flywheel_list_pipeline",
+    "flywheel_fetch_pipeline_entry",
+    "flywheel_upsert_pipeline_entry",
+    "flywheel_draft_pipeline_message",
+    "flywheel_send_pipeline_message",
+    "flywheel_add_pipeline_contact",
+    "flywheel_list_pipeline_contacts",
+    "flywheel_create_outreach_step",
+    "flywheel_list_outreach_steps",
+    "flywheel_update_outreach_step",
+    "flywheel_graduate_lead",
+    "flywheel_upsert_lead",
+    "flywheel_list_leads",
+    "flywheel_draft_lead_message",
+    "flywheel_send_lead_message",
+    "flywheel_add_lead_contact",
+    "flywheel_save_document",
+})
+
+
+class OnboardingGuard(Middleware):
+    """Prepend a setup guide on the first GTM tool call when context is empty."""
+
+    def __init__(self):
+        self._checked = False  # once per MCP session
+        self._needs_onboarding = False
+
+    async def on_call_tool(self, context, call_next):
+        tool_name = context.message.name
+
+        # Run the actual tool first — never block
+        result = await call_next(context)
+
+        # Only check once per session, and only for GTM tools
+        if self._checked or tool_name not in _GTM_TOOLS:
+            return result
+
+        self._checked = True
+
+        # Check context store in background — don't fail the tool if this errors
+        try:
+            client = FlywheelClient()
+            files = client.list_context_files()
+            file_list = files.get("files", [])
+            # Consider populated if at least 2 non-empty context files exist
+            if len(file_list) >= 2:
+                return result
+            self._needs_onboarding = True
+        except Exception:
+            # Auth or network issues — don't nag, just skip
+            return result
+
+        # Prepend onboarding guidance to the tool's existing response
+        onboarding_block = mt.TextContent(type="text", text=_ONBOARDING_MESSAGE)
+        separator = mt.TextContent(type="text", text="--- TOOL RESULT ---")
+        new_content = [onboarding_block, separator] + list(result.content)
+        return ToolResult(content=new_content)
+
+
 mcp = FastMCP("Flywheel")
+mcp.add_middleware(OnboardingGuard())
 mcp.add_middleware(InvocationLogger())
 
 
@@ -61,7 +151,7 @@ mcp.add_middleware(InvocationLogger())
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_run_skill(
     skill_name: str = "meeting-prep",
     input_text: str = "",
@@ -111,7 +201,7 @@ def flywheel_run_skill(
         return f"Error running skill: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_read_context(query: str) -> str:
     """Search Flywheel's business knowledge base.
 
@@ -145,7 +235,7 @@ def flywheel_read_context(query: str) -> str:
         return f"Error reading context: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_write_context(
     content: str,
     file_name: str = "market-signals",
@@ -175,7 +265,7 @@ def flywheel_write_context(
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_skills() -> str:
     """List all available Flywheel skills with descriptions, categories, and trigger phrases. Call this to discover what Flywheel can do for the user, or to find the right skill for a user's request. Returns skill names, descriptions, categories, trigger phrases, and context store contracts (what each skill reads/writes). Use trigger phrases to match natural language requests to skills."""
     try:
@@ -209,7 +299,7 @@ def flywheel_fetch_skills() -> str:
         return f"Error fetching skills: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_skill_prompt(skill_name: str) -> str:
     """Load the full execution instructions for a Flywheel skill by name. Returns the system prompt that you should follow to execute the skill. Call this after identifying which skill to run via flywheel_fetch_skills. The prompt contains step-by-step instructions, output format, and quality criteria."""
     try:
@@ -232,7 +322,7 @@ def flywheel_fetch_skill_prompt(skill_name: str) -> str:
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_meetings(limit: int = 10) -> str:
     """Fetch meetings that haven't been processed yet, including full transcripts. Use this during the morning brief to find meetings that need summarization and insight extraction. Returns meeting title, time, attendees, and transcript. Process each meeting's transcript, then save the summary via flywheel_save_meeting_summary."""
     try:
@@ -271,7 +361,7 @@ def flywheel_fetch_meetings(limit: int = 10) -> str:
         return f"Error fetching meetings: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_upcoming(limit: int = 10) -> str:
     """Fetch today's upcoming meetings with attendee details and linked accounts. Use this to identify meetings that need preparation. Returns meeting title, time, attendees (name + email), meeting type, and linked account if any. After fetching, prepare each meeting using the meeting-prep skill."""
     try:
@@ -317,7 +407,7 @@ def flywheel_fetch_upcoming(limit: int = 10) -> str:
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_tasks(status: str = "") -> str:
     """Fetch tasks that need attention -- pending triage, confirmed for execution, or deferred. Returns task title, status, priority, due date, and suggested skill if any. Use this during morning brief to surface action items, or anytime the user asks about their tasks or commitments."""
     try:
@@ -407,7 +497,7 @@ def _format_pipeline_detail(data: dict) -> str:
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_sync_meetings() -> str:
     """Sync meetings from Granola calendar integration. Call this at the start of the morning brief or when the user asks to refresh their meeting data. Returns count of new and updated meetings. After syncing, use flywheel_fetch_meetings to get unprocessed meetings."""
     try:
@@ -430,35 +520,37 @@ def flywheel_sync_meetings() -> str:
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_save_document(
     title: str,
     content: str,
     skill_name: str = "",
     account_id: str = "",
+    tags: list[str] | None = None,
 ) -> str:
-    """Save a skill's output to the Flywheel library. Send the raw content (markdown or structured text) -- Flywheel renders it with the design system. The document appears in the library UI immediately. Use this after every skill execution to persist the deliverable. Optionally link to a skill name and account."""
+    """Save a skill's output to the Flywheel library. Send the raw content (markdown or structured text) -- Flywheel renders it with the design system. The document appears in the library UI immediately. Use this after every skill execution to persist the deliverable. Optionally link to a skill name, account, and tags for organization."""
     try:
         client = FlywheelClient()
         metadata: dict = {}
-        if account_id:
-            metadata["account_id"] = account_id
         result = client.save_document(
             title=title,
             skill_name=skill_name or "mcp-manual",
             markdown_content=content,
             metadata=metadata,
+            account_id=account_id or None,
+            tags=tags or [],
         )
         run_id = result.get("run_id") or result.get("id", "?")
+        dedup = " (updated existing)" if result.get("dedup") else ""
         url = f"{client.frontend_url}/library"
-        return f"Document '{title}' saved (id: {run_id}). View: {url}"
+        return f"Document '{title}' saved (id: {run_id}){dedup}. View: {url}"
     except FlywheelAPIError as exc:
         return str(exc)
     except Exception as exc:
         return f"Error saving document: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_save_meeting_summary(
     meeting_id: str,
     summary: str,
@@ -475,7 +567,7 @@ def flywheel_save_meeting_summary(
         return f"Error saving meeting summary: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_update_task(
     task_id: str,
     status: str = "",
@@ -506,7 +598,7 @@ def flywheel_update_task(
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_upsert_pipeline_entry(
     name: str,
     domain: str = "",
@@ -542,7 +634,7 @@ def flywheel_upsert_pipeline_entry(
             "name": name,
             "entity_type": entity_type,
             "stage": stage,
-            "relationship_type": relationship_type,
+            "relationship_type": [relationship_type] if relationship_type else ["prospect"],
         }
         if domain:
             fields["domain"] = domain
@@ -571,7 +663,7 @@ def flywheel_upsert_pipeline_entry(
         return f"Error saving pipeline entry: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_list_pipeline(
     stage: str = "",
     fit_tier: str = "",
@@ -631,7 +723,7 @@ def flywheel_list_pipeline(
         return f"Error listing pipeline: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_pipeline_entry(identifier: str) -> str:
     """Fetch detailed information about a pipeline entry (prospect, customer, investor, etc.).
 
@@ -684,7 +776,7 @@ def flywheel_fetch_pipeline_entry(identifier: str) -> str:
         return f"Error fetching pipeline entry: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_add_pipeline_contact(
     entry_name: str,
     contact_name: str,
@@ -733,7 +825,7 @@ def flywheel_add_pipeline_contact(
         return f"Error adding contact: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_draft_pipeline_message(
     entry_name: str,
     contact_email: str = "",
@@ -810,7 +902,7 @@ def flywheel_draft_pipeline_message(
         return f"Error drafting message: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_send_pipeline_message(
     entry_name: str,
     contact_email: str = "",
@@ -892,7 +984,7 @@ def flywheel_send_pipeline_message(
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_list_pipeline_contacts(
     company: str = "",
     status: str = "",
@@ -974,7 +1066,7 @@ def flywheel_list_pipeline_contacts(
         return f"Error listing contacts: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_create_outreach_step(
     pipeline_entry_id: str,
     contact_id: str,
@@ -1037,7 +1129,7 @@ def flywheel_create_outreach_step(
         return f"Error creating outreach step: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_list_outreach_steps(
     pipeline_entry_id: str,
     contact_id: str = "",
@@ -1092,7 +1184,7 @@ def flywheel_list_outreach_steps(
         return f"Error listing outreach steps: {exc}"
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_update_outreach_step(
     pipeline_entry_id: str,
     activity_id: str,
@@ -1149,7 +1241,7 @@ def flywheel_update_outreach_step(
 # --------------------------------------------------------------------------
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_upsert_lead(
     name: str,
     domain: str = "",
@@ -1171,7 +1263,7 @@ def flywheel_upsert_lead(
     )
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_list_leads(
     pipeline_stage: str = "",
     fit_tier: str = "",
@@ -1182,7 +1274,7 @@ def flywheel_list_leads(
     return flywheel_list_pipeline(stage=pipeline_stage, fit_tier=fit_tier, limit=limit)
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_graduate_lead(lead_name: str) -> str:
     """[DEPRECATED] Graduation is no longer needed in the unified pipeline."""
     return (
@@ -1191,7 +1283,7 @@ def flywheel_graduate_lead(lead_name: str) -> str:
     )
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_add_lead_contact(
     lead_name: str,
     contact_name: str,
@@ -1207,13 +1299,13 @@ def flywheel_add_lead_contact(
     )
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_fetch_account(identifier: str) -> str:
     """[DEPRECATED -- use flywheel_fetch_pipeline_entry] Fetch pipeline entry details."""
     return flywheel_fetch_pipeline_entry(identifier=identifier)
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_draft_lead_message(
     lead_name: str,
     contact_email: str = "",
@@ -1233,7 +1325,7 @@ def flywheel_draft_lead_message(
     )
 
 
-@mcp.tool()
+@mcp.tool(output_schema=None)
 def flywheel_send_lead_message(
     lead_name: str,
     contact_email: str = "",
