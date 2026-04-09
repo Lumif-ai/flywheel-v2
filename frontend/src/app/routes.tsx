@@ -2,6 +2,7 @@ import { lazy, Suspense } from 'react'
 import { Routes, Route, Navigate, useParams } from 'react-router'
 import { AuthCallback } from '@/app/AuthCallback'
 import { useFeatureFlag } from '@/lib/feature-flags'
+import { useAuthStore } from '@/stores/auth'
 
 /** Redirect /relationships/:id to /pipeline/:id preserving the param */
 function RelationshipRedirect() {
@@ -35,7 +36,7 @@ const CompanyProfilePage = lazy(() =>
   import('@/features/profile/components/CompanyProfilePage').then((m) => ({ default: m.CompanyProfilePage }))
 )
 
-// Lazy-loaded document pages
+// Lazy-loaded document pages (v12.0 library redesign)
 const DocumentLibrary = lazy(() =>
   import('@/features/documents/components/DocumentLibrary').then((m) => ({ default: m.DocumentLibrary }))
 )
@@ -96,6 +97,16 @@ const SpinnerPreview = lazy(() =>
   import('@/pages/SpinnerPreview').then((m) => ({ default: m.SpinnerPreview }))
 )
 
+/** Root "/" — landing page for anonymous users, briefing dashboard for authenticated */
+function HomePage() {
+  const user = useAuthStore((s) => s.user)
+  const isAnonymous = user?.is_anonymous ?? true
+  if (isAnonymous) {
+    return <Suspense fallback={null}><LandingPage /></Suspense>
+  }
+  return <Suspense fallback={null}><BriefingPageV2 /></Suspense>
+}
+
 export function AppRoutes() {
   const emailEnabled = useFeatureFlag('email')
   const tasksEnabled = useFeatureFlag('tasks')
@@ -105,7 +116,7 @@ export function AppRoutes() {
   return (
     <Routes>
       {/* Primary routes — all lazy-loaded */}
-      <Route path="/" element={<Suspense fallback={null}><BriefingPageV2 /></Suspense>} />
+      <Route path="/" element={<HomePage />} />
       <Route path="/streams/:id" element={<Suspense fallback={null}><StreamDetailPage /></Suspense>} />
       <Route path="/chat" element={<Suspense fallback={null}><ActPage /></Suspense>} />
       {emailEnabled && <Route path="/email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />}

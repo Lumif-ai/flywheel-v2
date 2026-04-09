@@ -138,6 +138,8 @@ async def _generate_narrative(
             logger.warning("Failed to fetch user name for narrative", exc_info=True)
 
         # 2. Recent pipeline entries (names, not just count)
+        # Only include actively engaged/qualified entries — not research or
+        # early-stage entries that haven't had a real conversation yet.
         pipeline_names: list[str] = []
         try:
             seven_days_ago = datetime.datetime.now(datetime.timezone.utc) - timedelta(days=7)
@@ -146,6 +148,7 @@ async def _generate_narrative(
                 .where(
                     PipelineEntry.owner_id == UUID(user_id),
                     PipelineEntry.created_at > seven_days_ago,
+                    PipelineEntry.stage.in_(["engaged", "qualified"]),
                 )
                 .order_by(PipelineEntry.created_at.desc())
                 .limit(5)
@@ -154,6 +157,23 @@ async def _generate_narrative(
             pipeline_names = [r for r in result.scalars().all()]
         except Exception:
             logger.warning("Failed to fetch pipeline names for narrative", exc_info=True)
+
+        # 2b. Pending reachouts — identified/contacted entries awaiting outreach
+        pending_reachout_names: list[str] = []
+        try:
+            stmt = (
+                select(PipelineEntry.name)
+                .where(
+                    PipelineEntry.owner_id == UUID(user_id),
+                    PipelineEntry.stage.in_(["identified", "contacted"]),
+                )
+                .order_by(PipelineEntry.created_at.desc())
+                .limit(5)
+            )
+            result = await session.execute(stmt)
+            pending_reachout_names = [r for r in result.scalars().all()]
+        except Exception:
+            logger.warning("Failed to fetch pending reachouts for narrative", exc_info=True)
 
         # 3. Recent completed skill run names
         skill_names: list[str] = []
@@ -214,6 +234,7 @@ async def _generate_narrative(
             "attention_items": attention_count,
             "team_actions": team_activity_count,
             "recent_pipeline_entries": pipeline_names,
+            "pending_reachouts": pending_reachout_names,
             "recent_skills": skill_names,
         }
 
@@ -232,8 +253,10 @@ async def _generate_narrative(
                         "You are a warm, concise chief of staff writing a 2-3 sentence "
                         "morning brief for a startup founder. Reference SPECIFIC details "
                         "from the data: mention meeting titles or company names, task names, "
-                        "skill names that ran, or pipeline entries by name. Keep the tone "
-                        "encouraging and action-oriented. Do not use bullet points or "
+                        "skill names that ran, or active pipeline entries by name. "
+                        "If there are pending_reachouts, nudge the founder to reach out to "
+                        "them (e.g. 'You have reachouts pending for X and Y — worth sending '). "
+                        "Keep the tone encouraging and action-oriented. Do not use bullet points or "
                         "headers -- just flowing prose. Do not greet by name (the UI handles that)."
                     ),
                     messages=[{"role": "user", "content": json.dumps(facts)}],
@@ -258,6 +281,7 @@ async def _generate_narrative(
             "team_actions": team_activity_count,
             "user_name": "there",
             "recent_pipeline_entries": [],
+            "pending_reachouts": [],
             "recent_skills": [],
             "meetings": [],
             "task_titles": [],
@@ -277,6 +301,11 @@ def _template_fallback(facts: dict) -> str:
         parts.append(f"{tasks_due} task(s) due")
     if attention_items:
         parts.append(f"{attention_items} item(s) need your attention")
+
+    pending = facts.get("pending_reachouts", [])
+    if pending:
+        names = ", ".join(pending[:3])
+        parts.append(f"Reachouts pending for {names}")
 
     if not parts:
         return "Your day is clear. A great time to focus on strategic work."

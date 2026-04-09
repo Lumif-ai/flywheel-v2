@@ -10,6 +10,7 @@ import { MobileNav } from '@/features/navigation/components/MobileNav'
 import { CommandPalette } from '@/features/navigation/components/CommandPalette'
 import { AppRoutes } from '@/app/routes'
 import { AuthBootstrap } from '@/app/AuthBootstrap'
+import { useAuthStore } from '@/stores/auth'
 import { CriticalEmailAlert } from '@/features/email/components/CriticalEmailAlert'
 import { useEmailThreads } from '@/features/email/hooks/useEmailThreads'
 import { useFeatureFlag } from '@/lib/feature-flags'
@@ -71,7 +72,7 @@ if (typeof window !== 'undefined') {
 }
 
 // Routes that render as standalone pages (no sidebar, no tenant-dependent fetches)
-const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy', '/briefing', '/auth']
+const STANDALONE_ROUTES = ['/onboarding', '/invite', '/terms', '/privacy', '/briefing', '/auth', '/landing', '/settings']
 
 // Only rendered inside the authenticated shell so useEmailThreads never fires
 // on standalone routes (which have no auth context and would return 401).
@@ -93,11 +94,16 @@ function AuthenticatedAlerts() {
 function AppShell() {
   const isMobile = useMediaQuery('(max-width: 767px)')
   const location = useLocation()
+  const user = useAuthStore((s) => s.user)
+  const isAnonymous = user?.is_anonymous ?? true
 
   // Onboarding and other standalone routes render without the app shell.
   // This prevents tenant-dependent API calls (streams, tenants) from firing
   // before the user has been provisioned.
-  const isStandalone = STANDALONE_ROUTES.some((r) => location.pathname.startsWith(r))
+  // "/" is standalone when user is anonymous (shows landing page, no sidebar).
+  const isStandalone =
+    STANDALONE_ROUTES.some((r) => location.pathname.startsWith(r)) ||
+    (location.pathname === '/' && isAnonymous)
 
   if (isStandalone) {
     return (
