@@ -90,6 +90,7 @@ async def assemble_briefing_v2(
         tasks=today_section["tasks"],
         attention_count=attention_count,
         team_activity_count=team_activity_count,
+        tz=tz,
     )
 
     return {
@@ -116,6 +117,7 @@ async def _generate_narrative(
     tasks: list,
     attention_count: int = 0,
     team_activity_count: int = 0,
+    tz: str | None = None,
 ) -> str:
     """Generate a 2-3 sentence narrative summary using Claude Haiku.
 
@@ -172,13 +174,33 @@ async def _generate_narrative(
             logger.warning("Failed to fetch skill names for narrative", exc_info=True)
 
         # 4. Build structured facts dict
+        # Pre-format meeting times in user's timezone so the LLM doesn't misinterpret ISO offsets
+        from zoneinfo import ZoneInfo
+        user_tz = datetime.timezone.utc
+        if tz:
+            try:
+                user_tz = ZoneInfo(tz)
+            except (KeyError, ValueError):
+                pass
+
+        def _format_meeting_time(iso_str: str | None) -> str:
+            if not iso_str:
+                return "unknown time"
+            try:
+                dt = datetime.datetime.fromisoformat(iso_str)
+                local_dt = dt.astimezone(user_tz)
+                return local_dt.strftime("%-I:%M %p")  # e.g. "11:00 AM"
+            except (ValueError, TypeError):
+                return iso_str
+
         facts = {
             "user_name": user_name,
+            "user_timezone": tz or "UTC",
             "meeting_count": len(meetings),
             "meetings": [
                 {
                     "title": m.get("title", "Untitled"),
-                    "time": m.get("time"),
+                    "time": _format_meeting_time(m.get("time")),
                     "company": m.get("company"),
                     "attendees": [
                         a.get("name", a.get("email", ""))
