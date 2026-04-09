@@ -126,17 +126,17 @@ export function RelationshipHeader({ account, fromType }: RelationshipHeaderProp
             )
           })}
 
-          {/* Entity level */}
+          {/* Entity type */}
           <span className="text-xs text-muted-foreground">
-            {capitalize(account.entity_level)}
+            {capitalize(account.entity_type)}
           </span>
 
-          {/* Relationship status */}
+          {/* Stage */}
           <span
             className="inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium"
-            style={statusColor(account.relationship_status)}
+            style={statusColor(account.stage)}
           >
-            {account.relationship_status.replace(/_/g, ' ')}
+            {account.stage.replace(/_/g, ' ')}
           </span>
         </div>
       </div>

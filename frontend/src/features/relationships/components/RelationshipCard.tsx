@@ -77,12 +77,12 @@ export function RelationshipCard({ item, type }: RelationshipCardProps) {
             borderRadius: '9999px',
           }}
         >
-          {item.relationship_status}
+          {item.stage}
         </span>
         <span
           style={{ fontSize: '12px', color: 'var(--secondary-text)', textTransform: 'capitalize' }}
         >
-          {item.entity_level}
+          {item.entity_type}
         </span>
       </div>
 
@@ -105,7 +105,7 @@ export function RelationshipCard({ item, type }: RelationshipCardProps) {
           </span>
         )}
         <span style={{ fontSize: '12px', color: 'var(--secondary-text)' }}>
-          {formatTimeAgo(item.last_interaction_at)}
+          {formatTimeAgo(item.last_activity_at)}
         </span>
         {item.signal_count > 0 && (
           <span

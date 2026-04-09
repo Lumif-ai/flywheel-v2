@@ -435,11 +435,11 @@ async def _stage_3_prep(
                 },
             })
 
-            if meeting.account_id:
+            if meeting.pipeline_entry_id or meeting.account_id:
                 # Account-scoped prep
                 output, usage, calls = await _execute_account_meeting_prep(
                     api_key=api_key,
-                    input_text=f"Account-ID:{meeting.account_id}",
+                    input_text=f"Account-ID:{meeting.pipeline_entry_id or meeting.account_id}",
                     factory=factory,
                     run_id=run_id,
                     tenant_id=tenant_id,
@@ -473,7 +473,7 @@ async def _stage_3_prep(
             stage_results["prepped"].append({
                 "meeting_id": str(meeting.id),
                 "title": meeting.title,
-                "account_id": str(meeting.account_id) if meeting.account_id else None,
+                "account_id": str(meeting.pipeline_entry_id or meeting.account_id) if (meeting.pipeline_entry_id or meeting.account_id) else None,
                 "output": output,
                 "success": True,
             })
@@ -776,10 +776,10 @@ async def _stage_4_execute(
             total_token_usage["output_tokens"] += formulation_response.usage.output_tokens
 
             # Step 3: Invoke the target skill
-            if task.suggested_skill == "meeting-prep" and task.account_id:
+            if task.suggested_skill == "meeting-prep" and (task.pipeline_entry_id or task.account_id):
                 output, usage, calls = await _execute_account_meeting_prep(
                     api_key=api_key,
-                    input_text=f"Account-ID:{task.account_id}",
+                    input_text=f"Account-ID:{task.pipeline_entry_id or task.account_id}",
                     factory=factory,
                     run_id=run_id,
                     tenant_id=tenant_id,

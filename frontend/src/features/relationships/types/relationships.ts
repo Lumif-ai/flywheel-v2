@@ -5,12 +5,12 @@ export interface RelationshipListItem {
   name: string
   domain: string | null
   relationship_type: string[]
-  entity_level: string
-  relationship_status: string
+  entity_type: string
+  stage: string
   ai_summary: string | null
   signal_count: number
   primary_contact_name: string | null
-  last_interaction_at: string | null
+  last_activity_at: string | null
   created_at: string
 }
 

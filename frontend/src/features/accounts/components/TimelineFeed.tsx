@@ -1,9 +1,6 @@
-import { useState } from 'react'
 import { Badge } from '@/components/ui/badge'
-import { Button } from '@/components/ui/button'
 import { typography } from '@/lib/design-tokens'
 import { Send, FileText } from 'lucide-react'
-import { useTimeline } from '../hooks/useTimeline'
 import type { TimelineItem } from '../types/accounts'
 
 function formatDate(dateStr: string | null): string {
@@ -94,28 +91,10 @@ interface TimelineFeedProps {
   initialTimeline: TimelineItem[]
 }
 
-export function TimelineFeed({ accountId, initialTimeline }: TimelineFeedProps) {
-  const [offset, setOffset] = useState(0)
-  const limit = 20
-  const [usePaginated, setUsePaginated] = useState(false)
-
-  const { data, isLoading } = useTimeline(accountId, { offset, limit })
-
-  const hasMore = usePaginated ? (data?.has_more ?? false) : initialTimeline.length >= limit
-
-  function handleLoadMore() {
-    if (!usePaginated) {
-      setUsePaginated(true)
-      setOffset(initialTimeline.length)
-    } else {
-      setOffset((prev) => prev + limit)
-    }
-  }
-
-  // Merge initial + paginated items when switching to paginated mode
-  const displayItems = usePaginated
-    ? [...initialTimeline, ...(data?.items ?? [])]
-    : initialTimeline
+export function TimelineFeed({ accountId: _accountId, initialTimeline }: TimelineFeedProps) {
+  // Timeline data comes embedded in account detail response (recent_timeline).
+  // The separate /accounts/{id}/timeline endpoint was removed in v9.0 cleanup.
+  const displayItems = initialTimeline
 
   return (
     <div>
@@ -140,18 +119,7 @@ export function TimelineFeed({ accountId, initialTimeline }: TimelineFeedProps) 
         </div>
       )}
 
-      {hasMore && (
-        <div className="mt-4 flex justify-center">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleLoadMore}
-            disabled={isLoading}
-          >
-            {isLoading ? 'Loading...' : 'Load more'}
-          </Button>
-        </div>
-      )}
+      {/* Pagination removed — timeline data comes embedded in account detail */}
     </div>
   )
 }

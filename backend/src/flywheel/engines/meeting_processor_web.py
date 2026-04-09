@@ -488,7 +488,7 @@ async def write_context_entries(
                 content=content_str,
             )
             if account_id is not None:
-                entry.account_id = account_id
+                entry.pipeline_entry_id = account_id
 
             session.add(entry)
             written += 1

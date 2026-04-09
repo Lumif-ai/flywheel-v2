@@ -518,7 +518,7 @@ async def prep_meeting(
         raise HTTPException(status_code=404, detail="Meeting not found")
 
     # 2. Resolve account_id — use existing or auto-link
-    account_id = meeting.account_id
+    account_id = meeting.pipeline_entry_id or meeting.account_id
 
     if account_id is None:
         # auto_link requires a session factory (opens its own sessions internally)

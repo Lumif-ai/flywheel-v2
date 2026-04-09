@@ -27,7 +27,7 @@ export function EditAccountDialog({ account, open, onOpenChange }: EditAccountDi
   const [name, setName] = useState(account.name)
   const [domain, setDomain] = useState(account.domain ?? '')
   const [status, setStatus] = useState(account.status ?? 'prospect')
-  const [relStatus, setRelStatus] = useState(account.relationship_status ?? 'active')
+  const [relStatus, setRelStatus] = useState(account.stage ?? 'active')
   const [types, setTypes] = useState<string[]>(account.relationship_type)
 
   const accountMutation = useMutation({
@@ -36,7 +36,7 @@ export function EditAccountDialog({ account, open, onOpenChange }: EditAccountDi
         name: name !== account.name ? name : undefined,
         domain: domain || null,
         status,
-        relationship_status: relStatus,
+        stage: relStatus,
       }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.relationships.detail(account.id) })

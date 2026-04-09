@@ -9,7 +9,7 @@ import type { RelationshipListItem, RelationshipType } from '../types/relationsh
 
 /* ─── Types ────────────────────────────────────────────────────── */
 
-type SortField = 'name' | 'domain' | 'relationship_status' | 'primary_contact_name' | 'last_interaction_at' | 'signal_count'
+type SortField = 'name' | 'domain' | 'stage' | 'primary_contact_name' | 'last_activity_at' | 'signal_count'
 type SortDir = 'asc' | 'desc'
 
 /* ─── Avatar color hash ────────────────────────────────────────── */
@@ -69,8 +69,8 @@ const COLUMNS: Array<{
 }> = [
   { field: 'name', label: 'Name', icon: Building2, minWidth: '200px' },
   { field: 'primary_contact_name', label: 'Contact', icon: User, minWidth: '140px' },
-  { field: 'relationship_status', label: 'Status', icon: Circle, minWidth: '90px' },
-  { field: 'last_interaction_at', label: 'Last Active', icon: Clock, minWidth: '90px' },
+  { field: 'stage', label: 'Status', icon: Circle, minWidth: '90px' },
+  { field: 'last_activity_at', label: 'Last Active', icon: Clock, minWidth: '90px' },
   { field: 'signal_count', label: 'Signals', icon: Zap, minWidth: '72px' },
 ]
 
@@ -103,13 +103,13 @@ export function RelationshipTable({ items, type }: RelationshipTableProps) {
           return dir * a.name.localeCompare(b.name)
         case 'domain':
           return dir * (a.domain ?? '').localeCompare(b.domain ?? '')
-        case 'relationship_status':
-          return dir * a.relationship_status.localeCompare(b.relationship_status)
+        case 'stage':
+          return dir * a.stage.localeCompare(b.stage)
         case 'primary_contact_name':
           return dir * (a.primary_contact_name ?? '').localeCompare(b.primary_contact_name ?? '')
-        case 'last_interaction_at': {
-          const aT = a.last_interaction_at ? new Date(a.last_interaction_at).getTime() : 0
-          const bT = b.last_interaction_at ? new Date(b.last_interaction_at).getTime() : 0
+        case 'last_activity_at': {
+          const aT = a.last_activity_at ? new Date(a.last_activity_at).getTime() : 0
+          const bT = b.last_activity_at ? new Date(b.last_activity_at).getTime() : 0
           return dir * (aT - bT)
         }
         case 'signal_count':
@@ -136,8 +136,8 @@ export function RelationshipTable({ items, type }: RelationshipTableProps) {
   }
 
   const isStale = (item: RelationshipListItem) => {
-    if (!item.last_interaction_at) return true
-    return (Date.now() - new Date(item.last_interaction_at).getTime()) / 86400000 > STALE_DAYS
+    if (!item.last_activity_at) return true
+    return (Date.now() - new Date(item.last_activity_at).getTime()) / 86400000 > STALE_DAYS
   }
 
   return (
@@ -267,15 +267,15 @@ export function RelationshipTable({ items, type }: RelationshipTableProps) {
                 <td style={{ padding: `${CELL_PY} ${CELL_PX}`, borderBottom: '1px solid #F3F4F6' }}>
                   <span
                     className="inline-flex items-center rounded-full px-2 py-px text-xs font-medium"
-                    style={{ ...statusStyle(item.relationship_status), fontSize: '11px', lineHeight: '18px' }}
+                    style={{ ...statusStyle(item.stage), fontSize: '11px', lineHeight: '18px' }}
                   >
-                    {item.relationship_status.replace(/_/g, ' ')}
+                    {item.stage.replace(/_/g, ' ')}
                   </span>
                 </td>
 
                 {/* Last Active */}
                 <td style={{ padding: `${CELL_PY} ${CELL_PX}`, borderBottom: '1px solid #F3F4F6' }}>
-                  {item.last_interaction_at ? (
+                  {item.last_activity_at ? (
                     <span
                       style={{
                         fontSize: FONT_CELL,
@@ -283,7 +283,7 @@ export function RelationshipTable({ items, type }: RelationshipTableProps) {
                         fontWeight: stale ? 500 : 400,
                       }}
                     >
-                      {formatTimeAgo(item.last_interaction_at)}
+                      {formatTimeAgo(item.last_activity_at)}
                       {stale && (
                         <span style={{ fontSize: '11px', color: '#d97706', marginLeft: '4px' }}>
                           overdue

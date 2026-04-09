@@ -12,9 +12,9 @@ export interface AccountListItem {
   fit_score: number | null
   fit_tier: FitTier | null
   contact_count: number
-  last_interaction_at: string | null
-  next_action_due: string | null
-  next_action_type: string | null
+  last_interaction_at: string | null  // mapped from last_activity_at by backend compat layer
+  next_action_due: string | null      // mapped from next_action_date by backend compat layer
+  next_action_type: string | null     // mapped from next_action_note by backend compat layer
   source: string
 }
 
@@ -40,7 +40,7 @@ export interface ContactResponse {
   name: string
   email: string | null
   title: string | null
-  role_in_deal: string | null
+  role_in_deal: string | null  // mapped from Contact.role by backend compat layer
   linkedin_url: string | null
   notes: string | null
   source: string

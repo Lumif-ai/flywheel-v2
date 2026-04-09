@@ -36,7 +36,7 @@ export function EditContactDialog({ accountId, contact, open, onOpenChange }: Ed
         name: name.trim(),
         email: email.trim() || null,
         title: title.trim() || null,
-        role_in_deal: role.trim() || null,
+        role: role.trim() || null,
         linkedin_url: linkedin.trim() || null,
       }
       if (isNew) {

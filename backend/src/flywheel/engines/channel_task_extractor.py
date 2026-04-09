@@ -30,11 +30,11 @@ from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from flywheel.db.models import (
-    Account,
-    AccountContact,
+    Contact,
     ContextEntity,
     Email,
     EmailScore,
+    PipelineEntry,
     SkillRun,
     Task,
 )
@@ -384,32 +384,32 @@ async def _resolve_entity_to_account(
             return None
 
         if entity.entity_type == "company":
-            account_id = (await session.execute(
-                select(Account.id).where(
-                    Account.name == entity.name,
-                    Account.tenant_id == tenant_id,
+            entry_id = (await session.execute(
+                select(PipelineEntry.id).where(
+                    PipelineEntry.name == entity.name,
+                    PipelineEntry.tenant_id == tenant_id,
                 ).limit(1)
             )).scalar_one_or_none()
-            if account_id:
+            if entry_id:
                 logger.debug(
-                    "Resolved company entity '%s' to account %s",
-                    entity.name, account_id,
+                    "Resolved company entity '%s' to pipeline entry %s",
+                    entity.name, entry_id,
                 )
-            return account_id
+            return entry_id
 
         if entity.entity_type == "person":
-            contact = (await session.execute(
-                select(AccountContact.account_id).where(
-                    AccountContact.name == entity.name,
-                    AccountContact.tenant_id == tenant_id,
+            entry_id = (await session.execute(
+                select(Contact.pipeline_entry_id).where(
+                    Contact.name == entity.name,
+                    Contact.tenant_id == tenant_id,
                 ).limit(1)
             )).scalar_one_or_none()
-            if contact:
+            if entry_id:
                 logger.debug(
-                    "Resolved person entity '%s' to account %s",
-                    entity.name, contact,
+                    "Resolved person entity '%s' to pipeline entry %s",
+                    entity.name, entry_id,
                 )
-            return contact
+            return entry_id
 
         return None
 
@@ -466,7 +466,7 @@ async def _find_duplicate(
         result = await session.execute(
             select(Task.id, Task.title).where(
                 *base_filter,
-                Task.account_id == account_id,
+                Task.pipeline_entry_id == account_id,
             )
         )
         rows = result.all()

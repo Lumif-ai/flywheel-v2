@@ -80,12 +80,12 @@ export interface UpdateAccountPayload {
   name?: string
   domain?: string | null
   status?: string
-  relationship_status?: string
+  stage?: string
   fit_score?: number | null
   fit_tier?: string | null
   intel?: Record<string, unknown>
-  next_action_due?: string | null
-  next_action_type?: string | null
+  next_action_date?: string | null
+  next_action_note?: string | null
 }
 
 export function updateAccount(id: string, payload: UpdateAccountPayload): Promise<unknown> {
@@ -100,7 +100,7 @@ export interface UpdateContactPayload {
   name?: string
   email?: string | null
   title?: string | null
-  role_in_deal?: string | null
+  role?: string | null
   linkedin_url?: string | null
   notes?: string | null
 }
@@ -117,7 +117,7 @@ export interface CreateContactPayload {
   name: string
   email?: string | null
   title?: string | null
-  role_in_deal?: string | null
+  role?: string | null
   linkedin_url?: string | null
   notes?: string | null
 }

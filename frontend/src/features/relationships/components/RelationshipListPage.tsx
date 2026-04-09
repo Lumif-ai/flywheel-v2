@@ -44,8 +44,8 @@ const TYPE_CONFIG: Record<
 const STATUS_OPTIONS = ['active', 'at_risk', 'churned', 'new'] as const
 
 function isStale(item: RelationshipListItem): boolean {
-  if (!item.last_interaction_at) return true
-  return (Date.now() - new Date(item.last_interaction_at).getTime()) / 86400000 > STALE_DAYS
+  if (!item.last_activity_at) return true
+  return (Date.now() - new Date(item.last_activity_at).getTime()) / 86400000 > STALE_DAYS
 }
 
 /* ─── Dropdown helper ──────────────────────────────────────────── */
@@ -189,7 +189,7 @@ export function RelationshipListPage({ type }: { type: RelationshipType }) {
     let result = items
     if (activeView === 'needs_action') result = result.filter((i) => i.signal_count > 0)
     else if (activeView === 'stale') result = result.filter(isStale)
-    if (statusFilters.length > 0) result = result.filter((i) => statusFilters.includes(i.relationship_status))
+    if (statusFilters.length > 0) result = result.filter((i) => statusFilters.includes(i.stage))
     if (search.trim()) {
       const q = search.trim().toLowerCase()
       result = result.filter(

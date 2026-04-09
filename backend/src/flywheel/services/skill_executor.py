@@ -1698,7 +1698,7 @@ async def _execute_meeting_processor(
             external_id = meeting.external_id
             meeting_title = meeting.title or "Untitled"
             meeting_date = meeting.meeting_date
-            existing_account_id = meeting.account_id
+            existing_account_id = meeting.pipeline_entry_id or meeting.account_id
 
         if not external_id:
             raise ValueError(f"Meeting {meeting_id} has no external_id — cannot fetch from Granola")
@@ -2944,7 +2944,7 @@ async def _execute_account_meeting_prep(
             rows = (await session.execute(
                 select(ContextEntry)
                 .where(
-                    ContextEntry.account_id == account_id,
+                    ContextEntry.pipeline_entry_id == account_id,
                     ContextEntry.tenant_id == tenant_id,
                     ContextEntry.deleted_at.is_(None),
                     ContextEntry.file_name.in_(PREP_CONTEXT_FILES),
