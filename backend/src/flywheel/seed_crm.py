@@ -1,7 +1,7 @@
 """Seed CRM tables from GTM stack files.
 
 Reads xlsx, csv, and json files from the GTM stack directory and populates
-the Account, AccountContact, and OutreachActivity tables for a given tenant.
+the PipelineEntry, Contact, and Activity tables for a given tenant.
 Designed to be idempotent: running the command multiple times produces no
 duplicate rows.
 
@@ -26,7 +26,7 @@ from typing import Any
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from flywheel.db.models import Account, AccountContact, OutreachActivity
+from flywheel.db.models import PipelineEntry, Contact, Activity
 from flywheel.utils.normalize import normalize_company_name
 
 logger = logging.getLogger("flywheel.seed_crm")
@@ -600,17 +600,17 @@ def _parse_single_scored_csv(
 # Database upsert logic
 # ---------------------------------------------------------------------------
 
-async def upsert_accounts(
+async def upsert_pipeline_entries(
     session: AsyncSession,
     accounts: dict[str, AccountData],
     tenant_id: str,
     dry_run: bool,
     verbose: bool,
 ) -> dict[str, Any]:
-    """Upsert all accounts. Return mapping of normalized_name -> account_id."""
+    """Upsert all pipeline entries. Return mapping of normalized_name -> pipeline_entry_id."""
     from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-    account_id_map: dict[str, Any] = {}
+    entry_id_map: dict[str, Any] = {}
     inserted = updated = skipped = 0
 
     for norm, data in accounts.items():
@@ -627,10 +627,10 @@ async def upsert_accounts(
         if dry_run:
             # In dry-run, generate a fake UUID for downstream counting
             import uuid
-            account_id_map[norm] = str(uuid.uuid4())
+            entry_id_map[norm] = str(uuid.uuid4())
             continue
 
-        stmt = pg_insert(Account).values(
+        stmt = pg_insert(PipelineEntry).values(
             tenant_id=tenant_id,
             name=data.name,
             normalized_name=norm,
@@ -639,73 +639,73 @@ async def upsert_accounts(
             fit_tier=data.fit_tier,
             intel=intel,
             source=source_str,
-            status="prospect",
-            relationship_status="active",
-            pipeline_stage="prospect",
+            stage="identified",
+            entity_type="company",
+            relationship_type=["prospect"],
         )
 
         # ON CONFLICT: merge — keep higher fit_score, merge intel, keep first domain/name
         stmt = stmt.on_conflict_do_update(
-            constraint="uq_account_tenant_normalized",
+            constraint="uq_pipeline_tenant_owner_normalized",
             set_={
                 # Keep the longer/better name (use case: first insert wins unless new is longer)
                 "name": text(
-                    "CASE WHEN length(EXCLUDED.name) > length(accounts.name) "
-                    "THEN EXCLUDED.name ELSE accounts.name END"
+                    "CASE WHEN length(EXCLUDED.name) > length(pipeline_entries.name) "
+                    "THEN EXCLUDED.name ELSE pipeline_entries.name END"
                 ),
                 # Keep higher fit_score
                 "fit_score": text(
                     "CASE WHEN EXCLUDED.fit_score IS NOT NULL AND "
-                    "(accounts.fit_score IS NULL OR EXCLUDED.fit_score > accounts.fit_score) "
-                    "THEN EXCLUDED.fit_score ELSE accounts.fit_score END"
+                    "(pipeline_entries.fit_score IS NULL OR EXCLUDED.fit_score > pipeline_entries.fit_score) "
+                    "THEN EXCLUDED.fit_score ELSE pipeline_entries.fit_score END"
                 ),
                 # Keep fit_tier if not set
                 "fit_tier": text(
-                    "CASE WHEN accounts.fit_tier IS NULL THEN EXCLUDED.fit_tier "
-                    "ELSE accounts.fit_tier END"
+                    "CASE WHEN pipeline_entries.fit_tier IS NULL THEN EXCLUDED.fit_tier "
+                    "ELSE pipeline_entries.fit_tier END"
                 ),
                 # Keep first non-null domain
                 "domain": text(
-                    "CASE WHEN accounts.domain IS NULL THEN EXCLUDED.domain "
-                    "ELSE accounts.domain END"
+                    "CASE WHEN pipeline_entries.domain IS NULL THEN EXCLUDED.domain "
+                    "ELSE pipeline_entries.domain END"
                 ),
                 # Merge intel JSONB
-                "intel": text("accounts.intel || EXCLUDED.intel"),
+                "intel": text("pipeline_entries.intel || EXCLUDED.intel"),
                 # Append new source
                 "source": text(
-                    "CASE WHEN accounts.source NOT LIKE '%' || EXCLUDED.source || '%' "
-                    "THEN accounts.source || ',' || EXCLUDED.source "
-                    "ELSE accounts.source END"
+                    "CASE WHEN pipeline_entries.source NOT LIKE '%' || EXCLUDED.source || '%' "
+                    "THEN pipeline_entries.source || ',' || EXCLUDED.source "
+                    "ELSE pipeline_entries.source END"
                 ),
                 "updated_at": text("now()"),
             },
         )
-        stmt = stmt.returning(Account.id)
+        stmt = stmt.returning(PipelineEntry.id)
 
         result = await session.execute(stmt)
-        account_id = result.scalar_one()
-        account_id_map[norm] = account_id
+        entry_id = result.scalar_one()
+        entry_id_map[norm] = entry_id
 
         if verbose:
-            logger.debug("Account upsert: %s → %s", norm, account_id)
+            logger.debug("PipelineEntry upsert: %s -> %s", norm, entry_id)
 
     if not dry_run:
         await session.flush()
 
-    return account_id_map
+    return entry_id_map
 
 
-async def upsert_contacts(
+async def upsert_seed_contacts(
     session: AsyncSession,
     contacts: list[ContactData],
-    account_id_map: dict[str, Any],
+    entry_id_map: dict[str, Any],
     tenant_id: str,
     dry_run: bool,
     verbose: bool,
 ) -> tuple[dict[tuple, Any], int, int]:
     """Insert contacts. Return (contact_key_map, inserted, skipped).
 
-    contact_key_map maps (account_id, email_or_name) → contact_id.
+    contact_key_map maps (pipeline_entry_id, email_or_name) -> contact_id.
     """
     contact_id_map: dict[tuple, Any] = {}
     inserted = skipped = 0
@@ -724,10 +724,10 @@ async def upsert_contacts(
             deduped.append(c)
 
     for c in deduped:
-        account_id = account_id_map.get(c.normalized_company)
-        if account_id is None:
+        entry_id = entry_id_map.get(c.normalized_company)
+        if entry_id is None:
             if verbose:
-                logger.debug("No account found for contact: %s (company: %s)", c.name, c.normalized_company)
+                logger.debug("No pipeline entry found for contact: %s (company: %s)", c.name, c.normalized_company)
             skipped += 1
             continue
 
@@ -735,24 +735,24 @@ async def upsert_contacts(
             import uuid
             contact_id = str(uuid.uuid4())
             if c.email:
-                contact_id_map[(account_id, c.email.lower())] = contact_id
+                contact_id_map[(entry_id, c.email.lower())] = contact_id
             else:
-                contact_id_map[(account_id, c.name.lower())] = contact_id
+                contact_id_map[(entry_id, c.name.lower())] = contact_id
             inserted += 1
             continue
 
         # SELECT first
         if c.email:
-            stmt = select(AccountContact).where(
-                AccountContact.tenant_id == tenant_id,
-                AccountContact.account_id == account_id,
-                AccountContact.email == c.email,
+            stmt = select(Contact).where(
+                Contact.tenant_id == tenant_id,
+                Contact.pipeline_entry_id == entry_id,
+                Contact.email == c.email,
             )
         else:
-            stmt = select(AccountContact).where(
-                AccountContact.tenant_id == tenant_id,
-                AccountContact.account_id == account_id,
-                AccountContact.name == c.name,
+            stmt = select(Contact).where(
+                Contact.tenant_id == tenant_id,
+                Contact.pipeline_entry_id == entry_id,
+                Contact.name == c.name,
             )
         result = await session.execute(stmt)
         existing = result.scalar_one_or_none()
@@ -768,15 +768,15 @@ async def upsert_contacts(
             contact_id = existing.id
             skipped += 1
         else:
-            new_contact = AccountContact(
+            new_contact = Contact(
                 tenant_id=tenant_id,
-                account_id=account_id,
+                pipeline_entry_id=entry_id,
                 name=c.name,
                 email=c.email,
                 title=c.title,
                 linkedin_url=c.linkedin_url,
                 notes=c.notes,
-                source=c.source,
+                is_primary=False,
             )
             session.add(new_contact)
             await session.flush()
@@ -784,9 +784,9 @@ async def upsert_contacts(
             inserted += 1
 
         if c.email:
-            contact_id_map[(account_id, c.email.lower())] = contact_id
+            contact_id_map[(entry_id, c.email.lower())] = contact_id
         else:
-            contact_id_map[(account_id, c.name.lower())] = contact_id
+            contact_id_map[(entry_id, c.name.lower())] = contact_id
 
         if verbose:
             logger.debug(
@@ -802,13 +802,13 @@ async def upsert_contacts(
 async def insert_activities(
     session: AsyncSession,
     activities: list[ActivityData],
-    account_id_map: dict[str, Any],
+    entry_id_map: dict[str, Any],
     contact_id_map: dict[tuple, Any],
     tenant_id: str,
     dry_run: bool,
     verbose: bool,
 ) -> tuple[int, int]:
-    """Insert outreach activities. Return (inserted, skipped)."""
+    """Insert activities. Return (inserted, skipped)."""
     inserted = skipped = 0
 
     # Deduplicate input activities before hitting the DB
@@ -825,8 +825,8 @@ async def insert_activities(
             deduped.append(a)
 
     for a in deduped:
-        account_id = account_id_map.get(a.normalized_company)
-        if account_id is None:
+        entry_id = entry_id_map.get(a.normalized_company)
+        if entry_id is None:
             skipped += 1
             continue
 
@@ -837,21 +837,21 @@ async def insert_activities(
         # Resolve contact_id
         contact_id = None
         if a.contact_email:
-            contact_id = contact_id_map.get((account_id, a.contact_email.lower()))
+            contact_id = contact_id_map.get((entry_id, a.contact_email.lower()))
         if contact_id is None and a.contact_name:
-            contact_id = contact_id_map.get((account_id, a.contact_name.lower()))
+            contact_id = contact_id_map.get((entry_id, a.contact_name.lower()))
 
         if dry_run:
             inserted += 1
             continue
 
-        # SELECT first — dedup by (account_id, channel, sent_at date)
-        stmt = select(OutreachActivity).where(
-            OutreachActivity.tenant_id == tenant_id,
-            OutreachActivity.account_id == account_id,
-            OutreachActivity.channel == a.channel,
-            # Cast sent_at to date for comparison (same day = same activity)
-            text("DATE(outreach_activities.sent_at AT TIME ZONE 'UTC') = :sent_date").bindparams(
+        # SELECT first — dedup by (pipeline_entry_id, channel, occurred_at date)
+        stmt = select(Activity).where(
+            Activity.tenant_id == tenant_id,
+            Activity.pipeline_entry_id == entry_id,
+            Activity.channel == a.channel,
+            # Cast occurred_at to date for comparison (same day = same activity)
+            text("DATE(activities.occurred_at AT TIME ZONE 'UTC') = :sent_date").bindparams(
                 sent_date=a.sent_at.date()
             ),
         )
@@ -861,14 +861,17 @@ async def insert_activities(
         if existing:
             skipped += 1
         else:
-            new_activity = OutreachActivity(
+            # Map channel to activity type
+            activity_type = "email" if a.channel == "email" else a.channel
+            new_activity = Activity(
                 tenant_id=tenant_id,
-                account_id=account_id,
+                pipeline_entry_id=entry_id,
                 contact_id=contact_id,
+                type=activity_type,
                 channel=a.channel,
                 direction=a.direction,
                 status=a.status,
-                sent_at=a.sent_at,
+                occurred_at=a.sent_at,
                 metadata_={},
             )
             session.add(new_activity)
@@ -965,39 +968,39 @@ async def seed_crm(
                 from sqlalchemy import delete
                 print(f"\n[FORCE] Deleting existing data for tenant {tenant_id}...")
                 await session.execute(
-                    delete(OutreachActivity).where(
-                        OutreachActivity.tenant_id == tenant_id
+                    delete(Activity).where(
+                        Activity.tenant_id == tenant_id
                     )
                 )
                 await session.execute(
-                    delete(AccountContact).where(
-                        AccountContact.tenant_id == tenant_id
+                    delete(Contact).where(
+                        Contact.tenant_id == tenant_id
                     )
                 )
                 await session.execute(
-                    delete(Account).where(
-                        Account.tenant_id == tenant_id
+                    delete(PipelineEntry).where(
+                        PipelineEntry.tenant_id == tenant_id
                     )
                 )
                 await session.flush()
                 print("[FORCE] Existing data deleted.")
 
-            # Step 4: Upsert accounts
-            account_id_map = await upsert_accounts(
+            # Step 4: Upsert pipeline entries
+            entry_id_map = await upsert_pipeline_entries(
                 session, accounts, tenant_id, dry_run=False, verbose=verbose
             )
-            summary.accounts_inserted = len(account_id_map)
+            summary.accounts_inserted = len(entry_id_map)
 
             # Step 5: Upsert contacts
-            contact_id_map, c_inserted, c_skipped = await upsert_contacts(
-                session, contacts, account_id_map, tenant_id, dry_run=False, verbose=verbose
+            contact_id_map, c_inserted, c_skipped = await upsert_seed_contacts(
+                session, contacts, entry_id_map, tenant_id, dry_run=False, verbose=verbose
             )
             summary.contacts_inserted = c_inserted
             summary.contacts_skipped = c_skipped
 
-            # Step 6: Insert outreach activities
+            # Step 6: Insert activities
             a_inserted, a_skipped = await insert_activities(
-                session, activities, account_id_map, contact_id_map,
+                session, activities, entry_id_map, contact_id_map,
                 tenant_id, dry_run=False, verbose=verbose
             )
             summary.activities_inserted = a_inserted

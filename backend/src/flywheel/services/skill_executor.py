@@ -1635,8 +1635,8 @@ async def _execute_meeting_processor(
         write_context_entries,
         write_task_rows,
         _make_meeting_slug,
-        auto_link_meeting_to_account,
-        upsert_account_contacts,
+        auto_link_meeting_to_pipeline_entry,
+        upsert_contacts,
         apply_post_classification_rules,
     )
     from flywheel.db.models import Integration, Meeting, Tenant
@@ -1872,7 +1872,7 @@ async def _execute_meeting_processor(
             account_id = existing_account_id
             logger.info("Run %s: meeting already linked to account %s", run_id, account_id)
         else:
-            account_id = await auto_link_meeting_to_account(
+            account_id = await auto_link_meeting_to_pipeline_entry(
                 factory=factory,
                 tenant_id=tenant_id,
                 attendees=content.attendees,
@@ -1899,7 +1899,7 @@ async def _execute_meeting_processor(
                             sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
                             {"tid": str(tenant_id)},
                         )
-                        await upsert_account_contacts(
+                        await upsert_contacts(
                             sess, tenant_id, account_id, content.attendees, matched_domain
                         )
                         await sess.commit()

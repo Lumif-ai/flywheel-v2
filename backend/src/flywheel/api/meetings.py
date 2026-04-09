@@ -24,7 +24,7 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import Integration, Meeting, PipelineEntry, SkillRun
 from flywheel.db.session import get_session_factory
-from flywheel.engines.meeting_processor_web import auto_link_meeting_to_account
+from flywheel.engines.meeting_processor_web import auto_link_meeting_to_pipeline_entry
 from flywheel.services.meeting_sync import sync_granola_meetings
 from flywheel.services.calendar_sync import sync_calendar
 
@@ -522,7 +522,7 @@ async def prep_meeting(
 
     if account_id is None:
         # auto_link requires a session factory (opens its own sessions internally)
-        linked_id = await auto_link_meeting_to_account(
+        linked_id = await auto_link_meeting_to_pipeline_entry(
             get_session_factory(),
             tenant_id=user.tenant_id,
             attendees=meeting.attendees or [],
@@ -530,7 +530,7 @@ async def prep_meeting(
             meeting_title=meeting.title or "",
         )
         if linked_id:
-            meeting.account_id = linked_id
+            meeting.pipeline_entry_id = linked_id
             await db.commit()
             await db.refresh(meeting)
             account_id = linked_id

@@ -7,9 +7,9 @@ _execute_meeting_processor() 8-stage pipeline:
 - extract_intelligence() — Sonnet extraction into 7 MPP-04 context file types
 - upload_transcript()  — Upload transcript text to Supabase Storage
 - write_context_entries() — Write extracted intelligence to ContextEntry rows
-- auto_link_meeting_to_account() — Match attendee domains to existing accounts
-- auto_create_prospect() — Auto-create prospect account for unknown external domains
-- upsert_account_contacts() — Upsert attendees as AccountContact rows
+- auto_link_meeting_to_pipeline_entry() — Match attendee domains to existing pipeline entries
+- auto_create_prospect() — Auto-create prospect pipeline entry for unknown external domains
+- upsert_contacts() — Upsert attendees as Contact rows
 - apply_post_classification_rules() — Post-classification skip check (MPP-05 rules)
 - extract_tasks() — Haiku-based commitment classification from transcripts
 - write_task_rows() — Create Task ORM rows from extracted task dicts
@@ -37,7 +37,7 @@ from sqlalchemy import func, select
 from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncSession
 
-from flywheel.db.models import Account, AccountContact, ContextEntry, Task, Tenant
+from flywheel.db.models import PipelineEntry, Contact, ContextEntry, Task, Tenant
 
 logger = logging.getLogger(__name__)
 
@@ -142,7 +142,7 @@ async def classify_meeting(
 ) -> str:
     """Classify a meeting into one of 8 types using 3-layer detection.
 
-    Layer 1: Contact match — query AccountContact for attendee emails.
+    Layer 1: Contact match — query Contact for attendee emails.
               If found, derive type from parent account's relationship_type.
     Layer 2: Internal check — if all attendees share tenant domain, classify
               as "internal" (<=3 attendees) or "team-meeting" (>3 attendees).
@@ -169,18 +169,18 @@ async def classify_meeting(
                     {"tid": str(tenant_id)},
                 )
                 rows = (await session.execute(
-                    select(AccountContact, Account)
-                    .join(Account, AccountContact.account_id == Account.id)
+                    select(Contact, PipelineEntry)
+                    .join(PipelineEntry, Contact.pipeline_entry_id == PipelineEntry.id)
                     .where(
-                        AccountContact.tenant_id == tenant_id,
-                        AccountContact.email.in_(attendee_emails),
+                        Contact.tenant_id == tenant_id,
+                        Contact.email.in_(attendee_emails),
                     )
                     .limit(1)
                 )).first()
 
             if rows is not None:
-                contact, account = rows
-                rel_types = account.relationship_type or []
+                contact, entry = rows
+                rel_types = entry.relationship_type or []
                 # Map relationship_type array to meeting type
                 for rel in rel_types:
                     rel_lower = rel.lower()
@@ -605,17 +605,17 @@ def _extract_external_domains(attendees: list[dict]) -> list[str]:
     return list(domains.keys())
 
 
-async def upsert_account_contacts(
+async def upsert_contacts(
     session: AsyncSession,
     tenant_id: UUID,
-    account_id: UUID,
+    pipeline_entry_id: UUID,
     attendees: list[dict],
     domain: str,
 ) -> int:
-    """Upsert external attendees matching domain as AccountContact rows.
+    """Upsert external attendees matching domain as Contact rows.
 
     - Filters attendees to those with is_external=True and email ending in @{domain}.
-    - Checks for existing AccountContact by (tenant_id, account_id, email).
+    - Checks for existing Contact by (tenant_id, pipeline_entry_id, email).
     - Creates new contacts only when not already present.
     - Returns count of newly created contacts.
 
@@ -633,25 +633,25 @@ async def upsert_account_contacts(
         name = (a.get("name") or email.split("@")[0]).strip() or email
 
         existing = (await session.execute(
-            select(AccountContact.id).where(
-                AccountContact.tenant_id == tenant_id,
-                AccountContact.account_id == account_id,
-                AccountContact.email == email,
+            select(Contact.id).where(
+                Contact.tenant_id == tenant_id,
+                Contact.pipeline_entry_id == pipeline_entry_id,
+                Contact.email == email,
             ).limit(1)
         )).scalar_one_or_none()
 
         if existing is None:
-            contact = AccountContact(
+            contact = Contact(
                 tenant_id=tenant_id,
-                account_id=account_id,
+                pipeline_entry_id=pipeline_entry_id,
                 name=name,
                 email=email,
-                source="meeting-auto-discovery",
+                is_primary=False,
             )
             session.add(contact)
             created += 1
             logger.debug(
-                "upsert_account_contacts: added contact %s to account %s", email, account_id
+                "upsert_contacts: added contact %s to pipeline entry %s", email, pipeline_entry_id
             )
 
     return created
@@ -665,14 +665,14 @@ async def auto_create_prospect(
     attendees: list[dict],
     title: str = "",
 ) -> UUID:
-    """Auto-create a prospect Account for an unknown external domain.
+    """Auto-create a prospect PipelineEntry for an unknown external domain.
 
     - Derives company name from the domain (e.g. acme.com -> Acme).
     - Computes normalized_name for dedup check.
-    - Returns existing account.id if the normalized_name already exists.
-    - Creates new Account with all required NOT NULL fields.
-    - Calls upsert_account_contacts() for matching attendees.
-    - Commits and returns the account UUID.
+    - Returns existing entry.id if the normalized_name already exists.
+    - Creates new PipelineEntry with all required NOT NULL fields.
+    - Calls upsert_contacts() for matching attendees.
+    - Commits and returns the pipeline entry UUID.
     """
     company_name = domain.split(".")[0].title()
     normalized = re.sub(r"[^a-z0-9]", "", company_name.lower())
@@ -685,61 +685,60 @@ async def auto_create_prospect(
 
         # Dedup check
         existing_id = (await session.execute(
-            select(Account.id).where(
-                Account.tenant_id == tenant_id,
-                Account.normalized_name == normalized,
+            select(PipelineEntry.id).where(
+                PipelineEntry.tenant_id == tenant_id,
+                PipelineEntry.normalized_name == normalized,
             ).limit(1)
         )).scalar_one_or_none()
 
         if existing_id is not None:
             logger.info(
-                "auto_create_prospect: account %s already exists for domain %s (tenant=%s)",
+                "auto_create_prospect: pipeline entry %s already exists for domain %s (tenant=%s)",
                 existing_id, domain, tenant_id,
             )
             return existing_id
 
-        account = Account(
+        entry = PipelineEntry(
             tenant_id=tenant_id,
             name=company_name,
             normalized_name=normalized,
             domain=domain,
             source="meeting-auto-discovery",
-            status="prospect",
+            stage="identified",
+            entity_type="company",
             relationship_type=["prospect"],
-            relationship_status="new",
-            pipeline_stage="identified",
-            last_interaction_at=datetime.now(timezone.utc),
+            last_activity_at=datetime.now(timezone.utc),
         )
-        session.add(account)
-        await session.flush()  # Populate account.id
+        session.add(entry)
+        await session.flush()  # Populate entry.id
 
         # Upsert contacts for attendees matching this domain
-        await upsert_account_contacts(session, tenant_id, account.id, attendees, domain)
+        await upsert_contacts(session, tenant_id, entry.id, attendees, domain)
 
         await session.commit()
         logger.info(
             "auto_create_prospect: created prospect '%s' (id=%s) for domain %s (tenant=%s)",
-            company_name, account.id, domain, tenant_id,
+            company_name, entry.id, domain, tenant_id,
         )
-        return account.id
+        return entry.id
 
 
-async def auto_link_meeting_to_account(
+async def auto_link_meeting_to_pipeline_entry(
     factory: async_sessionmaker[AsyncSession],
     tenant_id: UUID,
     attendees: list[dict],
     user_id: UUID | None = None,
     meeting_title: str = "",
 ) -> UUID | None:
-    """Match meeting attendees to existing accounts by domain, or create prospects.
+    """Match meeting attendees to existing pipeline entries by domain, or create prospects.
 
     Steps:
     1. Extract unique external domains from attendees (excludes free email providers).
-    2. Query Account.domain for any of those domains in the tenant.
-    3. If single match: return account.id.
-    4. If multiple matches: return account with most AccountContacts (first if tied).
+    2. Query PipelineEntry.domain for any of those domains in the tenant.
+    3. If single match: return entry.id.
+    4. If multiple matches: return entry with most Contacts (first if tied).
     5. If no match: for each external domain, call auto_create_prospect().
-       Return the first created account's id.
+       Return the first created entry's id.
     6. If no external domains (all internal): return None.
 
     Args:
@@ -750,69 +749,69 @@ async def auto_link_meeting_to_account(
         meeting_title: Meeting title (passed to auto_create_prospect for context).
 
     Returns:
-        Account UUID if a match or prospect was created, else None.
+        PipelineEntry UUID if a match or prospect was created, else None.
     """
     external_domains = _extract_external_domains(attendees)
 
     if not external_domains:
         logger.debug(
-            "auto_link_meeting_to_account: no external domains found (all internal or free email)"
+            "auto_link_meeting_to_pipeline_entry: no external domains found (all internal or free email)"
         )
         return None
 
-    # Query for existing accounts matching any of the external domains
+    # Query for existing pipeline entries matching any of the external domains
     async with factory() as session:
         await session.execute(
             sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
             {"tid": str(tenant_id)},
         )
-        matched_accounts = (await session.execute(
-            select(Account).where(
-                Account.tenant_id == tenant_id,
-                Account.domain.in_(external_domains),
+        matched_entries = (await session.execute(
+            select(PipelineEntry).where(
+                PipelineEntry.tenant_id == tenant_id,
+                PipelineEntry.domain.in_(external_domains),
             )
         )).scalars().all()
 
-    if len(matched_accounts) == 1:
-        account = matched_accounts[0]
+    if len(matched_entries) == 1:
+        entry = matched_entries[0]
         logger.info(
-            "auto_link_meeting_to_account: single domain match -> account %s (domain=%s)",
-            account.id, account.domain,
+            "auto_link_meeting_to_pipeline_entry: single domain match -> entry %s (domain=%s)",
+            entry.id, entry.domain,
         )
-        return account.id
+        return entry.id
 
-    if len(matched_accounts) > 1:
-        # Pick account with most contacts; fall back to first if tied
+    if len(matched_entries) > 1:
+        # Pick entry with most contacts; fall back to first if tied
         async with factory() as session:
             await session.execute(
                 sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
                 {"tid": str(tenant_id)},
             )
             rows = (await session.execute(
-                select(Account.id, func.count(AccountContact.id).label("contact_count"))
-                .outerjoin(AccountContact, AccountContact.account_id == Account.id)
-                .where(Account.id.in_([a.id for a in matched_accounts]))
-                .group_by(Account.id)
-                .order_by(func.count(AccountContact.id).desc())
+                select(PipelineEntry.id, func.count(Contact.id).label("contact_count"))
+                .outerjoin(Contact, Contact.pipeline_entry_id == PipelineEntry.id)
+                .where(PipelineEntry.id.in_([e.id for e in matched_entries]))
+                .group_by(PipelineEntry.id)
+                .order_by(func.count(Contact.id).desc())
                 .limit(1)
             )).first()
 
-        best_id = rows[0] if rows else matched_accounts[0].id
+        best_id = rows[0] if rows else matched_entries[0].id
         logger.info(
-            "auto_link_meeting_to_account: %d domain matches, picked account %s by contact count",
-            len(matched_accounts), best_id,
+            "auto_link_meeting_to_pipeline_entry: %d domain matches, picked entry %s by contact count",
+            len(matched_entries), best_id,
         )
         return best_id
 
-    # No existing match — auto-create prospect accounts for unknown external domains
+    # No existing match — auto-create prospect entries for unknown external domains
     logger.info(
-        "auto_link_meeting_to_account: no existing accounts for domains %s — creating prospects",
+        "auto_link_meeting_to_pipeline_entry: no existing entries for domains %s — creating prospects",
         external_domains,
     )
-    first_account_id: UUID | None = None
+    first_entry_id: UUID | None = None
     for domain in external_domains:
         try:
-            account_id = await auto_create_prospect(
+            entry_id = await auto_create_prospect(
                 factory=factory,
                 tenant_id=tenant_id,
                 user_id=user_id,
@@ -820,15 +819,15 @@ async def auto_link_meeting_to_account(
                 attendees=attendees,
                 title=meeting_title,
             )
-            if first_account_id is None:
-                first_account_id = account_id
+            if first_entry_id is None:
+                first_entry_id = entry_id
         except Exception as exc:
             logger.warning(
-                "auto_link_meeting_to_account: failed to create prospect for domain %s: %s",
+                "auto_link_meeting_to_pipeline_entry: failed to create prospect for domain %s: %s",
                 domain, exc,
             )
 
-    return first_account_id
+    return first_entry_id
 
 
 # ---------------------------------------------------------------------------
