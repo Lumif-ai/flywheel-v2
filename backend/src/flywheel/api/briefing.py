@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import datetime
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -169,6 +169,8 @@ class MeetingItem(BaseModel):
     # Derivation: "available" if the meeting has a skill_run_id (prep ran)
     # or ai_summary (briefing exists), else "none"
     prep_status: str | None = None  # "available" | "none"
+    meeting_type: str | None = None  # e.g. "internal", "team-meeting", "discovery", etc.
+    is_internal: bool = False  # True when all attendees share the user's domain
 
 
 class TaskItem(BaseModel):
@@ -226,11 +228,12 @@ class BriefingV2Response(BaseModel):
 
 @router.get("/v2", response_model=BriefingV2Response)
 async def get_briefing_v2(
+    tz: str | None = Query(None, description="IANA timezone e.g. Asia/Kolkata"),
     token: TokenPayload = Depends(require_tenant),
     session: AsyncSession = Depends(get_tenant_db),
 ):
     """Morning standup briefing -- unified five-section response."""
-    result = await assemble_briefing_v2(session, token.sub, token.tenant_id)
+    result = await assemble_briefing_v2(session, token.sub, token.tenant_id, tz=tz)
     return result
 
 

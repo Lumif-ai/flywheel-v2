@@ -49,7 +49,8 @@ logger = logging.getLogger(__name__)
 
 
 async def assemble_briefing_v2(
-    session: AsyncSession, user_id: str | UUID, tenant_id: str | UUID
+    session: AsyncSession, user_id: str | UUID, tenant_id: str | UUID,
+    *, tz: str | None = None,
 ) -> dict:
     """Assemble the five-section briefing v2 response.
 
@@ -66,7 +67,7 @@ async def assemble_briefing_v2(
     prev_visit = await _get_and_update_last_visit(session, uid)
 
     # 1. Build today section (meetings + tasks)
-    today_section = await _build_today_section(session, uid, tid)
+    today_section = await _build_today_section(session, uid, tid, tz=tz)
 
     # 2. Build attention and team_activity sections
     attention = await _build_attention_section(session, uid, tid)
@@ -591,31 +592,71 @@ async def _get_and_update_last_visit(
 
 
 async def _build_today_section(
-    session: AsyncSession, user_id: UUID, tenant_id: UUID
+    session: AsyncSession, user_id: UUID, tenant_id: UUID,
+    *, tz: str | None = None,
 ) -> dict:
     """Build today section with meetings and tasks for today.
 
     Returns {"meetings": [...], "tasks": [...]}
     """
-    meetings = await _build_meetings(session, user_id, tenant_id)
+    meetings = await _build_meetings(session, user_id, tenant_id, tz=tz)
     tasks = await _build_tasks(session, user_id)
     return {"meetings": meetings, "tasks": tasks}
 
 
+def _is_internal_meeting(
+    attendees: list[dict] | None,
+    tenant_domain: str | None,
+) -> bool:
+    """Return True if all attendees share the tenant's email domain (internal meeting)."""
+    if not attendees or not tenant_domain:
+        return False
+    td = tenant_domain.lower()
+    for a in attendees:
+        email = (a.get("email") or "").lower()
+        if not email:
+            continue
+        domain = email.rsplit("@", 1)[-1] if "@" in email else ""
+        if domain and domain != td:
+            return False
+    return True
+
+
 async def _build_meetings(
-    session: AsyncSession, user_id: UUID, tenant_id: UUID
+    session: AsyncSession, user_id: UUID, tenant_id: UUID,
+    *, tz: str | None = None,
 ) -> list[dict]:
-    """Query meetings for today with company resolution and prep_status."""
+    """Query meetings for today with company resolution and prep_status.
+
+    Triggers a calendar sync first to ensure fresh data, then queries
+    using the user's timezone to calculate "today" boundaries.
+    """
     try:
-        now = datetime.datetime.now(datetime.timezone.utc)
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        from zoneinfo import ZoneInfo
+
+        # Use the user's timezone to determine "today"
+        user_tz = datetime.timezone.utc
+        if tz:
+            try:
+                user_tz = ZoneInfo(tz)
+            except (KeyError, ValueError):
+                logger.warning("Invalid timezone %r, falling back to UTC", tz)
+
+        now_user = datetime.datetime.now(user_tz)
+        today_start = now_user.replace(hour=0, minute=0, second=0, microsecond=0)
         today_end = today_start + datetime.timedelta(days=1)
+
+        # Get tenant domain for internal/external classification
+        from flywheel.db.models import Tenant
+        tenant_row = (await session.execute(
+            select(Tenant.domain).where(Tenant.id == tenant_id)
+        )).scalar_one_or_none()
+        tenant_domain = tenant_row if tenant_row else None
 
         stmt = (
             select(Meeting)
             .options(
                 joinedload(Meeting.pipeline_entry),
-                joinedload(Meeting.account),
             )
             .where(
                 Meeting.tenant_id == tenant_id,
@@ -632,12 +673,10 @@ async def _build_meetings(
 
         meetings = []
         for m in rows:
-            # Company resolution: pipeline_entry > account > None
+            # Company resolution from pipeline_entry
             company: str | None = None
             if m.pipeline_entry is not None:
                 company = m.pipeline_entry.name
-            elif m.account is not None:
-                company = m.account.name
 
             # Prep status: "available" if skill_run_id or ai_summary present
             prep_status = (
@@ -646,6 +685,10 @@ async def _build_meetings(
                 else "none"
             )
 
+            # Internal classification: use meeting_type if set, else check attendee domains
+            mt = m.meeting_type
+            is_internal = mt in ("internal", "team-meeting") if mt else _is_internal_meeting(m.attendees, tenant_domain)
+
             meetings.append({
                 "id": str(m.id),
                 "title": m.title,
@@ -653,6 +696,8 @@ async def _build_meetings(
                 "attendees": m.attendees,
                 "company": company,
                 "prep_status": prep_status,
+                "meeting_type": mt,
+                "is_internal": is_internal,
             })
 
         return meetings

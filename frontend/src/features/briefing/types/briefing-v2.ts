@@ -10,6 +10,8 @@ export interface MeetingItem {
   attendees: Array<Record<string, unknown>> | null
   company: string | null
   prep_status: string | null // "available" | "none"
+  meeting_type: string | null // e.g. "internal", "team-meeting", "discovery"
+  is_internal: boolean // true when all attendees share the user's domain
 }
 
 export interface TaskItem {
