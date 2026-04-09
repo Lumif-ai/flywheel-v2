@@ -13,7 +13,8 @@
 - ✅ **v8.0 Flywheel Platform Architecture — Wave 0** — Phases 76–82 (shipped 2026-04-05)
 - ✅ **v9.0 Unified Pipeline** — Phases 83–90 (shipped 2026-04-06)
 - ✅ **v10.0 Contact Outreach Pipeline** — Phases 91–94 (shipped 2026-04-07)
-- 🚧 **v11.0 Briefing Page Redesign** — Phases 96–100 (in progress)
+- ✅ **v11.0 Briefing Page Redesign** — Phases 96–100 (shipped 2026-04-08)
+- **v12.0 Library Redesign** — Phases 101–104
 
 ## Phases
 
@@ -161,15 +162,28 @@
 
 ---
 
-### v11.0 Briefing Page Redesign
+<details>
+<summary>✅ v11.0 Briefing Page Redesign (Phases 96–100) — SHIPPED 2026-04-08</summary>
 
-**Milestone Goal:** When a founder opens Flywheel at 8am, they see a morning standup view — a narrative brief, today's meetings and tasks, attention items requiring replies, AI team activity since last visit — with a persistent chat panel always one message away.
+- [x] Phase 96: Backend API Foundation (2/2 plans)
+- [x] Phase 97: Page Shell, Layout, Daily Brief, and Chat Panel (2/2 plans)
+- [x] Phase 98: Today and Tasks Sections (2/2 plans)
+- [x] Phase 99: Needs Attention and Team Activity Sections (2/2 plans)
+- [x] Phase 100: Cold Start and Cleanup (2/2 plans)
 
-- [x] **Phase 96: Backend API Foundation** — New /briefing/v2 endpoint with all five sections, last-visit tracking, graceful degradation (7 requirements)
-- [x] **Phase 97: Page Shell, Layout, Daily Brief, and Chat Panel** — Two-column shell, branded layout, narrative brief display, persistent chat panel (12 requirements)
-- [x] **Phase 98: Today and Tasks Sections** — Meeting cards with prep button, tasks due today with quick-add and completion (10 requirements)
-- [ ] **Phase 99: Needs Attention and Team Activity Sections** — Attention feed with one-click actions, grouped AI team activity feed (10 requirements)
-- [ ] **Phase 100: Cold Start and Cleanup** — Consolidated get-started card, remove legacy briefing components (10 requirements)
+</details>
+
+---
+
+### v12.0 Library Redesign
+
+**Milestone Goal:** Transform the document library from an unorganized flat dump into a scalable, filterable document surface with three filtering axes (type, company, tags), server-side pagination, atomic dedup, and a tagging system — ready for multi-module and team scale.
+
+- [ ] **Phase 101: Schema and Data Migration** — Tags column, account_id FK, dedup indexes, bad title cleanup, duplicate merge, account_id backfill (7 requirements)
+- [ ] **Phase 102: Write Path and API** — Dedup-on-save, readable titles, account resolution, tag validation, filtered list endpoint, tag/type counts, tag PATCH, backward compat, observability (10 requirements)
+- [ ] **Phase 103: Library UI and Tag Management** — Type tabs, company filter, tag bar, list/grid views, infinite scroll, search, tag pills, menus, empty states, tag autocomplete, tag removal, tag input (14 requirements)
+- [ ] **Phase 104: Skill Ecosystem** — Standard 15 in skill-standards.md, skill-creator update, 8 skill patches, integration test (4 requirements)
+- [ ] **Phase 104.1: Legacy Model Cleanup** — Rewire 9 backend files still referencing Account/AccountContact/OutreachActivity to use PipelineEntry/Contact/Activity (INSERTED)
 
 ## Phase Details
 
@@ -313,11 +327,55 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 100-01-PLAN.md — ColdStartCard component (detection logic, three-path card) + removal of all six legacy briefing components + first-visit layout unification
+- [x] 100-01-PLAN.md — ColdStartCard component and cold-start detection in BriefingPageV2
+- [x] 100-02-PLAN.md — Remove legacy v1 briefing components, hooks, and feature flag toggle
+
+### Phase 101: Schema and Data Migration
+**Goal**: The documents table has tags, account linking, and dedup infrastructure in place, and all existing documents have clean titles, no duplicates, and correct account_id values
+**Depends on**: Phase 100 (last shipped phase of v11.0)
+**Requirements**: SCHEMA-01, SCHEMA-02, SCHEMA-03, SCHEMA-04, SCHEMA-05, SCHEMA-06, OBS-03
+**Success Criteria** (what must be TRUE):
+  1. The documents table has a `tags TEXT[] NOT NULL DEFAULT '{}'` column with a GIN index, and `SELECT * FROM documents WHERE tags @> ARRAY['series-a']` returns results in under 50ms
+  2. The documents table has an `account_id` FK to pipeline_entries and a `module TEXT DEFAULT 'crm'` column, queryable via `WHERE account_id = ?`
+  3. Two partial unique indexes enforce dedup: one for `(tenant_id, document_type, title, account_id)` WHERE account_id IS NOT NULL AND deleted_at IS NULL, and one for `(tenant_id, document_type, title)` WHERE account_id IS NULL AND deleted_at IS NULL
+  4. Zero documents have UUID-prefixed or raw-URL titles (all cleaned to human-readable format), duplicate documents are merged (newest kept, others soft-deleted), and company-intel documents have account_id populated from their metadata
+  5. Migration progress is logged at INFO level with row counts, phase transitions, errors, and duration
+
+### Phase 102: Write Path and API
+**Goal**: Skills can save documents with dedup, readable titles, account linking, and tags — and the frontend can query, filter, and manage documents through a complete API
+**Depends on**: Phase 101 (schema must have tags, account_id, dedup indexes)
+**Requirements**: WRITE-01, WRITE-02, WRITE-03, WRITE-04, WRITE-05, API-01, API-02, API-03, API-04, API-05, OBS-01, OBS-02
+**Success Criteria** (what must be TRUE):
+  1. Saving a document with the same title + type + account within 1 hour updates the existing document instead of creating a new row, and the dedup hit is logged at INFO level
+  2. `GET /documents/` accepts `document_type`, `account_id`, `tags[]` (AND logic), and `search` (ILIKE on title) filter params with cursor-based pagination returning 50 results per page
+  3. `GET /documents/tags` returns unique tags with counts scoped to active filters, and `GET /documents/counts-by-type` returns per-type counts scoped to active filters
+  4. `PATCH /documents/{id}/tags` adds or removes tags with validation (max 20/doc, 200/tenant, 50 chars, lowercase regex), and validation failures are logged at WARN level
+  5. All new params on `POST /documents/from-content` (account_id, tags, title format) are optional — existing skills that pass none of them continue to work without errors
+
+### Phase 103: Library UI and Tag Management
+**Goal**: A founder opens the Library page and can find any document through type tabs, company filter, tag pills, or search — with infinite scroll, list/grid toggle, and inline tag management
+**Depends on**: Phase 102 (API must serve filtered, paginated documents with tag/type counts)
+**Requirements**: UI-01, UI-02, UI-03, UI-04, UI-05, UI-06, UI-07, UI-08, UI-09, UI-10, UI-11, TAG-01, TAG-02, TAG-03
+**Success Criteria** (what must be TRUE):
+  1. Clicking a document type tab filters the list to that type, with server-provided counts on each tab updating as other filters change
+  2. The company dropdown shows companies sorted by document count with search, and selecting one filters the document list; the tag bar shows clickable pills from the current filtered set with AND logic for multi-tag selection
+  3. Documents display in a time-grouped list view (Today, Yesterday, This Week, etc.) with icon, title, tags (max 3 + overflow), company, time, and hover-reveal menu; a grid view shows the same data as cards; a toggle switches between views
+  4. Scrolling to the bottom loads the next 50 documents automatically (IntersectionObserver), and typing in the search input filters by title with debounced server-side ILIKE
+  5. The menu on each document offers Open, Add tag (with autocomplete from existing tags and constraint validation), and Delete; tag pills in detail view show x on hover to remove tags
+
+### Phase 104: Skill Ecosystem
+**Goal**: All document-producing skills follow the new library contract — passing account_id, readable titles, and tags — with the standard documented and enforced by an integration test
+**Depends on**: Phase 102 (write path must accept account_id, tags, title format)
+**Requirements**: SKILL-01, SKILL-02, SKILL-03, SKILL-04
+**Success Criteria** (what must be TRUE):
+  1. `skill-standards.md` contains Standard 15 defining account resolution (Option C: create account first, pass account_id + company_name), title format ("{Type}: {Company} -- {Subject}"), and tag requirements for document-producing skills
+  2. The `skill-creator` skill includes account resolution and library contract compliance in its checklist, so new skills are created with the correct pattern
+  3. All 8 existing document-producing skills pass account_id, a human-readable title, and at least one tag when saving documents — verified by running each skill and checking the saved document
+  4. An integration test validates the skill-to-library contract: document has account_id set, title is human-readable (no UUIDs, no raw URLs), and tags array is non-empty
 
 ## Progress
 
-**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75 → 76 → 77 → 78 → 79 → 80 → 81 → 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96 → 97 → 98 → 99 → 100
+**Execution Order:** 1 → 2 → 3 → 4 → 5 → 6 → 48 → 49 → 49.1 → 50 → 51 → 52 → 53 → 54 → 55 → 56 → 57 → 58 → 59 → 60 → 61 → 62 → 63 → 64 → 65 → 66 → 66.1 → 67 → 68 → 69 → 70 → 71 → 72 → 73 → 74 → 75 → 76 → 77 → 78 → 79 → 80 → 81 → 82 → 83 → 84 → 85 → 86 → 87 → 88 → 89 → 90 → 91 → 92 → 93 → 94 → 95 → 96 → 97 → 98 → 99 → 100 → 101 → 102 → 103 → 104
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -381,7 +439,11 @@ Plans:
 | 97. Page Shell, Layout, Daily Brief, and Chat Panel | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
 | 98. Today and Tasks Sections | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
 | 99. Needs Attention and Team Activity Sections | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
-| 100. Cold Start and Cleanup | v11.0 | 0/TBD | Not started | — |
+| 100. Cold Start and Cleanup | v11.0 | 2/2 | ✓ Complete | 2026-04-08 |
+| 101. Schema and Data Migration | v12.0 | 0/0 | Pending | — |
+| 102. Write Path and API | v12.0 | 0/0 | Pending | — |
+| 103. Library UI and Tag Management | v12.0 | 0/0 | Pending | — |
+| 104. Skill Ecosystem | v12.0 | 0/0 | Pending | — |
 
 ---
 *Roadmap created: 2026-03-24*
@@ -398,3 +460,16 @@ Plans:
 *v9.0 milestone added: 2026-04-06 — Unified Pipeline (8 phases, 71 requirements)*
 *v10.0 milestone added: 2026-04-07 — Contact Outreach Pipeline (4 phases, 17 requirements)*
 *v11.0 milestone added: 2026-04-08 — Briefing Page Redesign (5 phases, 49 requirements)*
+*v12.0 milestone added: 2026-04-08 — Library Redesign (4 phases, 37 requirements)*
+
+### Phase 104.1: Legacy Model Cleanup
+**Goal:** Every backend file uses PipelineEntry/Contact/Activity instead of Account/AccountContact/OutreachActivity. No references to old models remain. All active endpoints work correctly.
+**Depends on:** Phase 104 (but can run independently -- no v12.0 dependency)
+**Plans:** 5 plans
+
+Plans:
+- [ ] 104.1-01-PLAN.md — Migration (ai_summary_updated_at) + easy wins (meetings.py, skill_executor.py)
+- [ ] 104.1-02-PLAN.md — Delete dead code (outreach.py, timeline.py)
+- [ ] 104.1-03-PLAN.md — Rewire signals.py + synthesis_engine.py
+- [ ] 104.1-04-PLAN.md — Rewire relationships.py (8 endpoints, highest complexity)
+- [ ] 104.1-05-PLAN.md — Rewire meeting_processor_web.py + seed_crm.py

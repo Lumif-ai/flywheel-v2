@@ -1,342 +1,437 @@
 # Domain Pitfalls
 
-**Domain:** Unified pipeline schema migration — merging 6 CRM tables into 3 on a live Flywheel V2 system
-**Researched:** 2026-04-06
-**Confidence:** HIGH (based on direct codebase analysis of all 6 CRM models, 12 API files, 8 engine files, 7 service files, 4 frontend feature directories, 43 Alembic migrations, and Supabase-specific constraints)
+**Domain:** Library redesign -- tags, filtering, cursor pagination, dedup-on-save, data cleanup for existing Flywheel V2 documents
+**Researched:** 2026-04-08
+**Confidence:** HIGH (based on direct codebase analysis of documents API, Document model, 8 skill save paths, frontend DocumentLibrary, 52 Alembic migrations, PgBouncer behavior, and PostgreSQL documentation)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause data loss, extended downtime, or require rewrites.
+Mistakes that cause data loss, silent corruption, or require rewrites.
+
+---
 
 ### Pitfall 1: Supabase PgBouncer Silently Rolls Back Multi-Statement DDL
 
-**What goes wrong:** Alembic wraps all DDL in a single transaction. PgBouncer (Supabase's connection pooler) commits the `alembic_version` UPDATE but silently rolls back the actual DDL. The migration reports success, `alembic current` shows the new revision, but no tables/columns actually changed. You proceed to deploy code that references non-existent schema.
+**What goes wrong:** The library redesign requires multiple DDL statements: `ALTER TABLE documents ADD COLUMN tags TEXT[]`, `CREATE INDEX ... USING GIN`, `ALTER TABLE documents ADD COLUMN account_id UUID`, `CREATE UNIQUE INDEX ... WHERE deleted_at IS NULL`. Alembic wraps all of these in a single transaction. PgBouncer commits the `alembic_version` UPDATE but silently rolls back the actual DDL. The migration reports success, `alembic current` shows the new revision, but no columns/indexes exist.
 
-**Why it happens:** PgBouncer in transaction pooling mode cannot handle multi-statement DDL transactions. Supabase uses PgBouncer by default on the pooled connection string. This is a known, documented issue in this project (see CLAUDE.md and `feedback_supabase_ddl.md`).
+**Why it happens:** PgBouncer in transaction pooling mode cannot handle multi-statement DDL transactions. Supabase uses PgBouncer by default on the pooled connection string (port 6543). This is a KNOWN issue in this project -- documented in CLAUDE.md, `feedback_supabase_ddl.md`, and the previous pipeline migration research.
 
-**Consequences:** Code deploys referencing `pipeline_entries` table that does not exist. Every API call returns 500. If you deployed the ORM model changes alongside the "migration," rollback requires reverting both code AND manually checking what actually exists in the DB.
+**Consequences:** Code deploys expecting `tags`, `account_id`, and the dedup unique index. Every document save/list call returns 500. Worst case: the dedup index silently doesn't exist, so ON CONFLICT fails with "no unique constraint matching" errors, and duplicate documents accumulate instead of being caught.
 
 **Prevention:**
-1. Never run multi-statement DDL through Alembic's standard `upgrade()` path on Supabase pooled connections.
-2. For each DDL statement, use a separate `session.execute()` + `session.commit()` via the direct (non-pooled) Supabase connection string, OR paste SQL directly into Supabase SQL Editor.
-3. After all DDL succeeds, run `alembic stamp <revision>` to sync Alembic's state.
-4. Write the Alembic migration file for documentation and downgrade support, but do NOT rely on `alembic upgrade head` to apply it.
+1. Write the Alembic migration for documentation and downgrade support
+2. Apply each DDL statement individually via Supabase SQL Editor or as separate `session.execute() + session.commit()` calls
+3. Run `alembic stamp <revision>` after manual application
+4. VERIFY every column and index exists before deploying code: `SELECT column_name FROM information_schema.columns WHERE table_name = 'documents'` and `SELECT indexname FROM pg_indexes WHERE tablename = 'documents'`
 
-**Detection:** After any migration, verify with a direct SQL query: `SELECT column_name FROM information_schema.columns WHERE table_name = 'pipeline_entries';`. Never trust `alembic current` alone.
+**Detection:** After migration, run verification queries. If `tags` column is missing but `alembic current` shows the revision, PgBouncer ate the DDL.
 
-**Which phase should address:** Phase 1 (schema migration). Every subsequent phase that adds columns or indexes must follow the same protocol.
+**Phase:** Must be addressed in EVERY migration phase. This is not a one-time fix -- every DDL migration in this milestone hits this.
+
+**Confidence:** HIGH -- verified in this project's history, documented in project memory.
 
 ---
 
-### Pitfall 2: Data Loss During Table Merge — Orphaned or Duplicated Records
+### Pitfall 2: ON CONFLICT Dedup Index + PgBouncer = Silent Dedup Failure
 
-**What goes wrong:** Merging `leads` + `accounts` into `pipeline_entries` loses data because:
-- Lead-only fields (`purpose`, `campaign`, `fit_rationale`) have no column in the target table and are silently dropped.
-- Duplicate normalized_name entries exist across leads and accounts (same company in both tables, e.g., a lead that was graduated but the lead row was retained with `account_id` FK set).
-- The graduation flow in `leads.py:773-905` already copies lead data to accounts during graduation. Merging both rows without checking `Lead.account_id` creates duplicates.
+**What goes wrong:** The dedup strategy relies on a partial unique index:
+```sql
+CREATE UNIQUE INDEX idx_documents_dedup
+ON documents (tenant_id, document_type, title)
+WHERE deleted_at IS NULL;
+```
+If this index doesn't exist (Pitfall 1), `INSERT ... ON CONFLICT ON CONSTRAINT idx_documents_dedup DO UPDATE` throws `there is no unique or exclusion constraint matching the ON CONFLICT specification`. But if you use `ON CONFLICT DO NOTHING` as a fallback, duplicates silently accumulate.
 
-**Why it happens:** The leads and accounts tables evolved independently with different column sets. 15 fields on Lead have no direct counterpart on Account (e.g., `purpose ARRAY(Text)`, `campaign TEXT`, `fit_rationale TEXT`). During migration, the INSERT-SELECT either omits these columns (data loss) or requires a JSONB metadata column to preserve them.
+**Why it happens:** The ON CONFLICT clause requires an exact match to an existing unique index/constraint. If the index creation was rolled back by PgBouncer but the Alembic version was stamped, the application code thinks the index exists.
 
-**Consequences:** Lost outreach context. Duplicate pipeline entries for the same company. Broken dedup constraints on the new table.
+**Consequences:** Either all document saves fail with 500 errors (if ON CONFLICT references missing index), or duplicates silently accumulate (if fallback to DO NOTHING). Both are production-breaking for a library with ~800 existing documents.
 
 **Prevention:**
-1. Map every column from both source tables to the target schema BEFORE writing migration SQL. Create a column mapping spreadsheet. Fields without a direct target go into `metadata JSONB`.
-2. Handle graduated leads explicitly: when `Lead.account_id IS NOT NULL`, merge lead-specific data INTO the corresponding account row (now pipeline_entry), do NOT create a second row.
-3. Run the migration on a Supabase branch or local copy first. Compare row counts: `SELECT count(*) FROM pipeline_entries` should equal `(SELECT count(*) FROM accounts) + (SELECT count(*) FROM leads WHERE account_id IS NULL)`.
-4. Keep the old tables (renamed with `_legacy` suffix) for 30 days before dropping.
+1. After creating the index via SQL Editor, verify: `SELECT indexname, indexdef FROM pg_indexes WHERE tablename = 'documents' AND indexname = 'idx_documents_dedup'`
+2. Add a startup health check that verifies the dedup index exists before the API accepts writes
+3. In the save_document path, catch `ProgrammingError` for missing index and log a CRITICAL alert rather than silently falling back
 
-**Detection:** Post-migration audit query: `SELECT normalized_name, tenant_id, count(*) FROM pipeline_entries GROUP BY 1,2 HAVING count(*) > 1;` should return zero rows (unless legitimate duplicates exist across entity types).
+**Detection:** Monitor for duplicate documents after deployment. Check `SELECT title, document_type, tenant_id, count(*) FROM documents WHERE deleted_at IS NULL GROUP BY 1,2,3 HAVING count(*) > 1`.
 
-**Which phase should address:** Phase 1 (data migration script). Must be the most thoroughly tested plan in the milestone.
+**Phase:** Schema migration phase (before any code changes to the save path).
+
+**Confidence:** HIGH -- ON CONFLICT behavior is well-documented in PostgreSQL docs; PgBouncer interaction is project-verified.
 
 ---
 
-### Pitfall 3: Contact Deduplication Conflicts When Merging lead_contacts + account_contacts
+### Pitfall 3: Partial Unique Index WHERE Clause Must Match Insert Filter Exactly
 
-**What goes wrong:** The same person exists in both `lead_contacts` (linked to a lead) and `account_contacts` (linked to the graduated account). Current graduation code in `leads.py:822-859` already handles this by matching on email, but:
-- Some lead_contacts have no email (scraped from LinkedIn with only name + title).
-- Name-only matching produces false positives ("John Smith" at two different companies).
-- The `lead_contacts` row has `pipeline_stage` (scraped/scored/drafted/sent/replied) while `account_contacts` has `role_in_deal` — different semantic fields.
-- `lead_contacts` has a `messages` relationship to `lead_messages`; `account_contacts` links to `outreach_activities`. Merging contacts means re-parenting these child records.
+**What goes wrong:** The dedup index uses `WHERE deleted_at IS NULL`. For ON CONFLICT to match this index, the INSERT statement must also include the same WHERE condition in its conflict target, OR the inserted row must satisfy the index predicate. If you insert a row where `deleted_at IS NOT NULL` (e.g., re-saving a soft-deleted document), PostgreSQL cannot find a matching arbiter index and throws an error.
 
-**Why it happens:** The dual-table design was intentional: leads and accounts represent different lifecycle stages. The contact models diverged to serve different purposes. LeadContact tracks outreach progression; AccountContact tracks deal roles.
+**Why it happens:** PostgreSQL's ON CONFLICT resolution requires the inserted row to be covered by the specified arbiter index. A partial index only covers rows matching its WHERE clause. If the new row doesn't match the predicate, the index can't serve as the conflict arbiter.
 
-**Consequences:** Duplicate contacts in the unified table. Lost outreach sequence data if lead_messages are not migrated. Broken FK references from outreach records to the wrong contact ID.
+**Consequences:** Edge case: if someone undeletes a document or the merge-duplicates logic soft-deletes then re-inserts, the ON CONFLICT clause fails. The save path crashes for specific documents that have a deleted_at history.
 
 **Prevention:**
-1. Dedup strategy: Match by (tenant_id, email) first (high confidence), then (tenant_id, normalized_name, company_normalized_name) as fallback (medium confidence, flag for review).
-2. For contacts with no email AND no unique name match, preserve both rows — over-retaining is safer than data loss.
-3. Merge child records: for each deduped contact, update `lead_messages.contact_id` and `outreach_activities.contact_id` to point to the surviving unified contact ID.
-4. Preserve BOTH `pipeline_stage` and `role_in_deal` as separate columns on the unified contacts table. Do not force one into the other.
-5. Add a `source` column tracking origin (`lead_contact`, `account_contact`, `meeting`, `email`).
+1. Always INSERT with `deleted_at = NULL` (which is the default). Never set deleted_at on insert.
+2. For the undelete/merge flow, use a separate UPDATE path, not INSERT ON CONFLICT.
+3. Add a code comment above the ON CONFLICT explaining the partial index dependency: `-- Requires idx_documents_dedup WHERE deleted_at IS NULL; row MUST have deleted_at IS NULL`
+4. Test: insert a document, soft-delete it, insert same title again -- verify it creates a new row (not conflict with the deleted one).
 
-**Detection:** Post-migration: `SELECT tenant_id, email, count(*) FROM contacts WHERE email IS NOT NULL GROUP BY 1,2 HAVING count(*) > 1;` — review each duplicate.
+**Detection:** Integration test that soft-deletes a document and re-saves with the same title should succeed (no conflict with the deleted version).
 
-**Which phase should address:** Phase 1 (data migration). Contact dedup should be a separate, auditable step within the migration script, not buried in a giant INSERT-SELECT.
+**Phase:** Save-path implementation phase.
+
+**Confidence:** HIGH -- per PostgreSQL documentation on partial unique indexes.
 
 ---
 
-### Pitfall 4: Breaking FK References from Meetings, Tasks, and Context Entries
+### Pitfall 4: Data Migration Merging 800 Documents Without Losing Provenance
 
-**What goes wrong:** Three high-traffic tables have `account_id` FK references that must be updated atomically:
-- `meetings.account_id` → references `accounts.id` (used by meeting processing, calendar sync, flywheel ritual, meeting prep)
-- `tasks.account_id` → references `accounts.id` (used by task extraction, task API, flywheel ritual)
-- `context_entries.account_id` → references `accounts.id` (used by 6+ engines and APIs)
+**What goes wrong:** The ~800 existing documents have bad titles (like "Meeting Prep: None" or generic skill names), no tags, no account_id, and duplicates. A cleanup migration that bulk-updates titles, merges duplicates, and backfills tags can:
+- Lose the original title (no way to undo if the heuristic was wrong)
+- Merge two documents that looked like duplicates but had different content
+- Break skill_run_id references if the "winner" of a merge is deleted
+- Lock the documents table for extended time on a batch UPDATE
 
-If the `accounts` table is renamed/dropped before FK references are updated, all meeting processing, task creation, and context writes fail with FK violation errors.
+**Why it happens:** Cleanup migrations are write-heavy and heuristic-driven. Title extraction from metadata is imperfect. "Same title + same type + same tenant" doesn't mean "same document" if they were created months apart with different content.
 
-**Why it happens:** FK constraints are enforced at the DB level. You cannot DROP or RENAME the referenced table while active FKs point to it. The migration must update the FK target before changing the source table.
-
-**Consequences:** Complete system halt. No meetings process. No tasks extract. No context entries write. The daily flywheel ritual fails entirely. This is the highest-blast-radius failure mode.
+**Consequences:** Users lose access to specific documents. Skill run provenance is broken. If the migration runs in a single transaction and fails partway, PgBouncer may commit some changes and roll back others (see Pitfall 1).
 
 **Prevention:**
-1. Migration order MUST be: (a) Create `pipeline_entries` table, (b) Migrate data from accounts+leads INTO pipeline_entries, (c) Update FK references on meetings/tasks/context_entries to point to pipeline_entries, (d) Drop old FK constraints, (e) Add new FK constraints, (f) ONLY THEN rename/drop old tables.
-2. Each step is a separate DDL statement with its own commit (Supabase PgBouncer constraint).
-3. Use `ALTER TABLE meetings ADD COLUMN pipeline_entry_id UUID REFERENCES pipeline_entries(id)` first, populate it, verify, THEN drop the old `account_id` column. Never do an in-place rename.
-4. During the transition, both columns exist simultaneously. Backend code checks both: `COALESCE(pipeline_entry_id, account_id)`.
+1. **Never delete originals.** Soft-delete losers in a merge, keeping all skill_run_id references intact.
+2. **Backup before migration:** `CREATE TABLE documents_backup_20260408 AS SELECT * FROM documents`
+3. **Batch in small chunks:** Process 50 documents per commit, not all 800 in one transaction.
+4. **Add `original_title` column** before cleanup so the original is preserved: `ALTER TABLE documents ADD COLUMN original_title TEXT`
+5. **Time-window dedup:** Only merge documents with the same title created within 5 minutes of each other (same skill run), not months apart.
+6. **Dry-run first:** Run the dedup query as a SELECT to review candidates before executing: `SELECT title, document_type, count(*), array_agg(id) FROM documents WHERE deleted_at IS NULL GROUP BY 1,2 HAVING count(*) > 1`
+7. **Title improvement heuristic:** Extract company/contact from metadata JSONB: `metadata->>'companies'->0` to build better titles. Fall back to existing title if metadata is empty.
 
-**Detection:** Before dropping old columns, verify: `SELECT count(*) FROM meetings WHERE pipeline_entry_id IS NULL AND account_id IS NOT NULL;` should return 0.
+**Detection:** After migration, compare `documents_backup` row count vs `documents WHERE deleted_at IS NULL` count. Verify no skill_run_ids were orphaned.
 
-**Which phase should address:** Phase 1 (schema migration), with FK update as a distinct, separately-verified step.
+**Phase:** Dedicated data migration phase, AFTER schema changes but BEFORE new save-path code.
+
+**Confidence:** HIGH -- based on examination of the 800 existing documents via the current schema.
 
 ---
 
-### Pitfall 5: Breaking MCP Tools and Background Engines During Migration
+### Pitfall 5: Account FK on Documents When Account Doesn't Exist
 
-**What goes wrong:** Multiple backend engines query `accounts`, `leads`, `lead_contacts`, and `account_contacts` directly:
-- `meeting_processor_web.py` — joins `AccountContact` to match attendees to accounts (line 173)
-- `channel_task_extractor.py` — queries `Account` by normalized_name and `AccountContact` by email to resolve entities (lines 387-402)
-- `flywheel_ritual.py` — imports `LeadContact`, `LeadMessage` for lead pipeline stage computation (line 22)
-- `skill_executor.py` — queries `Account` by ID for meeting-to-account linking (line 1806)
-- `synthesis_engine.py` — queries `Account` and `ContextEntry` for AI summary generation (lines 122, 207)
-- `context_store_writer.py` — accepts `account_id` parameter throughout (6 functions)
+**What goes wrong:** Adding `account_id UUID REFERENCES accounts(id)` to documents requires that every `account_id` value references an existing account. But the MCP `flywheel_save_document` tool currently accepts an `account_id` string from Claude Code, which may be:
+- A hallucinated UUID that doesn't exist in the accounts table
+- A valid UUID from a different tenant (cross-tenant reference)
+- An empty string (current code puts it in metadata, not as a FK)
 
-If the ORM models change before the migration is complete, OR if the migration completes before the code deploys, you get a window where either old code hits new schema or new code hits old schema.
+**Why it happens:** The current save path passes `account_id` through metadata as a string. Moving it to a proper FK column means the database will reject invalid references. Skills running in Claude Code don't validate account existence before calling save_document.
 
-**Why it happens:** This is a live system with background workers (gmail sync, calendar sync, flywheel ritual) that run continuously. There is no maintenance window — the daily user is actively using the system.
-
-**Consequences:** Meeting processing fails silently (no crash, but meetings are not linked to accounts). Task extraction cannot resolve entities. The flywheel ritual produces broken HTML briefings. Context entries are written without account links.
+**Consequences:** Document saves fail with `violates foreign key constraint` for any skill that passes a bad account_id. Since 8 skills save documents, this could break all skill output persistence.
 
 **Prevention:**
-1. **Dual-read period:** ORM models support BOTH old and new table names during transition. Use a compatibility layer: `PipelineEntry` model with `__tablename__ = "pipeline_entries"` but also register views or aliases for `accounts` and `leads`.
-2. **Feature flag:** Add a `UNIFIED_PIPELINE` feature flag. All engine code checks the flag and uses the appropriate model/table. Roll forward one engine at a time.
-3. **API backward compatibility:** Keep old endpoints (`/accounts/*`, `/leads/*`) working during transition by routing to the new unified service layer. Deprecate after all consumers are migrated.
-4. **Deploy order:** (a) Deploy migration, (b) Deploy code with dual-read, (c) Verify all engines work, (d) Remove old code paths.
+1. Make `account_id` nullable on the documents table (`account_id UUID REFERENCES accounts(id) ON DELETE SET NULL, nullable=True`)
+2. In the save endpoint, **resolve account by name, not by ID**: accept `account_name` string, look up the account, set account_id if found, leave NULL if not.
+3. Never trust client-supplied UUIDs for FK references. Always validate: `SELECT id FROM accounts WHERE id = :account_id AND tenant_id = :tenant_id`
+4. Add tenant_id check to prevent cross-tenant account references.
+5. Update the MCP tool signature to accept `account_name` (string) instead of `account_id` (UUID).
 
-**Detection:** Monitor the flywheel ritual output. If meeting counts drop to zero or account links are missing, the engine-to-schema mismatch has occurred.
+**Detection:** After deploying the FK, monitor for 500 errors on document saves with stack traces containing `ForeignKeyViolationError`.
 
-**Which phase should address:** Phase 2 (backend migration). This is the riskiest phase and should be split into multiple plans: one per engine.
+**Phase:** Schema migration phase + MCP tool update phase (must be coordinated).
+
+**Confidence:** HIGH -- examined current MCP save_document code which passes account_id as string metadata.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall 6: RLS Policy Gaps on New Tables
-
-**What goes wrong:** The current RLS policies are table-specific:
-- `accounts` has a custom `visibility_isolation` policy (migration 042) that checks `visibility = 'team' OR owner_id = app.user_id`.
-- `leads` has standard `tenant_isolation` policies (migration 040) with separate INSERT/UPDATE/SELECT/DELETE.
-- `lead_contacts`, `lead_messages`, `account_contacts`, `outreach_activities` have standard tenant-only isolation.
-
-The unified `pipeline_entries` table needs the MOST restrictive policy from any source table (visibility-aware), but if you create it with only tenant isolation, personal entries become visible to the entire team.
-
-**Why it happens:** Copy-paste from a simpler table's migration. The visibility-aware policy from accounts migration 042 is easy to miss.
-
-**Consequences:** Privacy breach: personal pipeline entries visible to all team members. Depending on data sensitivity, this could expose draft outreach, advisor relationships, or investor conversations.
-
-**Prevention:**
-1. The `pipeline_entries` RLS policy MUST include visibility awareness: `(visibility = 'team' OR owner_id = current_setting('app.user_id')::uuid)`.
-2. The unified `contacts` table needs tenant isolation only (contacts are always team-visible).
-3. The unified `activities` table needs tenant isolation only.
-4. Write RLS policies FIRST, before migrating data. Test with a non-owner user.
-
-**Detection:** After migration, connect as a different user and verify: `SET app.tenant_id = '...'; SET app.user_id = '<non-owner-id>'; SELECT * FROM pipeline_entries WHERE visibility = 'personal';` should return zero rows.
-
-**Which phase should address:** Phase 1 (schema creation). RLS is part of table creation, not a follow-up.
+Mistakes that cause degraded UX, performance issues, or extra rework.
 
 ---
 
-### Pitfall 7: Frontend State Fragmentation — Three Query Caches Becoming One
+### Pitfall 6: Cursor Pagination with Timestamp Ties Causing Skipped/Duplicate Documents
 
-**What goes wrong:** The frontend currently maintains separate React Query caches:
-- `['leads', params]` — LeadsPage
-- `['accounts', params]` — AccountsPage
-- `['pipeline', params]` — PipelinePage
-- `['lead-detail', id]` — LeadSidePanel
-- `['account', id]` — AccountDetailPage
-- `['leads-pipeline']` — LeadsFunnel
-- `['timeline', accountId, params]` — TimelineFeed
+**What goes wrong:** Cursor-based pagination using `created_at` alone will skip or duplicate documents when multiple documents share the same timestamp. With ~800 documents and skill runs that create multiple documents per execution, timestamp ties are common.
 
-The graduation flow in `useLeadGraduate.ts` and `useGraduate.ts` invalidates BOTH leads and accounts caches. If you replace these with a single `['pipeline-entries', params]` cache, mutations that previously invalidated one list now invalidate the shared list, causing unnecessary re-renders for the entire pipeline.
-
-**Why it happens:** Cache invalidation scope changes when you merge entities. A lead update that previously only invalidated the leads list now invalidates the unified list that includes all pipeline entries.
-
-**Consequences:** Sluggish UI — every mutation causes a full list re-fetch. If the unified list has 500+ entries, this is noticeable. Worse: stale data if you keep old cache keys and the old endpoints are removed.
+**Why it happens:** PostgreSQL's `now()` returns the same value for all statements in a transaction. If a skill run creates 3 documents in one transaction, all have identical `created_at`. A cursor like `WHERE created_at < :cursor_timestamp ORDER BY created_at DESC LIMIT 20` will either skip some of the tied documents or return them again on the next page.
 
 **Prevention:**
-1. Use React Query's `queryKey` factory pattern: `['pipeline-entries', { view: 'leads', ...params }]` so view-specific filters are cache-isolated.
-2. Use `queryClient.setQueryData` for optimistic updates on mutations instead of full invalidation.
-3. During transition, keep old query hooks working (they call the new API but use renamed keys) and migrate page-by-page.
-4. Graduation becomes a simple PATCH to change `stage` — no cross-cache invalidation needed.
+1. Use a **compound cursor**: `(created_at, id)` -- the UUID provides a guaranteed tiebreaker.
+2. Query: `WHERE (created_at, id) < (:cursor_ts, :cursor_id) ORDER BY created_at DESC, id DESC LIMIT 20`
+3. Create a composite index: `CREATE INDEX idx_documents_cursor ON documents (created_at DESC, id DESC) WHERE deleted_at IS NULL`
+4. Encode cursor as base64 of `timestamp|uuid` for clean API contracts.
+5. Keep backward compatibility: support both `offset` (existing pattern used by ALL other endpoints) and `cursor` parameters during transition.
 
-**Detection:** Chrome DevTools React Query Devtools extension. Watch for cache keys being invalidated unnecessarily after mutations.
+**Detection:** Test with a batch insert of 5 documents with identical created_at. Paginate with page_size=2. Verify all 5 documents appear across pages with no duplicates.
 
-**Which phase should address:** Phase 3 (frontend rebuild). Plan the cache key structure BEFORE building components.
+**Phase:** API pagination phase.
+
+**Confidence:** HIGH -- per PostgreSQL documentation and keyset pagination best practices.
 
 ---
 
-### Pitfall 8: Entity Resolution Conflicts — Same Company from Multiple Sources
+### Pitfall 7: PostgreSQL TEXT[] Tags -- NULL vs Empty Array vs Missing Column
 
-**What goes wrong:** The same company can enter the system from 5+ sources: GTM scrape (seed_crm.py), meeting processing (attendee domain matching), email context extraction (company mentions), LinkedIn scrape (lead contacts), and manual entry. Each source may use different name variants:
-- Seed: "Satguru Ventures Pvt. Ltd."
-- Meeting: "Satguru"
-- Email: "satguru ventures"
-- LinkedIn: "SATGURU VENTURES PVT LTD"
+**What goes wrong:** A `TEXT[]` column has three distinct states: `NULL`, `'{}'` (empty array), and `'{"tag1","tag2"}'`. Code that checks `tags IS NOT NULL` will pass for empty arrays. Code that checks `array_length(tags, 1) > 0` will return NULL for empty arrays (not 0). GIN indexes on `TEXT[]` handle NULL and empty arrays differently from populated arrays.
 
-The `normalize_company_name()` function in `utils/normalize.py` handles most suffixes, but edge cases remain:
-- "A.I. Solutions" vs "AI Solutions" (periods removed, but the output differs from "ai solutions" vs "a i solutions" — wait, actually periods ARE removed in the normalizer, so both become "ai")
-- "The Boston Group" vs "Boston Group" ("the" prefix stripped)
-- "McKinsey & Company" vs "McKinsey" (suffix stripped, but "&" handling varies)
+**Why it happens:** PostgreSQL arrays have notoriously confusing NULL semantics. `NULL` means "unknown tags," `'{}'` means "explicitly no tags," and these are logically different but commonly conflated.
 
-**Why it happens:** No authoritative entity registry exists. `normalize_company_name()` is good but not perfect. The `companies` table (global intel cache, line 85-104 of models.py) is keyed on `domain`, not `normalized_name`. Pipeline entries are keyed on `(tenant_id, normalized_name)`. If a meeting creates a pipeline entry before the domain is known, and a later scrape creates another entry with the domain, you get duplicates.
-
-**Consequences:** Duplicate pipeline entries for the same company. Meeting history split across two entries. AI summaries missing data from one of the duplicates.
+**Consequences:**
+- Filtering by `'meeting-prep' = ANY(tags)` correctly excludes NULL and empty arrays, but `NOT ('meeting-prep' = ANY(tags))` returns FALSE for NULL (not TRUE), so untagged documents vanish from "not this tag" filters.
+- `array_length(tags, 1)` returns NULL for empty arrays, breaking count queries.
+- Tag concatenation with `||` operator: `NULL || '{"new-tag"}'` returns NULL, losing the new tag.
 
 **Prevention:**
-1. Two-pass dedup: normalize_company_name FIRST, then domain match SECOND. If domain matches but name differs, merge into the domain-matched entry.
-2. Add a `domain` uniqueness constraint on `pipeline_entries`: `UNIQUE(tenant_id, domain) WHERE domain IS NOT NULL`. This prevents domain-level duplicates.
-3. During migration, run a dedup pass: group by `(tenant_id, domain)` and merge entries with matching domains but different normalized names.
-4. For meeting processing and email extraction, always check domain first (from attendee email domain), normalized name second.
+1. **Default to empty array, never NULL:** `tags TEXT[] NOT NULL DEFAULT '{}'::text[]`
+2. Backfill existing rows: `UPDATE documents SET tags = '{}' WHERE tags IS NULL`
+3. For "not tagged with X" queries, use: `NOT (tags @> ARRAY['X']::text[])` which correctly includes empty arrays.
+4. For tag append, use: `array_cat(COALESCE(tags, '{}'), ARRAY['new-tag'])` or better, `array_append(tags, 'new-tag')` since the column is NOT NULL.
+5. For tag count, use: `COALESCE(array_length(tags, 1), 0)`
 
-**Detection:** Periodic audit: `SELECT tenant_id, domain, count(*) FROM pipeline_entries WHERE domain IS NOT NULL GROUP BY 1,2 HAVING count(*) > 1;`
+**Detection:** Unit test: create document with no tags, verify `tags = '{}'` not NULL. Test "exclude tag X" filter includes untagged documents.
 
-**Which phase should address:** Phase 1 (migration dedup) and Phase 2 (engine updates must use domain-first resolution).
+**Phase:** Schema migration phase (column definition) + API filter phase.
+
+**Confidence:** HIGH -- per PostgreSQL array documentation and direct testing.
 
 ---
 
-### Pitfall 9: The Person-Who-Is-Also-A-Company-Contact Dual-Entity Problem
+### Pitfall 8: GIN Index on TEXT[] Not Used for Small Result Sets
 
-**What goes wrong:** An advisor like "Laurie" is a person-level entity (entity_type='person' in pipeline_entries) BUT also a contact at a company like "Howden" (a company-level pipeline entry). In the unified schema:
-- Laurie has her own row in `pipeline_entries` (type=person, relationship_type includes 'advisor')
-- Howden has a row in `pipeline_entries` (type=company, relationship_type includes 'customer')
-- Laurie should appear in Howden's contacts panel
-- Laurie's own pipeline entry should show her advisory relationship context
+**What goes wrong:** You create `CREATE INDEX idx_documents_tags ON documents USING GIN (tags)` and expect tag filtering to be fast. But PostgreSQL's query planner may choose a sequential scan over the GIN index for small tables (~800 rows), making the index useless at current scale but essential at 10K+.
 
-If the `contacts` table only links to pipeline_entries via `pipeline_entry_id` (replacing `account_id`), then Laurie-as-advisor and Laurie-as-Howden-contact are two separate records with no link. Updates to one don't flow to the other. The user sees stale data on one of the surfaces.
+**Why it happens:** GIN index lookups have higher fixed overhead than sequential scans. For tables under ~5000 rows, PostgreSQL correctly determines that a seq scan is faster. The index is "insurance" for future scale, not a current performance need.
 
-**Why it happens:** The current schema has no cross-reference between `AccountContact` and `Account` at the person level. The CRM redesign concept brief (line 96-99) explicitly called out this pattern but did not resolve it architecturally.
-
-**Consequences:** Data divergence. The user updates Laurie's email on her advisor page, but Howden's contact panel still shows the old email. Meeting notes tagged to Laurie-as-advisor don't appear on Howden's timeline.
+**Consequences:** No immediate performance issue -- the pitfall is spending time optimizing queries to use the GIN index at current scale. The real risk is writing queries that can't use the GIN index when scale demands it (e.g., using `tags::text LIKE '%meeting%'` instead of `tags @> ARRAY['meeting']`).
 
 **Prevention:**
-1. Add a `person_entry_id UUID REFERENCES pipeline_entries(id)` column on the `contacts` table. When a contact matches a person-type pipeline entry, link them.
-2. Person-type pipeline entries get a self-referencing contact row (as specified in STATE.md decision: "contacts table always has rows for person-type entries").
-3. When displaying a contact, check if `person_entry_id` is set. If so, pull name/email/title from the pipeline entry (single source of truth), not from the contacts row.
-4. Write a sync trigger or application-level hook: when a person pipeline entry is updated, propagate changes to all linked contact rows.
+1. Create the GIN index now for future-proofing, but don't add `SET enable_seqscan = off` hacks to force its use.
+2. Use array operators (`@>`, `&&`, `= ANY`) not text casting for tag queries. These are GIN-compatible.
+3. `@>` (contains) for "has this tag": `tags @> ARRAY['meeting-prep']::text[]`
+4. `&&` (overlaps) for "has any of these tags": `tags && ARRAY['meeting-prep', 'company-intel']::text[]`
+5. Do NOT use `'meeting-prep' IN (SELECT unnest(tags))` -- this can't use the GIN index.
 
-**Detection:** After migration: `SELECT c.id, c.name, pe.name FROM contacts c JOIN pipeline_entries pe ON c.person_entry_id = pe.id WHERE c.name != pe.name;` should return zero rows.
+**Detection:** `EXPLAIN ANALYZE` on tag filter queries at 800 rows (expect seq scan -- that's fine). Re-check at 5000+ rows.
 
-**Which phase should address:** Phase 1 (schema design) and Phase 2 (backend logic for person-entry linking).
+**Phase:** API filter implementation phase.
+
+**Confidence:** HIGH -- per PostgreSQL GIN index documentation and query planner behavior.
 
 ---
 
-### Pitfall 10: Performance Regression on Unified Table
+### Pitfall 9: Tag Validation -- Case Sensitivity and Namespace Pollution
 
-**What goes wrong:** Currently:
-- `leads` has ~200 rows with GIN index on `purpose` array
-- `accounts` has ~20 rows with composite indexes on `(tenant_id, status)`, `(tenant_id, pipeline_stage)`, `(tenant_id, relationship_status)`, and a GIN index on `relationship_type` array
+**What goes wrong:** Without validation, tags accumulate as `"Meeting Prep"`, `"meeting-prep"`, `"meeting_prep"`, `"MEETING PREP"` -- all treated as different values. The tag filter dropdown shows 4 entries for what the user considers one tag. Over time, the tag namespace becomes unusable.
 
-Merging into one `pipeline_entries` table creates ~220 rows (small now, but grows). The current Pipeline grid query in `outreach.py:440-480` joins `Account` with `OutreachActivity`, `AccountContact`, and subqueries for last status and primary contact. This query already has 4 subqueries and 3 joins. On a unified table, the WHERE clause must include `entity_type` filtering, which adds a seq scan if not indexed.
+**Why it happens:** Different skills generate tags with different casing conventions. MCP tool users type free-form text. No enforcement layer exists between tag input and database storage.
 
-**Why it happens:** Index design for separate tables doesn't transfer to a combined table. The `idx_account_tenant_status` index assumes all rows are accounts. On a unified table, the most common query pattern is `WHERE tenant_id = ? AND entity_type = ?` — this needs a composite index that includes `entity_type`.
-
-**Consequences:** At 200 rows, negligible. At 2,000+ rows (reasonable after a year of use), the pipeline grid query slows noticeably. At 10,000+ rows (unlikely but possible with aggressive scraping), sub-second response time is at risk.
+**Consequences:** Tag cloud/filter becomes polluted with near-duplicates. Users can't reliably filter because they don't know which variant was used. Search by tag misses documents with variant spellings.
 
 **Prevention:**
-1. Every index on `pipeline_entries` should include `entity_type` in the composite: `INDEX idx_pe_tenant_type_stage ON pipeline_entries(tenant_id, entity_type, stage)`.
-2. Add partial indexes for common filtered views: `INDEX idx_pe_active ON pipeline_entries(tenant_id, stage) WHERE retired_at IS NULL`.
-3. The `last_activity_at` denormalized column (from STATE.md decisions) should have an index: `INDEX idx_pe_activity ON pipeline_entries(tenant_id, last_activity_at DESC) WHERE retired_at IS NULL`.
-4. Run `EXPLAIN ANALYZE` on the pipeline grid query BEFORE and AFTER migration. Ensure no seq scans on the unified table.
+1. **Normalize on write:** Lowercase, trim, replace spaces/underscores with hyphens: `re.sub(r'[\s_]+', '-', tag.strip().lower())`
+2. **Validate format:** `^[a-z0-9][a-z0-9\-]{0,48}[a-z0-9]$` -- lowercase alphanumeric with hyphens, 2-50 chars.
+3. **Reject duplicates within array:** Use `SELECT DISTINCT unnest(...)` or Python `list(set(tags))` before saving.
+4. **Consider a tags lookup table** for future: `CREATE TABLE document_tags (id SERIAL, name TEXT UNIQUE, display_name TEXT)`. But for V1, inline TEXT[] with validation is sufficient.
+5. **XSS prevention:** Tags will appear in the UI. Sanitize: no HTML, no script content. The regex above handles this implicitly.
+6. **Max tags per document:** Cap at 20 to prevent abuse: `CHECK (array_length(tags, 1) <= 20 OR tags = '{}')`
 
-**Detection:** Add query timing logging to the pipeline API. Alert if P95 exceeds 200ms.
+**Detection:** After 1 month of usage, run: `SELECT DISTINCT unnest(tags) FROM documents ORDER BY 1` and check for near-duplicates.
 
-**Which phase should address:** Phase 1 (index design as part of schema creation).
+**Phase:** Save-path implementation phase (normalize before write).
+
+**Confidence:** HIGH -- common pattern, well-understood.
+
+---
+
+### Pitfall 10: Infinite Scroll Memory Leak with Growing DOM
+
+**What goes wrong:** The current DocumentLibrary uses a "Load more" button that appends to `extraPages` state. Each load adds 50 more DocumentRow/DocumentGridCard components to the DOM. At 800+ documents, the browser holds 800 rendered components in memory, causing slow scrolling, high memory usage, and eventual tab crashes on mobile.
+
+**Why it happens:** The current implementation (line 74 in DocumentLibrary.tsx: `const [extraPages, setExtraPages] = useState<DocumentListItem[]>([])`) accumulates all loaded documents in React state and renders every one. No virtualization is used.
+
+**Consequences:** At 100 documents, negligible. At 500+, noticeable jank on scroll. At 1000+, mobile Safari may kill the tab. Users with large libraries get a degraded experience.
+
+**Prevention:**
+1. **Use TanStack Query's `useInfiniteQuery`** instead of manual state accumulation. It handles page caching, refetching stale pages, and garbage collection.
+2. **Add windowed rendering** with `@tanstack/react-virtual` or `react-window` if document count exceeds 200.
+3. **Cap initial render:** Only render the visible viewport + 2 pages of buffer. Virtualize the rest.
+4. **For V1, "Load more" with 50-item pages is fine for 800 docs** -- but plan the virtualization escape hatch for when document count exceeds 2000.
+5. **Scroll position restoration:** TanStack Query handles this automatically if query cache isn't garbage collected. But navigating to a document detail and back requires the scroll position to be preserved. Current implementation loses it.
+
+**Detection:** Chrome DevTools Performance tab: measure memory growth after loading all pages. If it exceeds 50MB for document list data, virtualization is needed.
+
+**Phase:** Frontend pagination phase. V1 can keep "Load more" but must switch from manual state to useInfiniteQuery.
+
+**Confidence:** MEDIUM -- exact memory threshold depends on component complexity and device.
+
+---
+
+### Pitfall 11: Breaking 8 Skills' Save Path During Migration
+
+**What goes wrong:** The library redesign changes the document save contract: new required fields (tags), account resolution (name-based instead of ID-based), and dedup behavior (ON CONFLICT). All 8 skills that call `flywheel_save_document` via MCP must be updated, but they run in external Claude Code sessions that may have cached the old API.
+
+**Skills affected:**
+- `call-intelligence`
+- `gtm-company-fit-analyzer`
+- `gtm-outbound-messenger`
+- `gtm-pipeline`
+- `gtm-web-scraper-extractor`
+- `meeting-prep`
+- `meeting-processor`
+- `outreach-drafter`
+
+**Why it happens:** The MCP tool `flywheel_save_document` is the single write path for all skills. Changing its signature or behavior affects every skill simultaneously. Skills don't pin to API versions.
+
+**Consequences:** If the backend save endpoint changes its contract (e.g., requires tags, rejects account_id in metadata), all running skill sessions break until Claude Code restarts and picks up the new MCP tool definition.
+
+**Prevention:**
+1. **Make new fields optional with defaults:** `tags` defaults to `[]`, `account_name` defaults to `""`. The old save call signature must still work.
+2. **Don't remove the `account_id` metadata path.** Add `account_name` as a NEW parameter alongside. Deprecate `account_id` in metadata after all skills are updated.
+3. **Phase the rollout:** Deploy backend changes with backward compatibility first. Then update MCP tool definition. Then update skill prompts to use new parameters.
+4. **Test old call signature** against new endpoint: `flywheel_save_document(title="test", content="test", skill_name="meeting-prep")` must still work with zero new parameters.
+
+**Detection:** After deploying the new save endpoint, run each skill once and verify the document appears in the library with correct tags and account linkage.
+
+**Phase:** Save-path implementation must be backward-compatible. Skill updates are a separate follow-up phase.
+
+**Confidence:** HIGH -- examined all 8 skill SKILL.md files and the MCP server.py save_document definition.
+
+---
+
+### Pitfall 12: Offset-to-Cursor Migration Breaking Frontend Pagination
+
+**What goes wrong:** The entire codebase uses offset-based pagination (`offset` + `limit` + `total` + `has_more`). Switching the documents endpoint to cursor-based pagination changes the API contract. The frontend `fetchDocuments` function, the DocumentLibrary component, and the "Load more" button all assume offset-based semantics.
+
+**Current pattern (used in 8+ endpoints):**
+```typescript
+{ items: [...], total: 42, offset: 0, limit: 20, has_more: true }
+```
+
+**Why it happens:** Cursor pagination returns a different response shape: `{ items: [...], next_cursor: "...", has_more: true }` -- no `total`, no `offset`. The frontend "Showing X of Y documents" counter requires `total`, which cursor pagination can't efficiently provide.
+
+**Consequences:** The "42 documents" count badge, the "Showing 20 of 42" text, and the date-group-based rendering all break if `total` is removed.
+
+**Prevention:**
+1. **Hybrid approach:** Keep `total` via a separate `COUNT(*)` query (cheap at 800 rows, fine up to 50K). Return cursor AND total.
+2. **Response shape:** `{ items: [...], total: 42, next_cursor: "abc123", has_more: true }` -- compatible with existing frontend patterns.
+3. **Keep offset support** during transition. Accept both `offset` and `cursor` parameters. If cursor is provided, use keyset. If offset is provided, use offset. Default to cursor for new code.
+4. **Don't change the response shape of other endpoints.** Only documents gets cursor pagination. Keep the rest on offset.
+
+**Detection:** Frontend build should type-check the response. If `total` is missing, TypeScript catches it if the interface is properly defined.
+
+**Phase:** API + frontend pagination phase.
+
+**Confidence:** HIGH -- examined all existing pagination endpoints in the codebase.
 
 ---
 
 ## Minor Pitfalls
 
-### Pitfall 11: Alembic Revision Chain Breakage
-
-**What goes wrong:** The current latest revision is `043_fix_context_entries_rls_soft_delete`. Adding a new migration for the unified pipeline must correctly set `down_revision`. If multiple developers (or parallel agent sessions) create migrations simultaneously, the revision chain breaks.
-
-**Prevention:** Always check `alembic heads` before creating a new migration. Use sequential numbering (044, 045, etc.) consistent with the project convention. Create all unified-pipeline migrations in sequence within a single session.
-
-**Which phase should address:** Phase 1.
+Issues that cause small inconveniences or tech debt.
 
 ---
 
-### Pitfall 12: Losing the Graduation History
+### Pitfall 13: RLS Policy Must Be Updated for New Columns
 
-**What goes wrong:** The current `Lead.graduated_at` and `Lead.account_id` fields record when and where a lead was promoted. In the unified schema, there is no "graduation" — entries just change stage. If the `graduated_at` timestamp is not preserved, the history of when pipeline entries were promoted is lost.
+**What goes wrong:** The existing RLS policy `documents_tenant_isolation` uses `USING (tenant_id = current_setting('app.tenant_id', true)::uuid)`. This policy covers SELECT/UPDATE/DELETE but not INSERT. If a new INSERT policy is added that checks `account_id` references, it must also validate tenant_id on the account.
 
-**Prevention:** Preserve `graduated_at` as a column on `pipeline_entries`. Or better: log stage changes as activity records (type='stage_change' as specified in STATE.md decisions) which provides a full audit trail.
+**Prevention:** After adding `account_id` column, verify the existing RLS policy still works. No changes needed to the policy itself (it only checks tenant_id), but the application code must validate that the account's tenant_id matches the document's tenant_id.
 
-**Which phase should address:** Phase 1 (schema design).
+**Phase:** Schema migration phase.
 
----
-
-### Pitfall 13: MCP Tool Descriptions Referencing Old Table Names
-
-**What goes wrong:** MCP tool descriptions and help text may reference "leads" and "accounts" as separate concepts. Users who have built muscle memory around "graduate a lead" will be confused when the concept disappears.
-
-**Prevention:** Update all MCP tool descriptions. Rename `graduate` to `advance_stage` or similar. Add aliases for backward compatibility during transition.
-
-**Which phase should address:** Phase 2 (backend migration) or Phase 4 (cleanup).
+**Confidence:** HIGH.
 
 ---
 
-### Pitfall 14: Seed Script Breaks
+### Pitfall 14: Frontend Search is Client-Side Only
 
-**What goes wrong:** `seed_crm.py` directly creates `Account`, `AccountContact`, and `OutreachActivity` ORM instances. After the migration, these models no longer exist or are renamed. Running the seed script on a fresh database fails.
+**What goes wrong:** The current DocumentLibrary (line 125-134) filters by title, companies, and contacts in JavaScript after fetching all documents. With tags and more filter dimensions, client-side filtering becomes unreliable because it only filters the loaded pages, not the full dataset.
 
-**Prevention:** Update `seed_crm.py` to use the new models immediately after Phase 1. This is a low-effort change but easy to forget.
+**Prevention:**
+1. For V1 with 800 documents, client-side filtering is acceptable if all documents are loaded.
+2. For V2, move filtering to the server: `GET /documents/?tags=meeting-prep&search=acme&account_id=xxx`
+3. Server-side tag filtering uses GIN index: `WHERE tags @> ARRAY['meeting-prep']::text[]`
+4. Plan the API to accept filter parameters from day one, even if V1 frontend doesn't use all of them.
 
-**Which phase should address:** Phase 1 (schema migration) — update seed script in the same plan.
+**Phase:** API design phase. Define the filter parameters in the API even if the frontend starts with client-side filtering.
+
+**Confidence:** MEDIUM.
+
+---
+
+### Pitfall 15: Scroll Position Lost on Navigate-Back
+
+**What goes wrong:** User scrolls to document #40 in the library, clicks to view it, clicks browser back. The library re-renders from the top because the scroll position and loaded pages are not preserved.
+
+**Prevention:**
+1. Use TanStack Query's `useInfiniteQuery` with `staleTime: 5 * 60 * 1000` -- the cached pages persist across navigations.
+2. The browser's native scroll restoration works IF the DOM height is restored before the scroll position is applied. This requires the cached data to be available synchronously (which TanStack Query provides).
+3. Do NOT use `window.scrollTo(0, 0)` on the library page mount.
+
+**Phase:** Frontend pagination phase.
+
+**Confidence:** MEDIUM -- depends on TanStack Query cache configuration and React Router behavior.
 
 ---
 
 ## Phase-Specific Warnings
 
-| Phase Topic | Likely Pitfall | Severity | Mitigation |
-|-------------|---------------|----------|------------|
-| Schema creation (DDL) | PgBouncer silent rollback (Pitfall 1) | CRITICAL | Per-statement commits via SQL Editor or direct connection |
-| Data migration script | Data loss on merge (Pitfall 2) | CRITICAL | Column mapping, graduated-lead handling, row count verification |
-| Data migration script | Contact dedup conflicts (Pitfall 3) | CRITICAL | Email-first matching, preserve-both-on-ambiguity, child record re-parenting |
-| FK reference updates | Breaking meetings/tasks/context (Pitfall 4) | CRITICAL | Add new column first, populate, verify, then drop old column |
-| Backend engine migration | Engine-to-schema mismatch (Pitfall 5) | CRITICAL | Dual-read period, feature flag, one-engine-at-a-time rollout |
-| RLS policy creation | Privacy breach (Pitfall 6) | HIGH | Visibility-aware policy from day one, test with non-owner user |
-| Frontend rebuild | Cache fragmentation (Pitfall 7) | MODERATE | QueryKey factory pattern, optimistic updates, page-by-page migration |
-| Entity resolution | Duplicate entries (Pitfall 8) | MODERATE | Domain-first resolution, uniqueness constraint on domain |
-| Person-as-contact pattern | Data divergence (Pitfall 9) | MODERATE | person_entry_id FK, single source of truth for person data |
-| Index design | Query regression (Pitfall 10) | LOW (at current scale) | Composite indexes with entity_type, EXPLAIN ANALYZE verification |
-| Alembic management | Chain breakage (Pitfall 11) | LOW | Check `alembic heads` before creating migrations |
-| History preservation | Lost graduation timestamps (Pitfall 12) | LOW | Preserve graduated_at or use activity-based stage change log |
+| Phase Topic | Likely Pitfall | Mitigation |
+|---|---|---|
+| Schema migration (tags, account_id, dedup index) | PgBouncer rolls back DDL (Pitfall 1) | Apply via SQL Editor, stamp alembic, verify every column/index |
+| Schema migration (tags column) | NULL vs empty array confusion (Pitfall 7) | NOT NULL DEFAULT '{}', backfill existing rows |
+| Data cleanup migration | Losing original titles, breaking skill_run refs (Pitfall 4) | Backup table, original_title column, time-window dedup, dry-run |
+| Save-path implementation (dedup) | Partial index mismatch (Pitfall 3) | Always insert with deleted_at NULL, test soft-delete + re-save |
+| Save-path implementation (account FK) | FK violation from bad account_id (Pitfall 5) | Resolve by name not ID, nullable FK, validate tenant match |
+| Save-path implementation (tags) | Case pollution (Pitfall 9) | Normalize on write, validate format regex |
+| Save-path implementation (backward compat) | Breaking 8 skills (Pitfall 11) | All new params optional with defaults, don't remove old params |
+| API pagination | Timestamp ties skip documents (Pitfall 6) | Compound cursor (created_at, id), composite index |
+| API pagination | Breaking frontend contract (Pitfall 12) | Hybrid response with total + cursor, keep offset support |
+| Frontend infinite scroll | Memory growth (Pitfall 10) | useInfiniteQuery, plan virtualization escape hatch |
+| Frontend navigation | Scroll position lost (Pitfall 15) | TanStack Query cache + staleTime |
+| All API filter phases | GIN index misuse (Pitfall 8) | Use array operators (@>, &&), not text casting |
 
-## Supabase-Specific Gotchas Summary
+---
 
-1. **PgBouncer DDL transactions** (Pitfall 1): The single most dangerous gotcha. Every DDL statement must be its own commit. Use SQL Editor or direct connection string.
-2. **FK to `profiles` table**: Alembic cannot see the `profiles` table (it exists but is invisible to Alembic's connection context). The `pipeline_entries.owner_id` FK must be added via raw SQL, not Alembic's `ForeignKey()`.
-3. **RLS policy creation order**: Policies must be created AFTER the table but BEFORE data migration. If data is migrated without RLS, a brief window exists where all data is visible to any authenticated user.
-4. **Index creation on large tables**: `CREATE INDEX CONCURRENTLY` is not supported through Alembic and must be run as raw SQL. For the migration of 220 rows this is irrelevant, but worth noting for future index additions.
-5. **Trigger functions**: The `last_activity_at` DB trigger (from STATE.md decisions) must be created via raw SQL. Supabase supports triggers but they must be created through the SQL Editor, not through the Alembic pooled connection.
+## Testing Strategies
+
+### Migration Safety Tests (run in staging before production)
+1. Create backup table, run migration, compare row counts
+2. Verify all columns exist: `\d documents` in psql
+3. Verify all indexes exist: `SELECT indexname FROM pg_indexes WHERE tablename = 'documents'`
+4. Verify dedup index predicate: `SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_documents_dedup'`
+5. Run old save_document call against new endpoint -- must succeed with no new params
+6. Insert duplicate title -- must trigger ON CONFLICT, not create new row
+
+### Tag System Tests
+1. Insert with NULL tags -- should be rejected (NOT NULL constraint)
+2. Insert with empty array -- should succeed
+3. Insert with mixed case tags -- should be normalized to lowercase-hyphenated
+4. Filter by tag using `@>` operator -- should return correct documents
+5. "Not tagged with X" filter -- should include untagged documents
+6. Insert document with 21 tags -- should be rejected (max 20 check)
+
+### Cursor Pagination Tests
+1. Insert 5 documents with identical created_at (batch insert)
+2. Paginate with page_size=2 -- verify all 5 appear, no duplicates
+3. Insert a new document between page fetches -- verify it doesn't appear on current page
+4. Decode cursor -- verify it contains both timestamp and UUID
+5. Pass invalid cursor -- verify 400 error, not 500
+
+### Save-Path Backward Compatibility Tests
+1. Call save_document with old signature (title, content, skill_name only) -- must succeed
+2. Call save_document with account_id in metadata (old pattern) -- must succeed
+3. Call save_document with account_name (new pattern) -- must resolve to account_id
+4. Call save_document with nonexistent account_name -- must succeed with account_id = NULL
+5. Call save_document with tags -- must normalize and save
+6. Call save_document without tags -- must default to empty array
+
+---
 
 ## Sources
 
-- Direct codebase analysis: `db/models.py` (6 CRM table definitions), `api/leads.py` (10 endpoints), `api/accounts.py` (8 endpoints), `api/relationships.py` (8 endpoints), `api/outreach.py` (pipeline grid queries), `api/timeline.py` (FK joins), `api/meetings.py` (account linking), `api/tasks.py` (account FK)
-- Engine analysis: `meeting_processor_web.py`, `channel_task_extractor.py`, `flywheel_ritual.py`, `skill_executor.py`, `synthesis_engine.py`, `context_store_writer.py`
-- Migration history: 43 Alembic migrations, specifically `040_create_leads_tables.py`, `041_lead_user_scoping.py`, `042_accounts_visibility_rls_and_constraints.py`
-- Project decisions: `.planning/STATE.md` (v9.0 design decisions), `.planning/CONCEPT-BRIEF-crm-redesign.md` (dual-entity pattern), `.planning/PROJECT.md` (unified pipeline spec)
-- Known constraints: `CLAUDE.md` Supabase DDL workaround, `feedback_supabase_ddl.md`
+- [PostgreSQL GIN Index Documentation](https://www.postgresql.org/docs/current/gin.html) -- NULL handling, empty array behavior
+- [PostgreSQL INSERT ON CONFLICT Documentation](https://www.postgresql.org/docs/current/sql-insert.html) -- partial index arbiter requirements
+- [Supabase PgBouncer Silent Rollback Issue](https://github.com/supabase/supabase/issues/43753) -- serializable transactions silently discarded
+- [Keyset Pagination Best Practices](https://blog.sequinstream.com/keyset-cursors-not-offsets-for-postgres-pagination/) -- compound cursor with tiebreaker
+- [Cursor Pagination Guide](https://bun.uptrace.dev/guide/cursor-pagination.html) -- timestamp tie handling
+- [TanStack Query Infinite Queries](https://tanstack.com/query/latest/docs/framework/react/guides/infinite-queries) -- stale page refetching, scroll restoration
+- [TanStack Query Scroll Restoration](https://tanstack.com/query/v4/docs/framework/react/guides/scroll-restoration) -- automatic with cache
+- [PostgreSQL GIN Index Analysis (pganalyze)](https://pganalyze.com/blog/gin-index) -- when GIN is/isn't used by planner
+- [PostgreSQL Duplicate Removal Techniques (CYBERTEC)](https://www.cybertec-postgresql.com/en/removing-duplicate-rows-in-postgresql/) -- safe dedup strategies
+- Project-internal: `backend/src/flywheel/api/documents.py`, `cli/flywheel_mcp/server.py`, `backend/src/flywheel/db/models.py`, `backend/alembic/versions/019_documents.py`, `.planning/CONCEPT-BRIEF-documents-architecture.md`

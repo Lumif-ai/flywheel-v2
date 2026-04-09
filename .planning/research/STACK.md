@@ -1,301 +1,319 @@
-# Technology Stack
+# Technology Stack: Library Redesign
 
-**Project:** Unified Pipeline Schema & UI
-**Researched:** 2026-04-06
+**Project:** Flywheel V2 - Library Redesign (Tags, Filtering, Pagination, Dedup)
+**Researched:** 2026-04-08
+**Overall confidence:** HIGH
 
 ## Recommended Stack
 
-### Principle: Minimal Additions
+### Principle: Zero New Dependencies
 
-The existing stack (FastAPI, SQLAlchemy 2.0 async, AG Grid Community v35, React 19, Tailwind v4, Supabase PostgreSQL) already covers 90% of what this milestone needs. The recommendations below are surgical additions, not replacements.
+The existing stack covers 100% of what the Library Redesign needs. No new npm packages. No new Python packages. No new database extensions.
 
-**New packages needed: ZERO (backend and frontend).**
-**New database extensions needed: ONE (pg_trgm, enable via Supabase Dashboard).**
+| Feature | Existing Tool | Why Sufficient |
+|---------|--------------|----------------|
+| Tags column (`TEXT[]`) | `sqlalchemy.dialects.postgresql.ARRAY(Text)` | Used in 10+ models already |
+| GIN index on tags | Alembic raw SQL | Pattern in migrations 010, 028, 040 |
+| Tag containment queries | `.contains()`, `.overlap()` | Used in pipeline_service, leads, entity_normalization |
+| Cursor-based pagination | SQLAlchemy `select().where().limit()` | Pure SQL keyset pagination |
+| Infinite scroll | `useInfiniteQuery` from `@tanstack/react-query` v5 | Installed, just not used yet |
+| Scroll sentinel | Native `IntersectionObserver` | Used in LandingPage.tsx, DealTapeTheater.tsx |
+| Tag autocomplete | `cmdk` + custom component | cmdk already powers CommandPalette |
+| ILIKE search | SQLAlchemy `.ilike()` | Built-in operator |
+| Debounced search | `setTimeout` | Already in DocumentLibrary.tsx |
+| Dedup (content hash) | SHA-256 + unique partial index | Standard PostgreSQL |
 
 ---
 
-### 1. Schema Migration (Alembic + Supabase PgBouncer)
+## Implementation Patterns
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Alembic | >=1.14 (existing) | Migration file authoring and version tracking | Already in stack; no change needed |
-| Supabase SQL Editor | N/A | Actual DDL execution | PgBouncer silently rolls back multi-statement DDL transactions; each statement must be its own commit |
+### 1. Tags Column -- PostgreSQL ARRAY with GIN Index
 
-**Migration strategy for table merging (6 tables -> 3+1):**
+**Confidence:** HIGH (identical pattern used across codebase)
 
-Alembic serves as **documentation and version tracking only**. Actual execution goes through Supabase SQL Editor or individual `session.execute()` + `session.commit()` calls. Then `alembic stamp <revision>` to sync state. This is the same pattern used across all 43 existing migrations.
+**Model addition:**
+```python
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy import Text
 
-**Required pattern for this milestone:**
+# Add to Document model in db/models.py
+tags: Mapped[list[str]] = mapped_column(
+    ARRAY(Text), server_default=text("'{}'::text[]"), nullable=False
+)
+```
+
+**Migration SQL (each statement as individual commit per Supabase DDL workaround):**
+```sql
+-- Statement 1: Add column
+ALTER TABLE documents ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';
+
+-- Statement 2: Create GIN index
+CREATE INDEX idx_documents_tags ON documents USING GIN (tags);
+```
+
+**GIN + tenant scoping:** GIN indexes cannot composite with non-array columns like UUID. Since RLS already filters by `tenant_id` via `current_setting('app.tenant_id')`, the query planner uses the RLS B-tree index on `tenant_id` first, then the GIN index on `tags`. This is the same approach used in migration 040 (`idx_lead_tenant_purpose`).
+
+**Querying tags (verified from existing codebase patterns):**
+```python
+# Filter: documents matching ANY selected tag (OR -- for browsing)
+stmt = stmt.where(Document.tags.overlap(["meeting-prep", "company-intel"]))
+
+# Filter: documents matching ALL selected tags (AND -- for drill-down)
+stmt = stmt.where(Document.tags.contains(["meeting-prep", "company-intel"]))
+
+# Autocomplete: distinct tags across tenant
+distinct_tags = await db.execute(
+    select(func.unnest(Document.tags).label("tag"))
+    .where(Document.deleted_at.is_(None))
+    .distinct()
+    .order_by(text("tag"))
+    .limit(50)
+)
+```
+
+**Sources:** `pipeline_service.py:276` uses `.overlap()`, `leads.py:325` uses `.contains()`, `entity_normalization.py:84` uses `.op("@>")`.
+
+---
+
+### 2. Cursor-Based Pagination -- Replacing Offset
+
+**Confidence:** HIGH (standard SQLAlchemy keyset pagination)
+
+**Why replace offset pagination:** The current `list_documents` endpoint uses `offset/limit` with a separate `COUNT(*)` query. Problems:
+- Skipped/duplicated items when data changes between page loads
+- `COUNT(*)` is a full table scan (slow at scale)
+- Not compatible with infinite scroll UX
+
+**Cursor approach using `created_at` + `id` (tiebreaker):**
+```python
+@router.get("/")
+async def list_documents(
+    document_type: str | None = None,
+    tags: list[str] | None = Query(None),
+    search: str | None = None,
+    cursor: str | None = None,       # ISO timestamp of last item
+    cursor_id: str | None = None,    # UUID tiebreaker
+    limit: int = Query(20, ge=1, le=100),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> DocumentCursorResponse:
+    base = select(Document).where(Document.deleted_at.is_(None))
+
+    if document_type:
+        base = base.where(Document.document_type == document_type)
+    if tags:
+        base = base.where(Document.tags.overlap(tags))
+    if search:
+        base = base.where(Document.title.ilike(f"%{search}%"))
+
+    # Keyset pagination
+    if cursor and cursor_id:
+        cursor_dt = datetime.fromisoformat(cursor)
+        cursor_uuid = UUID(cursor_id)
+        base = base.where(
+            or_(
+                Document.created_at < cursor_dt,
+                and_(
+                    Document.created_at == cursor_dt,
+                    Document.id < cursor_uuid,
+                ),
+            )
+        )
+
+    base = base.order_by(Document.created_at.desc(), Document.id.desc())
+    rows = (await db.execute(base.limit(limit + 1))).scalars().all()
+
+    has_more = len(rows) > limit
+    items = rows[:limit]
+
+    return DocumentCursorResponse(
+        documents=[_doc_to_list_item(doc) for doc in items],
+        has_more=has_more,
+        next_cursor=items[-1].created_at.isoformat() if items and has_more else None,
+        next_cursor_id=str(items[-1].id) if items and has_more else None,
+    )
+```
+
+**Why `limit + 1`:** Fetching one extra row to determine `has_more` avoids the expensive COUNT query. The current endpoint's separate COUNT will degrade at scale.
+
+**Backward compatibility:** Keep `offset` parameter as deprecated optional. If provided (and no `cursor`), fall back to offset behavior so existing frontend code doesn't break during migration.
+
+---
+
+### 3. Infinite Scroll -- useInfiniteQuery + IntersectionObserver
+
+**Confidence:** HIGH (`@tanstack/react-query` v5.91.2 already installed, IntersectionObserver already used)
+
+**Frontend pattern:**
+```typescript
+import { useInfiniteQuery } from '@tanstack/react-query'
+
+const {
+  data,
+  fetchNextPage,
+  hasNextPage,
+  isFetchingNextPage,
+  isLoading,
+} = useInfiniteQuery({
+  queryKey: ['documents', { type: activeTab, tags: selectedTags, search: debouncedSearch }],
+  queryFn: ({ pageParam }) => fetchDocuments({
+    limit: 20,
+    cursor: pageParam?.cursor,
+    cursorId: pageParam?.cursorId,
+    documentType: activeTab === 'all' ? undefined : activeTab,
+    tags: selectedTags.length ? selectedTags : undefined,
+    search: debouncedSearch || undefined,
+  }),
+  initialPageParam: null as { cursor: string; cursorId: string } | null,
+  getNextPageParam: (lastPage) =>
+    lastPage.has_more
+      ? { cursor: lastPage.next_cursor, cursorId: lastPage.next_cursor_id }
+      : undefined,
+})
+
+const documents = data?.pages.flatMap(p => p.documents) ?? []
+```
+
+**Sentinel element (reuse existing IntersectionObserver pattern from LandingPage.tsx):**
+```typescript
+const sentinelRef = useRef<HTMLDivElement>(null)
+
+useEffect(() => {
+  if (!sentinelRef.current || !hasNextPage) return
+  const observer = new IntersectionObserver(
+    ([entry]) => { if (entry.isIntersecting && !isFetchingNextPage) fetchNextPage() },
+    { rootMargin: '200px' }  // Pre-fetch 200px before visible
+  )
+  observer.observe(sentinelRef.current)
+  return () => observer.disconnect()
+}, [hasNextPage, fetchNextPage, isFetchingNextPage])
+
+// At bottom of document list:
+// <div ref={sentinelRef} aria-hidden="true" />
+```
+
+**Replaces:** The current manual `extraPages` state + `handleLoadMore` button pattern in DocumentLibrary.tsx. `useInfiniteQuery` handles all page accumulation, caching, and refetching automatically.
+
+---
+
+### 4. Tag Input / Autocomplete -- Custom Component with cmdk
+
+**Confidence:** HIGH (cmdk v1.1.1 already in use)
+
+**Why NOT add a tag library (emblor, react-tag-input, etc.):** The project already has `cmdk` powering the command palette. A tag input with autocomplete is a small wrapper (~80 lines) around cmdk's `CommandInput` + `CommandGroup` + `CommandItem`. Adding a library for this is dependency bloat.
+
+**Component approach:**
+- Multi-select input built with `cmdk` primitives (same as `components/ui/command.tsx`)
+- Popover dropdown shows matching tags from autocomplete endpoint
+- Selected tags as removable pills (badge style, Tailwind)
+- Keyboard: Enter to select, Backspace to remove last, Escape to close, free-form entry allowed
+- Debounced API call for suggestions (reuse existing debounce pattern)
+
+**Autocomplete endpoint:**
+```python
+@router.get("/tags")
+async def list_tags(
+    q: str = Query("", max_length=100),
+    limit: int = Query(30, ge=1, le=100),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> list[str]:
+    """Distinct tags for autocomplete, optionally filtered by prefix."""
+    base = (
+        select(func.unnest(Document.tags).label("tag"))
+        .where(Document.deleted_at.is_(None))
+        .distinct()
+        .order_by(text("tag"))
+        .limit(limit)
+    )
+    if q:
+        # Use subquery to filter on the unnested value
+        from sqlalchemy import literal_column
+        subq = base.subquery()
+        stmt = select(subq.c.tag).where(subq.c.tag.ilike(f"{q}%"))
+    else:
+        stmt = base
+    result = await db.execute(stmt)
+    return [row[0] for row in result]
+```
+
+---
+
+### 5. ILIKE Search on Title (V1)
+
+**Confidence:** HIGH (built into SQLAlchemy)
 
 ```python
-# Alembic migration file -- for documentation + downgrade support
-def upgrade():
-    # Phase 1: Create new tables (do NOT drop old tables yet)
-    op.create_table('pipeline_entries', ...)
-    op.create_table('pipeline_entry_sources', ...)
-    # Unified contacts table (merging lead_contacts + account_contacts)
-    op.create_table('contacts', ...)
-    # Unified activities table (merging lead_messages + outreach_activities)
-    op.create_table('activities', ...)
-
-    # Phase 2: Migrate data
-    op.execute("""
-        INSERT INTO pipeline_entries (id, tenant_id, name, normalized_name, domain, ...)
-        SELECT id, tenant_id, name, normalized_name, domain, ...
-        FROM accounts WHERE ...
-    """)
-    op.execute("""
-        INSERT INTO pipeline_entries (id, tenant_id, name, normalized_name, domain, ...)
-        SELECT id, tenant_id, name, normalized_name, domain, ...
-        FROM leads WHERE ...
-    """)
-    # ... similar for contacts, activities, sources junction
-
-    # Phase 3: Create indexes, triggers, RLS policies on new tables
-    # Phase 4: Drop old tables (separate migration, after app code is updated)
-
-def downgrade():
-    # Reverse: recreate old tables from new ones
+if search:
+    # Escape user input for LIKE special chars
+    escaped = search.replace("%", "\\%").replace("_", "\\_")
+    base = base.where(Document.title.ilike(f"%{escaped}%"))
 ```
 
-**Critical: CREATE new tables, do NOT RENAME old ones.** Reasons:
-- Renaming requires also renaming all sequences, indexes, constraints, and RLS policies
-- Supabase RLS policies reference table names by string; renaming silently breaks them
-- Fresh tables let you set up clean RLS policies from scratch
-- Old tables coexist during migration window for rollback safety
-- UUIDs as primary keys mean old IDs carry over to new tables without conflicts
+**V1 ILIKE is sufficient.** For document library scale (hundreds to low thousands per tenant), `ILIKE` with leading wildcard is fast enough. No index needed for V1.
 
-**Execution order (each as separate SQL Editor statement):**
-1. CREATE TABLE pipeline_entries
-2. CREATE TABLE pipeline_entry_sources
-3. CREATE TABLE contacts (unified)
-4. CREATE TABLE activities (unified)
-5. INSERT INTO pipeline_entries ... (data migration from accounts)
-6. INSERT INTO pipeline_entries ... (data migration from leads)
-7. INSERT INTO contacts ... (from lead_contacts)
-8. INSERT INTO contacts ... (from account_contacts)
-9. INSERT INTO activities ... (from lead_messages)
-10. INSERT INTO activities ... (from outreach_activities)
-11. INSERT INTO pipeline_entry_sources ... (backfill source tracking)
-12. CREATE INDEX statements (one per statement)
-13. CREATE TRIGGER statements
-14. ALTER TABLE ENABLE ROW LEVEL SECURITY + CREATE POLICY statements
-15. `alembic stamp <revision>` to sync version state
-
-**Confidence:** HIGH -- matches documented Supabase DDL workaround in CLAUDE.md and pattern used across 43 existing migrations.
-
----
-
-### 2. AG Grid Airtable-Style UX
-
-| Feature Needed | AG Grid Community Support | Implementation |
-|----------------|--------------------------|----------------|
-| Inline cell editing | YES - `editable: true` on ColDef | Built-in, no new packages |
-| Custom cell editors (dropdowns, tags) | YES - `cellEditor` component prop | Build custom React components |
-| Cell editor popups | YES - `cellEditorPopup: true` | Built-in |
-| Column resize | YES - already using `resizable: true` | No change |
-| Column reorder | YES - already using column move handlers | No change |
-| Row click -> side panel | YES - already built | `PipelineSidePanel.tsx` exists |
-| Full row editing mode | YES - Community feature | `editType: 'fullRow'` on grid |
-| Row selection (single/multi) | YES - built-in | No change |
-| Column state persistence | YES - already built | `usePipelineColumns.ts` saves to localStorage |
-| Master/Detail (nested grid) | NO - Enterprise only | **Not needed** -- side panel is better UX |
-
-**No new packages needed.** The existing `ag-grid-community@35.2.0` + `ag-grid-react@35.2.0` covers everything required.
-
-**Key implementation patterns for Airtable-style editing:**
-
-```typescript
-// 1. Simple dropdown editing (pipeline stage)
-{
-  headerName: 'Stage',
-  field: 'pipeline_stage',
-  editable: true,
-  cellEditor: 'agSelectCellEditor',  // built-in
-  cellEditorParams: {
-    values: ['prospect', 'qualified', 'proposal', 'negotiation', 'closed_won', 'closed_lost']
-  },
-}
-
-// 2. Custom cell editor for complex fields (multi-select tags, rich text)
-{
-  headerName: 'Tags',
-  field: 'relationship_type',
-  editable: true,
-  cellEditor: TagEditor,         // custom React component
-  cellEditorPopup: true,         // renders as popup overlay, not inline
-  cellEditorPopupPosition: 'under',
-}
-
-// 3. Optimistic update on edit complete
-onCellValueChanged={(event) => {
-  // Fire mutation via React Query, revert on error
-  updatePipelineEntry.mutate({
-    id: event.data.id,
-    [event.colDef.field]: event.newValue,
-  }, {
-    onError: () => {
-      // Revert: set old value back
-      event.node.setDataValue(event.colDef.field!, event.oldValue)
-      toast.error('Failed to save')
-    }
-  })
-}}
-```
-
-**Row expand pattern:** Keep the existing side panel approach (click row -> 440px slide-in from right). This matches Airtable's actual UX. Master/Detail (Enterprise) renders a nested grid inline, which is wrong for CRM record detail.
-
-**Confidence:** HIGH -- verified against AG Grid v35 Community vs Enterprise feature matrix. Cell editing, custom editors, column operations are all explicitly Community features.
-
----
-
-### 3. Database Triggers for Denormalized Fields
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| PostgreSQL PL/pgSQL triggers | PostgreSQL 15 (Supabase) | Auto-update `last_activity_at`, `contact_count`, `activity_count` on `pipeline_entries` | Guarantees consistency even on direct DB edits or bulk imports |
-
-**Trigger pattern for `last_activity_at`:**
-
+**V2 upgrade path if search gets slow:**
 ```sql
--- Function: update parent pipeline_entry when activities change
-CREATE OR REPLACE FUNCTION fn_update_pipeline_entry_activity_ts()
-RETURNS TRIGGER AS $$
-BEGIN
-  IF TG_OP = 'DELETE' THEN
-    UPDATE pipeline_entries
-    SET last_activity_at = (
-      SELECT MAX(created_at) FROM activities
-      WHERE pipeline_entry_id = OLD.pipeline_entry_id
-    ), updated_at = NOW()
-    WHERE id = OLD.pipeline_entry_id;
-    RETURN OLD;
-  ELSE
-    UPDATE pipeline_entries
-    SET last_activity_at = NOW(),
-        updated_at = NOW()
-    WHERE id = NEW.pipeline_entry_id;
-    RETURN NEW;
-  END IF;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-CREATE TRIGGER trg_activities_update_pipeline_entry
-  AFTER INSERT OR UPDATE OR DELETE ON activities
-  FOR EACH ROW
-  EXECUTE FUNCTION fn_update_pipeline_entry_activity_ts();
-```
-
-**Trigger pattern for `contact_count`:**
-
-```sql
-CREATE OR REPLACE FUNCTION fn_update_pipeline_entry_contact_count()
-RETURNS TRIGGER AS $$
-DECLARE
-  target_id UUID;
-BEGIN
-  target_id := COALESCE(NEW.pipeline_entry_id, OLD.pipeline_entry_id);
-  UPDATE pipeline_entries
-  SET contact_count = (
-    SELECT COUNT(*) FROM contacts WHERE pipeline_entry_id = target_id
-  ), updated_at = NOW()
-  WHERE id = target_id;
-  RETURN COALESCE(NEW, OLD);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-CREATE TRIGGER trg_contacts_update_pipeline_entry
-  AFTER INSERT OR DELETE ON contacts
-  FOR EACH ROW
-  EXECUTE FUNCTION fn_update_pipeline_entry_contact_count();
-```
-
-**Key decisions:**
-
-1. **SECURITY DEFINER** -- triggers must bypass RLS to update the parent table. Without this, the trigger fails if RLS blocks the cross-table UPDATE. Safe because trigger logic is fixed, not user-controlled.
-
-2. **AFTER trigger, not BEFORE** -- the child row (activity/contact) must be committed first, then we update the parent. BEFORE triggers would reference rows that don't yet exist.
-
-3. **FOR EACH ROW** -- the volume per operation is low (one activity insert at a time). FOR EACH STATEMENT with transition tables is more complex and only beneficial for bulk inserts.
-
-4. **Application-layer belt-and-suspenders** -- also compute `last_activity_at` in the API endpoint, so the field works correctly even if triggers are temporarily disabled during schema migrations.
-
-**Confidence:** HIGH -- standard PostgreSQL pattern; Supabase explicitly supports custom triggers with SECURITY DEFINER.
-
----
-
-### 4. Entity Deduplication for Multi-Source Entries
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| `pg_trgm` extension | Available in Supabase (enable manually) | Fuzzy company name matching via trigram similarity | Standard approach; runs in DB, no round-trip overhead |
-| Application-layer dedup logic | Python/SQLAlchemy | Multi-signal matching pipeline | Orchestrates the 3-tier matching strategy |
-
-**No external dedup library needed.** The matching scope is company names within a single tenant (hundreds to low thousands of records), not probabilistic entity resolution across millions.
-
-**3-tier deduplication strategy:**
-
-| Tier | Signal | Confidence | Action |
-|------|--------|------------|--------|
-| 1: Exact match | `normalized_name` within tenant | 100% | Auto-merge during data migration, no user confirmation |
-| 2: Domain match | Same `domain` (e.g., acme.com) within tenant | 95% | Auto-merge during data migration, log for audit |
-| 3: Fuzzy match | `pg_trgm` similarity > 0.6 on `normalized_name` | Variable | Flag as potential duplicate; user confirms in UI |
-
-**Implementation:**
-
-```sql
--- Step 1: Enable pg_trgm (one-time, via Supabase Dashboard > Extensions)
 CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
--- Step 2: GIN index for fast fuzzy lookups
-CREATE INDEX idx_pipeline_entry_name_trgm
-  ON pipeline_entries USING gin (normalized_name gin_trgm_ops);
-
--- Step 3: Find Tier 1+2 duplicates during migration
--- (exact name OR same domain)
-SELECT a.id AS keep_id, b.id AS merge_id,
-       'exact_name' AS match_reason
-FROM pipeline_entries a
-JOIN pipeline_entries b
-  ON a.tenant_id = b.tenant_id
-  AND a.normalized_name = b.normalized_name
-  AND a.id < b.id;
-
--- Step 4: Find Tier 3 fuzzy duplicates (post-migration, for user review)
-SELECT a.id, b.id,
-       similarity(a.normalized_name, b.normalized_name) AS score
-FROM pipeline_entries a
-JOIN pipeline_entries b
-  ON a.tenant_id = b.tenant_id
-  AND a.id < b.id
-  AND similarity(a.normalized_name, b.normalized_name) > 0.6
-WHERE a.domain IS DISTINCT FROM b.domain;  -- skip domain matches (already merged)
+CREATE INDEX idx_documents_title_trgm ON documents USING GIN (title gin_trgm_ops);
 ```
 
-**Merge strategy:**
-- `pipeline_entry_sources` junction table tracks origin: `('accounts', original_id)`, `('leads', original_id)`, `('apollo', import_id)`, etc.
-- On merge: keep the record with more data (higher field fill rate), union all sources, re-parent all contacts and activities from the merged record
-- Expose "Possible duplicates" badge in the grid + merge UI in the side panel
+This would accelerate `ILIKE '%term%'` queries via trigram matching. But this is NOT needed for V1 -- premature optimization.
 
-**The 0.6 threshold** is a well-documented starting point for company name matching. It correctly catches "Acme Corp" vs "Acme Corporation" while avoiding false positives like "Acme" vs "Amazon". May need tuning after initial migration -- expose it as a config value.
+---
 
-**Confidence:** MEDIUM -- pg_trgm is available in Supabase but needs manual enabling. The threshold may need tuning per real data distribution.
+### 6. Document Deduplication -- Content Hash
+
+**Confidence:** MEDIUM (approach is sound, but dedup strategy needs validation with real data)
+
+**Add `content_hash` column:**
+```python
+# In Document model
+content_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
+```
+
+**Migration:**
+```sql
+-- Statement 1: Add column
+ALTER TABLE documents ADD COLUMN content_hash TEXT;
+
+-- Statement 2: Unique partial index (per tenant, non-deleted only)
+CREATE UNIQUE INDEX idx_documents_dedup
+    ON documents (tenant_id, content_hash)
+    WHERE content_hash IS NOT NULL AND deleted_at IS NULL;
+```
+
+**On document creation:** Compute SHA-256 from rendered HTML content. Check for existing hash before inserting -- if match found, return existing document instead of creating duplicate.
+
+**Fuzzy dedup (similar titles) is a UI concern, not a DB constraint.** Show a "possible duplicate" warning when title similarity is high, but don't block creation.
+
+---
+
+## Supabase / PgBouncer Considerations
+
+| Concern | Mitigation |
+|---------|------------|
+| DDL migration (add columns + indexes) | Each DDL statement as individual commit per established workaround |
+| `unnest()` in tag autocomplete | Pure SQL function, works through PgBouncer transaction mode |
+| `ARRAY` operators (`@>`, `&&`) | Standard PostgreSQL, no PgBouncer issues |
+| GIN index creation | Regular `CREATE INDEX` (not `CONCURRENTLY`). At current scale, locks for milliseconds. |
+| RLS + cursor pagination | RLS adds `WHERE tenant_id = X` automatically. Cursor `WHERE created_at < Y` composes cleanly. |
+| `UNIQUE` partial index for dedup | Standard PostgreSQL, works through PgBouncer |
 
 ---
 
 ## What NOT to Add
 
-| Technology | Why Not |
-|------------|---------|
-| `ag-grid-enterprise` | Master/Detail is not needed; side panel is better UX for CRM records. Saves significant license cost (~$1500+/yr). |
-| `dedupe` or `splink` Python libraries | Overkill for tenant-scoped company matching (hundreds of records). pg_trgm + domain matching is sufficient. |
-| Real-time sync (liveblocks, yjs) | Not doing collaborative editing. Single-user inline edit with optimistic updates via React Query. |
-| Separate migration tool (flyway, dbmate) | Alembic already in stack; just need the PgBouncer single-statement workaround. |
-| `react-hook-form` or `formik` | AG Grid's built-in cell editing handles inline forms. Side panel edits use simple controlled components. |
-| `react-table` / TanStack Table | AG Grid already in codebase and proven across Pipeline + Leads pages. Switching is a regression. |
-| GraphQL / Hasura | REST endpoints with React Query already handle the data fetching. No N+1 problem since pipeline entries are a flat list with JOINed data. |
-| Elasticsearch / Meilisearch | Pipeline search is simple column filtering on a few thousand records. PostgreSQL indexes + existing FTS are sufficient. |
-| `pgcron` for scheduled dedup | Run dedup on-demand (import events) and during migration. No recurring schedule needed. |
+| Library/Tech | Why Skip |
+|-------------|----------|
+| `emblor` / `react-tag-input` / `react-tagsinput` | cmdk already provides typeahead primitives; ~80 lines custom vs new dependency |
+| `react-infinite-scroll-component` | `useInfiniteQuery` + `IntersectionObserver` is simpler and already partially in codebase |
+| `react-virtuoso` | `@tanstack/react-virtual` already installed; only needed for 500+ visible items (unlikely with 20-item pages) |
+| `pg_trgm` extension | ILIKE sufficient for V1 title search; documented as V2 upgrade path |
+| Full-text search (`tsvector` on documents) | Overkill for title-only search; context store already has FTS if full-content needed |
+| Separate `document_tags` junction table | `TEXT[]` on document row is correct at this scale; junction table only needed for tag metadata (colors, hierarchy) |
+| Elasticsearch / Meilisearch | Title ILIKE on hundreds of docs; no external search engine needed |
+| `react-hook-form` | Tag input is a single component, not a form; controlled state is fine |
 
 ---
 
@@ -303,31 +321,28 @@ WHERE a.domain IS DISTINCT FROM b.domain;  -- skip domain matches (already merge
 
 | Category | Recommended | Alternative | Why Not |
 |----------|-------------|-------------|---------|
-| Grid editing | AG Grid Community inline edit | AG Grid Enterprise | License cost; Community covers all needed editing features |
-| Grid detail | Side panel (existing pattern) | Master/Detail (Enterprise) | Wrong UX pattern -- nested grid vs. record detail panel |
-| Grid detail | Side panel (existing pattern) | Full-width expandable row | Breaks table layout; side panel preserves context |
-| Fuzzy match | pg_trgm (in-database) | Python rapidfuzz/fuzzywuzzy | Keeps matching in DB, no round-trip, simpler architecture |
-| Denorm sync | PostgreSQL triggers | Application-layer only | Triggers guarantee consistency on direct DB edits and bulk imports |
-| Denorm sync | PostgreSQL triggers | Materialized views | Overkill; only 2-3 denormalized fields, not aggregate queries |
-| Migration execution | SQL Editor + alembic stamp | Direct Alembic execution | PgBouncer constraint makes multi-DDL unreliable |
-| Migration approach | CREATE new + migrate data | ALTER TABLE RENAME | Rename breaks RLS policies, sequences, index names |
-| Dedup library | pg_trgm + domain match | dedupe (Python) | Probabilistic ER is over-engineered for <10K company records per tenant |
+| Tags storage | `TEXT[]` column + GIN | Junction table (`document_tags`) | Over-normalized for simple string tags at this scale |
+| Tags storage | `TEXT[]` column + GIN | Tags in JSONB `metadata` | Can't GIN-index a nested JSONB array as efficiently; explicit column is clearer |
+| Pagination | Cursor (keyset) | Offset (current) | Offset skips/duplicates rows on mutation; bad for infinite scroll |
+| Pagination | Cursor (keyset) | Page numbers | Page numbers require COUNT; cursor is cheaper and UX is infinite scroll anyway |
+| Infinite scroll | `useInfiniteQuery` + sentinel | Manual page state (current) | Current `extraPages` state is fragile; `useInfiniteQuery` handles caching, refetch, stale data |
+| Tag input | Custom with cmdk | emblor library | Dependency for ~80 lines of code; cmdk already in bundle |
+| Title search | ILIKE (V1) | pg_trgm GIN | Premature optimization; ILIKE is fine for <5K rows per tenant |
+| Dedup | Content hash (SHA-256) | Title similarity matching | Hash catches exact dupes deterministically; fuzzy matching is UI warning, not constraint |
 
 ---
 
-## Installation
+## Migration Checklist
 
-**No new npm packages needed.** Frontend `package.json` stays exactly as-is.
+Execute in order, each DDL as individual commit:
 
-**No new Python packages needed.** Backend `pyproject.toml` stays exactly as-is.
-
-**One database extension to enable (one-time, via Supabase Dashboard > Database > Extensions):**
-
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-```
-
-pg_trgm is pre-installed in Supabase but not enabled by default. Enabling it is a single click in the Dashboard or a single SQL statement.
+1. `ALTER TABLE documents ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}'`
+2. `ALTER TABLE documents ADD COLUMN content_hash TEXT`
+3. `CREATE INDEX idx_documents_tags ON documents USING GIN (tags)`
+4. `CREATE UNIQUE INDEX idx_documents_dedup ON documents (tenant_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL`
+5. `alembic stamp <revision>`
+6. Backfill script: extract tags from existing `metadata` JSONB (companies, skill names) into `tags` array
+7. Backfill script: compute `content_hash` for existing documents
 
 ---
 
@@ -335,27 +350,26 @@ pg_trgm is pre-installed in Supabase but not enabled by default. Enabling it is 
 
 | Component | Current Version | Change Needed |
 |-----------|----------------|---------------|
-| ag-grid-community | 35.2.0 | None -- use inline editing features already included |
-| ag-grid-react | 35.2.0 | None |
-| alembic | >=1.14 | None -- files for documentation, execute via SQL Editor |
-| SQLAlchemy | >=2.0 | None -- new async models follow existing patterns |
-| PostgreSQL | 15 (Supabase) | Enable pg_trgm extension |
-| React Query | 5.91.2 | None -- use for optimistic updates on inline edits |
-| Zustand | 5.0.12 | None -- use for side panel state, column preferences |
-| React Router | 7.13.1 | None -- existing routing handles profile pages |
+| `@tanstack/react-query` | ^5.91.2 | None -- use `useInfiniteQuery` (already available) |
+| `@tanstack/react-virtual` | ^3.13.23 | None -- available if list virtualization needed |
+| `cmdk` | ^1.1.1 | None -- use for tag autocomplete component |
+| SQLAlchemy | >=2.0 | None -- `ARRAY(Text)`, `.overlap()`, `.contains()` all available |
+| asyncpg | >=0.29 | None -- handles array types natively |
+| PostgreSQL | 15 (Supabase) | None -- GIN, ARRAY, ILIKE all built-in |
+| Alembic | >=1.14 | None -- migration file + SQL Editor execution |
 
 ---
 
 ## Sources
 
-- [AG Grid Community vs Enterprise](https://www.ag-grid.com/javascript-data-grid/community-vs-enterprise/) -- feature matrix confirming cell editing is Community, Master/Detail is Enterprise
-- [AG Grid Cell Editing docs](https://www.ag-grid.com/react-data-grid/cell-editing/) -- inline editing API, `editable`, `cellEditor`, `cellEditorPopup`
-- [AG Grid Cell Editors](https://www.ag-grid.com/react-data-grid/cell-editors/) -- built-in editors including `agSelectCellEditor`
-- [PostgreSQL pg_trgm docs](https://www.postgresql.org/docs/current/fuzzystrmatch.html) -- trigram similarity functions
-- [Crunchy Data: Fuzzy Name Matching](https://www.crunchydata.com/blog/fuzzy-name-matching-in-postgresql) -- pg_trgm best practices and threshold recommendations
-- [Supabase Extensions docs](https://supabase.com/docs/guides/database/extensions) -- pg_trgm availability in Supabase
-- [Supabase Triggers docs](https://supabase.com/docs/guides/database/postgres/triggers) -- trigger support, SECURITY DEFINER pattern
-- [PostgreSQL Trigger Functions](https://www.postgresql.org/docs/current/plpgsql-trigger.html) -- PL/pgSQL trigger authoring reference
-- [Alembic Operations Reference](https://alembic.sqlalchemy.org/en/latest/ops.html) -- `rename_table`, `create_table`, `execute` operations
-- [Pete Graham: Rename Postgres Table with Alembic](https://petegraham.co.uk/rename-postgres-table-with-alembic/) -- why CREATE > RENAME when dealing with sequences/indexes
-- Existing codebase: `db/models.py` (6 CRM tables), `PipelinePage.tsx` (AG Grid usage), `PipelineSidePanel.tsx` (side panel pattern), `usePipelineColumns.ts` (column state persistence), `alembic/env.py` (migration config)
+- **Codebase (verified):** `db/models.py` lines 271, 571, 834, 977, 1202 -- ARRAY(Text) usage across 10+ models
+- **Codebase (verified):** `pipeline_service.py:276` -- `.overlap()` for array filtering
+- **Codebase (verified):** `leads.py:325` -- `.contains()` for array filtering
+- **Codebase (verified):** `entity_normalization.py:84` -- `.op("@>")` for array containment
+- **Codebase (verified):** `alembic/versions/028_*`, `040_*` -- GIN index creation patterns
+- **Codebase (verified):** `frontend/src/pages/LandingPage.tsx:116` -- IntersectionObserver pattern
+- **Codebase (verified):** `frontend/src/features/email/components/ThreadList.tsx` -- `@tanstack/react-virtual` usage
+- **Codebase (verified):** `frontend/src/features/navigation/components/CommandPalette.tsx` -- cmdk usage
+- **Codebase (verified):** `frontend/src/features/documents/components/DocumentLibrary.tsx` -- current offset pagination to replace
+- [Emblor tag input](https://github.com/JaleelB/emblor) -- evaluated and rejected (dependency overhead)
+- [shadcn/ui tag input discussion](https://github.com/shadcn-ui/ui/issues/3647) -- no official component; custom build is standard

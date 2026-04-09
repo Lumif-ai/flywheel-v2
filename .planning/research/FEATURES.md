@@ -1,137 +1,249 @@
-# Feature Landscape: Unified Pipeline CRM
+# Feature Landscape: Library Redesign
 
-**Domain:** AI-native CRM for founders — unified pipeline replacing 3 separate views
-**Researched:** 2026-04-06
+**Domain:** Document library with tagging, filtering, pagination, dedup for AI-produced content
+**Researched:** 2026-04-08
+**Overall confidence:** HIGH (based on codebase analysis + established SaaS patterns)
+
+## Current State (What Exists)
+
+Before mapping new features, here is what the library already has:
+
+| Existing | Implementation | Notes |
+|----------|---------------|-------|
+| Flat document list | `DocumentLibrary.tsx` — fetches all docs, client-side tab filter | Works but loads everything up front |
+| Type tabs | Dynamic tabs built from `document_type` field | Client-side only, counts from loaded docs |
+| Client-side search | Filters on title, companies, contacts in memory | No server-side search |
+| List/grid toggle | `ViewToggle` component with localStorage persistence | Already polished |
+| Date grouping | Today/Yesterday/This Week/Earlier buckets | Good UX, keep it |
+| Manual "Load More" | Button-based pagination, PAGE_SIZE=50 | Not infinite scroll — cursor-based offset |
+| Share via token | Generate share_token, copy link | Working |
+| Smart title cleanup | `displayTitle()` strips prefixes, resolves URLs, fallback to metadata | Already handles bad titles somewhat |
+| Document type styles | Color-coded icons per type (meeting-prep, company-intel, etc.) | Extensible via `TYPE_STYLES` map |
+
+**Key gaps the redesign addresses:** No tags. No company filter. No server-side search. No dedup. Titles still bad at source. No account linkage on the Document model (only loose `metadata_.companies` JSON array).
+
+---
 
 ## Table Stakes
 
-Features users expect from a unified pipeline CRM. Missing = product feels broken or half-baked.
+Features users expect in any modern document library. Missing = product feels broken or amateur.
 
-| Feature | Why Expected | Complexity | Dependencies | Notes |
-|---------|--------------|------------|--------------|-------|
-| Single grid showing all entities (leads + accounts + relationships) | This is the entire premise. Attio, Folk, and HubSpot all show companies/people in one surface. Separate views = separate products. | **High** | Requires unified data model or query layer that JOINs `leads`, `accounts`, and their contacts into one result set | AG Grid already used on both Leads and Pipeline pages — reuse the component but unify the data source |
-| Continuous stage column (no graduation walls) | Attio and Folk both use a single status/stage field per record. HubSpot uses deal stages that flow continuously. The graduation flow (Lead -> Account -> Relationship) is Flywheel's biggest UX friction — users shouldn't need to "promote" a record to keep working it. | **High** | Needs schema migration: either merge Lead + Account tables, or create a unified view/materialized view. Current `leads.graduated_at` and `accounts.pipeline_stage` + `accounts.relationship_status` are separate progression tracks | This is the hardest backend change. Recommend a single `pipeline_stage` enum that covers the full lifecycle: `scraped -> researched -> contacted -> replied -> meeting_booked -> in_conversation -> proposal -> closed_won -> active_customer -> churned` |
-| Side panel for record detail | Every modern CRM (Attio, Folk, Pipedrive, HubSpot) uses click-to-expand side panels. Already built on both Leads and Pipeline pages. | **Low** | Merge `LeadSidePanel` and `PipelineSidePanel` into one `UnifiedSidePanel` that handles both entity types | Existing panels have different data shapes — will need a normalized props interface |
-| Full-text search across all records | Attio handles 50k+ contacts with instant search. Users type a name and expect to see every matching company/person regardless of lifecycle stage. | **Medium** | Existing `normalized_name` fields on both tables. Can use pg `ILIKE` or full-text search via `search_vector` on `context_entries` | Search should hit company name, contact name, domain, and notes |
-| Filter bar with multi-select facets | Attio, Folk, and Pipedrive all offer combinatorial filters (stage + fit tier + industry + source). Already partially built in `LeadsFilterBar` and `PipelineFilterBar`. | **Medium** | Unify filter state management. Current filters are different per page. | Filter facets: stage, fit tier, relationship type (prospect/customer/advisor/investor), source, last activity recency, owner |
-| Column sorting and reordering | Standard spreadsheet behavior. Attio and Clay both allow column drag-to-reorder and click-to-sort. | **Low** | AG Grid supports this natively. Just needs column definitions to enable `sortable: true` and `suppressMovable: false` | Already partially working in existing grids |
-| Row click -> side panel -> detail page navigation | Attio: click row = side panel, click "Open" = full page. Folk: same pattern. Two-level progressive disclosure. | **Low** | Side panel already opens on row click. Add a "View full profile" link in the panel header that routes to `/profile/:id` | CompanyProfilePage already exists at `frontend/src/features/profile/` |
-| Pagination or virtual scroll for 500+ records | Pipedrive and HubSpot paginate. Attio virtualizes. Both LeadsPage and PipelinePage already have `PAGE_SIZE_OPTIONS = [25, 50, 100]`. | **Low** | AG Grid virtual scrolling is built-in. Keep server-side pagination via existing pattern | Already implemented — just needs unified endpoint |
-| Activity recency indicators | Pipedrive shows overdue/due/no-activity badges on pipeline cards. Existing `OutreachDot` and `DaysSinceCell` renderers serve this purpose. | **Low** | Reuse existing cell renderers. `last_interaction_at` exists on Account model. Need to compute equivalent for Leads from `lead_messages.sent_at` | Color-coded dot: green (< 3d), yellow (3-7d), red (> 7d), gray (never) |
+| # | Feature | Why Expected | Complexity | Dependencies | Real-World Reference |
+|---|---------|-------------|------------|-------------|---------------------|
+| T1 | **Type tab filtering (server-side)** | Users already see tabs — but they only filter client-loaded docs. At 500+ docs, tabs must query server with counts from the full dataset. | Low | Existing `document_type` column + index `idx_documents_type` | Notion database views, Linear issue type filter |
+| T2 | **Company/Account dropdown filter** | Founders think in accounts ("show me everything on Acme"). Docs already have `metadata_.companies` but no filter UI or proper FK. | Medium | Account resolution (D4) adds `account_id` FK on documents, account list endpoint already exists | Salesforce files-per-account, HubSpot document associations |
+| T3 | **Text search (server-side)** | Current client-side search breaks at scale. Users type a company name or keyword and expect results. ILIKE on title + metadata is sufficient for <10K docs — no need for full-text search engine. | Medium | Backend endpoint changes, debounced input already exists at 300ms | Google Drive search bar, Notion quick search |
+| T4 | **Server-side pagination with cursor** | Current offset-based pagination works but gets slower as offset grows. Cursor-based (keyset on `created_at, id`) is the standard for sorted lists. | Medium | Backend: change from offset to `created_at < cursor` keyset pattern | Every modern SaaS list: Linear, Notion, Slack |
+| T5 | **Infinite scroll (hybrid)** | Users expect content to load as they scroll, not click "Load More." Hybrid = auto-load on scroll + show count ("Showing 150 of 2,341"). Keep "Load More" as accessibility fallback. | Medium | Frontend: IntersectionObserver trigger, backend: cursor pagination (T4) | Google Drive, Dropbox, Notion |
+| T6 | **Dedup on save** | Skills re-run and create duplicates. Users see "Meeting Prep: Acme" four times. Atomic dedup = hash(tenant_id + skill_name + normalized_title + date_bucket) with UPSERT. | Medium | Backend: content hash column, unique constraint, upsert logic in `create_from_content` endpoint | Gmail dedup, Slack message dedup |
+| T7 | **Smart title generation at source** | Current titles are "Company Intel: https://lumif.ai/" or "Meeting Prep: DOCUMENT_FILE:uuid". Frontend `displayTitle()` patches this but the source data is bad. Fix at write time in the save endpoint. | Low | Backend: title generation logic in `create_from_content`, skill_name + metadata heuristics | Notion auto-title from content, Google Docs "Untitled document" |
+| T8 | **Empty & loading states for filter combos** | Already exist but need updating for new filter combinations. "No documents match these filters" with clear-all action per active filter. | Low | None — already partially built | Linear empty states, Notion filtered-view empty |
+
+---
 
 ## Differentiators
 
-Features that set the product apart. Not expected in a basic CRM but highly valued by founders.
+Features that set the library apart. Not expected, but valued. These move Flywheel from "document dump" to "intelligence hub."
 
-| Feature | Value Proposition | Complexity | Dependencies | Notes |
-|---------|-------------------|------------|--------------|-------|
-| AI-computed stage suggestions | When a reply comes in or a meeting is booked, suggest (or auto-advance) the stage. No other lightweight CRM does this well. Attio's workflows require manual setup. For founders, the CRM should just know. | **Medium** | Needs signal detection: email reply -> suggest "replied", meeting scheduled -> suggest "meeting_booked". Existing meeting processing and outreach tracking provide the raw signals | Show as a subtle nudge in the side panel: "Acme replied 2h ago — move to Replied?" with one-click accept. Don't auto-advance without user control initially. |
-| Unified activity timeline in side panel | Attio's biggest strength: emails, meetings, notes, stage changes — all in one chronological feed per record. Currently split across `outreach_activities`, `meetings`, `context_entries`, and `lead_messages`. | **High** | Must aggregate from 4+ tables. Create a `GET /api/crm/records/:id/timeline` endpoint that unions these sources with a polymorphic shape | This is the single most impactful differentiator. Folk and Pipedrive timelines are basic. Attio's is great. Combine all signal sources into one scrollable feed with type-specific rendering (email card, meeting card, note card, stage-change card) |
-| Smart dedup on record creation | When adding a company, detect near-duplicates by normalized name and domain. Show "Did you mean Acme Corp (already in pipeline)?" Clay and Attio both do this. | **Medium** | `normalized_name` and `domain` already indexed with unique constraints. Add a fuzzy match check (Levenshtein or trigram via pg `pg_trgm`) before insert | Prevention > cleanup. Block duplicate creation at the UI level with a merge-or-create dialog |
-| Saved views (personal) | Attio's saved views are a core feature: "My hot leads", "Stale accounts", "Investors". Folk has custom views per group. Founders want 3-5 saved filters they toggle between. | **Medium** | New `saved_views` table: `{id, tenant_id, user_id, name, filters: JSONB, sort: JSONB, columns: JSONB, is_default}`. Frontend: tab bar above grid. | Start with personal views only (not shared/team views). The existing `PipelineViewTabs` (all/hot/replied/stale) are hardcoded saved views — make them configurable |
-| Inline cell editing (stage, notes, next action) | Attio and Clay both support clicking a cell to edit in-place. More efficient than opening a side panel for a quick stage change. | **Medium** | AG Grid supports `editable: true` on column defs with custom cell editors. Need PATCH endpoint per field. | Only make high-frequency fields inline-editable: stage (dropdown), fit tier (dropdown), next action date (date picker), notes (text). Don't make everything editable — that's a spreadsheet, not a CRM. |
-| Multi-source entry with source tagging | Records come from CSV import, manual add, meeting detection, email sync, AI research. Each source should be visible. Attio tags records with source and shows enrichment provenance. | **Low** | `source` field already exists on both Lead and Account. Display as a badge in the grid. Add source to the add-record dialog. | Sources: `manual`, `csv_import`, `meeting_detected`, `email_sync`, `ai_research`, `browser_extension` |
-| Keyboard navigation | Attio and Clay both support arrow keys in grid, Enter to open, Escape to close panel. Power users expect this. | **Medium** | AG Grid has built-in keyboard nav. Wire Enter -> open side panel, Escape -> close. Add Cmd+K for quick search. | Low effort, high perceived quality. Ship in v1 of unified view. |
-| Quick-add row at bottom of grid | Airtable's "+" row at the bottom. Type a company name, hit Enter, record created with defaults. | **Low** | AG Grid `pinnedBottomRowData` with a custom "Add new" row renderer. On submit, POST to `/api/crm/records` with dedup check. | Much faster than opening a modal. Attio does this. |
-| Outreach sequence status as a column | Show "Step 2/4 sent" or "Waiting for reply" inline in the grid. Folk integrates sequences directly in the pipeline view. Currently, sequence state lives in `lead_messages` (step_number, status). | **Medium** | Aggregate sequence progress per contact: `MAX(step_number) WHERE status='sent'` / total steps. Show as a progress indicator cell. | Don't embed full sequence editing in the grid. Show status; click to manage in side panel. |
+| # | Feature | Value Proposition | Complexity | Dependencies | Real-World Reference |
+|---|---------|-------------------|------------|-------------|---------------------|
+| D1 | **Tag system (auto + manual)** | Skills auto-tag on save (e.g., "investor-update", "competitor", "pricing"). Users can add/remove tags. Tags become a powerful cross-cutting filter axis orthogonal to type and company. | High | New `tags` JSONB array column on documents, GIN index, tag CRUD API, pill bar UI, skill ecosystem updates | Notion multi-select property, Dropbox tags, Gmail labels |
+| D2 | **Tag pill bar (horizontal filter)** | Clickable colored pills showing all tags in use, with counts. Click to filter, click again to remove. Multi-select OR logic. Sits below type tabs, above search. | Medium | D1 (tag system exists), tag aggregation query to get distinct tags with counts | Linear label pills, GitHub issue labels, Notion multi-select filter |
+| D3 | **Multi-axis filter composition** | All three axes (type tabs + company dropdown + tag pills) compose together with AND logic. "Show me Meeting Prep docs for Acme tagged investor-update." Active filters shown as removable chips. | Medium | T1 + T2 + D1 + D2 all working, backend must accept all filter params in one query | Linear compound filters, Notion combined database filters |
+| D4 | **Account resolution on save** | When a skill saves a document, it resolves the company to an Account record and sets `account_id` FK. This enables T2 (company filter) to use a proper FK join instead of slow JSONB search. Option C = skills call ensure_account first. | Medium | New `account_id` column on documents, account resolution logic, MCP tool updates | CRM document association (Salesforce, HubSpot) |
+| D5 | **Skill compliance / ecosystem updates** | All skills that save documents must: (1) provide meaningful titles, (2) include tags in metadata, (3) ensure account exists before save. This is an ecosystem change, not a UI feature. | Medium | Audit all skills, update save calls, update SKILL.md specs | Internal — no external reference |
+| D6 | **Keyboard shortcuts** | `/` to focus search, `Escape` to clear, `G` then `L` for grid/list toggle. Power users (founders) live in keyboard shortcuts. | Low | Frontend only, no backend changes | Linear (extensive shortcuts), Notion (`/` commands), Gmail |
+| D7 | **Bulk operations** | Select multiple docs, bulk tag, bulk delete, bulk export. Not MVP but becomes essential at 1K+ docs. | High | Multi-select UI, batch API endpoints, confirmation dialogs | Google Drive multi-select, Notion bulk operations |
+| D8 | **Saved views / smart filters** | Save a filter combination as a named view ("My Investor Docs", "Acme War Room"). Persistent per-user. | High | New `saved_views` table, view CRUD API, view switcher UI | Notion saved views, Linear custom views, Salesforce list views |
+
+---
 
 ## Anti-Features
 
-Features to explicitly NOT build. These add complexity without proportional value for a founder-focused CRM.
+Features to explicitly NOT build. These are traps that waste effort or harm the product.
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Kanban board view | Pipedrive's kanban is their identity, but Flywheel is grid-first. Kanban requires a completely different data fetching pattern, drag-drop infrastructure, and doesn't scale past ~50 visible cards. Founders managing 200+ relationships need density, not cards. | Stick with AG Grid table view. Stage progression via inline dropdown or side panel. The filter bar already segments by stage. |
-| Custom objects / custom fields (Attio-style) | Attio's object model is powerful but complex. Building a schema-builder is a product unto itself. Founders don't need to define custom objects — they need the one pipeline to work well. | Use JSONB `intel` and `metadata` fields for extensibility. Add specific columns as needed (e.g., `deal_value`, `industry`) rather than a generic field builder. |
-| Shared/team saved views with permissions | Team views require role-based visibility, edit permissions, and conflict resolution. For a solo-founder or tiny team, personal views are sufficient. | Ship personal saved views. Add shared views in a future milestone when multi-user is a real use case. |
-| Full email compose inside the grid | HubSpot's inline email composer is heavy. Folk's is simpler but still adds significant complexity. | Show email history in the timeline. Link to email compose (existing email feature). Don't embed a rich-text email editor in the CRM grid. |
-| Automated sequence execution engine | Building a reliable email sending queue with scheduling, throttling, bounce handling, and deliverability monitoring is a massive undertaking. Clay and HubSpot have dedicated teams for this. | Show sequence templates and drafted messages. Let the user send from their email client (or existing email feature). AI drafts the messages; human sends them. |
-| Calendar view of pipeline activities | Attio offers calendar views. Low usage for pipeline management. Founders check their calendar in Google Calendar, not their CRM. | Show "next meeting" as a column in the grid. Link to calendar for scheduling. |
-| Real-time collaboration / multiplayer cursors | Attio has multi-user presence indicators. Flywheel is founder-first, often single-user. The engineering cost of real-time sync (WebSockets, conflict resolution) is enormous. | Standard optimistic updates with last-write-wins. Add collaboration features when team size warrants it. |
-| Company/contact separation toggle | Some CRMs let you toggle between "show companies" and "show people" as separate grid modes. This recreates the fragmentation we're eliminating. | One grid. Company is the primary row. Contacts are visible in the side panel and as expandable sub-rows (if needed). |
+| # | Anti-Feature | Why Avoid | What to Do Instead |
+|---|-------------|-----------|-------------------|
+| A1 | **Folder hierarchy** | Documents are skill outputs, not user-created files. Folders create organizational burden and conflict with tags. Notion moved away from pure folders toward databases for this reason. | Use tags + type tabs + company filter as the three axes. Flat list with powerful filtering beats nested folders for AI-generated content. |
+| A2 | **Full-text search on content (day 1)** | PostgreSQL full-text search on document content requires indexing rendered HTML/markdown, adds significant complexity, and founders search by title/company 95% of the time. | Start with ILIKE on title + metadata fields. Add pg_trgm or tsvector later if search becomes a top user complaint. |
+| A3 | **Document versioning** | Skills produce new runs, not edits. Version control implies editing workflows that don't exist. Dedup with upsert handles the "re-run same skill" case. | Dedup on save (T6) handles the primary use case. If a skill re-runs, the old doc is updated in place, not versioned. |
+| A4 | **Drag-and-drop reordering** | Library items are time-ordered intelligence artifacts. Manual reordering implies curation effort that conflicts with the "automatic intelligence" value prop. | Keep time-based grouping (Today/Yesterday/etc). Let filtering handle "find what I need." |
+| A5 | **Inline document editing** | Documents are rendered skill outputs (HTML from markdown). Editing means either raw markdown editing (bad UX) or WYSIWYG on generated content (massive complexity, low value). | Documents are read-only artifacts. If content needs updating, re-run the skill. |
+| A6 | **Tag hierarchy / nested tags** | Adds complexity without proportional value at <5K docs. Notion offers it but most users don't use nested tags. | Flat tags with good naming conventions ("investor-q1", "investor-q2") cover the use case. |
+| A7 | **Real-time collaboration on filters** | Multi-user filter state sync. Massive complexity, minimal value for a founder tool. | Each user has their own filter state in URL params or localStorage. |
+| A8 | **Complex boolean filter builder** | Linear/Jira-style query builders with AND/OR/NOT nesting. Overkill for a document library with three filter axes. | Three fixed axes (type + company + tags) with implicit AND between axes, implicit OR within tags. Simple, predictable, fast. |
+
+---
 
 ## Feature Dependencies
 
 ```
-Unified data model ──────────────┬── Single grid view
-                                 ├── Unified side panel
-                                 ├── Continuous stage progression
-                                 └── Full-text search across all records
-
-Single grid view ────────────────┬── Inline cell editing
-                                 ├── Column sorting/reordering
-                                 ├── Saved views (depends on filter state shape)
-                                 ├── Quick-add row
-                                 └── Keyboard navigation
-
-Unified side panel ──────────────┬── Activity timeline (aggregated)
-                                 └── Outreach sequence status
-
-Activity timeline ───────────────── AI stage suggestions (needs signal data)
-
-Filter bar ──────────────────────── Saved views (serialized filter state)
-
-Dedup check ─────────────────────── Quick-add row (must check before insert)
-                                 └── Multi-source entry (merge-or-create on import)
+T4 (cursor pagination) --> T5 (infinite scroll)
+T1 (server-side type filter) --\
+T2 (company filter) ----------- --> D3 (multi-axis composition)
+D1 (tag system) --> D2 (pill bar) -/
+D4 (account resolution) --> T2 (company filter uses account_id FK)
+D5 (skill compliance) --> D1 (skills must send tags)
+D5 (skill compliance) --> T7 (skills must send good titles)
+D5 (skill compliance) --> D4 (skills must ensure account exists)
+T6 (dedup) -- standalone, no deps
+T7 (smart titles) -- standalone, no deps (backend-only)
+T8 (empty states) -- standalone, update as filters land
+D6 (keyboard shortcuts) -- standalone, add anytime
+D7 (bulk operations) -- after multi-axis filtering works
+D8 (saved views) -- after multi-axis filtering works
 ```
+
+**Critical path:** D4 (account resolution) + D5 (skill compliance) are prerequisites for T2 and D1 to have good data. Without skills sending proper tags and account IDs, the filtering UI has nothing to filter on.
+
+---
 
 ## MVP Recommendation
 
-**Phase 1 — Unified Grid (must ship together):**
-1. Unified data model / query layer (merges leads + accounts into one result set)
-2. Single AG Grid with continuous stage column (no graduation)
-3. Merged side panel (handles both legacy entity types)
-4. Unified filter bar with stage, fit tier, relationship type, search
-5. Keyboard navigation (Enter/Escape/arrow keys)
+### Phase 1 — Backend Foundation + Data Quality (build first)
+1. **T6 — Dedup on save** (stop the bleeding — no more duplicate docs)
+2. **T7 — Smart title generation** (fix titles at source, not just display)
+3. **D4 — Account resolution** (add `account_id` FK to documents)
+4. **T4 — Cursor pagination** (backend prerequisite for everything else)
 
-**Phase 2 — Rich interactions:**
-6. Inline cell editing (stage, fit tier, next action)
-7. Saved views (personal)
-8. Quick-add row with dedup
-9. Activity timeline in side panel (aggregated from all sources)
+### Phase 2 — Filtering UI (build second)
+5. **T1 — Server-side type tabs** (upgrade existing tabs to query server)
+6. **T2 — Company dropdown** (using account_id FK from Phase 1)
+7. **T3 — Server-side search** (ILIKE on title + metadata)
+8. **T5 — Infinite scroll** (hybrid with IntersectionObserver)
 
-**Phase 3 — AI layer:**
-10. AI stage suggestions based on activity signals
-11. Smart dedup on all entry points (CSV import, manual add)
-12. Outreach sequence status column
+### Phase 3 — Tags + Polish (build third)
+9. **D1 — Tag system** (JSONB array + GIN index + CRUD)
+10. **D2 — Tag pill bar** (filter UI)
+11. **D3 — Multi-axis composition** (all three axes working together)
+12. **D5 — Skill ecosystem updates** (all skills send tags + account + good titles)
+13. **T8 — Empty state updates** (polish for new filter combinations)
 
-**Defer entirely:**
-- Kanban view: not needed for density-first founder CRM
-- Custom objects: JSONB covers extensibility needs
-- Email compose in grid: existing email feature handles this
-- Automated sequence sending: draft-and-send-manually is fine for now
+### Defer
+- **D6 — Keyboard shortcuts**: Nice-to-have, add in any phase
+- **D7 — Bulk operations**: Wait for user demand at scale
+- **D8 — Saved views**: Wait for multi-axis filtering to prove its value
 
-## Existing Infrastructure to Leverage
+---
 
-| Existing Component | Reuse Strategy |
-|-------------------|----------------|
-| AG Grid (both pages) | Unified column definitions, shared theme config (already near-identical between `leadsTheme` and `pipelineTheme`) |
-| `PipelineSidePanel` + `LeadSidePanel` | Merge into `UnifiedSidePanel` with normalized data interface |
-| `PipelineFilterBar` + `LeadsFilterBar` | Merge into `UnifiedFilterBar` with superset of filter facets |
-| `OutreachDot`, `DaysSinceCell`, `FitTierBadge`, `StageBadge` | Reuse directly — these cell renderers work regardless of entity source |
-| `CompanyProfilePage` | Already handles full profile view — just needs routing from unified grid |
-| `GraduationModal` + `GraduateButton` + `LeadGraduateButton` | **Remove** — graduation is replaced by continuous stage progression |
-| `PipelineViewTabs` (all/hot/replied/stale) | Replace with saved views system (these become default saved views) |
-| `LeadsFunnel` | Keep as optional collapsible visualization above the grid |
-| Backend `Account` + `Lead` models | Create a unified query endpoint that JOINs/UNIONs with consistent shape |
-| `lead_messages` + `outreach_activities` + `meetings` | Unified timeline query for side panel |
-| `RelationshipListPage` type tabs (prospect/customer/advisor/investor) | Become filter facets in the unified filter bar, not separate pages |
+## Tag Management UX Patterns (Deep Dive)
+
+Since tags are the highest-complexity differentiator, here are the specific patterns to follow:
+
+### Auto-Tagging by Skills (Write Path)
+- Skills include `tags: ["meeting-prep", "acme", "q2-review"]` in metadata on save
+- Backend validates tags (lowercase, alphanumeric + hyphens, max 50 chars)
+- Auto-tags are not special — users can remove them
+- **Pattern:** Notion auto-assigns properties on creation; same concept for skill-generated tags
+
+### User Tag Editing (Read Path)
+- **Inline pill display:** Tags shown as colored pills on document row/card
+- **Click-to-edit:** Click a tag area to open a popover with autocomplete input
+- **Autocomplete from existing:** As user types, show matching tags from the tenant's tag pool (max 10 suggestions)
+- **Create new:** If no match, show "Create tag: [typed-input]" option at bottom of dropdown
+- **Remove:** X button on each pill, or backspace in the edit popover
+- **Keyboard:** Arrow keys to navigate suggestions, Enter to select, Escape to close
+- **Pattern:** Notion multi-select property editor — popover with search + create + remove
+
+### Tag Pill Filter Bar (Filter Path)
+- Horizontal scrollable row of pills showing tags in use (with doc counts)
+- Click to toggle filter on/off (pill fills with color when active)
+- Multiple tags = OR logic ("show docs tagged investor OR competitor")
+- Combined with type tabs and company = AND logic
+- Show max ~8 pills visible, overflow indicator (" +12 more") with expand
+- **Pattern:** GitHub issue label filter, Linear label pills
+
+### Tag Color Assignment
+- Auto-assign from a palette of 8-10 colors based on deterministic hash of tag name
+- Same tag always gets same color across all views and sessions
+- Users do NOT manually pick colors (anti-feature: too much config overhead for a founder tool)
+- **Pattern:** Notion auto-colors for multi-select options
+
+---
+
+## Infinite Scroll UX Patterns (Deep Dive)
+
+The hybrid approach is the consensus for SaaS document lists:
+
+### Implementation Pattern
+1. **Initial load:** Fetch first 50 docs with cursor pagination
+2. **Scroll trigger:** IntersectionObserver on a sentinel div ~200px before list end
+3. **Auto-load:** Fetch next 50 when sentinel becomes visible
+4. **Progress indicator:** "Showing 150 of 2,341" pinned at bottom
+5. **Loading state:** Skeleton rows/cards appear while fetching (already built)
+6. **End state:** "You've seen all documents" message when no more pages
+7. **Fallback:** If IntersectionObserver unavailable, "Load More" button remains (already built)
+
+### Preserving Scroll Position
+- When user navigates to a document detail and comes back, restore scroll position
+- Use React Router's `scrollRestoration` or manual position tracking via ref
+- **Critical for UX:** Losing scroll position after viewing a doc is the #1 complaint with infinite scroll lists
+
+### Filter Reset Behavior
+- When any filter changes, reset to first page (new cursor)
+- Show loading skeleton, not empty state, during filter transition
+- Preserve scroll position only within same filter set
+
+---
+
+## Multi-Axis Filter Composition (Deep Dive)
+
+### Three Axes
+1. **Type tabs** (horizontal, top): Mutually exclusive single-select (All / Meeting Prep / Company Intel / ...)
+2. **Company dropdown** (left of search bar): Single-select dropdown with typeahead search, shows accounts with doc counts
+3. **Tag pills** (horizontal bar below tabs): Multi-select, OR within tags
+
+### Composition Logic
+- Between axes: AND (`type = meeting-prep AND account_id = X AND (tag = a OR tag = b)`)
+- Within tags: OR (selecting "investor" and "competitor" shows docs with either tag)
+- Type "All" tab = no type filter applied
+
+### Active Filter Chips
+- When company or tags are active, show removable chips below the filter bar
+- "Acme Corp x" | "investor x" | "competitor x" | "Clear all"
+- Chip removal resets that single axis, not all filters
+- **Pattern:** Google Drive active filter chips, Amazon product filter breadcrumbs
+
+### URL State
+- Encode filters in URL query params: `?type=meeting-prep&account=uuid&tags=investor,competitor`
+- Enables sharing filtered views and browser back/forward navigation
+- Debounce URL updates to avoid history spam during rapid filter changes
+- **Pattern:** Linear encodes filter state in URL (good); Notion does not (worse — can't share or bookmark views)
+
+---
+
+## Dedup Strategy (Deep Dive)
+
+### Hash-Based Inline Dedup
+- **Hash key:** `sha256(tenant_id + skill_name + normalized_title + date_bucket)`
+- **Date bucket:** Truncate `created_at` to date (same skill + same title on same day = duplicate)
+- **Operation:** UPSERT — if hash exists, update content + metadata + updated_at; if not, insert
+- **Normalization:** Lowercase title, strip prefixes ("Meeting Prep: " etc.), collapse whitespace
+- **Column:** Add `content_hash TEXT` to documents table with unique constraint per tenant
+
+### Edge Cases
+- Different skill re-run same day = UPDATE (desired: latest output wins)
+- Same skill different day = INSERT (desired: separate docs for different dates)
+- User manually renames a doc = hash changes, no longer dedup-eligible (acceptable)
+- Bulk re-run of all skills = all docs updated in place, no new rows (desired)
+
+---
 
 ## Sources
 
-- [Attio Help Center - Views](https://attio.com/help/academy/introduction/views) — HIGH confidence
-- [Attio Help Center - Filter and sort views](https://attio.com/help/reference/managing-your-data/views/filter-and-sort-views) — HIGH confidence
-- [Attio Help Center - Table views](https://attio.com/help/reference/managing-your-data/views/create-and-manage-table-views) — HIGH confidence
-- [Attio Workflows](https://attio.com/platform/workflows) — HIGH confidence
-- [Attio Chrome Extension](https://attio.com/help/reference/tools-and-extensions/attio-chrome-extension) — HIGH confidence
-- [Attio Email and Calendar Syncing](https://attio.com/help/reference/email-calendar/email-and-calendar-syncing) — HIGH confidence
-- [Folk CRM - Create views](https://help.folk.app/en/articles/4998224-create-views) — HIGH confidence
-- [Folk CRM - Email sequences](https://help.folk.app/en/articles/8744016-send-email-sequences) — HIGH confidence
-- [Folk CRM - Best practice email sequences](https://www.folk.app/articles/best-practice-for-sending-email-sequences) — HIGH confidence
-- [Pipedrive Pipeline view](https://support.pipedrive.com/en/article/pipeline-view) — HIGH confidence
-- [HubSpot Pipeline Management](https://www.hubspot.com/products/crm/pipeline-management) — MEDIUM confidence
-- [CRM Deduplication Guide 2025](https://www.rtdynamic.com/blog/crm-deduplication-guide-2025/) — MEDIUM confidence
-- [Attio CRM Review 2026 - CRM.org](https://crm.org/news/attio-review) — MEDIUM confidence
-- [Folk CRM Review 2026 - hackceleration](https://hackceleration.com/folk-crm-review/) — MEDIUM confidence
-- [react-datasheet-grid](https://github.com/nick-keller/react-datasheet-grid) — MEDIUM confidence (implementation patterns)
-- [Attio + Clay Integration](https://attio.com/apps/clay) — HIGH confidence (multi-source enrichment patterns)
+- [Notion tagging guide](https://www.thebricks.com/resources/how-to-use-tags-in-notion-a-comprehensive-guide) — MEDIUM confidence
+- [How to add tags in Notion (2026)](https://super.so/blog/how-to-add-tags-in-notion) — MEDIUM confidence
+- [Linear filters documentation](https://linear.app/docs/filters) — HIGH confidence
+- [Linear custom views](https://linear.app/docs/custom-views) — HIGH confidence
+- [Filter UX patterns for SaaS (Eleken)](https://www.eleken.co/blog-posts/filter-ux-and-ui-for-saas) — MEDIUM confidence
+- [Filter UX Design Patterns (Pencil & Paper)](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-filtering) — MEDIUM confidence
+- [Pagination UI in 2026 (Eleken)](https://www.eleken.co/blog-posts/pagination-ui) — MEDIUM confidence
+- [Pagination vs infinite scroll (LogRocket)](https://blog.logrocket.com/ux-design/pagination-vs-infinite-scroll-ux/) — MEDIUM confidence
+- [Dropbox tags](https://help.dropbox.com/organize/dropbox-tags) — HIGH confidence
+- [Google Drive labels](https://help.folgo.com/article/330-what-are-google-drive-labels) — MEDIUM confidence
+- [Tag UX to implementation](https://schof.co/tags-ux-to-implementation/) — MEDIUM confidence
+- [Autocomplete UX best practices (Baymard)](https://baymard.com/blog/autocomplete-design) — HIGH confidence
+- [Complex filters UX (Smart Interface Design Patterns)](https://smart-interface-design-patterns.com/articles/complex-filtering/) — MEDIUM confidence
+- [AI-driven UX patterns SaaS 2026 (Orbix)](https://www.orbix.studio/blogs/ai-driven-ux-patterns-saas-2026) — LOW confidence
+- [Data deduplication (Wikipedia)](https://en.wikipedia.org/wiki/Data_deduplication) — HIGH confidence
+- [Hash-based dedup internals](https://pibytes.wordpress.com/2013/02/09/deduplication-internals-hash-based-part-2/) — MEDIUM confidence
