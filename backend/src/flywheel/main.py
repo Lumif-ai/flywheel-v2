@@ -46,9 +46,7 @@ from flywheel.api.work_items import router as work_items_router
 from flywheel.api.pipeline import router as pipeline_router
 from flywheel.api.saved_views import router as saved_views_router
 from flywheel.api.leads import router as leads_router
-from flywheel.api.outreach import router as outreach_router
 from flywheel.api.accounts import router as accounts_router
-from flywheel.api.timeline import router as timeline_router
 from flywheel.api.relationships import router as relationships_router
 from flywheel.api.signals import router as signals_router
 from flywheel.api.meetings import router as meetings_router
@@ -220,9 +218,7 @@ def create_app() -> FastAPI:
     app.include_router(team_onboarding_router, prefix="/api/v1")
     app.include_router(profile_router, prefix="/api/v1")
     app.include_router(agent_ws_router, prefix="/api/v1")
-    app.include_router(outreach_router, prefix="/api/v1")
     app.include_router(accounts_router, prefix="/api/v1")
-    app.include_router(timeline_router, prefix="/api/v1")
     app.include_router(relationships_router, prefix="/api/v1")
     app.include_router(signals_router, prefix="/api/v1")
     app.include_router(meetings_router, prefix="/api/v1")
