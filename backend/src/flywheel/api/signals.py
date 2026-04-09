@@ -6,7 +6,7 @@ SIG-01: GET /signals/  -- per-type badge counts for the sidebar navigation
 
 SIGNAL TAXONOMY (SIG-02):
   reply_received   (P1) — New reply received in last 7 days
-  followup_overdue (P2) — Follow-up is overdue (next_action_due < now)
+  followup_overdue (P2) — Follow-up is overdue (next_action_date < today)
   commitment_due   (P2) — Commitment coming due within 7 days
   stale_relationship (P3) — No interaction in 90+ days
 
@@ -15,8 +15,8 @@ TASK SIGNALS (TASK-04):
   tasks_in_review  — Tasks in 'in_review' status awaiting confirmation
   tasks_overdue    — Tasks past due_date that are not done/dismissed
 
-PARTITION CONTRACT: ALL signal queries MUST include `Account.graduated_at.isnot(None)`.
-Pipeline-only accounts (graduated_at IS NULL) are always excluded from signal counts.
+PARTITION CONTRACT: ALL signal queries filter on pipeline_entries with
+retired_at IS NULL (active entries only). Retired entries are excluded.
 
 PERFORMANCE: Uses 2 SQL queries (down from 16) with PostgreSQL FILTER clauses
 and unnest() to compute all signals across all types in one pass. Results are
@@ -112,45 +112,49 @@ def _set_task_cached(key: str, value: dict) -> None:
 # SQL-based signal computation — 2 queries instead of 16
 # ---------------------------------------------------------------------------
 
-# Query 1: account-only signals (followup_overdue, commitment_due, stale)
-# Uses unnest() + FILTER to compute all 3 signals × 4 types in one pass.
+# Query 1: pipeline-entry signals (followup_overdue, commitment_due, stale)
+# Uses unnest() + FILTER to compute all 3 signals x 4 types in one pass.
+# next_action_date is DATE (not TIMESTAMP), so comparisons use :today (date).
 _ACCOUNT_SIGNALS_SQL = text("""
     SELECT
         t.type AS rel_type,
         COUNT(DISTINCT a.id) FILTER (
-            WHERE a.next_action_due IS NOT NULL
-              AND a.next_action_due < :now
+            WHERE a.next_action_date IS NOT NULL
+              AND a.next_action_date < :today
         ) AS followup_overdue,
         COUNT(DISTINCT a.id) FILTER (
-            WHERE a.next_action_type = 'commitment'
-              AND a.next_action_due IS NOT NULL
-              AND a.next_action_due < :seven_ahead
+            WHERE a.next_action_note = 'commitment'
+              AND a.next_action_date IS NOT NULL
+              AND a.next_action_date < :seven_ahead_date
         ) AS commitment_due,
         COUNT(DISTINCT a.id) FILTER (
-            WHERE (a.last_interaction_at IS NOT NULL AND a.last_interaction_at < :ninety_ago)
-               OR (a.last_interaction_at IS NULL AND a.created_at < :ninety_ago)
+            WHERE (a.last_activity_at IS NOT NULL AND a.last_activity_at < :ninety_ago)
+               OR (a.last_activity_at IS NULL AND a.created_at < :ninety_ago)
         ) AS stale_relationship
-    FROM accounts a,
+    FROM pipeline_entries a,
          unnest(a.relationship_type) AS t(type)
     WHERE a.tenant_id = :tid
-      AND a.graduated_at IS NOT NULL
+      AND a.retired_at IS NULL
+      AND a.stage NOT IN ('identified')
       AND t.type IN ('prospect', 'customer', 'advisor', 'investor')
     GROUP BY t.type
 """)
 
-# Query 2: reply_received (needs JOIN to outreach_activities)
+# Query 2: reply_received (needs JOIN to activities)
 _REPLY_SIGNALS_SQL = text("""
     SELECT
         t.type AS rel_type,
         COUNT(DISTINCT a.id) AS reply_received
-    FROM accounts a
-    JOIN outreach_activities oa
-      ON oa.account_id = a.id
-     AND oa.status = 'replied'
-     AND oa.created_at > :seven_ago
+    FROM pipeline_entries a
+    JOIN activities oa
+      ON oa.pipeline_entry_id = a.id
+     AND oa.status = 'completed'
+     AND oa.direction = 'inbound'
+     AND oa.occurred_at > :seven_ago
     CROSS JOIN LATERAL unnest(a.relationship_type) AS t(type)
     WHERE a.tenant_id = :tid
-      AND a.graduated_at IS NOT NULL
+      AND a.retired_at IS NULL
+      AND a.stage NOT IN ('identified')
       AND t.type IN ('prospect', 'customer', 'advisor', 'investor')
     GROUP BY t.type
 """)
@@ -181,11 +185,16 @@ async def _compute_all_signals(
     ninety_ago = now - datetime.timedelta(days=90)
     seven_ahead = now + datetime.timedelta(days=7)
 
+    today = now.date()
+    seven_ahead_date = (now + datetime.timedelta(days=7)).date()
+
     params = {
         "tid": tenant_id,
         "now": now,
+        "today": today,
         "seven_ago": seven_ago,
         "seven_ahead": seven_ahead,
+        "seven_ahead_date": seven_ahead_date,
         "ninety_ago": ninety_ago,
     }
 
@@ -195,7 +204,7 @@ async def _compute_all_signals(
         for rt in RELATIONSHIP_TYPES
     }
 
-    # Query 1: account-only signals
+    # Query 1: pipeline-entry signals
     acct_result = await db.execute(_ACCOUNT_SIGNALS_SQL, params)
     for row in acct_result:
         rt = row.rel_type
@@ -248,8 +257,8 @@ async def get_signals(
 ) -> SignalsResponse:
     """Return per-type badge counts for sidebar navigation.
 
-    PARTITION CONTRACT: graduated_at.isnot(None) enforced in every signal query.
-    Pipeline-only accounts (graduated_at IS NULL) are excluded.
+    PARTITION CONTRACT: retired_at IS NULL enforced in every signal query.
+    Retired and identified-only entries are excluded.
 
     Performance: 2 SQL queries with 60s TTL cache per tenant for relationship
     signals, plus 1 SQL query with 60s TTL cache per user for task signals.

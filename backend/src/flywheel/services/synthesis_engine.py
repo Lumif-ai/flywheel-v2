@@ -1,9 +1,9 @@
 """SynthesisEngine: AI synthesis service for relationship summaries and Q&A.
 
 Public API:
-    SynthesisEngine.enforce_rate_limit(account) -> None  # raises 429 if within window
-    SynthesisEngine.generate(db, account) -> str | None
-    SynthesisEngine.ask(db, account, question) -> dict
+    SynthesisEngine.enforce_rate_limit(entry) -> None  # raises 429 if within window
+    SynthesisEngine.generate(db, entry) -> str | None
+    SynthesisEngine.ask(db, entry, question) -> dict
 
 Rate-limit contract:
     Synthesis is rate-limited to once per 5 minutes via DB-level ai_summary_updated_at.
@@ -32,7 +32,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.config import settings
-from flywheel.db.models import Account, ContextEntry
+from flywheel.db.models import ContextEntry, PipelineEntry
 from flywheel.services.circuit_breaker import anthropic_breaker
 
 try:
@@ -57,29 +57,29 @@ _MIN_CONTEXT_ENTRIES = 3
 
 
 class SynthesisEngine:
-    """Stateless service for AI synthesis and Q&A on relationship accounts.
+    """Stateless service for AI synthesis and Q&A on pipeline entries.
 
-    All methods are async static — pass db session and account explicitly.
+    All methods are async static — pass db session and entry explicitly.
     """
 
     @staticmethod
-    async def enforce_rate_limit(account: Account) -> None:
+    async def enforce_rate_limit(entry: PipelineEntry) -> None:
         """Raise HTTP 429 if synthesis was triggered within the rate-limit window.
 
         Args:
-            account: The Account ORM object (must have ai_summary_updated_at).
+            entry: The PipelineEntry ORM object (must have ai_summary_updated_at).
 
         Raises:
             HTTPException: 429 if within 5-minute rate-limit window.
         """
-        if account.ai_summary_updated_at is None:
+        if entry.ai_summary_updated_at is None:
             # Never synthesized — allow unconditionally
             return
 
         window_start = datetime.now(timezone.utc) - _RATE_LIMIT_WINDOW
 
         # Ensure ai_summary_updated_at is timezone-aware for comparison
-        last_updated = account.ai_summary_updated_at
+        last_updated = entry.ai_summary_updated_at
         if last_updated.tzinfo is None:
             last_updated = last_updated.replace(tzinfo=timezone.utc)
 
@@ -98,8 +98,8 @@ class SynthesisEngine:
             )
 
     @staticmethod
-    async def generate(db: AsyncSession, account: Account) -> str | None:
-        """Generate an AI summary for the relationship account.
+    async def generate(db: AsyncSession, entry: PipelineEntry) -> str | None:
+        """Generate an AI summary for a pipeline entry.
 
         Fetches up to 20 recent context entries and calls Haiku.
         Returns None (and still updates ai_summary_updated_at) if fewer than
@@ -107,7 +107,7 @@ class SynthesisEngine:
 
         Args:
             db: Async database session.
-            account: The Account ORM object to synthesize.
+            entry: The PipelineEntry ORM object to synthesize.
 
         Returns:
             Generated summary string, or None for sparse data.
@@ -119,7 +119,7 @@ class SynthesisEngine:
         result = await db.execute(
             select(ContextEntry)
             .where(
-                ContextEntry.account_id == account.id,
+                ContextEntry.pipeline_entry_id == entry.id,
                 ContextEntry.deleted_at.is_(None),
             )
             .order_by(ContextEntry.date.desc())
@@ -131,8 +131,8 @@ class SynthesisEngine:
 
         # Sparse-data guard: update timestamp so rate limit applies, return None
         if len(entries) < _MIN_CONTEXT_ENTRIES:
-            account.ai_summary = None
-            account.ai_summary_updated_at = now
+            entry.ai_summary = None
+            entry.ai_summary_updated_at = now
             return None
 
         # Build system prompt
@@ -144,9 +144,9 @@ class SynthesisEngine:
 
         # Build user content from context entries
         entry_lines = []
-        for entry in entries:
+        for ctx in entries:
             entry_lines.append(
-                f"[{entry.date}] [{entry.source}] {entry.content}"
+                f"[{ctx.date}] [{ctx.source}] {ctx.content}"
             )
         user_content = "\n\n".join(entry_lines)
 
@@ -172,14 +172,14 @@ class SynthesisEngine:
             raise
 
         # Persist results
-        account.ai_summary = summary
-        account.ai_summary_updated_at = now
-        account.updated_at = now
+        entry.ai_summary = summary
+        entry.ai_summary_updated_at = now
+        entry.updated_at = now
 
         return summary
 
     @staticmethod
-    async def ask(db: AsyncSession, account: Account, question: str) -> dict:
+    async def ask(db: AsyncSession, entry: PipelineEntry, question: str) -> dict:
         """Answer a question about a relationship using context entries.
 
         Uses all non-deleted context entries (up to 50). Returns a graceful
@@ -191,7 +191,7 @@ class SynthesisEngine:
 
         Args:
             db: Async database session.
-            account: The Account ORM object.
+            entry: The PipelineEntry ORM object.
             question: The question to answer (5-1000 characters).
 
         Returns:
@@ -204,7 +204,7 @@ class SynthesisEngine:
         result = await db.execute(
             select(ContextEntry)
             .where(
-                ContextEntry.account_id == account.id,
+                ContextEntry.pipeline_entry_id == entry.id,
                 ContextEntry.deleted_at.is_(None),
             )
             .order_by(ContextEntry.date.desc())
