@@ -1561,13 +1561,13 @@ async def _upsert_pipeline_from_meeting(
                 sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
                 {"tid": str(tenant_id)},
             )
-            from flywheel.db.models import Account
-            acct = (await sess.execute(
-                select(Account).where(Account.id == account_id)
+            from flywheel.db.models import PipelineEntry
+            entry = (await sess.execute(
+                select(PipelineEntry).where(PipelineEntry.id == account_id)
             )).scalar_one_or_none()
-            if acct:
-                company_name = acct.name
-                domain = acct.domain
+            if entry:
+                company_name = entry.name
+                domain = entry.domain
 
     # Priority 2: Derive from external attendee domains
     if not company_name and attendees:
@@ -1887,12 +1887,12 @@ async def _execute_meeting_processor(
                         sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
                         {"tid": str(tenant_id)},
                     )
-                    from flywheel.db.models import Account
-                    acct = (await sess.execute(
-                        select(Account).where(Account.id == account_id)
+                    from flywheel.db.models import PipelineEntry
+                    entry = (await sess.execute(
+                        select(PipelineEntry).where(PipelineEntry.id == account_id)
                     )).scalar_one_or_none()
-                    if acct:
-                        matched_domain = acct.domain
+                    if entry:
+                        matched_domain = entry.domain
                 if matched_domain:
                     async with factory() as sess:
                         await sess.execute(

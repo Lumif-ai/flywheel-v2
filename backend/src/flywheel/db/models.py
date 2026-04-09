@@ -899,6 +899,26 @@ class Document(Base):
             unique=True,
             postgresql_where=text("share_token IS NOT NULL"),
         ),
+        Index(
+            "idx_documents_tags",
+            "tags",
+            postgresql_using="gin",
+        ),
+        Index("idx_documents_account", "tenant_id", "account_id"),
+        # Dedup index: non-NULL account_id
+        Index(
+            "idx_documents_dedup",
+            "tenant_id", "document_type", "title", "account_id",
+            unique=True,
+            postgresql_where=text("account_id IS NOT NULL AND deleted_at IS NULL"),
+        ),
+        # Dedup index: NULL account_id (tenant-scoped)
+        Index(
+            "idx_documents_dedup_no_account",
+            "tenant_id", "document_type", "title",
+            unique=True,
+            postgresql_where=text("account_id IS NULL AND deleted_at IS NULL"),
+        ),
         # Note: GIN index on metadata column is created in the migration, not here,
         # because the ORM attribute name (metadata_) differs from the DB column (metadata).
     )
@@ -923,6 +943,17 @@ class Document(Base):
         ForeignKey("skill_runs.id", ondelete="SET NULL")
     )
     share_token: Mapped[str | None] = mapped_column(Text, unique=True)
+    # --- v12.0 Library Redesign columns ---
+    tags: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), nullable=False, server_default=text("'{}'::text[]")
+    )
+    account_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
+    )
+    module: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="crm"
+    )
+    # --- end v12.0 columns ---
     metadata_: Mapped[dict] = mapped_column(
         "metadata", JSONB, server_default=text("'{}'::jsonb")
     )
@@ -1709,6 +1740,9 @@ class PipelineEntry(Base):
         JSONB, server_default=text("'{}'::jsonb")
     )
     ai_summary: Mapped[str | None] = mapped_column(Text, nullable=True)
+    ai_summary_updated_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
     company_cache_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("companies.id"), nullable=True
     )

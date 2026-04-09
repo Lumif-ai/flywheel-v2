@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
-from flywheel.db.models import Account, Integration, Meeting, SkillRun
+from flywheel.db.models import Integration, Meeting, PipelineEntry, SkillRun
 from flywheel.db.session import get_session_factory
 from flywheel.engines.meeting_processor_web import auto_link_meeting_to_account
 from flywheel.services.meeting_sync import sync_granola_meetings
@@ -543,11 +543,11 @@ async def prep_meeting(
         )
 
     # 3. Load account name for dispatch prefix
-    acct_result = await db.execute(
-        select(Account).where(Account.id == account_id).limit(1)
+    entry_result = await db.execute(
+        select(PipelineEntry).where(PipelineEntry.id == account_id).limit(1)
     )
-    account = acct_result.scalar_one_or_none()
-    account_name = account.name if account else "Unknown"
+    entry = entry_result.scalar_one_or_none()
+    account_name = entry.name if entry else "Unknown"
 
     # 4. Build input_text with Account-ID dispatch prefix
     input_text = (
