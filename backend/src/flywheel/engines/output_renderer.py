@@ -102,6 +102,20 @@ def detect_output_type(skill_name: str) -> str:
 # Section parsing
 # ---------------------------------------------------------------------------
 
+def _strip_frontmatter(text: str) -> str:
+    """Remove YAML frontmatter (--- delimited block at start of content)."""
+    if not text or not text.lstrip().startswith("---"):
+        return text
+    # Find the closing ---
+    stripped = text.lstrip()
+    end = stripped.find("---", 3)
+    if end == -1:
+        return text
+    # Skip past closing --- and any trailing newline
+    after = stripped[end + 3:]
+    return after.lstrip("\n")
+
+
 def parse_output_sections(raw_output: str) -> dict:
     """Parse markdown-style output into structured sections.
 
@@ -111,6 +125,9 @@ def parse_output_sections(raw_output: str) -> dict:
     """
     if not raw_output or not raw_output.strip():
         return {"sections": [], "raw": raw_output or "", "section_count": 0}
+
+    # Strip YAML frontmatter if present
+    raw_output = _strip_frontmatter(raw_output)
 
     lines = raw_output.split("\n")
     sections = []
@@ -151,8 +168,20 @@ def parse_output_sections(raw_output: str) -> dict:
 
 
 def _save_section(sections: list, title: Optional[str], lines: list):
-    """Build a section dict from title and collected lines."""
-    content = "\n".join(lines).strip()
+    """Build a section dict from title and collected lines.
+
+    Strips leading/trailing blank lines from the content block so that
+    the markdown converter doesn't produce spurious <br> tags at the
+    boundaries of each section.
+    """
+    # Drop leading blank lines (common after a ## heading)
+    while lines and not lines[0].strip():
+        lines = lines[1:]
+    # Drop trailing blank lines
+    while lines and not lines[-1].strip():
+        lines = lines[:-1]
+
+    content = "\n".join(lines)
     if not title and not content:
         return
     title = title or "Overview"
@@ -165,14 +194,31 @@ def _save_section(sections: list, title: Optional[str], lines: list):
 
 
 def _extract_items(content: str) -> list:
-    """Extract bullet-point items from content text."""
+    """Extract bullet-point items from content text.
+
+    Handles nested lists by detecting indentation level (2 or 4 spaces)
+    and prefixing sub-items with an indent marker so templates can
+    distinguish hierarchy when needed.
+    """
     items = []
     for line in content.split("\n"):
         stripped = line.strip()
+        # Detect indentation depth (number of leading spaces / 2)
+        leading = len(line) - len(line.lstrip())
+        depth = leading // 2  # 0 = top-level, 1 = sub-item, 2 = sub-sub-item
+
         if stripped.startswith("- ") or stripped.startswith("* "):
-            items.append(stripped[2:].strip())
+            text = stripped[2:].strip()
+            if depth > 0:
+                items.append({"text": text, "depth": depth})
+            else:
+                items.append(text)
         elif re.match(r"^\d+\.\s+", stripped):
-            items.append(re.sub(r"^\d+\.\s+", "", stripped).strip())
+            text = re.sub(r"^\d+\.\s+", "", stripped).strip()
+            if depth > 0:
+                items.append({"text": text, "depth": depth})
+            else:
+                items.append(text)
     return items
 
 
@@ -196,11 +242,11 @@ def extract_key_facts(sections: list) -> list:
         for line in content.split("\n"):
             stripped = line.strip()
 
-            # Pattern: **Label:** Value
-            match = re.match(r"\*\*(.+?)\*\*[:\s]+(.+)", stripped)
+            # Pattern: **Label:** Value  or  - **Label**: Value
+            match = re.match(r"^[-*]?\s*\*\*(.+?)\*\*[:\s]+(.+)", stripped)
             if match:
                 label = match.group(1).strip().rstrip(":")
-                value = match.group(2).strip()
+                value = re.sub(r"\*\*(.+?)\*\*", r"\1", match.group(2).strip())
                 key = label.lower()
                 if key not in seen and value:
                     facts.append({"label": label, "value": value})
@@ -220,6 +266,112 @@ def extract_key_facts(sections: list) -> list:
                         seen.add(key)
 
     return facts
+
+
+# ---------------------------------------------------------------------------
+# Meeting-prep-specific post-processing
+# ---------------------------------------------------------------------------
+
+# Key facts to surface in the sidebar for meeting briefs.
+# Maps lowercase label prefixes to display labels.
+_MEETING_BRIEF_FACT_LABELS = {
+    "education": "Education",
+    "location": "Location",
+    "founded": "Founded",
+    "scale": "Scale",
+    "revenue": "Revenue",
+    "core": "Core Business",
+    "languages": "Languages",
+    "title": "Title",
+    "company": "Company",
+}
+
+
+def _extract_meeting_contacts(sections: list) -> list:
+    """Extract contact cards from 'Who He Is' / 'Who She Is' / profile sections.
+
+    Looks for **Name** | Title, Company patterns and structured bullet lists
+    with Name:, Title:, Email:, LinkedIn: fields.
+    """
+    contacts = []
+    for section in sections:
+        content = section.get("content", "")
+        title_lower = section.get("title", "").lower()
+
+        # Pattern 1: **Name** | Title | Company on the FIRST non-empty line
+        if "who" in title_lower or "profile" in title_lower or "background" in title_lower or "contact" in title_lower:
+            first_line = ""
+            for cline in content.split("\n"):
+                if cline.strip():
+                    first_line = cline.strip()
+                    break
+            if "|" in first_line and "**" in first_line:
+                parts = [p.strip() for p in first_line.split("|")]
+                name = re.sub(r"\*\*(.+?)\*\*", r"\1", parts[0]).strip()
+                title_str = parts[1].strip() if len(parts) > 1 else ""
+                company = parts[2].strip() if len(parts) > 2 else ""
+                if name and len(name) < 60:
+                    contact = {"name": name, "title": title_str}
+                    if company:
+                        contact["title"] = f"{title_str}, {company}" if title_str else company
+                    contacts.append(contact)
+
+        # Pattern 2: structured list with - Name:, - Title:, - Email:
+        name = title = email = linkedin = None
+        for line in content.split("\n"):
+            stripped = line.strip()
+            m = re.match(r"^[-*]\s+\*?\*?Name\*?\*?[:\s]+(.+)", stripped, re.I)
+            if m:
+                name = re.sub(r"\*\*(.+?)\*\*", r"\1", m.group(1)).strip()
+            m = re.match(r"^[-*]\s+\*?\*?Title\*?\*?[:\s]+(.+)", stripped, re.I)
+            if m:
+                title = m.group(1).strip()
+            m = re.match(r"^[-*]\s+\*?\*?Email\*?\*?[:\s]+(.+)", stripped, re.I)
+            if m:
+                email = m.group(1).strip()
+            m = re.match(r"^[-*]\s+\*?\*?LinkedIn\*?\*?[:\s]+(.+)", stripped, re.I)
+            if m:
+                linkedin = m.group(1).strip()
+
+        if name and not any(c["name"] == name for c in contacts):
+            contacts.append({
+                "name": name,
+                "title": title or "",
+                "email": email,
+                "linkedin": linkedin,
+            })
+
+    return contacts
+
+
+def _curate_meeting_key_facts(sections: list, all_facts: list) -> list:
+    """Select the most relevant key facts for a meeting brief sidebar.
+
+    Prioritizes structured profile fields (Education, Location, Scale, etc.)
+    and caps at 8 items to keep the sidebar clean.
+    """
+    curated = []
+    seen = set()
+
+    # First pass: grab priority facts by label
+    for fact in all_facts:
+        label_lower = fact["label"].lower().rstrip(":")
+        for prefix, display in _MEETING_BRIEF_FACT_LABELS.items():
+            if label_lower.startswith(prefix) and prefix not in seen:
+                curated.append({"label": display, "value": fact["value"]})
+                seen.add(prefix)
+                break
+
+    # Second pass: fill remaining slots (up to 8) with other facts
+    for fact in all_facts:
+        if len(curated) >= 8:
+            break
+        label_lower = fact["label"].lower().rstrip(":")
+        if not any(label_lower.startswith(p) for p in seen):
+            curated.append(fact)
+            seen.add(label_lower)
+
+    return curated
 
 
 # ---------------------------------------------------------------------------
@@ -248,17 +400,77 @@ def _load_jinja2_env(templates_dir: str):
         try:
             import markdown as _md
             from markupsafe import Markup
-            html = _md.markdown(str(text), extensions=["extra"])
+            # Extensions:
+            #   extra     - tables, fenced code, footnotes, attr_list, etc.
+            #   sane_lists - prevents a bullet list from being interrupted by
+            #                a different list type; gives cleaner nested lists
+            #   nl2br     - converts single newlines to <br>, matching how
+            #                most users expect markdown to render
+            #   smarty    - typographic quotes and dashes
+            html = _md.markdown(
+                str(text),
+                extensions=["extra", "sane_lists", "nl2br", "smarty"],
+                # LLM output typically uses 2-space indent for nested lists;
+                # the default tab_length=4 causes nested items to flatten.
+                tab_length=2,
+            )
             html = sanitize_html(html)
             return Markup(html)
         except ImportError:
-            # Fallback: at minimum convert **bold** and newlines
+            # Fallback: best-effort regex conversion when markdown lib missing
             import re as _re
             from markupsafe import Markup
             text = str(text)
+
+            # --- Headings (### h3, ## h2 etc.) ---
+            text = _re.sub(r'^####\s+(.+)$', r'<h4>\1</h4>', text, flags=_re.MULTILINE)
+            text = _re.sub(r'^###\s+(.+)$', r'<h3>\1</h3>', text, flags=_re.MULTILINE)
+            text = _re.sub(r'^##\s+(.+)$', r'<h2>\1</h2>', text, flags=_re.MULTILINE)
+            text = _re.sub(r'^#\s+(.+)$', r'<h1>\1</h1>', text, flags=_re.MULTILINE)
+
+            # --- Bold / italic ---
             text = _re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
             text = _re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
-            text = text.replace('\n', '<br>')
+
+            # --- Unordered list blocks ---
+            def _convert_ul(m):
+                block = m.group(0)
+                items = _re.findall(r'^[ \t]*[-*]\s+(.+)$', block, _re.MULTILINE)
+                li = "".join(f"<li>{item}</li>" for item in items)
+                return f"<ul>{li}</ul>"
+            text = _re.sub(
+                r'(?:^[ \t]*[-*]\s+.+$\n?)+',
+                _convert_ul,
+                text,
+                flags=_re.MULTILINE,
+            )
+
+            # --- Ordered list blocks ---
+            def _convert_ol(m):
+                block = m.group(0)
+                items = _re.findall(r'^\d+\.\s+(.+)$', block, _re.MULTILINE)
+                li = "".join(f"<li>{item}</li>" for item in items)
+                return f"<ol>{li}</ol>"
+            text = _re.sub(
+                r'(?:^\d+\.\s+.+$\n?)+',
+                _convert_ol,
+                text,
+                flags=_re.MULTILINE,
+            )
+
+            # --- Links: [text](url) ---
+            text = _re.sub(
+                r'\[([^\]]+)\]\(([^)]+)\)',
+                r'<a href="\2">\1</a>',
+                text,
+            )
+
+            # --- Horizontal rules ---
+            text = _re.sub(r'^---+$', '<hr>', text, flags=_re.MULTILINE)
+
+            # --- Remaining newlines to <br> (skip lines already wrapped in block tags) ---
+            text = _re.sub(r'\n(?!<)', '<br>\n', text)
+
             text = sanitize_html(text)
             return Markup(text)
 
@@ -322,6 +534,12 @@ def render_output(
             for k, v in (attribution or {}).items()
         ]
 
+    # Meeting-prep-specific post-processing
+    contacts = []
+    if output_type == "meeting_brief":
+        contacts = _extract_meeting_contacts(parsed["sections"])
+        key_facts = _curate_meeting_key_facts(parsed["sections"], key_facts)
+
     return template.render(
         sections=parsed["sections"],
         key_facts=key_facts,
@@ -335,7 +553,7 @@ def render_output(
         total_files=total_files,
         source_skills=source_skills,
         compound_depth=compound_depth,
-        contacts=[],
+        contacts=contacts,
     )
 
 

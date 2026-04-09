@@ -52,9 +52,41 @@ export function MeetingPrepRenderer({ renderedHtml }: MeetingPrepRendererProps) 
         }
         .meeting-prep-content li {
           margin-bottom: 4px;
+          line-height: 1.6;
+        }
+        .meeting-prep-content li > ul,
+        .meeting-prep-content li > ol {
+          margin: 4px 0 4px 0;
         }
         .meeting-prep-content p {
           margin: 8px 0;
+        }
+        .meeting-prep-content blockquote {
+          border-left: 3px solid var(--brand-coral, #E94D35);
+          padding: 4px 12px;
+          margin: 12px 0;
+          color: var(--body-text);
+          opacity: 0.85;
+        }
+        .meeting-prep-content table {
+          width: 100%;
+          border-collapse: collapse;
+          margin: 12px 0;
+          font-size: 0.9em;
+        }
+        .meeting-prep-content th,
+        .meeting-prep-content td {
+          border: 1px solid var(--subtle-border, #e5e7eb);
+          padding: 6px 10px;
+          text-align: left;
+        }
+        .meeting-prep-content th {
+          background: var(--surface-secondary, #f9fafb);
+          font-weight: 600;
+        }
+        .meeting-prep-content strong {
+          font-weight: 600;
+          color: var(--heading-text);
         }
       `}</style>
       <div dangerouslySetInnerHTML={{ __html: clean }} />

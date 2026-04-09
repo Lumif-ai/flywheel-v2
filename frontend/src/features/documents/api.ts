@@ -13,6 +13,9 @@ export interface DocumentListItem {
   metadata: { contacts?: string[]; companies?: string[]; tags?: string[] }
   created_at: string
   skill_run_id: string | null
+  tags: string[]
+  account_id: string | null
+  account_name: string | null
 }
 
 export interface DocumentDetail extends DocumentListItem {
@@ -24,6 +27,17 @@ export interface DocumentDetail extends DocumentListItem {
 export interface DocumentListResponse {
   documents: DocumentListItem[]
   total: number
+  next_cursor: string | null
+}
+
+export interface TagCountItem {
+  tag: string
+  count: number
+}
+
+export interface TypeCountItem {
+  document_type: string
+  count: number
 }
 
 export interface ShareResponse {
@@ -35,30 +49,76 @@ export interface ShareResponse {
 // API functions
 // ---------------------------------------------------------------------------
 
-export async function fetchDocuments(params?: {
+export interface FetchDocumentsParams {
   document_type?: string
+  account_id?: string
+  tags?: string[]
+  search?: string
+  cursor?: string
   limit?: number
-  offset?: number
-}): Promise<DocumentListResponse> {
-  return api.get<DocumentListResponse>('/documents/', { params })
+}
+
+export async function fetchDocuments(
+  params?: FetchDocumentsParams,
+): Promise<DocumentListResponse> {
+  const searchParams = new URLSearchParams()
+  if (params?.document_type) searchParams.set('document_type', params.document_type)
+  if (params?.account_id) searchParams.set('account_id', params.account_id)
+  if (params?.tags) {
+    for (const tag of params.tags) searchParams.append('tags', tag)
+  }
+  if (params?.search) searchParams.set('search', params.search)
+  if (params?.cursor) searchParams.set('cursor', params.cursor)
+  if (params?.limit) searchParams.set('limit', String(params.limit))
+  const qs = searchParams.toString()
+  return api.get<DocumentListResponse>(`/documents/${qs ? `?${qs}` : ''}`)
+}
+
+export async function fetchDocumentTags(params?: {
+  document_type?: string
+  account_id?: string
+  search?: string
+}): Promise<TagCountItem[]> {
+  return api.get<TagCountItem[]>('/documents/tags', { params })
+}
+
+export async function fetchDocumentCountsByType(params?: {
+  account_id?: string
+  tags?: string[]
+  search?: string
+}): Promise<TypeCountItem[]> {
+  const searchParams = new URLSearchParams()
+  if (params?.account_id) searchParams.set('account_id', params.account_id)
+  if (params?.tags) {
+    for (const tag of params.tags) searchParams.append('tags', tag)
+  }
+  if (params?.search) searchParams.set('search', params.search)
+  const qs = searchParams.toString()
+  return api.get<TypeCountItem[]>(`/documents/counts-by-type${qs ? `?${qs}` : ''}`)
+}
+
+export async function updateDocumentTags(
+  id: string,
+  body: { add?: string[]; remove?: string[] },
+): Promise<{ tags: string[] }> {
+  return api.patch<{ tags: string[] }>(`/documents/${id}/tags`, body)
 }
 
 export async function fetchDocument(id: string): Promise<DocumentDetail> {
   return api.get<DocumentDetail>(`/documents/${id}`)
 }
 
+export async function deleteDocument(id: string): Promise<void> {
+  await api.delete(`/documents/${id}`)
+}
+
 export async function shareDocument(id: string): Promise<ShareResponse> {
   return api.post<ShareResponse>(`/documents/${id}/share`)
 }
 
-/**
- * Fetch a shared document by its public share token.
- * This calls a public endpoint -- no auth token is sent.
- */
 export async function fetchSharedDocument(
   shareToken: string,
 ): Promise<DocumentDetail> {
-  // Public endpoint: call directly without auth headers
   const res = await fetch(`/api/v1/documents/shared/${shareToken}`)
   if (!res.ok) {
     const body = await res.json().catch(() => ({

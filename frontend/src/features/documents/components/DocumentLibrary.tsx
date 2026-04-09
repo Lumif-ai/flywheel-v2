@@ -1,7 +1,7 @@
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router'
-import { useQuery } from '@tanstack/react-query'
-import { Search, X, FileText } from 'lucide-react'
+import { useInfiniteQuery, useQuery, useQueryClient } from '@tanstack/react-query'
+import { Search, X, FileText, ChevronDown, Check } from 'lucide-react'
 import { useAuthStore } from '@/stores/auth'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { Toast } from '@/components/ui/toast-notification'
@@ -9,8 +9,15 @@ import { EmptyState } from '@/components/ui/empty-state'
 import { ViewToggle, type ViewMode } from '@/components/ui/view-toggle'
 import { DocumentRow, DocumentRowSkeleton } from './DocumentRow'
 import { DocumentGridCard, DocumentGridCardSkeleton } from './DocumentGridCard'
-import { fetchDocuments, shareDocument } from '../api'
-import type { DocumentListItem } from '../api'
+import {
+  fetchDocuments,
+  fetchDocumentTags,
+  fetchDocumentCountsByType,
+  shareDocument,
+  deleteDocument,
+  updateDocumentTags,
+} from '../api'
+import type { DocumentListItem, TypeCountItem, TagCountItem } from '../api'
 import { getTypeStyle } from '../utils'
 
 // ---------------------------------------------------------------------------
@@ -23,16 +30,20 @@ function getDateGroup(iso: string): string {
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
   const yesterday = new Date(today.getTime() - 86_400_000)
   const weekAgo = new Date(today.getTime() - 7 * 86_400_000)
+  const twoWeeksAgo = new Date(today.getTime() - 14 * 86_400_000)
+  const monthAgo = new Date(today.getTime() - 30 * 86_400_000)
 
   if (date >= today) return 'TODAY'
   if (date >= yesterday) return 'YESTERDAY'
   if (date >= weekAgo) return 'THIS WEEK'
+  if (date >= twoWeeksAgo) return 'LAST WEEK'
+  if (date >= monthAgo) return 'THIS MONTH'
   return 'EARLIER'
 }
 
 function groupByDate(docs: DocumentListItem[]): Map<string, DocumentListItem[]> {
   const groups = new Map<string, DocumentListItem[]>()
-  const order = ['TODAY', 'YESTERDAY', 'THIS WEEK', 'EARLIER']
+  const order = ['TODAY', 'YESTERDAY', 'THIS WEEK', 'LAST WEEK', 'THIS MONTH', 'EARLIER']
   for (const key of order) groups.set(key, [])
   for (const doc of docs) {
     const group = getDateGroup(doc.created_at)
@@ -59,20 +70,254 @@ function getStoredViewMode(): ViewMode {
 }
 
 // ---------------------------------------------------------------------------
-// Component
+// Constants
 // ---------------------------------------------------------------------------
 
 const PAGE_SIZE = 50
 
+// ---------------------------------------------------------------------------
+// Tag Filter Bar component
+// ---------------------------------------------------------------------------
+
+function TagFilterBar({
+  tags,
+  activeTags,
+  onToggle,
+}: {
+  tags: TagCountItem[]
+  activeTags: string[]
+  onToggle: (tag: string) => void
+}) {
+  if (tags.length === 0) return null
+  return (
+    <div
+      className="flex items-center gap-1.5 overflow-x-auto pb-1 -mx-1 px-1 mb-4"
+      role="toolbar"
+      aria-label="Filter by tag"
+    >
+      {tags.map((t) => {
+        const isActive = activeTags.includes(t.tag)
+        return (
+          <button
+            key={t.tag}
+            type="button"
+            role="button"
+            aria-pressed={isActive}
+            onClick={() => onToggle(t.tag)}
+            className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium whitespace-nowrap transition-all duration-150 border"
+            style={{
+              backgroundColor: isActive ? 'rgba(233,77,53,0.1)' : 'rgba(0,0,0,0.03)',
+              borderColor: isActive ? 'rgba(233,77,53,0.3)' : 'transparent',
+              color: isActive ? 'var(--brand-coral)' : colors.secondaryText,
+            }}
+          >
+            {t.tag}
+            <span className="opacity-60">{t.count}</span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Company Filter Dropdown component
+// ---------------------------------------------------------------------------
+
+function CompanyFilter({
+  documents,
+  selected,
+  onSelect,
+}: {
+  documents: DocumentListItem[]
+  selected: string | null
+  onSelect: (id: string | null) => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const ref = useRef<HTMLDivElement>(null)
+
+  // Derive companies from documents
+  const companies = useMemo(() => {
+    const map = new Map<string, { id: string; name: string; count: number }>()
+    for (const doc of documents) {
+      if (doc.account_id && doc.account_name) {
+        const existing = map.get(doc.account_id)
+        if (existing) {
+          existing.count++
+        } else {
+          map.set(doc.account_id, { id: doc.account_id, name: doc.account_name, count: 1 })
+        }
+      }
+    }
+    return Array.from(map.values()).sort((a, b) => b.count - a.count)
+  }, [documents])
+
+  const filtered = search
+    ? companies.filter((c) => c.name.toLowerCase().includes(search.toLowerCase()))
+    : companies
+
+  const selectedName = selected
+    ? companies.find((c) => c.id === selected)?.name ?? 'Company'
+    : null
+
+  if (companies.length === 0) return null
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg border border-[var(--subtle-border)] text-sm transition-all duration-150 hover:border-[var(--brand-coral)]"
+        style={{ color: selected ? colors.headingText : colors.secondaryText }}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        {selectedName || 'Company'}
+        <ChevronDown size={14} />
+      </button>
+      {open && (
+        <>
+          <div className="fixed inset-0 z-10" onClick={() => { setOpen(false); setSearch('') }} />
+          <div className="absolute left-0 top-full mt-1 z-20 bg-[var(--card-bg)] border border-[var(--subtle-border)] rounded-lg shadow-lg py-1 min-w-[220px] max-h-[300px] overflow-auto">
+            {/* Search */}
+            <div className="px-2 pb-1">
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="Search companies..."
+                className="w-full h-8 px-2 rounded-md border border-[var(--subtle-border)] text-sm outline-none focus:border-[var(--brand-coral)]"
+                autoFocus
+              />
+            </div>
+            {/* All companies option */}
+            <button
+              type="button"
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-[rgba(233,77,53,0.04)] transition-colors"
+              style={{ color: !selected ? 'var(--brand-coral)' : colors.headingText }}
+              onClick={() => { onSelect(null); setOpen(false); setSearch('') }}
+            >
+              {!selected && <Check size={14} />}
+              <span className={!selected ? '' : 'ml-5'}>All Companies</span>
+            </button>
+            {filtered.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                className="flex items-center gap-2 w-full px-3 py-2 text-sm hover:bg-[rgba(233,77,53,0.04)] transition-colors"
+                style={{ color: selected === c.id ? 'var(--brand-coral)' : colors.headingText }}
+                onClick={() => { onSelect(c.id); setOpen(false); setSearch('') }}
+              >
+                {selected === c.id && <Check size={14} />}
+                <span className={selected === c.id ? '' : 'ml-5'}>{c.name}</span>
+                <span className="ml-auto text-xs opacity-50">{c.count}</span>
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Add Tag Modal (simple inline input)
+// ---------------------------------------------------------------------------
+
+function AddTagInput({
+  docId,
+  existingTags,
+  onDone,
+}: {
+  docId: string
+  existingTags: string[]
+  onDone: () => void
+}) {
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    inputRef.current?.focus()
+  }, [])
+
+  const handleSubmit = async () => {
+    const tag = value.trim().toLowerCase()
+    if (!tag || existingTags.includes(tag)) return
+    setSaving(true)
+    try {
+      await updateDocumentTags(docId, { add: [tag] })
+      onDone()
+    } catch {
+      // ignore
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onDone}>
+      <div
+        className="bg-[var(--card-bg)] rounded-xl p-4 shadow-xl border border-[var(--subtle-border)] w-[320px]"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h3 className="text-sm font-medium mb-2" style={{ color: colors.headingText }}>Add Tag</h3>
+        <input
+          ref={inputRef}
+          type="text"
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
+          placeholder="e.g. series-a, board-prep"
+          className="w-full h-9 px-3 rounded-lg border border-[var(--subtle-border)] text-sm outline-none focus:border-[var(--brand-coral)]"
+          maxLength={50}
+        />
+        <p className="text-xs mt-1 opacity-50" style={{ color: colors.secondaryText }}>
+          Lowercase, alphanumeric and hyphens only
+        </p>
+        <div className="flex justify-end gap-2 mt-3">
+          <button
+            type="button"
+            onClick={onDone}
+            className="px-3 py-1.5 rounded-lg text-sm"
+            style={{ color: colors.secondaryText }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleSubmit}
+            disabled={saving || !value.trim()}
+            className="px-3 py-1.5 rounded-lg text-sm font-medium text-white disabled:opacity-50"
+            style={{ backgroundColor: 'var(--brand-coral)' }}
+          >
+            {saving ? 'Adding...' : 'Add'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Main Component
+// ---------------------------------------------------------------------------
+
 export function DocumentLibrary() {
   const navigate = useNavigate()
+  const queryClient = useQueryClient()
   const user = useAuthStore((s) => s.user)
   const [activeTab, setActiveTab] = useState<string>('all')
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedSearch, setDebouncedSearch] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>(getStoredViewMode)
-  const [extraPages, setExtraPages] = useState<DocumentListItem[]>([])
+  const [activeTags, setActiveTags] = useState<string[]>([])
+  const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [shareToast, setShareToast] = useState<string | null>(null)
+  const [addTagDoc, setAddTagDoc] = useState<DocumentListItem | null>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   // Debounce search
   useEffect(() => {
@@ -86,62 +331,97 @@ export function DocumentLibrary() {
     try { localStorage.setItem('library-view-mode', mode) } catch { /* ignore */ }
   }, [])
 
-  // Fetch all documents
-  const { data, isLoading: loading } = useQuery({
-    queryKey: ['documents', 'all'],
-    queryFn: () => fetchDocuments({ limit: PAGE_SIZE, offset: 0 }),
+  // Build filter params
+  const filterParams = useMemo(() => ({
+    document_type: activeTab === 'all' ? undefined : activeTab,
+    account_id: selectedCompany ?? undefined,
+    tags: activeTags.length > 0 ? activeTags : undefined,
+    search: debouncedSearch || undefined,
+  }), [activeTab, selectedCompany, activeTags, debouncedSearch])
+
+  // Infinite query for documents
+  const {
+    data,
+    isLoading: loading,
+    fetchNextPage,
+    hasNextPage,
+    isFetchingNextPage,
+  } = useInfiniteQuery({
+    queryKey: ['documents', filterParams],
+    queryFn: ({ pageParam }) =>
+      fetchDocuments({
+        ...filterParams,
+        cursor: pageParam ?? undefined,
+        limit: PAGE_SIZE,
+      }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (lastPage) => lastPage.next_cursor,
     enabled: !!user,
   })
 
-  const firstPageDocs = data?.documents ?? []
-  const total = data?.total ?? 0
-  const allDocuments = [...firstPageDocs, ...extraPages]
+  const allDocuments = useMemo(
+    () => data?.pages.flatMap((p) => p.documents) ?? [],
+    [data],
+  )
+  const total = data?.pages[0]?.total ?? 0
 
-  // Build tabs dynamically from document types
+  // Fetch type counts (server-side)
+  const { data: typeCounts } = useQuery({
+    queryKey: ['document-counts', { account_id: selectedCompany, tags: activeTags, search: debouncedSearch }],
+    queryFn: () => fetchDocumentCountsByType({
+      account_id: selectedCompany ?? undefined,
+      tags: activeTags.length > 0 ? activeTags : undefined,
+      search: debouncedSearch || undefined,
+    }),
+    enabled: !!user,
+  })
+
+  // Fetch tags (server-side, scoped to current filters minus tags)
+  const { data: tagOptions } = useQuery({
+    queryKey: ['document-tags', { document_type: filterParams.document_type, account_id: selectedCompany, search: debouncedSearch }],
+    queryFn: () => fetchDocumentTags({
+      document_type: filterParams.document_type,
+      account_id: selectedCompany ?? undefined,
+      search: debouncedSearch || undefined,
+    }),
+    enabled: !!user,
+  })
+
+  // Build tabs from type counts
   const tabs = useMemo(() => {
-    const typeCounts = new Map<string, number>()
-    for (const doc of allDocuments) {
-      typeCounts.set(doc.document_type, (typeCounts.get(doc.document_type) ?? 0) + 1)
-    }
-    // Sort by count descending
-    const typeEntries = Array.from(typeCounts.entries()).sort((a, b) => b[1] - a[1])
+    const allCount = typeCounts?.reduce((sum, t) => sum + t.count, 0) ?? total
+    const entries = (typeCounts ?? []).sort((a, b) => b.count - a.count)
     return [
-      { key: 'all', label: 'All', count: allDocuments.length },
-      ...typeEntries.map(([type, count]) => ({
-        key: type,
-        label: getTypeStyle(type).label,
-        count,
+      { key: 'all', label: 'All', count: allCount },
+      ...entries.map((t) => ({
+        key: t.document_type,
+        label: getTypeStyle(t.document_type).label,
+        count: t.count,
       })),
     ]
-  }, [allDocuments])
+  }, [typeCounts, total])
 
-  // Filter by active tab
-  const tabFiltered = useMemo(() => {
-    if (activeTab === 'all') return allDocuments
-    return allDocuments.filter((doc) => doc.document_type === activeTab)
-  }, [allDocuments, activeTab])
+  // IntersectionObserver for infinite scroll
+  useEffect(() => {
+    const sentinel = sentinelRef.current
+    if (!sentinel) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && hasNextPage && !isFetchingNextPage) {
+          fetchNextPage()
+        }
+      },
+      { threshold: 0.1 },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [hasNextPage, isFetchingNextPage, fetchNextPage])
 
-  // Apply search on top of tab filter
-  const documents = useMemo(() => {
-    if (!debouncedSearch.trim()) return tabFiltered
-    const q = debouncedSearch.toLowerCase()
-    return tabFiltered.filter((doc) => {
-      const title = doc.title.toLowerCase()
-      const companies = (doc.metadata?.companies ?? []).join(' ').toLowerCase()
-      const contacts = (doc.metadata?.contacts ?? []).join(' ').toLowerCase()
-      return title.includes(q) || companies.includes(q) || contacts.includes(q)
-    })
-  }, [tabFiltered, debouncedSearch])
-
-  const handleLoadMore = async () => {
-    const newOffset = allDocuments.length
-    try {
-      const res = await fetchDocuments({ limit: PAGE_SIZE, offset: newOffset })
-      setExtraPages((prev) => [...prev, ...res.documents])
-    } catch (err) {
-      console.error('Failed to load more documents:', err)
-    }
-  }
+  const handleToggleTag = useCallback((tag: string) => {
+    setActiveTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag],
+    )
+  }, [])
 
   const handleShare = async (doc: DocumentListItem) => {
     try {
@@ -154,6 +434,19 @@ export function DocumentLibrary() {
     }
   }
 
+  const handleDelete = async (doc: DocumentListItem) => {
+    const confirmed = window.confirm(`Delete "${doc.title}"? This action cannot be undone.`)
+    if (!confirmed) return
+    try {
+      await deleteDocument(doc.id)
+      await queryClient.invalidateQueries({ queryKey: ['documents'] })
+      await queryClient.invalidateQueries({ queryKey: ['document-counts'] })
+      await queryClient.invalidateQueries({ queryKey: ['document-tags'] })
+    } catch (err) {
+      console.error('Failed to delete document:', err)
+    }
+  }
+
   const handleView = (doc: DocumentListItem) => {
     navigate(`/documents/${doc.id}`)
   }
@@ -163,8 +456,15 @@ export function DocumentLibrary() {
     setDebouncedSearch('')
   }
 
-  const grouped = groupByDate(documents)
-  const hasMore = allDocuments.length < total && !debouncedSearch.trim()
+  const handleClearFilters = () => {
+    setSearchQuery('')
+    setDebouncedSearch('')
+    setActiveTab('all')
+    setActiveTags([])
+    setSelectedCompany(null)
+  }
+
+  const grouped = groupByDate(allDocuments)
 
   return (
     <div
@@ -175,6 +475,15 @@ export function DocumentLibrary() {
       }}
     >
       <Toast message="Link copied to clipboard" visible={!!shareToast} onDismiss={() => setShareToast(null)} />
+
+      {/* Add Tag Modal */}
+      {addTagDoc && (
+        <AddTagInput
+          docId={addTagDoc.id}
+          existingTags={addTagDoc.tags}
+          onDone={() => setAddTagDoc(null)}
+        />
+      )}
 
       {/* ── Header ── */}
       <div className="flex items-baseline gap-3 mb-2">
@@ -203,9 +512,9 @@ export function DocumentLibrary() {
         )}
       </div>
 
-      {/* ── Tabs ── */}
+      {/* ── Type Tabs ── */}
       <div
-        className="flex items-center gap-1 overflow-x-auto mb-6 -mx-1 px-1"
+        className="flex items-center gap-1 overflow-x-auto mb-4 -mx-1 px-1"
         role="tablist"
         aria-label="Document types"
         style={{ borderBottom: `1px solid ${colors.subtleBorder}` }}
@@ -235,7 +544,6 @@ export function DocumentLibrary() {
               >
                 {tab.count}
               </span>
-              {/* Active indicator bar */}
               {isActive && (
                 <span
                   className="absolute bottom-0 left-2 right-2 h-0.5 rounded-full"
@@ -247,8 +555,13 @@ export function DocumentLibrary() {
         })}
       </div>
 
-      {/* ── Search + View toggle ── */}
-      <div className="flex items-center gap-3 mb-6">
+      {/* ── Filters row: Company dropdown + Search + View toggle ── */}
+      <div className="flex items-center gap-3 mb-2">
+        <CompanyFilter
+          documents={allDocuments}
+          selected={selectedCompany}
+          onSelect={setSelectedCompany}
+        />
         <div className="relative flex-1 max-w-sm" role="search">
           <Search
             size={16}
@@ -282,8 +595,15 @@ export function DocumentLibrary() {
         </div>
       </div>
 
+      {/* ── Tag filter bar ── */}
+      <TagFilterBar
+        tags={tagOptions ?? []}
+        activeTags={activeTags}
+        onToggle={handleToggleTag}
+      />
+
       {/* ── Loading skeleton ── */}
-      {loading && documents.length === 0 && (
+      {loading && allDocuments.length === 0 && (
         viewMode === 'list' ? (
           <div className="space-y-1">
             {Array.from({ length: 6 }).map((_, i) => (
@@ -300,34 +620,27 @@ export function DocumentLibrary() {
       )}
 
       {/* ── Empty state (no documents at all) ── */}
-      {!loading && allDocuments.length === 0 && (
+      {!loading && total === 0 && !debouncedSearch && activeTags.length === 0 && !selectedCompany && activeTab === 'all' && (
         <EmptyState
           icon={FileText}
           title="Your library is empty"
-          description="Intelligence documents from skills like meeting prep and company research will appear here."
+          description="Documents from meeting prep, account research, and skills will appear here automatically."
         />
       )}
 
-      {/* ── Empty state (search/tab yields nothing) ── */}
-      {!loading && allDocuments.length > 0 && documents.length === 0 && (
+      {/* ── Empty state (filter yields nothing) ── */}
+      {!loading && allDocuments.length === 0 && (debouncedSearch || activeTags.length > 0 || selectedCompany || activeTab !== 'all') && (
         <EmptyState
           icon={Search}
-          title="No documents found"
-          description={
-            debouncedSearch.trim()
-              ? "Try a different search term or switch tabs."
-              : "No documents in this category yet."
-          }
-          actionLabel={debouncedSearch.trim() ? "Clear search" : "Show all"}
-          onAction={() => {
-            handleClearSearch()
-            setActiveTab('all')
-          }}
+          title="No documents match your filters"
+          description="Try removing a filter or search term."
+          actionLabel="Clear filters"
+          onAction={handleClearFilters}
         />
       )}
 
       {/* ── Document content ── */}
-      {(!loading || documents.length > 0) && documents.length > 0 && (
+      {allDocuments.length > 0 && (
         viewMode === 'list' ? (
           <div>
             {Array.from(grouped.entries()).map(([group, docs]) => (
@@ -355,6 +668,8 @@ export function DocumentLibrary() {
                       document={doc}
                       onView={handleView}
                       onShare={handleShare}
+                      onAddTag={setAddTagDoc}
+                      onDelete={handleDelete}
                     />
                   ))}
                 </div>
@@ -389,6 +704,7 @@ export function DocumentLibrary() {
                       index={i}
                       onView={handleView}
                       onShare={handleShare}
+                      onDelete={handleDelete}
                     />
                   ))}
                 </div>
@@ -398,30 +714,22 @@ export function DocumentLibrary() {
         )
       )}
 
-      {/* ── Pagination ── */}
-      {hasMore && !loading && (
-        <div className="flex items-center justify-between mt-8 px-4">
-          <span style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
-            Showing {allDocuments.length} of {total} documents
-          </span>
-          <button
-            type="button"
-            onClick={handleLoadMore}
-            className="px-5 py-2 rounded-xl text-sm font-medium border border-[var(--subtle-border)] transition-all duration-200 hover:border-[var(--brand-coral)] hover:text-[var(--brand-coral)] hover:shadow-sm"
-            style={{
-              backgroundColor: 'transparent',
-              color: colors.secondaryText,
-            }}
-          >
-            Load more
-          </button>
+      {/* ── Infinite scroll sentinel ── */}
+      <div ref={sentinelRef} className="h-4" />
+
+      {/* ── Loading more indicator ── */}
+      {isFetchingNextPage && (
+        <div className="flex justify-center mt-4 mb-8">
+          <div className="w-6 h-6 border-2 border-[var(--subtle-border)] border-t-[var(--brand-coral)] rounded-full animate-spin" />
         </div>
       )}
 
-      {/* ── Loading more indicator ── */}
-      {loading && allDocuments.length > 0 && (
-        <div className="flex justify-center mt-4">
-          <div className="w-6 h-6 border-2 border-[var(--subtle-border)] border-t-[var(--brand-coral)] rounded-full animate-spin" />
+      {/* ── Footer count ── */}
+      {allDocuments.length > 0 && !hasNextPage && (
+        <div className="text-center mt-4 mb-8">
+          <span style={{ fontSize: typography.caption.size, color: colors.secondaryText }}>
+            {allDocuments.length} of {total} documents
+          </span>
         </div>
       )}
     </div>
