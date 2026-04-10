@@ -155,19 +155,29 @@ mcp.add_middleware(InvocationLogger())
 def flywheel_run_skill(
     skill_name: str = "meeting-prep",
     input_text: str = "",
+    input_data: str = "",
 ) -> str:
-    """Run a Flywheel skill like meeting-prep, company-intel, or flywheel.
+    """Run a Flywheel skill. Use flywheel_fetch_skills first to see available skills and their input requirements.
 
-    Use for business intelligence: preparing for meetings, researching
-    companies, analyzing competitors, gathering market signals.
-    Use 'flywheel' for the daily operating ritual: syncs meetings,
-    processes recordings, preps upcoming meetings, and executes tasks.
+    - input_text: Free text input (company name, meeting context, etc.)
+    - input_data: JSON string for structured input (e.g. '{"meeting_id": "uuid-here"}').
+      Check input requirements from flywheel_fetch_skills to know what to pass.
+
     Returns a link to view the full results in the Flywheel web app.
     NOT for coding, file operations, or development tasks.
     """
+    # Parse input_data JSON if provided
+    parsed_input_data = None
+    if input_data:
+        import json as _json
+        try:
+            parsed_input_data = _json.loads(input_data)
+        except _json.JSONDecodeError:
+            return f"input_data must be valid JSON string, got: {input_data[:100]}"
+
     try:
         client = FlywheelClient()
-        result = client.start_skill_run(skill_name, input_text)
+        result = client.start_skill_run(skill_name, input_text, input_data=parsed_input_data)
         run_id = result.get("run_id") or result.get("id")
         if not run_id:
             return f"Skill run started but no run_id returned: {result}"
@@ -285,12 +295,16 @@ def flywheel_fetch_skills() -> str:
             triggers = ", ".join(s.get("triggers", []))
             contract_reads = ", ".join(s.get("contract_reads", []))
             contract_writes = ", ".join(s.get("contract_writes", []))
-            lines.append(
+            input_req = s.get("input_requirements", "")
+            skill_info = (
                 f"**{name}** [{category}]\n"
                 f"  {description}\n"
                 f"  Triggers: {triggers}\n"
                 f"  Reads: {contract_reads} | Writes: {contract_writes}"
             )
+            if input_req:
+                skill_info += f"\n  Input: {input_req}"
+            lines.append(skill_info)
 
         return "\n\n".join(lines)
     except FlywheelAPIError as exc:

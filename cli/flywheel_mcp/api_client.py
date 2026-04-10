@@ -77,13 +77,12 @@ class FlywheelClient:
     # Public API
     # ------------------------------------------------------------------
 
-    def start_skill_run(self, skill_name: str, input_text: str) -> dict:
+    def start_skill_run(self, skill_name: str, input_text: str, input_data: dict | None = None) -> dict:
         """POST /api/v1/skills/runs -- start a new skill run."""
-        return self._request(
-            "post",
-            "/api/v1/skills/runs",
-            json={"skill_name": skill_name, "input_text": input_text},
-        )
+        payload: dict = {"skill_name": skill_name, "input_text": input_text}
+        if input_data is not None:
+            payload["input_data"] = input_data
+        return self._request("post", "/api/v1/skills/runs", json=payload)
 
     def get_run(self, run_id: str) -> dict:
         """GET /api/v1/skills/runs/{run_id} -- poll run status."""
@@ -176,17 +175,24 @@ class FlywheelClient:
         skill_name: str,
         markdown_content: str,
         metadata: dict | None = None,
+        account_id: str | None = None,
+        tags: list[str] | None = None,
     ) -> dict:
         """POST /api/v1/documents/from-content -- save a document from raw content."""
+        payload: dict = {
+            "title": title,
+            "skill_name": skill_name,
+            "markdown_content": markdown_content,
+            "metadata": metadata or {},
+        }
+        if account_id:
+            payload["account_id"] = account_id
+        if tags:
+            payload["tags"] = tags
         return self._request(
             "post",
             "/api/v1/documents/from-content",
-            json={
-                "title": title,
-                "skill_name": skill_name,
-                "markdown_content": markdown_content,
-                "metadata": metadata or {},
-            },
+            json=payload,
         )
 
     def save_meeting_summary(
