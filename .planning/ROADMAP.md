@@ -183,7 +183,8 @@
 - [ ] **Phase 102: Write Path and API** — Dedup-on-save, readable titles, account resolution, tag validation, filtered list endpoint, tag/type counts, tag PATCH, backward compat, observability (10 requirements)
 - [ ] **Phase 103: Library UI and Tag Management** — Type tabs, company filter, tag bar, list/grid views, infinite scroll, search, tag pills, menus, empty states, tag autocomplete, tag removal, tag input (14 requirements)
 - [ ] **Phase 104: Skill Ecosystem** — Standard 15 in skill-standards.md, skill-creator update, 8 skill patches, integration test (4 requirements)
-- [ ] **Phase 104.1: Legacy Model Cleanup** — Rewire 9 backend files still referencing Account/AccountContact/OutreachActivity to use PipelineEntry/Contact/Activity (INSERTED)
+- [x] **Phase 104.1: Legacy Model Cleanup** — Rewire 9 backend files still referencing Account/AccountContact/OutreachActivity to use PipelineEntry/Contact/Activity (INSERTED) ✓ 2026-04-09
+- [x] **Phase 104.2: Skill Input Schema Validation** — Two-step skill invocation with server-side input validation, input_data support, enriched fetch_skills response (INSERTED) ✓ 2026-04-10
 
 ## Phase Details
 
@@ -461,6 +462,16 @@ Plans:
 *v10.0 milestone added: 2026-04-07 — Contact Outreach Pipeline (4 phases, 17 requirements)*
 *v11.0 milestone added: 2026-04-08 — Briefing Page Redesign (5 phases, 49 requirements)*
 *v12.0 milestone added: 2026-04-08 — Library Redesign (4 phases, 37 requirements)*
+
+### Phase 104.2: Skill Input Schema Validation (INSERTED)
+
+**Goal:** Two-step skill invocation with server-side input validation. Repurpose parameters JSONB for input schemas, enrich fetch_skills response with input requirements, add server-side validation in start_run, support structured input_data alongside input_text.
+**Depends on:** Phase 104
+**Plans:** 2 plans
+
+Plans:
+- [ ] 104.2-01-PLAN.md — Backend validation + skill input schemas
+- [ ] 104.2-02-PLAN.md — MCP layer (input_data support, input requirements display, remove hardcoded validation)
 
 ### Phase 104.1: Legacy Model Cleanup
 **Goal:** Every backend file uses PipelineEntry/Contact/Activity instead of Account/AccountContact/OutreachActivity. No references to old models remain. All active endpoints work correctly.

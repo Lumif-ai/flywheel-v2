@@ -228,26 +228,45 @@ function CompanyFilter({
 function AddTagInput({
   docId,
   existingTags,
+  availableTags,
   onDone,
 }: {
   docId: string
   existingTags: string[]
+  availableTags: TagCountItem[]
   onDone: () => void
 }) {
   const [value, setValue] = useState('')
   const [saving, setSaving] = useState(false)
+  const [highlightIdx, setHighlightIdx] = useState(-1)
+  const [showDropdown, setShowDropdown] = useState(true)
   const inputRef = useRef<HTMLInputElement>(null)
+  const listRef = useRef<HTMLUListElement>(null)
 
   useEffect(() => {
     inputRef.current?.focus()
   }, [])
 
-  const handleSubmit = async () => {
-    const tag = value.trim().toLowerCase()
-    if (!tag || existingTags.includes(tag)) return
+  // Filter suggestions: match typed text, exclude already-applied tags
+  const suggestions = useMemo(() => {
+    const q = value.trim().toLowerCase()
+    if (!q) return []
+    return availableTags.filter(
+      (t) => t.tag.includes(q) && !existingTags.includes(t.tag),
+    )
+  }, [value, availableTags, existingTags])
+
+  // Reset highlight when suggestions change
+  useEffect(() => {
+    setHighlightIdx(-1)
+  }, [suggestions.length, value])
+
+  const submitTag = async (tag: string) => {
+    const normalized = tag.trim().toLowerCase()
+    if (!normalized || existingTags.includes(normalized)) return
     setSaving(true)
     try {
-      await updateDocumentTags(docId, { add: [tag] })
+      await updateDocumentTags(docId, { add: [normalized] })
       onDone()
     } catch {
       // ignore
@@ -256,6 +275,51 @@ function AddTagInput({
     }
   }
 
+  const handleSubmit = () => {
+    // If a suggestion is highlighted, use that; otherwise use typed value
+    if (highlightIdx >= 0 && highlightIdx < suggestions.length) {
+      submitTag(suggestions[highlightIdx].tag)
+    } else {
+      submitTag(value)
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (!showDropdown || suggestions.length === 0) {
+      if (e.key === 'Enter') handleSubmit()
+      return
+    }
+
+    switch (e.key) {
+      case 'ArrowDown':
+        e.preventDefault()
+        setHighlightIdx((prev) => (prev < suggestions.length - 1 ? prev + 1 : 0))
+        break
+      case 'ArrowUp':
+        e.preventDefault()
+        setHighlightIdx((prev) => (prev > 0 ? prev - 1 : suggestions.length - 1))
+        break
+      case 'Enter':
+        e.preventDefault()
+        handleSubmit()
+        break
+      case 'Escape':
+        e.preventDefault()
+        setShowDropdown(false)
+        break
+    }
+  }
+
+  // Scroll highlighted item into view
+  useEffect(() => {
+    if (highlightIdx >= 0 && listRef.current) {
+      const item = listRef.current.children[highlightIdx] as HTMLElement | undefined
+      item?.scrollIntoView({ block: 'nearest' })
+    }
+  }, [highlightIdx])
+
+  const visibleSuggestions = showDropdown && value.trim() && suggestions.length > 0
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/30" onClick={onDone}>
       <div
@@ -263,16 +327,48 @@ function AddTagInput({
         onClick={(e) => e.stopPropagation()}
       >
         <h3 className="text-sm font-medium mb-2" style={{ color: colors.headingText }}>Add Tag</h3>
-        <input
-          ref={inputRef}
-          type="text"
-          value={value}
-          onChange={(e) => setValue(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') handleSubmit() }}
-          placeholder="e.g. series-a, board-prep"
-          className="w-full h-9 px-3 rounded-lg border border-[var(--subtle-border)] text-sm outline-none focus:border-[var(--brand-coral)]"
-          maxLength={50}
-        />
+        <div className="relative">
+          <input
+            ref={inputRef}
+            type="text"
+            value={value}
+            onChange={(e) => { setValue(e.target.value); setShowDropdown(true) }}
+            onKeyDown={handleKeyDown}
+            placeholder="e.g. series-a, board-prep"
+            className="w-full h-9 px-3 rounded-lg border border-[var(--subtle-border)] text-sm outline-none focus:border-[var(--brand-coral)]"
+            maxLength={50}
+            role="combobox"
+            aria-expanded={!!visibleSuggestions}
+            aria-autocomplete="list"
+            aria-controls="tag-suggestions"
+          />
+          {visibleSuggestions && (
+            <ul
+              ref={listRef}
+              id="tag-suggestions"
+              role="listbox"
+              className="absolute left-0 right-0 top-full mt-1 bg-[var(--card-bg)] border border-[var(--subtle-border)] rounded-lg shadow-lg py-1 max-h-[160px] overflow-auto z-10"
+            >
+              {suggestions.map((s, i) => (
+                <li
+                  key={s.tag}
+                  role="option"
+                  aria-selected={i === highlightIdx}
+                  className="flex items-center justify-between px-3 py-1.5 text-sm cursor-pointer transition-colors"
+                  style={{
+                    backgroundColor: i === highlightIdx ? 'rgba(233,77,53,0.08)' : 'transparent',
+                    color: i === highlightIdx ? 'var(--brand-coral)' : colors.headingText,
+                  }}
+                  onMouseEnter={() => setHighlightIdx(i)}
+                  onMouseDown={(e) => { e.preventDefault(); submitTag(s.tag) }}
+                >
+                  <span>{s.tag}</span>
+                  <span className="text-xs opacity-50" style={{ color: colors.secondaryText }}>{s.count}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
         <p className="text-xs mt-1 opacity-50" style={{ color: colors.secondaryText }}>
           Lowercase, alphanumeric and hyphens only
         </p>
@@ -481,6 +577,7 @@ export function DocumentLibrary() {
         <AddTagInput
           docId={addTagDoc.id}
           existingTags={addTagDoc.tags}
+          availableTags={tagOptions ?? []}
           onDone={() => setAddTagDoc(null)}
         />
       )}
