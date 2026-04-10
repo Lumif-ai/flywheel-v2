@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flywheel-ai"
-version = "0.3.3"
+version = "0.3.4"
 description = "Flywheel CLI and MCP server — business intelligence from the terminal and Claude Code"
 readme = "README.md"
 license = "MIT"
