@@ -689,6 +689,7 @@ async def execute_run(run: SkillRun) -> None:
                     system_prompt_override=db_system_prompt,
                     protected=(skill_meta or {}).get("protected", True),
                     skill_parameters=(skill_meta or {}).get("parameters"),
+                    token_budget=(skill_meta or {}).get("token_budget"),
                 )
             anthropic_breaker.record_success()
         except Exception as exec_err:
@@ -3217,6 +3218,7 @@ async def _execute_with_tools(
     system_prompt_override: str | None = None,
     protected: bool = True,
     skill_parameters: dict | None = None,
+    token_budget: int | None = None,
 ) -> tuple[str, dict, list]:
     """Execute a skill using AsyncAnthropic with the tool registry.
 
@@ -3310,7 +3312,7 @@ async def _execute_with_tools(
     for _iteration in range(max_iterations):
         create_kwargs: dict = {
             "model": "claude-sonnet-4-20250514",
-            "max_tokens": 4096,
+            "max_tokens": token_budget or 4096,
             "system": system_prompt,
             "tools": tool_defs,
             "messages": messages,
