@@ -88,6 +88,8 @@ TYPE_MAP = {
     "ctx-investor-update": "investor_update",
     "company-fit-analyzer": "competitive_analysis",
     "ctx-company-fit-analyzer": "competitive_analysis",
+    "one-pager": "one_pager",
+    "ctx-one-pager": "one_pager",
 }
 
 
@@ -500,6 +502,21 @@ def render_output(
 
     attribution = attribution or {}
     output_type = detect_output_type(skill_name)
+
+    # Structured JSON output path — skills like one-pager output JSON directly.
+    # Convention: structured skill outputs MUST include "schema_version" at the
+    # top level for detection.  The value is a semver string (e.g. "1.0").
+    # Templates receive the parsed dict as `structured_data` in their context.
+    structured_data = None
+    if raw_output and raw_output.strip().startswith("{"):
+        try:
+            import json as _json
+            candidate = _json.loads(raw_output)
+            if isinstance(candidate, dict) and candidate.get("schema_version"):
+                structured_data = candidate
+        except (ValueError, TypeError):
+            pass
+
     parsed = parse_output_sections(raw_output)
     key_facts = extract_key_facts(parsed["sections"])
 
@@ -554,6 +571,7 @@ def render_output(
         source_skills=source_skills,
         compound_depth=compound_depth,
         contacts=contacts,
+        structured_data=structured_data,
     )
 
 

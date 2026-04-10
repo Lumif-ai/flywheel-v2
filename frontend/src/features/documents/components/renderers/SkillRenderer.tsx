@@ -1,5 +1,7 @@
 import { MeetingPrepRenderer } from './MeetingPrepRenderer'
 import { GenericRenderer } from './GenericRenderer'
+import { OnePagerRenderer } from './OnePagerRenderer'
+import { isOnePagerData } from '../../types/one-pager'
 import { typography } from '@/lib/design-tokens'
 
 interface SkillRendererProps {
@@ -20,15 +22,43 @@ interface SkillRendererProps {
  * 3. If only rendered_html exists (legacy), fall back to MeetingPrepRenderer
  *    (which handles any pre-rendered HTML via sanitized dangerouslySetInnerHTML)
  */
+/**
+ * Detect if "HTML" is actually raw markdown that wasn't rendered properly.
+ * Checks for markdown table pipes or unrendered headings as telltale signs.
+ */
+function looksLikeRawMarkdown(html: string): boolean {
+  // If it contains markdown table syntax (pipes with dashes) but no <table> tag
+  if (/\|[-:]+\|/.test(html) && !/<table/i.test(html)) return true
+  // If it contains raw ### headings not wrapped in HTML tags
+  if (/^#{1,4}\s+/m.test(html) && !/<h[1-4]/i.test(html)) return true
+  return false
+}
+
 export function SkillRenderer({ skillType, output, renderedHtml }: SkillRendererProps) {
+  // Structured JSON output — detect and dispatch to dedicated renderers
+  if (output) {
+    try {
+      const parsed = JSON.parse(output)
+      if (isOnePagerData(parsed)) {
+        return <OnePagerRenderer data={parsed} />
+      }
+      // Future structured types can be detected here
+    } catch {
+      // Not JSON — fall through to existing renderers
+    }
+  }
+
   // Meeting-prep: prefer rendered HTML (it's purpose-built HTML from the LLM)
   if (skillType === 'meeting-prep' || skillType === 'ctx-meeting-prep' || skillType === 'flywheel') {
-    if (renderedHtml) {
+    // If rendered_html is actually raw markdown (backend rendering failed),
+    // fall through to GenericRenderer which uses react-markdown
+    if (renderedHtml && !looksLikeRawMarkdown(renderedHtml)) {
       return <MeetingPrepRenderer renderedHtml={renderedHtml} />
     }
-    // Fallback to generic if HTML is missing for some reason
-    if (output) {
-      return <GenericRenderer output={output} skillName={skillType} />
+    // Use raw output with react-markdown, or the broken rendered_html as markdown
+    const markdownContent = output || renderedHtml
+    if (markdownContent) {
+      return <GenericRenderer output={markdownContent} skillName={skillType} />
     }
   }
 
