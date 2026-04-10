@@ -487,6 +487,8 @@ This is the flywheel proof. Show cross-references prominently.
 
 ## Step 5: Write to Context Store
 
+> **Metadata requirement (Phase 110+):** Every context write must carry `meeting_type` and `meeting_date` in the metadata JSONB. Use FlywheelClient.write_context() with the metadata kwarg — see pattern below.
+
 ```python
 # entries_by_file = {filename: entry_dict or None}
 entries_by_file = {
@@ -504,10 +506,36 @@ for f, result in write_results.items():
     print(f"  {f}: {result}")
 ```
 
-Individual append_entry() calls per file. Programmatically, append via:
+Individual append_entry() calls per file. Every write must include meeting_type and meeting_date in metadata so downstream synthesis can filter by meeting type.
+
+Programmatically, write via FlywheelClient (preferred for metadata support):
+```python
+from flywheel_mcp.api_client import FlywheelClient
+
+client = FlywheelClient()
+metadata = {
+    "meeting_type": meeting_type,   # e.g., "discovery", "expert", "prospect"
+    "meeting_date": date,            # YYYY-MM-DD string, e.g., "2026-04-11"
+}
+
+for file_name, entry_text in entries_by_file.items():
+    if entry_text is None:
+        continue
+    result = client.write_context(
+        file_name=file_name,
+        content=entry_text,
+        source="meeting-processor",
+        confidence="medium",
+        metadata=metadata,
+    )
+    print(f"  {file_name}: {result}")
 ```
-python3 ~/.claude/skills/_shared/context_utils.py append [file] --source meeting-processor --detail "[tag]" --content "[lines]"
-```
+
+If running via CLI (context_utils.py), metadata cannot be passed through the CLI interface. Use the FlywheelClient Python API above when meeting_type must be recorded. The metadata fields are:
+- `meeting_type`: One of: discovery, expert, prospect, advisor, investor-pitch, internal, customer-feedback, team-meeting
+- `meeting_date`: ISO date string matching the meeting date (not today's processing date)
+
+Entries without metadata (written before Phase 110) continue to work — downstream consumers handle `metadata: {}` gracefully.
 
 Partial success is acceptable. No empty writes -- only include files where content was extracted.
 

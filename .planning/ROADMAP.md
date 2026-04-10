@@ -15,6 +15,7 @@
 - ✅ **v10.0 Contact Outreach Pipeline** — Phases 91–94 (shipped 2026-04-07)
 - ✅ **v11.0 Briefing Page Redesign** — Phases 96–100 (shipped 2026-04-08)
 - **v12.0 Library Redesign** — Phases 101–104
+- **v14.0 Meeting Intelligence Synthesis** — Phases 110–111
 
 ## Phases
 
@@ -445,6 +446,8 @@ Plans:
 | 102. Write Path and API | v12.0 | 0/0 | Pending | — |
 | 103. Library UI and Tag Management | v12.0 | 0/0 | Pending | — |
 | 104. Skill Ecosystem | v12.0 | 0/0 | Pending | — |
+| 110. Synthesis Infrastructure | v14.0 | 0/0 | Pending | — |
+| 111. Pain Landscape Synthesis | v14.0 | 0/0 | Pending | — |
 
 ---
 *Roadmap created: 2026-03-24*
@@ -462,6 +465,27 @@ Plans:
 *v10.0 milestone added: 2026-04-07 — Contact Outreach Pipeline (4 phases, 17 requirements)*
 *v11.0 milestone added: 2026-04-08 — Briefing Page Redesign (5 phases, 49 requirements)*
 *v12.0 milestone added: 2026-04-08 — Library Redesign (4 phases, 37 requirements)*
+*v14.0 milestone added: 2026-04-11 — Meeting Intelligence Synthesis (2 phases, 7 requirements)*
+
+### v14.0 Meeting Intelligence Synthesis
+
+### Phase 110: Synthesis Infrastructure Prerequisites
+**Goal:** Fix two Flywheel platform gaps so the synthesis engine can read all entries from a context file and filter by meeting type. PREREQ-01: Document and validate FlywheelClient.read_context_file() as the skill read pattern. PREREQ-02: Add meeting_type to context entry metadata JSONB in meeting-processor.
+**Depends on:** None (independent of v12.0)
+**Plans:** 2 plans
+
+Plans:
+- [ ] 110-01-PLAN.md — Pagination read pattern: add offset to read_context_file() + document in context-protocol.md
+- [ ] 110-02-PLAN.md — Meeting type metadata: add metadata param to write_context() + update meeting-processor Step 5
+
+### Phase 111: Pain Landscape Synthesis Skill
+**Goal:** A Flywheel skill (`/synthesize`) that reads pain-points, insights, and product-feedback from the context store, identifies cross-meeting patterns using LLM analysis, and writes one rich entry per pain to pain-landscape.md. Confidence calibrated. Idempotent via deterministic upsert. meeting-prep automatically gets smarter.
+**Depends on:** Phase 110
+**Plans:** 2 plans
+
+Plans:
+- [ ] 111-01-PLAN.md — Core synthesis pipeline (data load, LLM grouping, pain entry writing with calibration)
+- [ ] 111-02-PLAN.md — Co-occurrence detection, terminal report, library save, skill finalization
 
 ### Phase 104.2: Skill Input Schema Validation (INSERTED)
 

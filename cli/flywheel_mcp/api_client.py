@@ -94,24 +94,48 @@ class FlywheelClient:
             "get", "/api/v1/context/search", params={"q": query, "limit": limit}
         )
 
-    def read_context_file(self, file_name: str, limit: int = 20) -> dict:
-        """GET /api/v1/context/files/{file_name}/entries -- read entries from a file."""
+    def read_context_file(self, file_name: str, limit: int = 100, offset: int = 0) -> dict:
+        """GET /api/v1/context/files/{file_name}/entries -- read entries from a file.
+
+        The backend supports pagination: pass offset to page through large files.
+        Response shape: {"items": [...], "total": N, "offset": N, "limit": N, "has_more": bool}
+        Use the pagination helper pattern from context-protocol.md to read all entries.
+        """
         return self._request(
             "get",
             f"/api/v1/context/files/{file_name}/entries",
-            params={"limit": limit},
+            params={"limit": limit, "offset": offset},
         )
 
-    def write_context(self, file_name: str, content: str) -> dict:
-        """POST /api/v1/context/files/{file_name}/entries -- append a context entry."""
+    def write_context(
+        self,
+        file_name: str,
+        content: str,
+        source: str = "mcp-manual",
+        confidence: str = "medium",
+        metadata: dict | None = None,
+    ) -> dict:
+        """POST /api/v1/context/files/{file_name}/entries -- append a context entry.
+
+        Args:
+            file_name: Context file name (e.g., "pain-points.md")
+            content: Entry text content (min 10 chars)
+            source: Source identifier (default "mcp-manual")
+            confidence: "low", "medium", or "high" (default "medium")
+            metadata: Optional JSONB metadata dict, e.g.:
+                      {"meeting_type": "discovery", "meeting_date": "2026-04-11"}
+        """
+        body: dict = {
+            "content": content,
+            "source": source,
+            "confidence": confidence,
+        }
+        if metadata:
+            body["metadata"] = metadata
         return self._request(
             "post",
             f"/api/v1/context/files/{file_name}/entries",
-            json={
-                "content": content,
-                "source": "mcp-manual",
-                "confidence": "medium",
-            },
+            json=body,
         )
 
     def list_context_files(self) -> dict:

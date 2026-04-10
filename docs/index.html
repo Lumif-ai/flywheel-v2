@@ -1,0 +1,1427 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Lumif.ai — Technical Architecture</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  :root {
+    --brand: #E94D35;
+    --brand-light: rgba(233,77,53,0.1);
+    --brand-glow: rgba(233,77,53,0.05);
+    --brand-gradient: linear-gradient(135deg, #E94D35, rgba(233,77,53,0.8));
+    --text-primary: #121212;
+    --text-secondary: #6B7280;
+    --text-muted: #9CA3AF;
+    --border: #E5E7EB;
+    --border-light: #F3F4F6;
+    --surface: #FAFAFA;
+    --warm-tint: #FFF8F6;
+    --success: #22C55E;
+    --info: #3B82F6;
+    --warning: #F97316;
+    --danger: #EF4444;
+    --purple: #A855F7;
+    --teal: #14B8A6;
+  }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    color: var(--text-primary);
+    background: #fff;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Header — clean white, coral accent bar */
+  .header {
+    background: #fff;
+    color: var(--text-primary);
+    padding: 80px 0 56px;
+    position: relative;
+    border-bottom: 1px solid var(--border);
+  }
+  .header::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 4px;
+    background: var(--brand-gradient);
+  }
+  .header .container { position: relative; z-index: 1; }
+  .header .badge {
+    display: inline-block;
+    background: var(--brand-light);
+    color: var(--brand);
+    padding: 6px 16px;
+    border-radius: 9999px;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .header h1 {
+    font-size: 42px;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    line-height: 1.1;
+    margin-bottom: 16px;
+  }
+  .header h1 span { color: var(--brand); }
+  .header .subtitle {
+    font-size: 17px;
+    color: var(--text-secondary);
+    max-width: 700px;
+    line-height: 1.7;
+  }
+  .header .meta {
+    margin-top: 24px;
+    font-size: 13px;
+    color: var(--text-muted);
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+  }
+  .header .meta-item { display: flex; align-items: center; gap: 6px; }
+  .header .meta-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--brand); }
+
+  .container { max-width: 960px; margin: 0 auto; padding: 0 32px; }
+
+  /* Sections */
+  section { padding: 52px 0; border-bottom: 1px solid var(--border-light); }
+  section:last-of-type { border-bottom: none; }
+  section.tinted { background: var(--warm-tint); }
+  section.surface { background: var(--surface); }
+
+  h2 { font-size: 26px; font-weight: 700; letter-spacing: -0.01em; margin-bottom: 8px; }
+  h2 .num { color: var(--brand); font-weight: 800; margin-right: 4px; }
+  h3 { font-size: 17px; font-weight: 600; margin-bottom: 8px; margin-top: 28px; }
+  .section-subtitle { font-size: 15px; color: var(--text-secondary); margin-bottom: 28px; max-width: 700px; }
+  p { font-size: 15px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.7; }
+
+  /* Code/Diagram */
+  .arch-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 28px 32px;
+    margin: 20px 0;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12.5px;
+    line-height: 1.9;
+    color: var(--text-secondary);
+    overflow-x: auto;
+    white-space: pre;
+  }
+  .arch-diagram .label { color: var(--brand); font-weight: 600; }
+  .arch-diagram .layer { color: var(--info); font-weight: 600; }
+  .arch-diagram .green { color: var(--success); font-weight: 600; }
+  .arch-diagram .muted { color: var(--text-muted); }
+  .arch-diagram .purple { color: var(--purple); font-weight: 600; }
+  .arch-diagram .danger { color: var(--danger); font-weight: 600; }
+
+  /* Layer stack */
+  .layer-stack { margin: 20px 0; }
+  .layer { border: 1px solid var(--border); border-radius: 12px; padding: 18px 24px; margin-bottom: -1px; }
+  .layer:first-child { border-radius: 12px 12px 0 0; }
+  .layer:last-child { border-radius: 0 0 12px 12px; }
+  .layer .layer-label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700; margin-bottom: 6px; }
+  .layer.brand { background: rgba(233,77,53,0.03); }
+  .layer.brand .layer-label { color: var(--brand); }
+  .layer.blue { background: rgba(59,130,246,0.03); }
+  .layer.blue .layer-label { color: var(--info); }
+  .layer.green { background: rgba(34,197,94,0.03); }
+  .layer.green .layer-label { color: var(--success); }
+  .layer.purple { background: rgba(168,85,247,0.03); }
+  .layer.purple .layer-label { color: var(--purple); }
+  .layer.teal { background: rgba(20,184,166,0.03); }
+  .layer.teal .layer-label { color: var(--teal); }
+  .layer .layer-items { display: flex; flex-wrap: wrap; gap: 8px; }
+  .layer .item { font-size: 13px; padding: 4px 12px; border-radius: 6px; background: white; border: 1px solid var(--border-light); color: var(--text-secondary); }
+
+  /* Tables */
+  table { width: 100%; border-collapse: collapse; margin: 18px 0; font-size: 14px; }
+  thead th { text-align: left; padding: 10px 14px; background: var(--surface); border-bottom: 2px solid var(--border); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-secondary); }
+  tbody td { padding: 11px 14px; border-bottom: 1px solid var(--border-light); color: var(--text-secondary); vertical-align: top; }
+  tbody td:first-child { color: var(--text-primary); font-weight: 500; }
+
+  /* Cards */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 16px; margin-top: 20px; }
+  .card { background: white; border: 1px solid var(--border); border-radius: 12px; padding: 22px; transition: all 0.2s ease; }
+  .card:hover { border-color: rgba(233,77,53,0.3); box-shadow: 0 4px 14px rgba(233,77,53,0.08); }
+  .card h4 { font-size: 15px; font-weight: 600; margin-bottom: 6px; }
+  .card p { font-size: 13px; margin-bottom: 0; }
+  .card .tag { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; margin-bottom: 10px; }
+  .tag-api { background: rgba(59,130,246,0.1); color: #2563eb; }
+  .tag-service { background: rgba(34,197,94,0.1); color: #16a34a; }
+  .tag-engine { background: rgba(249,115,22,0.1); color: #ea580c; }
+  .tag-db { background: rgba(168,85,247,0.1); color: #7c3aed; }
+  .tag-frontend { background: rgba(233,77,53,0.1); color: #E94D35; }
+  .tag-risk { background: rgba(239,68,68,0.1); color: #dc2626; }
+
+  /* Highlight box */
+  .highlight-box { background: var(--brand-glow); border: 1px solid rgba(233,77,53,0.15); border-radius: 12px; padding: 22px 26px; margin: 20px 0; }
+  .highlight-box h4 { font-size: 15px; font-weight: 600; color: var(--brand); margin-bottom: 6px; }
+  .highlight-box p { font-size: 14px; margin-bottom: 0; }
+  .highlight-box.blue { background: rgba(59,130,246,0.04); border-color: rgba(59,130,246,0.15); }
+  .highlight-box.blue h4 { color: var(--info); }
+  .highlight-box.warn { background: rgba(249,115,22,0.04); border-color: rgba(249,115,22,0.15); }
+  .highlight-box.warn h4 { color: var(--warning); }
+  .highlight-box.red { background: rgba(239,68,68,0.04); border-color: rgba(239,68,68,0.15); }
+  .highlight-box.red h4 { color: var(--danger); }
+
+  /* KPI */
+  .kpi-strip { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin: 24px 0; }
+  .kpi { text-align: center; padding: 18px; background: white; border: 1px solid var(--border); border-radius: 12px; }
+  .kpi .number { font-size: 32px; font-weight: 800; color: var(--brand); letter-spacing: -0.02em; }
+  .kpi .label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; margin-top: 4px; }
+
+  /* Badges */
+  .badge-green { display: inline-block; background: rgba(34,197,94,0.1); color: #16a34a; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-blue { display: inline-block; background: rgba(59,130,246,0.1); color: #2563eb; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-orange { display: inline-block; background: rgba(249,115,22,0.1); color: #ea580c; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+  .badge-red { display: inline-block; background: rgba(239,68,68,0.1); color: #dc2626; padding: 2px 10px; border-radius: 9999px; font-size: 12px; font-weight: 600; }
+
+  /* Sequence diagram */
+  .seq-diagram { margin: 20px 0; }
+  .seq-step { display: flex; gap: 16px; margin-bottom: 2px; }
+  .seq-num { width: 28px; height: 28px; border-radius: 50%; background: var(--surface); border: 2px solid var(--border); display: flex; align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--text-secondary); flex-shrink: 0; margin-top: 2px; }
+  .seq-content { flex: 1; padding: 8px 0 16px; border-left: 2px solid var(--border-light); padding-left: 16px; margin-left: -15px; }
+  .seq-step:last-child .seq-content { border-left-color: transparent; }
+  .seq-actor { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 2px; }
+  .seq-actor.api { color: var(--info); }
+  .seq-actor.service { color: var(--success); }
+  .seq-actor.engine { color: var(--warning); }
+  .seq-actor.db { color: var(--purple); }
+  .seq-actor.external { color: var(--brand); }
+  .seq-action { font-size: 13px; color: var(--text-secondary); }
+
+  /* ADR */
+  .adr { margin: 16px 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+  .adr-header { background: var(--surface); padding: 14px 20px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; }
+  .adr-header h4 { font-size: 14px; font-weight: 600; margin: 0; }
+  .adr-header .adr-status { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 9999px; }
+  .adr-body { padding: 16px 20px; display: none; border-top: 1px solid var(--border-light); }
+  .adr-body.open { display: block; }
+  .adr-body dt { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin-top: 12px; }
+  .adr-body dt:first-child { margin-top: 0; }
+  .adr-body dd { font-size: 13px; color: var(--text-secondary); margin-top: 4px; line-height: 1.6; }
+
+  /* TOC */
+  .toc { margin: 20px 0; columns: 2; column-gap: 32px; }
+  .toc a { font-size: 14px; color: var(--text-secondary); text-decoration: none; display: block; padding: 5px 0; border-bottom: 1px solid var(--border-light); break-inside: avoid; }
+  .toc a:hover { color: var(--brand); }
+  .toc .num { color: var(--brand); font-weight: 700; margin-right: 8px; }
+
+  /* System diagram (CSS) */
+  .sys-diagram { margin: 24px 0; }
+  .sys-layer {
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 20px 24px;
+    margin-bottom: 0;
+    position: relative;
+  }
+  .sys-layer + .sys-connector {
+    display: flex;
+    justify-content: center;
+    padding: 6px 0;
+  }
+  .sys-connector .arrow {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+  }
+  .sys-connector .arrow::after {
+    content: '▼';
+    font-size: 10px;
+    color: var(--text-muted);
+  }
+  .sys-layer-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-bottom: 10px;
+  }
+  .sys-layer.l-ui { background: rgba(233,77,53,0.02); }
+  .sys-layer.l-ui .sys-layer-title { color: var(--brand); }
+  .sys-layer.l-api { background: rgba(59,130,246,0.02); }
+  .sys-layer.l-api .sys-layer-title { color: var(--info); }
+  .sys-layer.l-svc { background: rgba(34,197,94,0.02); }
+  .sys-layer.l-svc .sys-layer-title { color: var(--success); }
+  .sys-layer.l-eng { background: rgba(168,85,247,0.02); }
+  .sys-layer.l-eng .sys-layer-title { color: var(--purple); }
+  .sys-layer.l-data { background: rgba(20,184,166,0.02); }
+  .sys-layer.l-data .sys-layer-title { color: var(--teal); }
+  .sys-layer.l-ext { background: rgba(249,115,22,0.02); }
+  .sys-layer.l-ext .sys-layer-title { color: var(--warning); }
+  .sys-items { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
+  .sys-item {
+    font-size: 13px;
+    font-weight: 600;
+    padding: 6px 14px;
+    border-radius: 8px;
+    background: white;
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+  }
+  .sys-item small { font-weight: 400; color: var(--text-muted); display: block; font-size: 11px; margin-top: 1px; }
+  .sys-details {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+  }
+  .sys-details span::before { content: '├ '; font-family: monospace; color: var(--border); }
+  .sys-details span:last-child::before { content: '└ '; }
+  .sys-connector-labels {
+    display: flex;
+    justify-content: center;
+    gap: 48px;
+    padding: 4px 0;
+    font-size: 11px;
+    color: var(--text-muted);
+    font-weight: 500;
+    letter-spacing: 0.02em;
+  }
+
+  /* Footer */
+  .footer { padding: 40px 0; text-align: center; color: var(--text-muted); font-size: 13px; }
+  .footer .brand { color: var(--brand); font-weight: 600; }
+
+  @media (max-width: 768px) {
+    .header h1 { font-size: 28px; }
+    .kpi-strip { grid-template-columns: repeat(2, 1fr); }
+    .card-grid { grid-template-columns: 1fr; }
+    .toc { columns: 1; }
+  }
+  @media print {
+    .header { padding: 40px 0 30px; }
+    section { padding: 30px 0; }
+    .card:hover { border-color: var(--border); box-shadow: none; }
+    .adr-body { display: block !important; }
+  }
+</style>
+
+<style>
+  /* Password gate */
+  .gate {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: #fff;
+    font-family: 'Inter', sans-serif;
+  }
+  .gate-box {
+    text-align: center;
+    max-width: 380px;
+    padding: 48px 32px;
+  }
+  .gate-box::before {
+    content: '';
+    display: block;
+    width: 48px;
+    height: 4px;
+    background: linear-gradient(135deg, #E94D35, rgba(233,77,53,0.8));
+    border-radius: 2px;
+    margin: 0 auto 28px;
+  }
+  .gate-box h2 {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin-bottom: 8px;
+    color: #121212;
+  }
+  .gate-box p {
+    font-size: 14px;
+    color: #6B7280;
+    margin-bottom: 28px;
+  }
+  .gate-input {
+    width: 100%;
+    padding: 12px 16px;
+    border: 1px solid #E5E7EB;
+    border-radius: 10px;
+    font-size: 15px;
+    font-family: 'Inter', sans-serif;
+    outline: none;
+    transition: border-color 0.2s;
+    text-align: center;
+    letter-spacing: 0.05em;
+  }
+  .gate-input:focus {
+    border-color: #E94D35;
+    box-shadow: 0 0 0 3px rgba(233,77,53,0.1);
+  }
+  .gate-input.error {
+    border-color: #EF4444;
+    animation: shake 0.4s ease;
+  }
+  .gate-btn {
+    width: 100%;
+    margin-top: 14px;
+    padding: 12px;
+    background: linear-gradient(135deg, #E94D35, rgba(233,77,53,0.85));
+    color: white;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 600;
+    font-family: 'Inter', sans-serif;
+    cursor: pointer;
+    transition: opacity 0.2s;
+  }
+  .gate-btn:hover { opacity: 0.9; }
+  .gate-hint {
+    font-size: 12px;
+    color: #9CA3AF;
+    margin-top: 16px;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-6px); }
+    75% { transform: translateX(6px); }
+  }
+  #protected-content { display: none; }
+</style>
+</head>
+<body>
+
+<!-- Password Gate -->
+<div class="gate" id="gate">
+  <div class="gate-box">
+    <h2>Lumif.ai</h2>
+    <p>This document is confidential.<br>Enter the access code to continue.</p>
+    <form onsubmit="return checkPassword()">
+      <input type="password" class="gate-input" id="pw" placeholder="Access code" autofocus>
+      <button type="submit" class="gate-btn">View Document</button>
+    </form>
+    <div class="gate-hint">Contact Sharan JM for access</div>
+  </div>
+</div>
+
+<!-- Protected Content -->
+<div id="protected-content">
+
+
+<!-- Header -->
+<div class="header">
+  <div class="container">
+    <div class="badge">Architecture Document</div>
+    <h1>Flywheel v2<br><span>Technical Architecture</span></h1>
+    <p class="subtitle">
+      A compound intelligence operating system built on FastAPI + React + Supabase. This document maps the current architecture, data model, integration surface, resilience characteristics, and platform expansion path.
+    </p>
+    <div class="meta">
+      <span class="meta-item"><span class="meta-dot"></span> April 2026</span>
+      <span class="meta-item"><span class="meta-dot"></span> v13.0 Skill Platform</span>
+      <span class="meta-item"><span class="meta-dot"></span> 13 milestones shipped</span>
+      <span class="meta-item"><span class="meta-dot"></span> Sharan JM, CPO</span>
+    </div>
+  </div>
+</div>
+
+<!-- TOC -->
+<section>
+  <div class="container">
+    <h2>Contents</h2>
+    <div class="toc">
+      <a href="#exec"><span class="num">01</span> Executive Summary</a>
+      <a href="#system"><span class="num">02</span> System Overview</a>
+      <a href="#platform"><span class="num">03</span> Platform Vision &amp; Expansion</a>
+      <a href="#architecture"><span class="num">04</span> System Architecture</a>
+      <a href="#stack"><span class="num">05</span> Technology Stack</a>
+      <a href="#data"><span class="num">06</span> Data Model</a>
+      <a href="#flows"><span class="num">07</span> Key Flows</a>
+      <a href="#api"><span class="num">08</span> API Contracts &amp; Auth</a>
+      <a href="#skills"><span class="num">09</span> Skill Execution System</a>
+      <a href="#enforcement"><span class="num">10</span> Skill Enforcement &amp; Quality Gates</a>
+      <a href="#context"><span class="num">11</span> Context Store &amp; Intelligence</a>
+      <a href="#integrations"><span class="num">12</span> Integrations &amp; MCP Server</a>
+      <a href="#resilience"><span class="num">13</span> Failure Modes &amp; Resilience</a>
+      <a href="#infra"><span class="num">14</span> Infrastructure &amp; Security</a>
+      <a href="#adrs"><span class="num">15</span> Architecture Decision Records</a>
+      <a href="#debt"><span class="num">16</span> Tech Debt &amp; Risk Register</a>
+      <a href="#discussion"><span class="num">17</span> Discussion Points</a>
+    </div>
+  </div>
+</section>
+
+<!-- 01: System Overview -->
+<!-- 01: Executive Summary -->
+<section id="exec" class="tinted">
+  <div class="container">
+    <h2><span class="num">01</span> Executive Summary</h2>
+    <p class="section-subtitle">The 30-second version. What Flywheel is, where it's going, and why the architecture matters.</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h4>What It Is</h4>
+        <p>A compound intelligence operating system for teams. GTM is the beachhead &mdash; pipeline, briefing, email, document library &mdash; but the architecture is domain-agnostic. A shared intelligence layer accumulates structured knowledge from every meeting, email, and interaction across any business function. Claude Code + MCP is the primary interface; a React web app provides visual operating surfaces.</p>
+      </div>
+      <div class="card">
+        <h4>What Makes It Defensible</h4>
+        <p>Not AI capability &mdash; that commoditizes. The moat is: <strong>deep business knowledge</strong> that learns continuously from every interaction across every module. <strong>Connected agents</strong> &mdash; sales knows what legal flagged, product knows what customers asked for in calls, HR knows which roles the pipeline demands. <strong>Background compounding</strong> &mdash; intelligence accumulates whether you ask or not. The more modules, the smarter each one gets.</p>
+      </div>
+      <div class="card">
+        <h4>Where It's Going</h4>
+        <p>The heavy lifting is done. The shared layer (email, meetings, contacts, documents, context store, skills, browser automation) is vertical-agnostic. Adding a new module &mdash; HR, Product Management, Insurance Brokerage, Legal, Finance &mdash; is domain skills + domain tables + a domain page. No new infrastructure. The module-per-tenant architecture is production-ready.</p>
+      </div>
+    </div>
+
+    <div class="highlight-box">
+      <h4>Architecture Thesis</h4>
+      <p>Every module shares the same shared layer (email, meetings, contacts, documents, context store, browser automation) and the same platform layer (auth, skill engine, MCP, database). Only the module layer differs. One codebase, one deployment, one data model &mdash; with per-tenant module configuration via a single JSONB field. Within a single organization, a recruiting team's candidate interviews enrich the same context store that the sales team's discovery calls feed. Cross-module intelligence compounds automatically &mdash; no integrations to configure between departments.</p>
+    </div>
+
+    <div class="kpi-strip">
+      <div class="kpi"><div class="number">942</div><div class="label">Source Files</div></div>
+      <div class="kpi"><div class="number">268K</div><div class="label">Lines of Code</div></div>
+      <div class="kpi"><div class="number">~70%</div><div class="label">Infra Exists for Verticals</div></div>
+      <div class="kpi"><div class="number">30+</div><div class="label">MCP Tools</div></div>
+      <div class="kpi"><div class="number">20+</div><div class="label">Skills</div></div>
+    </div>
+  </div>
+</section>
+
+<section id="system">
+  <div class="container">
+    <h2><span class="num">02</span> System Overview</h2>
+    <p class="section-subtitle">Four daily operating surfaces, each purpose-built for a specific founder workflow. All powered by the same compound intelligence layer.</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h4>Pipeline Command Center</h4>
+        <p>AG Grid-based triage of companies and contacts. Filter by stage, fit tier, relationship. Inline editing, side panels, outreach sequences.</p>
+      </div>
+      <div class="card">
+        <h4>Morning Briefing</h4>
+        <p>Synthesized daily intelligence: meetings with auto-prep, overdue tasks, pipeline signals, action items extracted from yesterday.</p>
+      </div>
+      <div class="card">
+        <h4>Email Review Queue</h4>
+        <p>Five-tier priority scoring. AI-drafted replies in learned voice. Low-priority auto-filed. Confidence-based routing.</p>
+      </div>
+      <div class="card">
+        <h4>Document Library</h4>
+        <p>Structured renderers (one-pager, meeting prep, generic), PDF/DOCX export, tag system, full-text search.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 03: Platform Vision & Expansion -->
+<section id="platform" class="surface">
+  <div class="container">
+    <h2><span class="num">03</span> Platform Vision &amp; Expansion</h2>
+    <p class="section-subtitle">The infrastructure we built for GTM is a horizontal platform. Each vertical is a module enabled per tenant &mdash; one app, one codebase, one deployment.</p>
+
+    <div class="layer-stack">
+      <div class="layer brand">
+        <div class="layer-label">Module Layer &mdash; What's Different Per Vertical</div>
+        <div class="layer-items">
+          <span class="item">GTM: Pipeline, Outreach, Fit Scoring</span>
+          <span class="item">HR: Recruiting Pipeline, Candidate Screening</span>
+          <span class="item">Product: Feature Requests, Roadmap, User Feedback</span>
+          <span class="item">Insurance: Projects, Coverages, Quote Comparison</span>
+          <span class="item">Legal: Contract Review, Clause Library, Risk Scoring</span>
+        </div>
+      </div>
+      <div class="layer blue">
+        <div class="layer-label">Shared Layer &mdash; Same Across All Modules</div>
+        <div class="layer-items">
+          <span class="item">Email + AI</span><span class="item">Meetings + Calendar</span><span class="item">Contacts + Companies</span>
+          <span class="item">Document Library</span><span class="item">Context Store</span><span class="item">Daily Briefing</span>
+          <span class="item">Browser Automation (Playwright)</span>
+        </div>
+      </div>
+      <div class="layer green">
+        <div class="layer-label">Platform Layer &mdash; Infrastructure</div>
+        <div class="layer-items">
+          <span class="item">Multi-tenant Auth + RLS</span><span class="item">Skill Engine</span><span class="item">MCP Server</span>
+          <span class="item">Gmail/Outlook OAuth</span><span class="item">Supabase + Alembic</span><span class="item">React SPA + AG Grid</span>
+        </div>
+      </div>
+    </div>
+
+    <h3>Module Configuration</h3>
+    <div class="arch-diagram"><span class="label">tenant.settings.modules</span> (JSONB field &mdash; already exists in production)
+
+<span class="green">Lumif.ai</span>        &rarr; ["gtm"]
+<span class="purple">Alaya Seguros</span>   &rarr; ["broker"]
+<span class="purple">CRE Broker</span>      &rarr; ["landlord"]
+<span class="purple">Hybrid Client</span>   &rarr; ["gtm", "broker"]</div>
+    <p>The frontend sidebar, API route access, and skill catalog all filter by the tenant's active modules. No separate deployments, no feature flag spaghetti.</p>
+
+    <h3>Expansion Cost Per Vertical</h3>
+    <table>
+      <thead><tr><th>Capability</th><th>Status</th><th>Notes</th></tr></thead>
+      <tbody>
+        <tr><td>Email, meetings, contacts, documents, context store, skills, browser automation</td><td><span class="badge-green">~70% exists</span></td><td>Shared layer is fully built and in daily use</td></tr>
+        <tr><td>Contract analysis, gap detection, quote comparison, recommendations</td><td><span class="badge-blue">4 new skills</span></td><td>Domain-specific prompts on existing PDF + Playwright infrastructure</td></tr>
+        <tr><td>Broker operations page</td><td><span class="badge-blue">1 new page</span></td><td>Same React patterns as BriefingPage, PipelinePage</td></tr>
+        <tr><td>broker_projects, project_coverages, carrier_quotes</td><td><span class="badge-orange">3 new tables</span></td><td>Linked to existing PipelineEntry + Contact models</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Any Domain, Same Pattern</h3>
+    <p>The platform can automate workflows in any domain. Each module reuses the shared layer (email, meetings, contacts, documents, context store, browser automation, skill engine) and adds only domain-specific skills, tables, and a page. Because 70-80% of the infrastructure is already built, <strong>new modules go from concept to working MVP in weeks, not months.</strong></p>
+
+    <div class="highlight-box">
+      <h4>Speed to Market: Weeks, Not Months</h4>
+      <p>A traditional vertical SaaS company rebuilds email integration, auth, document management, and AI pipelines for every new product. We build it once. Each new module inherits everything listed in the shared layer &mdash; the module author writes only domain skills and domain tables.</p>
+      <p style="margin-top: 10px; margin-bottom: 0;"><strong>What this means practically:</strong> The entire GTM operating system &mdash; email sync, meeting intelligence, pipeline management, contact enrichment, document generation, browser automation &mdash; was built as domain-agnostic infrastructure. A new vertical module can go from concept to customer-facing MVP in weeks because the hard problems (auth, multi-tenancy, email integration, AI execution, PDF/DOCX export, browser automation) are already solved. The infrastructure that took us 13 milestones to build and harden is reused wholesale for every new vertical.</p>
+    </div>
+
+    <div class="highlight-box blue">
+      <h4>Why We Can Move This Fast</h4>
+      <p><strong>MCP + Skills as the real multiplier:</strong> The platform exposes 30+ tools via the open MCP protocol &mdash; a standard supported by Anthropic, OpenAI, Google, and the broader AI ecosystem. Any MCP-compatible client (Claude Code, Cursor, Windsurf, custom agents) can read the context store, run skills, manage pipeline data, and trigger workflows. We built on Claude Code, but the architecture is client-agnostic. If a better AI development environment emerges tomorrow, the MCP layer means zero migration cost.</p>
+      <p style="margin-top: 10px;"><strong>Skills as deployable domain knowledge:</strong> Adding a new vertical doesn't require code releases. Domain expertise is captured in SKILL.md files &mdash; declarative prompts with structured output schemas. A domain expert (insurance underwriter, construction PM, lease analyst) can define a workflow as a skill and deploy it via <code>flywheel db seed</code>. No backend changes, no frontend changes, no deployment pipeline.</p>
+      <p style="margin-top: 10px; margin-bottom: 0;"><strong>Multi-tenancy as scale lever:</strong> RLS-based tenant isolation means onboarding a new customer is creating a row, not spinning up infrastructure. One deployment serves every tenant across every vertical. A construction compliance firm and an insurance brokerage run on the same codebase, same database, same deployment &mdash; differentiated only by their <code>tenant.settings.modules</code> configuration.</p>
+    </div>
+
+    <div class="card-grid">
+      <div class="card">
+        <h4>GTM / Sales</h4>
+        <p>Pipeline triage, meeting prep, call intelligence, outreach sequences, company fit scoring, competitive analysis. <strong>Live and in daily use.</strong></p>
+      </div>
+      <div class="card">
+        <h4>Construction Compliance</h4>
+        <p>Contract-to-coverage reconciliation, subcontractor insurance verification, vendor prequalification, compliance gap detection with clause-level traceability. Reuses: PDF extraction, email integration, document library. Context store accumulates project risk profiles across hundreds of subcontractors.</p>
+      </div>
+      <div class="card">
+        <h4>Insurance Brokerage</h4>
+        <p>Multi-carrier quote comparison, coverage gap analysis, recommendation letter generation, carrier portal automation via Playwright, renewal tracking. Context store compounds carrier response patterns &mdash; after 50 submissions, the system knows which carriers are competitive for which coverage types.</p>
+      </div>
+      <div class="card">
+        <h4>Commercial Real Estate</h4>
+        <p>Lease document parsing, key term extraction (rent, TI, CAM, escalations), lease comparison across properties, tenant compliance verification, vendor insurance for property management. Reuses: PDF extraction, pipeline (properties as entries), document library.</p>
+      </div>
+      <div class="card">
+        <h4>Legal / Contract Management</h4>
+        <p>Contract review with PII redaction, clause library, risk scoring, term comparison, audit trail. After 50 contracts, the system knows your standard terms and red-line patterns. Context store links contract intelligence to the accounts and deals they belong to.</p>
+      </div>
+      <div class="card">
+        <h4>HR, Product, Finance, ...</h4>
+        <p>Recruiting pipelines, feature request synthesis, investor updates, board prep &mdash; any domain where professionals read documents, manage relationships, and make decisions from accumulated knowledge. The pattern is the same: domain skills + domain tables + domain page.</p>
+      </div>
+    </div>
+
+    <div class="highlight-box warn">
+      <h4>Skill Marketplace Opportunity</h4>
+      <p>The SKILL.md format is fully declarative &mdash; a domain expert can define a workflow without touching backend code. The architecture already supports: per-tenant skill enablement, structured output schemas, context store integration, and document export. This opens a natural path to a <strong>third-party skill marketplace</strong> where domain experts (insurance underwriters, legal analysts, recruiting specialists) build and publish skills that run on the platform. Revenue model: platform fee on paid skills. The compound context store is the ecosystem lock-in &mdash; skills produce better output on Flywheel than standalone because they operate on months of accumulated business intelligence, not a blank prompt.</p>
+    </div>
+
+    <div class="highlight-box">
+      <h4>One Tenant, One Data Model</h4>
+      <p>Tenants are fully RLS-isolated &mdash; no data crosses between companies. Within a single organization, all modules share the same contacts, companies, meetings, and documents. No duplicate data entry across workflows. A contact added during a sales call is immediately available in a compliance review. A meeting transcript processed for deal context is the same transcript available for legal clause extraction. The shared data model eliminates the integration tax that plagues multi-tool stacks.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 04: System Architecture -->
+<section id="architecture">
+  <div class="container">
+    <h2><span class="num">04</span> System Architecture</h2>
+    <p class="section-subtitle">Six layers with strict downward dependency flow. Each layer has a distinct responsibility. The diagram shows every major component and its connections.</p>
+
+    <div class="sys-diagram">
+      <!-- User Interfaces -->
+      <div class="sys-layer l-ui">
+        <div class="sys-layer-title">Presentation &mdash; User Interfaces</div>
+        <div class="sys-items">
+          <div class="sys-item">React SPA<small>localhost:5173</small></div>
+          <div class="sys-item">Claude Code<small>MCP Client (primary interface)</small></div>
+          <div class="sys-item">CLI<small>pip install flywheel-ai</small></div>
+        </div>
+        <div class="sys-details">
+          <span>Pipeline Grid</span>
+          <span>Briefing Page</span>
+          <span>Email Queue</span>
+          <span>Document Library</span>
+          <span>SkillRenderer (JSON dispatch)</span>
+          <span>OnePagerRenderer</span>
+        </div>
+      </div>
+
+      <div class="sys-connector">
+        <div class="sys-connector-labels">
+          <span>HTTP / REST</span>
+          <span>MCP stdio</span>
+          <span>HTTP</span>
+        </div>
+      </div>
+
+      <!-- API Gateway -->
+      <div class="sys-layer l-api">
+        <div class="sys-layer-title">API Gateway &mdash; FastAPI + MCP Server</div>
+        <div class="sys-items">
+          <div class="sys-item">FastAPI<small>port 8000 &middot; 25+ route modules</small></div>
+          <div class="sys-item">MCP Server<small>FastMCP &middot; 30+ tools &rarr; proxies to FastAPI</small></div>
+        </div>
+        <div class="sys-details">
+          <span>Supabase JWT auth</span>
+          <span>slowapi rate limiting</span>
+          <span>RLS-scoped DB sessions</span>
+          <span>SSE streaming for skill runs</span>
+          <span>Tenant isolation via dependency injection</span>
+        </div>
+      </div>
+
+      <div class="sys-connector"><div class="arrow"></div></div>
+
+      <!-- Service Layer -->
+      <div class="sys-layer l-svc">
+        <div class="sys-layer-title">Services &mdash; Business Logic &amp; Orchestration</div>
+        <div class="sys-items">
+          <div class="sys-item">Skill Executor</div>
+          <div class="sys-item">Gmail Sync</div>
+          <div class="sys-item">Pipeline Svc</div>
+          <div class="sys-item">Meeting Ingest</div>
+          <div class="sys-item">Nudge Engine</div>
+          <div class="sys-item">Calendar Sync</div>
+          <div class="sys-item">Synthesis</div>
+          <div class="sys-item">Learning</div>
+        </div>
+        <div class="sys-details">
+          <span>Job Queue (pg FOR UPDATE SKIP LOCKED)</span>
+          <span>Circuit Breaker (3 failures &rarr; 60s OPEN)</span>
+          <span>Cost Tracker (per-model USD estimation)</span>
+        </div>
+      </div>
+
+      <div class="sys-connector"><div class="arrow"></div></div>
+
+      <!-- Engine Layer -->
+      <div class="sys-layer l-eng">
+        <div class="sys-layer-title">Engines &mdash; AI Execution &amp; Intelligence</div>
+        <div class="sys-items">
+          <div class="sys-item">Email Scorer</div>
+          <div class="sys-item">Email Drafter</div>
+          <div class="sys-item">Meeting Processor</div>
+          <div class="sys-item">Meeting Prep</div>
+          <div class="sys-item">Context Extractor</div>
+          <div class="sys-item">Entity Extraction</div>
+          <div class="sys-item">Output Renderer</div>
+        </div>
+        <div class="sys-details">
+          <span>Execution Gateway &rarr; Anthropic Claude API (user's own key)</span>
+          <span>Structured outputs via output_config (json_schema)</span>
+          <span>Jinja2 templates for HTML/PDF rendering</span>
+        </div>
+      </div>
+
+      <div class="sys-connector"><div class="arrow"></div></div>
+
+      <!-- Data Layer -->
+      <div class="sys-layer l-data">
+        <div class="sys-layer-title">Data &mdash; PostgreSQL + Supabase</div>
+        <div class="sys-items">
+          <div class="sys-item">PostgreSQL<small>Supabase managed</small></div>
+          <div class="sys-item">PgBouncer<small>Connection pooling</small></div>
+          <div class="sys-item">Alembic<small>DDL migrations</small></div>
+        </div>
+        <div class="sys-details">
+          <span>40+ tables with Row-Level Security</span>
+          <span>JSONB context store (structured intelligence)</span>
+          <span>AES-256-GCM encrypted credentials</span>
+          <span>ON CONFLICT upserts (dedup)</span>
+        </div>
+      </div>
+
+      <div class="sys-connector"><div class="arrow"></div></div>
+
+      <!-- External Integrations -->
+      <div class="sys-layer l-ext">
+        <div class="sys-layer-title">External Integrations</div>
+        <div class="sys-items">
+          <div class="sys-item">Gmail<small>OAuth 2.0</small></div>
+          <div class="sys-item">Calendar<small>OAuth 2.0</small></div>
+          <div class="sys-item">Outlook<small>OAuth 2.0</small></div>
+          <div class="sys-item">Granola<small>API key</small></div>
+          <div class="sys-item">Slack<small>OAuth 2.0</small></div>
+          <div class="sys-item">Apollo<small>MCP plugin</small></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 03: Tech Stack -->
+<section id="stack" class="surface">
+  <div class="container">
+    <h2><span class="num">05</span> Technology Stack</h2>
+    <p class="section-subtitle">Monorepo with three packages: backend, frontend, cli. Each independently deployable.</p>
+    <table>
+      <thead><tr><th>Layer</th><th>Technology</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td>Runtime</td><td>Python 3.12 (uv)</td><td>Backend API, services, engines, skill execution</td></tr>
+        <tr><td>Web Framework</td><td>FastAPI 0.115+</td><td>Async HTTP API with automatic OpenAPI docs</td></tr>
+        <tr><td>ORM</td><td>SQLAlchemy 2.0</td><td>Async ORM with mapped_column declarative models</td></tr>
+        <tr><td>Database</td><td>PostgreSQL 15+ (Supabase)</td><td>Primary store with RLS + PgBouncer pooling</td></tr>
+        <tr><td>Migrations</td><td>Alembic 1.13+</td><td>Schema migrations (with Supabase DDL workaround)</td></tr>
+        <tr><td>Frontend</td><td>React 19 + Vite</td><td>SPA with feature-based module structure</td></tr>
+        <tr><td>UI</td><td>shadcn/ui + Tailwind</td><td>Design system, utility-first styling</td></tr>
+        <tr><td>Data Grid</td><td>AG Grid 32+</td><td>Pipeline command center, lead management</td></tr>
+        <tr><td>LLM</td><td>Anthropic Claude SDK &ge;0.93.0</td><td>All AI reasoning via user's own API key</td></tr>
+        <tr><td>MCP Server</td><td>FastMCP (Python)</td><td>30+ tools exposed to Claude Code</td></tr>
+        <tr><td>PDF Export</td><td>WeasyPrint &ge;62.0</td><td>HTML &rarr; PDF via Jinja2 templates (async)</td></tr>
+        <tr><td>DOCX Export</td><td>python-docx &ge;1.2.0</td><td>Branded Word document generation</td></tr>
+        <tr><td>Job Queue</td><td>PostgreSQL (FOR UPDATE SKIP LOCKED)</td><td>Atomic, race-free job claiming across workers</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 04: Data Model -->
+<section id="data" class="tinted">
+  <div class="container">
+    <h2><span class="num">06</span> Data Model</h2>
+    <p class="section-subtitle">40+ SQLAlchemy models across six domains. All tenant-scoped with RLS enforced at the database level.</p>
+    <table>
+      <thead><tr><th>Domain</th><th>Key Models</th><th>Purpose</th></tr></thead>
+      <tbody>
+        <tr><td>Identity &amp; Tenancy</td><td>Tenant, Profile, UserTenant, Integration</td><td>Multi-tenant auth, user profiles, OAuth credentials (AES-256)</td></tr>
+        <tr><td>Pipeline</td><td>PipelineEntry, Contact, Activity, Lead, LeadContact, SavedView</td><td>Unified CRM: companies, contacts, activities, pipeline stages</td></tr>
+        <tr><td>Communication</td><td>Email, EmailScore, EmailDraft, EmailVoiceProfile, OutreachActivity</td><td>Email ingestion, AI scoring, drafts, voice profiles, outreach</td></tr>
+        <tr><td>Meetings</td><td>Meeting, MeetingClassification, Task</td><td>Calendar sync, meeting intelligence, auto-extracted tasks</td></tr>
+        <tr><td>Intelligence</td><td>ContextEntry, ContextEntity, ContextRelationship, ContextEvent</td><td>Structured business knowledge graph with provenance</td></tr>
+        <tr><td>Skills</td><td>SkillDefinition, TenantSkill, SkillRun, Document</td><td>Skill catalog, execution tracking, generated outputs</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Entity Relationship Overview</h3>
+    <div class="arch-diagram"><span class="label">Tenant</span> ──┬── <span class="layer">Profile[]</span> (users via Supabase auth)
+       ├── <span class="layer">Integration[]</span> (Gmail, Calendar, Granola, Slack, Apollo)
+       ├── <span class="layer">PipelineEntry[]</span> (companies/people)
+       │   ├── <span class="green">Contact[]</span> ── <span class="green">Activity[]</span> ── <span class="green">PipelineEntrySource[]</span>
+       │   └── <span class="green">OutreachActivity[]</span> (multi-step sequences)
+       ├── <span class="layer">Lead[]</span> → <span class="green">LeadContact[]</span> → <span class="green">LeadMessage[]</span>
+       ├── <span class="purple">Email[]</span> → <span class="green">EmailScore</span> → <span class="green">EmailDraft</span> (voice-matched)
+       ├── <span class="purple">Meeting[]</span> → <span class="green">MeetingClassification</span> → <span class="green">Task[]</span>
+       ├── <span class="purple">ContextEntry[]</span> → <span class="green">ContextEntity[]</span> + <span class="green">ContextRelationship[]</span>
+       └── <span class="label">SkillDefinition[]</span> → <span class="green">TenantSkill[]</span> → <span class="green">SkillRun[]</span> → <span class="green">Document[]</span></div>
+  </div>
+</section>
+
+<!-- 06: Key Flows -->
+<section id="flows">
+  <div class="container">
+    <h2><span class="num">07</span> Key Flows</h2>
+    <p class="section-subtitle">Sequence diagrams for the three most critical data flows in the system.</p>
+
+    <h3>Flow 1: Skill Execution (e.g., One-Pager)</h3>
+    <div class="highlight-box">
+      <h4>Two Entry Points &mdash; Same Backend</h4>
+      <p><strong>Primary (Claude Code):</strong> User types a command in Claude Code &rarr; Claude calls MCP tool <code>flywheel_run_skill</code> &rarr; MCP server proxies to <code>POST /skills/runs</code> &rarr; polls for completion &rarr; returns output to Claude &rarr; Claude presents results in terminal.<br>
+      <strong>Secondary (Web UI):</strong> User clicks "Run" in browser &rarr; <code>POST /skills/runs</code> &rarr; SSE stream via <code>EventSource</code> &rarr; live progress in UI.</p>
+    </div>
+    <div class="seq-diagram">
+      <div class="seq-step"><div class="seq-num">1</div><div class="seq-content"><div class="seq-actor external">Claude Code / MCP</div><div class="seq-action">User invokes skill via Claude Code (e.g., <code>/meeting-prep</code> or natural language). Claude calls <code>flywheel_run_skill(name, input)</code> MCP tool. The MCP server (<code>cli/flywheel_mcp/server.py</code>) proxies this as <code>POST /skills/runs</code> to the backend API over HTTP.</div></div></div>
+      <div class="seq-step"><div class="seq-num">2</div><div class="seq-content"><div class="seq-actor api">API Gateway</div><div class="seq-action">Validate tenant access, check rate limits (per-tenant concurrent run limit), create <code>SkillRun</code> record (status: pending). Return <code>{run_id, status}</code>. Web UI subscribes to SSE stream; MCP server polls <code>GET /skills/runs/{id}</code> until complete.</div></div></div>
+      <div class="seq-step"><div class="seq-num">3</div><div class="seq-content"><div class="seq-actor service">Skill Executor</div><div class="seq-action"><code>execute_run()</code> &rarr; load skill prompt from DB, build messages array, inject system prompt. <strong>Protected skills</strong> get an anti-extraction prefix prepended at runtime (never stored in DB) to prevent prompt copying. If <code>output_schema</code> exists, set <code>output_config.format.json_schema</code> (API-level enforcement). Use <code>token_budget</code> from skill metadata (or 4096 fallback).</div></div></div>
+      <div class="seq-step"><div class="seq-num">4</div><div class="seq-content"><div class="seq-actor engine">Execution Gateway</div><div class="seq-action">Anthropic API call with tool_use loop. Circuit breaker wraps all calls (3 failures &rarr; 60s OPEN &rarr; HALF-OPEN probe). Each tool result emitted as SSE event. Skills can call MCP tools (context store reads/writes, web search) during execution.</div></div></div>
+      <div class="seq-step"><div class="seq-num">5</div><div class="seq-content"><div class="seq-actor engine">Output Renderer</div><div class="seq-action">Detect structured JSON (<code>schema_version</code> check), select Jinja2 template, render HTML. Non-fatal: rendering failure doesn't fail the run.</div></div></div>
+      <div class="seq-step"><div class="seq-num">6</div><div class="seq-content"><div class="seq-actor db">Database + Response</div><div class="seq-action">Save <code>SkillRun.output</code> + <code>rendered_html</code>. Create <code>Document</code> in library. <strong>MCP path:</strong> MCP server returns output text to Claude, which presents it in the terminal. <strong>Web path:</strong> Emit final SSE <code>done</code> event; React renders via SkillRenderer &rarr; OnePagerRenderer (or GenericRenderer).</div></div></div>
+    </div>
+
+    <h3>Flow 2: Email Intelligence Pipeline</h3>
+    <div class="seq-diagram">
+      <div class="seq-step"><div class="seq-num">1</div><div class="seq-content"><div class="seq-actor external">Gmail API</div><div class="seq-action">Incremental sync via <code>historyId</code>. Per-integration 60s timeout. <code>asyncio.gather(return_exceptions=True)</code> for concurrent integrations. <code>ON CONFLICT DO UPDATE</code> dedup at DB layer. Can also be triggered via MCP tool <code>flywheel_sync_meetings</code>.</div></div></div>
+      <div class="seq-step"><div class="seq-num">2</div><div class="seq-content"><div class="seq-actor engine">Email Scorer</div><div class="seq-action">Five-tier priority scoring using sender history, topic relevance, relationship context. Confidence-based routing: high-confidence auto-files, uncertain goes to review queue.</div></div></div>
+      <div class="seq-step"><div class="seq-num">3</div><div class="seq-content"><div class="seq-actor engine">Email Drafter</div><div class="seq-action">AI-generated reply using <code>EmailVoiceProfile</code> (learned from 50+ samples). Draft stored as <code>EmailDraft</code> linked to original email.</div></div></div>
+      <div class="seq-step"><div class="seq-num">4</div><div class="seq-content"><div class="seq-actor engine">Context Extractor</div><div class="seq-action">Extract contacts, company mentions, pain points, competitive signals. Write to <code>ContextEntry</code> with provenance. Queryable via MCP tools <code>flywheel_read_context</code> / <code>flywheel_write_context</code>.</div></div></div>
+    </div>
+    <div class="highlight-box blue">
+      <h4>Pipeline Isolation</h4>
+      <p>Each stage is committed before the next begins. A failure in context extraction cannot lose email scoring results. Per-email exceptions are caught non-fatally &mdash; one bad email never blocks the batch.</p>
+    </div>
+
+    <h3>Flow 3: Meeting Intelligence</h3>
+    <div class="seq-diagram">
+      <div class="seq-step"><div class="seq-num">1</div><div class="seq-content"><div class="seq-actor external">Granola via MCP</div><div class="seq-action">Triggered via <code>flywheel_sync_meetings</code> MCP tool from Claude Code, or automatically on calendar sync. Paginated transcript fetch (page_size=30). Fuzzy title dedup against existing meetings.</div></div></div>
+      <div class="seq-step"><div class="seq-num">2</div><div class="seq-content"><div class="seq-actor engine">Meeting Processor</div><div class="seq-action">7-stage pipeline: classify meeting type &rarr; extract 9 insight types (pain points, budget signals, competitive mentions, decisions, next steps, stakeholders, objections, timeline, relationship dynamics).</div></div></div>
+      <div class="seq-step"><div class="seq-num">3</div><div class="seq-content"><div class="seq-actor engine">Context Store Writer</div><div class="seq-action">Entity extraction &rarr; normalization &rarr; relationship mapping &rarr; confidence scoring. Writes structured <code>ContextEntry</code> records linked to account. Accessible via <code>flywheel_read_context</code>.</div></div></div>
+      <div class="seq-step"><div class="seq-num">4</div><div class="seq-content"><div class="seq-actor engine">Task Extractor</div><div class="seq-action">Auto-extract action items as <code>Task</code> records. Visible via <code>flywheel_fetch_tasks</code> MCP tool and web briefing page. Non-fatal: failure logs warning, doesn't fail processing.</div></div></div>
+    </div>
+    <div class="highlight-box">
+      <h4>MCP as the Primary Interface</h4>
+      <p>Claude Code is the primary user interface. The MCP server exposes 30+ tools that map to every backend capability. The web UI is the <em>secondary</em> interface for visual surfaces (pipeline grid, briefing, email queue, document library) that benefit from persistent, interactive display. Both interfaces hit the same backend API &mdash; there is no separate "MCP backend."</p>
+    </div>
+
+    <h3>Flow 4: GTM Outreach with Browser Automation</h3>
+    <div class="seq-diagram">
+      <div class="seq-step"><div class="seq-num">1</div><div class="seq-content"><div class="seq-actor external">Claude Code</div><div class="seq-action">User asks Claude to "send outreach to the top 5 leads" or "scrape contacts from this directory." Claude calls Flywheel MCP tools to load pipeline data (<code>flywheel_list_pipeline</code>, <code>flywheel_read_context</code>) and reads accumulated context for personalization.</div></div></div>
+      <div class="seq-step"><div class="seq-num">2</div><div class="seq-content"><div class="seq-actor engine">Outreach Drafter</div><div class="seq-action">Generates personalized email/LinkedIn messages using context store intelligence (pain points from meetings, competitive signals, relationship history). Messages scored against a quality bar before sending.</div></div></div>
+      <div class="seq-step"><div class="seq-num">3</div><div class="seq-content"><div class="seq-actor external">Playwright MCP</div><div class="seq-action">Browser automation via Playwright MCP server. Navigates to carrier portals, LinkedIn, or target websites. Fills forms, extracts structured data, takes screenshots. Per-carrier/per-portal configuration for different submission flows.</div></div></div>
+      <div class="seq-step"><div class="seq-num">4</div><div class="seq-content"><div class="seq-actor service">Pipeline Service</div><div class="seq-action">Records outreach as <code>OutreachActivity</code> linked to pipeline entry. Creates <code>LeadMessage</code> for tracking. Updates pipeline stage based on activity signals. All visible in pipeline grid and briefing.</div></div></div>
+    </div>
+    <div class="highlight-box blue">
+      <h4>Playwright is the Expansion Lever</h4>
+      <p>Browser automation makes Flywheel's skill system capable of interacting with any web application &mdash; carrier portals (insurance), property listing sites (CRE), government filing systems (legal). The same Playwright MCP infrastructure that powers GTM web scraping and outreach becomes the integration layer for vertical-specific workflows without building custom API integrations.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 07: API Contracts -->
+<section id="api" class="surface">
+  <div class="container">
+    <h2><span class="num">08</span> API Contracts &amp; Auth</h2>
+    <p class="section-subtitle">Authentication flow, response envelopes, and key API conventions.</p>
+
+    <h3>Authentication Flow</h3>
+    <div class="arch-diagram"><span class="label">Client</span> ──→ <span class="layer">POST /auth/magic-link</span> (email) ──→ <span class="green">Supabase</span> sends OTP
+          ──→ <span class="layer">POST /auth/callback</span> (OTP)    ──→ <span class="green">Supabase JWT</span> returned
+          ──→ All requests: <span class="purple">Authorization: Bearer &lt;access_token&gt;</span>
+
+<span class="label">Dependency chain</span> (per request):
+  <span class="layer">get_current_user</span>  → decode JWT → auto-provision anonymous users (Profile + Tenant)
+  <span class="layer">require_tenant</span>    → assert tenant_id (self-heal from DB if missing from JWT)
+  <span class="layer">get_tenant_db</span>     → create RLS-scoped DB session (tenant_id set as session var)
+  <span class="layer">require_admin</span>     → check role, fallback to DB lookup</div>
+
+    <h3>Response Envelopes</h3>
+    <table>
+      <thead><tr><th>Pattern</th><th>Shape</th><th>Example</th></tr></thead>
+      <tbody>
+        <tr><td>List (offset)</td><td><code>{items: [], total, offset, limit, has_more}</code></td><td>Skill runs, pipeline entries</td></tr>
+        <tr><td>List (cursor)</td><td><code>{documents: [], total, next_cursor}</code></td><td>Documents (created_at|id cursor)</td></tr>
+        <tr><td>Single object</td><td>Direct object (no wrapper)</td><td>GET /pipeline/{id}</td></tr>
+        <tr><td>Error</td><td><code>{error: str, message: str, code: int}</code></td><td>All HTTP/validation errors</td></tr>
+        <tr><td>SSE stream</td><td>Event-per-line, final <code>done</code> event</td><td>Skill run streaming</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Key API Conventions</h3>
+    <table>
+      <thead><tr><th>Convention</th><th>Details</th></tr></thead>
+      <tbody>
+        <tr><td>Rate limiting</td><td><code>slowapi</code>: magic-link 3/hour, default per <code>settings.rate_limit_default</code></td></tr>
+        <tr><td>Tenant scoping</td><td>Two DB variants: <code>get_tenant_db</code> (RLS-scoped) and <code>get_db_unscoped</code> (profile creation)</td></tr>
+        <tr><td>User caching</td><td>In-process <code>_user_tenant_cache</code> dict caches tenant_id + role per user for process lifetime</td></tr>
+        <tr><td>BYOK API key</td><td>Stored AES-encrypted in <code>profiles.api_key_encrypted</code>; validated against Anthropic API before storage</td></tr>
+        <tr><td>SSE auth</td><td>JWT via header OR <code>?token=</code> query param (EventSource can't send headers)</td></tr>
+        <tr><td>Dedup</td><td><code>POST /documents/from-content</code>: same title+type+account within 1 hour updates instead of inserting</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 08: Skill System -->
+<section id="skills">
+  <div class="container">
+    <h2><span class="num">09</span> Skill Execution System</h2>
+    <p class="section-subtitle">Declarative workflows defined in SKILL.md files. The executor runs them generically &mdash; zero hardcoded skill branches.</p>
+
+    <div class="arch-diagram"><span class="label">SKILL.md</span> (YAML frontmatter + prompt body)
+  │
+  ├── <span class="green">seed.py</span> → SkillDefinition table
+  │   └── parameters JSONB: output_schema, token_budget, web_tier, tags
+  │
+  ├── <span class="label">Trigger</span>: MCP <code>flywheel_run_skill</code> │ Web <code>POST /api/skills/run</code>
+  │   └── Creates SkillRun (status: pending)
+  │
+  ├── <span class="green">skill_executor.py</span>
+  │   ├── Load prompt from DB (filesystem fallback for unseeded skills)
+  │   ├── If output_schema → <span class="purple">output_config.format.json_schema</span> (API-level enforcement)
+  │   ├── max_tokens = <span class="purple">token_budget</span> || 4096
+  │   ├── Tool-use loop with SSE event emission per iteration
+  │   └── Circuit breaker wraps all Anthropic API calls
+  │
+  ├── <span class="green">output_renderer.py</span>
+  │   ├── Detect structured JSON (schema_version + document_type)
+  │   ├── Select Jinja2 template by output_type (one_pager, meeting_prep, generic)
+  │   ├── Pass structured_data to template context
+  │   └── <span class="muted">Non-fatal: rendering failure doesn't fail the skill run</span>
+  │
+  └── <span class="label">Output</span>: Document saved to library + rendered_html cached</div>
+
+    <h3>Active Skills</h3>
+    <table>
+      <thead><tr><th>Skill</th><th>Output</th><th>Context Store</th><th>Tier</th><th>Schema</th></tr></thead>
+      <tbody>
+        <tr><td>meeting-prep</td><td>HTML</td><td>Reads</td><td>1</td><td>&mdash;</td></tr>
+        <tr><td>call-intelligence</td><td>HTML + JSON</td><td>Reads + Writes</td><td>1</td><td>&mdash;</td></tr>
+        <tr><td>one-pager</td><td>Structured JSON</td><td>Reads</td><td>1</td><td>output_schema enforced</td></tr>
+        <tr><td>gtm-company-fit-analyzer</td><td>HTML</td><td>Reads</td><td>1</td><td>&mdash;</td></tr>
+        <tr><td>gtm-pipeline</td><td>HTML</td><td>Reads + Writes</td><td>1</td><td>&mdash;</td></tr>
+        <tr><td>outreach-drafter</td><td>HTML</td><td>Reads</td><td>&mdash;</td><td>&mdash;</td></tr>
+        <tr><td>meeting-processor</td><td>JSON</td><td>Writes</td><td>&mdash;</td><td>&mdash;</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 09: Skill Enforcement -->
+<section id="enforcement" class="tinted">
+  <div class="container">
+    <h2><span class="num">10</span> Skill Enforcement &amp; Quality Gates</h2>
+    <p class="section-subtitle">How the platform ensures skills meet quality, security, and compatibility requirements at every stage of their lifecycle.</p>
+
+    <h3>Enforcement at Seed Time (seed.py)</h3>
+    <table>
+      <thead><tr><th>Check</th><th>Behavior on Failure</th></tr></thead>
+      <tbody>
+        <tr><td>YAML frontmatter markers (<code>---</code>)</td><td>Raises <code>ValueError</code>, skill skipped entirely</td></tr>
+        <tr><td><code>name</code> field (required string)</td><td>Skill skipped with error log</td></tr>
+        <tr><td><code>web_tier</code> (must be 1, 2, or 3)</td><td>Defaults to 1 silently</td></tr>
+        <tr><td><code>token_budget</code> (must be int)</td><td>Set to <code>None</code> (falls back to 4096 at runtime)</td></tr>
+        <tr><td><code>parameters</code>, <code>tags</code> (type checks)</td><td>Defaulted to empty dict/list</td></tr>
+        <tr><td><code>public: false</code> (default)</td><td>Sets <code>protected = True</code>; anti-extraction prefix applied</td></tr>
+        <tr><td>Directory prefix <code>_</code> or <code>_archived</code></td><td>Entire directory skipped</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Enforcement at Runtime (skill_executor.py)</h3>
+    <table>
+      <thead><tr><th>Gate</th><th>What It Enforces</th></tr></thead>
+      <tbody>
+        <tr><td>Tenant enablement</td><td><code>tenant_skills</code> table controls per-tenant access. Disabled skills return <code>None</code>, execution fails fast.</td></tr>
+        <tr><td>Web tier gating</td><td><code>web_tier == 3</code> skills require local browser agent; hard error if not connected.</td></tr>
+        <tr><td>Structured output</td><td><code>output_schema</code> &rarr; Anthropic API enforces JSON schema at generation time. Malformed output is impossible.</td></tr>
+        <tr><td>Token budget</td><td><code>token_budget</code> from DB flows to <code>max_tokens</code>. Prevents truncation for verbose outputs.</td></tr>
+        <tr><td>Prompt protection</td><td>Protected skills get anti-extraction prefix prepended at execution time (never stored in DB).</td></tr>
+        <tr><td>Error sanitization</td><td><code>_sanitize_error()</code> strips system-prompt fragments from error messages before surfacing to callers.</td></tr>
+        <tr><td>Circuit breaker</td><td>3 consecutive Anthropic API failures &rarr; 60s cooldown. Prevents cascading failures across skills.</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Enforcement at Render Time (output_renderer.py)</h3>
+    <table>
+      <thead><tr><th>Gate</th><th>What It Enforces</th></tr></thead>
+      <tbody>
+        <tr><td>Structured data detection</td><td>JSON must include <code>schema_version</code> at top level to be treated as structured output</td></tr>
+        <tr><td>HTML sanitization</td><td>All HTML fragments sanitized before WeasyPrint rendering (XSS prevention in PDF exports)</td></tr>
+        <tr><td>Template selection</td><td>Dispatched by <code>output_type</code>; unknown types fall back to generic renderer</td></tr>
+        <tr><td>Non-fatal rendering</td><td>Render failures log warnings but never fail the skill run itself</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Enforcement at Display Time (Frontend)</h3>
+    <div class="arch-diagram"><span class="label">SkillRenderer</span> (entry point for all skill output)
+  │
+  ├── <span class="green">JSON.parse(output)</span> succeeds?
+  │   ├── <span class="purple">isOnePagerData(parsed)</span>     → <span class="layer">OnePagerRenderer</span>
+  │   ├── <span class="purple">isMeetingPrepData(parsed)</span>  → <span class="layer">MeetingPrepRenderer</span>
+  │   └── <span class="muted">Future type guards</span>         → <span class="muted">FutureRenderer</span>
+  │
+  └── Not JSON / no type guard match
+      └── <span class="layer">GenericRenderer</span> (markdown → sanitized HTML)
+
+<span class="muted">Each type guard validates required fields before dispatching.
+Malformed structured data falls through safely to GenericRenderer.</span></div>
+
+    <div class="highlight-box">
+      <h4>14 Engineering Standards</h4>
+      <p>All skills must comply with 14 engineering standards covering: memory &amp; learned preferences, dependency checks, testing, parallel execution, resume &amp; checkpoint, deliverable display, idempotency, progress updates, input validation, graceful degradation, context management, backup before destructive ops, version headers, and context store integration. These are enforced by code review and the skill-creator workflow, not automated gates.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 10: Context Store -->
+<section id="context">
+  <div class="container">
+    <h2><span class="num">11</span> Context Store &amp; Intelligence Pipeline</h2>
+    <p class="section-subtitle">The compound intelligence layer. Structured business knowledge that accumulates automatically. This is the core differentiation.</p>
+
+    <h3>Intelligence Data Flow</h3>
+    <div class="arch-diagram"><span class="label">INGESTION</span>                    <span class="label">PROCESSING</span>                       <span class="label">STORAGE</span>
+─────────────              ──────────────────              ─────────────────
+Gmail Sync       ──→  <span class="layer">Email Scorer</span>              ──→  EmailScore (5-tier)
+                 ──→  <span class="layer">Context Extractor</span>         ──→  ContextEntry (contacts, signals)
+                 ──→  <span class="layer">Entity Extraction</span>         ──→  ContextEntity + ContextRelationship
+
+Granola Adapter  ──→  <span class="layer">Meeting Processor</span>         ──→  9 insight types per meeting
+                 ──→  <span class="layer">Context Store Writer</span>      ──→  ContextEntry (linked to account)
+
+Skill Execution  ──→  <span class="layer">Output Renderer</span>           ──→  Document (library)
+                 ──→  <span class="layer">Context Store Writer</span>      ──→  ContextEntry (bidirectional)
+
+<span class="green">Every ingestion source feeds the same context store.</span>
+<span class="green">Every surface reads from the same context store.</span>
+<span class="green">Cross-domain compounding is emergent, not engineered.</span></div>
+
+    <h3>What Gets Stored</h3>
+    <table>
+      <thead><tr><th>Entity Type</th><th>Source</th><th>Fields</th></tr></thead>
+      <tbody>
+        <tr><td>Contacts</td><td>Meetings, emails, enrichment</td><td>Name, title, company, LinkedIn, relationship strength</td></tr>
+        <tr><td>Companies</td><td>Pipeline, web research</td><td>Domain, industry, size, tech stack, competitive landscape</td></tr>
+        <tr><td>Pain Points</td><td>Meeting transcripts</td><td>Description, severity, account linkage, discovery date</td></tr>
+        <tr><td>Competitive Intel</td><td>Meetings, research</td><td>Competitor, signal type, source, confidence score</td></tr>
+        <tr><td>Deal Context</td><td>Pipeline activity, emails</td><td>Budget, timeline, decision process, stakeholders</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 11: Integrations -->
+<section id="integrations" class="surface">
+  <div class="container">
+    <h2><span class="num">12</span> Integrations &amp; MCP Server</h2>
+    <p class="section-subtitle">External services connect via OAuth or API key. The MCP server exposes 30+ tools to Claude Code.</p>
+
+    <table>
+      <thead><tr><th>Integration</th><th>Auth</th><th>Data Flow</th></tr></thead>
+      <tbody>
+        <tr><td>Gmail</td><td>OAuth 2.0</td><td>Read + Send, incremental sync via historyId, 5-min polling</td></tr>
+        <tr><td>Google Calendar</td><td>OAuth 2.0</td><td>Read, meeting detection, auto-prep triggering</td></tr>
+        <tr><td>Microsoft Outlook</td><td>OAuth 2.0</td><td>Read + Send, calendar sync</td></tr>
+        <tr><td>Granola</td><td>API Key</td><td>Meeting transcript ingestion with cursor-based pagination</td></tr>
+        <tr><td>Slack</td><td>OAuth 2.0</td><td>Channel monitoring, slash commands, event processing</td></tr>
+        <tr><td>Apollo</td><td>API Key</td><td>Contact enrichment, prospecting, sequence management (MCP plugin)</td></tr>
+        <tr><td>Playwright</td><td>MCP Server</td><td>Browser automation: portal form filling, web scraping, data extraction, screenshots</td></tr>
+      </tbody>
+    </table>
+
+    <h3>MCP Server (30+ Tools)</h3>
+    <p>Built with FastMCP (<code>cli/flywheel_mcp/server.py</code>). Communicates with the backend API over HTTP. Enables full Flywheel access from Claude Code terminal.</p>
+    <div class="card-grid">
+      <div class="card"><h4>Skills (3)</h4><p>fetch_skills, fetch_skill_prompt, run_skill</p></div>
+      <div class="card"><h4>Context (2)</h4><p>read_context, write_context &mdash; bidirectional intelligence access</p></div>
+      <div class="card"><h4>Pipeline (10)</h4><p>CRUD for entries, contacts, outreach steps, messages</p></div>
+      <div class="card"><h4>Meetings (4)</h4><p>fetch, sync, upcoming, save_summary</p></div>
+      <div class="card"><h4>Leads (6)</h4><p>CRUD, graduate, contacts, messages</p></div>
+      <div class="card"><h4>Tasks + Docs (3)</h4><p>fetch_tasks, update_task, save_document</p></div>
+    </div>
+  </div>
+</section>
+
+<!-- 12: Failure Modes & Resilience -->
+<section id="resilience">
+  <div class="container">
+    <h2><span class="num">13</span> Failure Modes &amp; Resilience</h2>
+    <p class="section-subtitle">How the system behaves when things go wrong. Every failure mode has been encountered in production.</p>
+
+    <h3>Circuit Breaker (Anthropic API)</h3>
+    <div class="arch-diagram"><span class="green">CLOSED</span> ──(3 consecutive failures)──→ <span class="danger">OPEN</span> ──(60s cooldown)──→ <span class="purple">HALF-OPEN</span>
+   ↑                                      │                           │
+   │                                      │ all calls blocked         │ allow 1 probe
+   └──────────(success)───────────────────←┘                           │
+   └──────────(probe succeeds)────────────────────────────────────────←┘
+
+<span class="muted">Thread-safe via threading.Lock. Process-level singleton (anthropic_breaker).</span>
+<span class="muted">Shared by chat orchestrator and skill executor.</span></div>
+
+    <h3>Failure Matrix</h3>
+    <table>
+      <thead><tr><th>Failure</th><th>Detection</th><th>Response</th><th>Data Loss?</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Anthropic API down</td>
+          <td>Circuit breaker trips after 3 failures</td>
+          <td>All LLM calls blocked for 60s. Skills return error status. Email scoring deferred.</td>
+          <td>No &mdash; emails/meetings saved, AI processing retried later</td>
+        </tr>
+        <tr>
+          <td>Gmail OAuth token expired</td>
+          <td><code>TokenRevokedException</code></td>
+          <td>Integration marked as disconnected. User prompted to re-auth. Other integrations unaffected.</td>
+          <td>No &mdash; sync resumes from last historyId after re-auth</td>
+        </tr>
+        <tr>
+          <td>Gmail rate limit / HTTP error</td>
+          <td><code>HttpError 404</code> or rate limit response</td>
+          <td>One retry with history token reset. Other HTTP errors re-raised. Per-integration 60s timeout.</td>
+          <td>No &mdash; incremental sync picks up from last position</td>
+        </tr>
+        <tr>
+          <td>Malformed LLM JSON output</td>
+          <td><code>json.loads()</code> failure</td>
+          <td>Regex fallback extraction. If still unparseable, <code>ValueError</code> raised. SkillRun marked failed.</td>
+          <td>No &mdash; raw output preserved in SkillRun record</td>
+        </tr>
+        <tr>
+          <td>Skill rendering failure</td>
+          <td>Exception in output_renderer</td>
+          <td>Non-fatal: warning logged, raw output available. Document still created with raw content.</td>
+          <td>No &mdash; graceful degradation to raw display</td>
+        </tr>
+        <tr>
+          <td>Meeting processing failure</td>
+          <td>7-stage pipeline, each stage guarded</td>
+          <td>Meeting marked <code>processing_status="failed"</code>. Even status-update failure is guarded.</td>
+          <td>No &mdash; transcript preserved, reprocessing possible</td>
+        </tr>
+        <tr>
+          <td>PgBouncer DDL rollback</td>
+          <td>Migration appears to succeed but schema unchanged</td>
+          <td>Manual workaround: each DDL as individual commit + <code>alembic stamp</code></td>
+          <td>No &mdash; but silent failure if not caught</td>
+        </tr>
+        <tr>
+          <td>Bad email in sync batch</td>
+          <td>Per-email try/except</td>
+          <td>Exception logged, email skipped. Rest of batch continues normally.</td>
+          <td>Single email lost &mdash; retried on next sync cycle</td>
+        </tr>
+        <tr>
+          <td>Job queue worker crash</td>
+          <td>Outer <code>while True</code> with catch-all</td>
+          <td>Log exception, sleep 5s, retry. <code>attempts < max_attempts</code> gate prevents infinite retry.</td>
+          <td>No &mdash; unclaimed jobs stay in queue for next claim</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="highlight-box blue">
+      <h4>Design Principle: Stage Isolation</h4>
+      <p>Multi-stage pipelines (email sync, meeting processing, skill execution) commit each stage independently. A failure in stage N cannot lose the results of stages 1 through N-1. Sub-stages (attribution enrichment, reasoning trace, task extraction) are individually try/except guarded as non-fatal.</p>
+    </div>
+  </div>
+</section>
+
+<!-- 13: Infrastructure -->
+<section id="infra" class="tinted">
+  <div class="container">
+    <h2><span class="num">14</span> Infrastructure &amp; Security</h2>
+
+    <h3>Local Development</h3>
+    <div class="arch-diagram"><span class="label">./start-dev.sh</span>
+  ├── Backend:  uvicorn (port 8000) &mdash; FastAPI + async workers
+  ├── Frontend: vite dev (port 5173) &mdash; React HMR
+  └── Tunnel:   ngrok (public URL)   &mdash; OAuth callbacks + MCP access</div>
+
+    <h3>Security Controls</h3>
+    <table>
+      <thead><tr><th>Layer</th><th>Mechanism</th><th>Details</th></tr></thead>
+      <tbody>
+        <tr><td>Auth</td><td>Supabase JWT</td><td>Per-request validation, auto-refresh, anonymous session support</td></tr>
+        <tr><td>Tenant Isolation</td><td>PostgreSQL RLS</td><td>Every table has RLS policy keyed on tenant_id. Enforced at DB level.</td></tr>
+        <tr><td>Credentials</td><td>AES-256-GCM</td><td>OAuth tokens encrypted at rest. Server-side key. Never exposed to frontend.</td></tr>
+        <tr><td>Export</td><td>HTML Sanitization</td><td>All fragments sanitized before WeasyPrint. Prevents XSS in PDF exports.</td></tr>
+        <tr><td>API Keys</td><td>User's own</td><td>Flywheel never touches the Claude API key directly during interactive use.</td></tr>
+        <tr><td>Prompt Protection</td><td>Anti-extraction prefix</td><td>Protected skills get system-prompt protection at execution time.</td></tr>
+        <tr><td>Error Sanitization</td><td>_sanitize_error()</td><td>Strips prompt fragments from error messages before surfacing.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 15: ADRs -->
+<section id="adrs" class="surface">
+  <div class="container">
+    <h2><span class="num">15</span> Architecture Decision Records</h2>
+    <p class="section-subtitle">Key decisions with context, alternatives considered, and consequences. Click to expand.</p>
+
+    <div class="adr">
+      <div class="adr-header"><h4>ADR-001: Supabase PostgreSQL with RLS for multi-tenancy</h4><span class="adr-status badge-green">Accepted</span></div>
+      <div class="adr-body">
+        <dt>Context</dt><dd>Need multi-tenant isolation for a SaaS product with sensitive business data (emails, contacts, deal intel). Options ranged from app-level filtering to schema-per-tenant to database-level RLS.</dd>
+        <dt>Alternatives</dt><dd><strong>App-level WHERE clauses:</strong> Easy to implement, easy to leak data via missed filters. <strong>Schema-per-tenant:</strong> Strong isolation, migration complexity grows linearly with tenants. <strong>Separate databases:</strong> Maximum isolation, operational overhead unmanageable for a small team.</dd>
+        <dt>Decision</dt><dd>PostgreSQL Row-Level Security via Supabase. RLS policies on every table keyed on <code>tenant_id</code>. Enforcement at DB level means a missing app-level filter cannot leak data.</dd>
+        <dt>Consequences</dt><dd><strong>Positive:</strong> Data isolation enforced at the database regardless of app bugs. Supabase provides managed hosting + auth. <strong>Negative:</strong> PgBouncer connection pooling silently rolls back multi-statement DDL transactions (see ADR-006). All queries must set session tenant_id. Performance overhead of RLS policy evaluation on every query.</dd>
+      </div>
+    </div>
+
+    <div class="adr">
+      <div class="adr-header"><h4>ADR-002: User's own Claude API key (BYOK), not platform key</h4><span class="adr-status badge-green">Accepted</span></div>
+      <div class="adr-body">
+        <dt>Context</dt><dd>AI reasoning is the core of every skill, briefing, and email draft. Who pays for the LLM tokens?</dd>
+        <dt>Alternatives</dt><dd><strong>Platform key with usage billing:</strong> Better UX (no setup), but requires billing infrastructure, margin management, and makes us a reseller. <strong>Passthrough with markup:</strong> Complexity of proxying without the simplicity of either model.</dd>
+        <dt>Decision</dt><dd>BYOK: user provides their own Claude API key, stored AES-256 encrypted. Flywheel provides data, surfaces, and workflows &mdash; not AI capability. We are complementary to Anthropic, not competitive.</dd>
+        <dt>Consequences</dt><dd><strong>Positive:</strong> Zero LLM cost on our side. Clear value proposition: "we build the memory, they build the brain." Better relationship with Anthropic. <strong>Negative:</strong> Setup friction (user needs Claude Code subscription). Can't control model quality or version. Token costs are user's problem to manage.</dd>
+      </div>
+    </div>
+
+    <div class="adr">
+      <div class="adr-header"><h4>ADR-003: Generic skill executor, no hardcoded skill branches</h4><span class="adr-status badge-green">Accepted</span></div>
+      <div class="adr-body">
+        <dt>Context</dt><dd>Early versions had <code>if skill_name == "meeting-prep"</code> branches in the executor. Each new skill required executor code changes.</dd>
+        <dt>Alternatives</dt><dd><strong>Keep branching:</strong> Faster for one-off skills, unmaintainable at 20+. <strong>Plugin system:</strong> Each skill as a Python module with a standard interface. More powerful, more complex.</dd>
+        <dt>Decision</dt><dd>SKILL.md declarative format with parameters JSONB. All skill-specific config (output_schema, token_budget, web_tier) flows through the parameters dict. Executor is 100% generic.</dd>
+        <dt>Consequences</dt><dd><strong>Positive:</strong> New skills require zero executor changes. Seed pipeline handles all config. Clean separation between skill definition and execution. <strong>Negative:</strong> Some legacy hardcoded branches remain in <code>execute_run()</code> (tech debt, see Section 16). Less flexibility than a plugin system for skills needing custom execution logic.</dd>
+      </div>
+    </div>
+
+    <div class="adr">
+      <div class="adr-header"><h4>ADR-004: Anthropic output_config for structured outputs</h4><span class="adr-status badge-green">Accepted</span></div>
+      <div class="adr-body">
+        <dt>Context</dt><dd>Skills like one-pager need guaranteed valid JSON matching a specific schema. Prompt-only enforcement ("output a JSON object") fails intermittently &mdash; markdown fences, missing fields, preamble text.</dd>
+        <dt>Alternatives</dt><dd><strong>Prompt-only:</strong> Works 90% of the time, catastrophic 10%. <strong>Retry loop:</strong> Parse, validate, re-prompt on failure. Expensive, slow, still not guaranteed. <strong>Post-processing:</strong> Regex/heuristic extraction from raw output. Fragile.</dd>
+        <dt>Decision</dt><dd>Anthropic SDK <code>output_config</code> with <code>json_schema</code> format. API-level enforcement &mdash; the model physically cannot produce output that doesn't match the schema.</dd>
+        <dt>Consequences</dt><dd><strong>Positive:</strong> 100% valid JSON. No retries. No parsing failures. Frontend can trust the shape. <strong>Negative:</strong> Tied to Anthropic SDK >=0.93.0. Schema must be maintained in sync with TypeScript interfaces. All properties must be present (nullable for optional fields).</dd>
+      </div>
+    </div>
+
+    <div class="adr">
+      <div class="adr-header"><h4>ADR-005: PostgreSQL FOR UPDATE SKIP LOCKED as job queue</h4><span class="adr-status badge-green">Accepted</span></div>
+      <div class="adr-body">
+        <dt>Context</dt><dd>Background jobs (email sync, meeting processing) need reliable, race-free execution. Options: Redis/Celery, separate queue service, or database-native queuing.</dd>
+        <dt>Alternatives</dt><dd><strong>Celery + Redis:</strong> Industry standard, but adds two infrastructure dependencies and operational complexity. <strong>AWS SQS / GCP Pub/Sub:</strong> Managed, but cloud-specific lock-in. <strong>Dramatiq:</strong> Lighter than Celery but still needs Redis.</dd>
+        <dt>Decision</dt><dd>PostgreSQL <code>FOR UPDATE SKIP LOCKED</code> in a polling loop. Zero additional infrastructure. Atomic claiming, built-in retry limits (<code>attempts < max_attempts</code>), transactional with the rest of the data.</dd>
+        <dt>Consequences</dt><dd><strong>Positive:</strong> No Redis, no broker, no separate service. Jobs are ACID-consistent with business data. Easy to inspect/debug via SQL. <strong>Negative:</strong> Polling-based (5s sleep between claims). Won't scale beyond ~100 jobs/second. No priority queues. Sufficient for current scale, will need migration to proper queue at growth-stage.</dd>
+      </div>
+    </div>
+
+    <div class="adr">
+      <div class="adr-header"><h4>ADR-006: Supabase PgBouncer DDL workaround</h4><span class="adr-status badge-orange">Accepted (workaround)</span></div>
+      <div class="adr-body">
+        <dt>Context</dt><dd>Alembic migrations with multiple DDL statements silently fail on Supabase. PgBouncer commits the <code>alembic_version</code> update but rolls back the actual DDL. Migration appears to succeed but nothing changed.</dd>
+        <dt>Alternatives</dt><dd><strong>Direct connection (bypass PgBouncer):</strong> Supabase doesn't expose direct connections on all plans. <strong>Single-statement migrations:</strong> One DDL per migration file. Works but creates migration file bloat.</dd>
+        <dt>Decision</dt><dd>Write migrations normally (for docs/downgrade). Apply actual DDL as individual commits via <code>session.execute() + session.commit()</code> per statement. Then <code>alembic stamp</code> to sync state. Alternatively: paste SQL in Supabase SQL Editor.</dd>
+        <dt>Consequences</dt><dd><strong>Positive:</strong> Migrations work reliably. Alembic history is accurate. <strong>Negative:</strong> Manual two-step process. Easy to forget the stamp. New engineers will hit this silently.</dd>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- 16: Tech Debt -->
+<section id="debt">
+  <div class="container">
+    <h2><span class="num">16</span> Tech Debt &amp; Risk Register</h2>
+    <p class="section-subtitle">Honest accounting of what's fragile, what needs refactoring, and what could bite us.</p>
+
+    <h3>Active Tech Debt</h3>
+    <table>
+      <thead><tr><th>Item</th><th>Location</th><th>Severity</th><th>Impact</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>Hardcoded skill-name branches in executor</td>
+          <td><code>skill_executor.py:592-639</code></td>
+          <td><span class="badge-orange">Medium</span></td>
+          <td><code>is_company_intel / is_meeting_prep / is_email_scorer</code> branches bypass generic dispatch. Each new engine-backed skill tempts adding another branch. Should be routed through execution_gateway config.</td>
+        </tr>
+        <tr>
+          <td>Global env lock for API key mutation</td>
+          <td><code>skill_executor.py (_env_lock)</code></td>
+          <td><span class="badge-red">High</span></td>
+          <td><code>threading.Lock</code> serializes <code>os.environ["ANTHROPIC_API_KEY"]</code> mutation for CLI/Slack paths. Global env mutation is inherently unsafe under concurrency. Should use per-request client instantiation.</td>
+        </tr>
+        <tr>
+          <td>Filesystem fallback for skill prompts</td>
+          <td><code>skill_executor.py:3250</code></td>
+          <td><span class="badge-orange">Medium</span></td>
+          <td>Unseeded skills fall back to reading SKILL.md from filesystem. Couples web execution to local file structure. TODO in code to remove after confirming all skills are seeded.</td>
+        </tr>
+        <tr>
+          <td>Private import coupling in ritual engine</td>
+          <td><code>flywheel_ritual.py:26</code></td>
+          <td><span class="badge-blue">Low</span></td>
+          <td>Imports internals from skill_executor. Explicitly marked "tech debt &mdash; do not refactor" (intentional shortcut).</td>
+        </tr>
+        <tr>
+          <td>Per-tenant search cap deferred</td>
+          <td><code>web_search.py:15</code></td>
+          <td><span class="badge-blue">Low</span></td>
+          <td>Only per-run search budget enforced; no daily tenant-level cap. Risk of runaway costs on abusive tenants.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>Risk Register</h3>
+    <table>
+      <thead><tr><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Mitigation</th></tr></thead>
+      <tbody>
+        <tr>
+          <td>PgBouncer DDL silent failure on new engineer</td>
+          <td><span class="badge-orange">High</span></td>
+          <td><span class="badge-orange">Medium</span></td>
+          <td>Documented in ADR-006 + CLAUDE.md. Could add a pre-commit hook that detects multi-statement migrations.</td>
+        </tr>
+        <tr>
+          <td>Context store query degradation at scale</td>
+          <td><span class="badge-orange">Medium</span></td>
+          <td><span class="badge-red">High</span></td>
+          <td>No indexes optimized for context store queries yet. Consider materialized views or search index when >5K entries per tenant.</td>
+        </tr>
+        <tr>
+          <td>Single-process architecture under load</td>
+          <td><span class="badge-orange">Medium</span></td>
+          <td><span class="badge-red">High</span></td>
+          <td>Background jobs (sync, processing) share the web process. At 50+ concurrent users, need separate worker processes or proper queue.</td>
+        </tr>
+        <tr>
+          <td>In-memory user cache staleness</td>
+          <td><span class="badge-blue">Low</span></td>
+          <td><span class="badge-blue">Low</span></td>
+          <td><code>_user_tenant_cache</code> is process-lifetime. Role changes require process restart to take effect. Add TTL or event-based invalidation.</td>
+        </tr>
+        <tr>
+          <td>No automated test suite</td>
+          <td><span class="badge-red">Certain</span></td>
+          <td><span class="badge-orange">Medium</span></td>
+          <td>Current: smoke tests + manual QA. Need integration tests against real DB, E2E with Playwright, contract tests for API boundaries.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- 17: Discussion -->
+<section id="discussion" class="tinted">
+  <div class="container">
+    <h2><span class="num">17</span> Scaling Considerations</h2>
+    <p class="section-subtitle">Key areas to address when scaling beyond the initial few users.</p>
+
+    <table>
+      <thead><tr><th>Area</th><th>Current State</th><th>What Changes at Scale</th></tr></thead>
+      <tbody>
+        <tr><td>Background Jobs</td><td>Gmail sync, meeting processing, and skill execution run as async tasks in the web process</td><td>Separate worker processes or migrate to Celery/Dramatiq. pg-based queue (FOR UPDATE SKIP LOCKED) works to ~100 jobs/sec.</td></tr>
+        <tr><td>API Key Handling</td><td>Global <code>_env_lock</code> serializes API key mutation in <code>os.environ</code></td><td>Per-request Anthropic client instantiation. Must fix before multi-tenant &mdash; current pattern is unsafe under concurrency.</td></tr>
+        <tr><td>Deployment</td><td>Single-tenant dev with ngrok</td><td>Containerized deployment (Docker), managed PostgreSQL, static frontend hosting. Need to choose cloud target.</td></tr>
+        <tr><td>CI/CD</td><td>Manual deployment</td><td>GitHub Actions, preview environments, staging &rarr; production promotion flow.</td></tr>
+        <tr><td>Test Coverage</td><td>Smoke tests + manual QA</td><td>Integration tests against real DB, E2E with Playwright, contract tests for MCP tools.</td></tr>
+        <tr><td>Context Store Queries</td><td>JSONB queries, no specialized indexes</td><td>Materialized views or search index (Typesense/Meilisearch) when >5K entries per tenant. pgvector for semantic search.</td></tr>
+        <tr><td>Module Gating</td><td>Tenant settings JSONB field exists but not enforced in routing</td><td>Config-driven API route gating, frontend page filtering, and skill catalog scoping per tenant module.</td></tr>
+        <tr><td>Observability</td><td>Cost tracking exists (cost_tracker.py)</td><td>Request tracing, error reporting (Sentry), performance monitoring (OpenTelemetry).</td></tr>
+        <tr><td>API Stability</td><td>No versioning</td><td>MCP tools and third-party consumers need stable contracts. Version headers or URL versioning before opening the API.</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- Footer -->
+<div class="footer">
+  <div class="container">
+    <p><span class="brand">Lumif.ai</span> &middot; Flywheel v2 Technical Architecture &middot; April 2026</p>
+    <p style="margin-top: 8px;">Confidential &mdash; Sharan JM, CPO</p>
+  </div>
+</div>
+
+
+
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', () => {
+  document.querySelectorAll('.adr-header').forEach(h => {
+    h.addEventListener('click', () => h.nextElementSibling.classList.toggle('open'));
+  });
+});
+</script>
+
+<script>
+async function checkPassword() {
+  const pw = document.getElementById('pw').value;
+  const encoder = new TextEncoder();
+  const data = encoder.encode(pw);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', data);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+  const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+
+  if (hashHex === '0bd6161722e4b99336f09dbfedd28c8d6a7f20cb16e0199db99f3735c5fadbef') {
+    document.getElementById('gate').style.display = 'none';
+    document.getElementById('protected-content').style.display = 'block';
+  } else {
+    document.getElementById('pw').classList.add('error');
+    setTimeout(() => document.getElementById('pw').classList.remove('error'), 400);
+  }
+  return false;
+}
+</script>
+
+</body>
+</html>
