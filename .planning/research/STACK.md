@@ -1,375 +1,276 @@
-# Technology Stack: Library Redesign
+# Technology Stack: Structured Output, Export, Upload, PII Redaction
 
-**Project:** Flywheel V2 - Library Redesign (Tags, Filtering, Pagination, Dedup)
-**Researched:** 2026-04-08
+**Project:** Flywheel V2 - Milestone: Structured Skill Output + Export + Upload + PII
+**Researched:** 2026-04-10
 **Overall confidence:** HIGH
 
-## Recommended Stack
+## Context: What Already Exists
 
-### Principle: Zero New Dependencies
+These are already in `pyproject.toml` and working. DO NOT re-add or change:
 
-The existing stack covers 100% of what the Library Redesign needs. No new npm packages. No new Python packages. No new database extensions.
+| Existing Dep | Version | Current Use |
+|---|---|---|
+| `anthropic` | >=0.86.0 (installed: 0.84.0) | Skill executor tool_use loop via `AsyncAnthropic` |
+| `python-docx` | >=1.2.0 | Read-only DOCX text extraction in `file_extraction.py` |
+| `pdfplumber` | >=0.11.9 | PDF text extraction in `file_extraction.py` |
+| `python-multipart` | >=0.0.22 | FastAPI `UploadFile` support (already used in `api/files.py`) |
+| `pydantic` | >=2.0 | Request/response models, settings |
+| `jinja2` | (via FastAPI) | HTML template rendering in `output_renderer.py` |
+| `beautifulsoup4` | >=4.12 | HTML sanitization in `output_renderer.py` |
+| `markdown` | >=3.10.2 | Markdown processing |
 
-| Feature | Existing Tool | Why Sufficient |
-|---------|--------------|----------------|
-| Tags column (`TEXT[]`) | `sqlalchemy.dialects.postgresql.ARRAY(Text)` | Used in 10+ models already |
-| GIN index on tags | Alembic raw SQL | Pattern in migrations 010, 028, 040 |
-| Tag containment queries | `.contains()`, `.overlap()` | Used in pipeline_service, leads, entity_normalization |
-| Cursor-based pagination | SQLAlchemy `select().where().limit()` | Pure SQL keyset pagination |
-| Infinite scroll | `useInfiniteQuery` from `@tanstack/react-query` v5 | Installed, just not used yet |
-| Scroll sentinel | Native `IntersectionObserver` | Used in LandingPage.tsx, DealTapeTheater.tsx |
-| Tag autocomplete | `cmdk` + custom component | cmdk already powers CommandPalette |
-| ILIKE search | SQLAlchemy `.ilike()` | Built-in operator |
-| Debounced search | `setTimeout` | Already in DocumentLibrary.tsx |
-| Dedup (content hash) | SHA-256 + unique partial index | Standard PostgreSQL |
+**Key finding:** File upload infrastructure is already complete (`api/files.py`, `file_extraction.py`, `document_storage.py`, `UploadedFile` model). The skill executor already handles `DOCUMENT_FILE:` prefixed inputs for uploaded documents. No new upload work needed at the API layer.
 
 ---
 
-## Implementation Patterns
+## NEW Dependencies Required
 
-### 1. Tags Column -- PostgreSQL ARRAY with GIN Index
+### 1. Anthropic SDK Upgrade (structured JSON output)
 
-**Confidence:** HIGH (identical pattern used across codebase)
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `anthropic` | **>=0.93.0** | Structured output via `output_config.format` | Current 0.84.0 predates structured outputs (GA in SDK ~0.77.0+). Need `client.messages.create(output_config=...)` and `client.messages.parse()` with Pydantic models. |
 
-**Model addition:**
+**Integration point:** `skill_executor.py` line ~3306 (`_execute_with_tools`). The tool_use loop calls `client.messages.create()`. For structured output skills, the FINAL call (after all tools resolve, on `end_turn`) should use `output_config` to guarantee JSON schema compliance.
+
+**Critical nuance:** Structured JSON output (`output_config.format`) and tool_use (`tools=`) CAN be combined in the same request. Claude will use tools normally and produce structured JSON on the final `end_turn`. This means the existing tool_use loop works -- just add `output_config` to the `messages.create()` call for skills that declare structured output.
+
+**How it works with Pydantic:**
 ```python
-from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy import Text
+from pydantic import BaseModel
 
-# Add to Document model in db/models.py
-tags: Mapped[list[str]] = mapped_column(
-    ARRAY(Text), server_default=text("'{}'::text[]"), nullable=False
+class SkillOutput(BaseModel):
+    title: str
+    sections: list[dict]
+    metadata: dict
+
+# SDK auto-converts Pydantic to JSON schema
+response = await client.messages.parse(
+    model="claude-sonnet-4-20250514",
+    max_tokens=4096,
+    output_format=SkillOutput,  # SDK translates to output_config internally
+    messages=messages,
 )
+parsed = response.parsed_output  # typed SkillOutput
 ```
 
-**Migration SQL (each statement as individual commit per Supabase DDL workaround):**
-```sql
--- Statement 1: Add column
-ALTER TABLE documents ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}';
+**Schema limitations to know:**
+- No recursive schemas
+- `additionalProperties` must be `false` for objects
+- No `minimum`/`maximum`/`minLength`/`maxLength` constraints
+- `minItems` only supports 0 or 1
+- Required properties appear first in output (reordered)
 
--- Statement 2: Create GIN index
-CREATE INDEX idx_documents_tags ON documents USING GIN (tags);
+**Confidence:** HIGH -- verified from official Anthropic docs (platform.claude.com)
+
+---
+
+### 2. WeasyPrint (PDF generation from HTML)
+
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `weasyprint` | **>=68.0** | Convert rendered HTML to PDF | Best Python HTML-to-PDF library. Full CSS3 support (flexbox, grid, media queries). No browser engine needed. Uses pydyf for PDF generation (since v53). Existing Jinja2 HTML templates can be reused directly. |
+
+**System dependencies (macOS):**
+```bash
+brew install cairo pango gdk-pixbuf libffi
 ```
 
-**GIN + tenant scoping:** GIN indexes cannot composite with non-array columns like UUID. Since RLS already filters by `tenant_id` via `current_setting('app.tenant_id')`, the query planner uses the RLS B-tree index on `tenant_id` first, then the GIN index on `tags`. This is the same approach used in migration 040 (`idx_lead_tenant_purpose`).
+**System dependencies (Linux/Docker):**
+```bash
+apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
+```
 
-**Querying tags (verified from existing codebase patterns):**
+**Integration point:** New `services/export_service.py` that takes rendered HTML (already stored in `SkillRun.rendered_html`) and converts to PDF bytes via `weasyprint.HTML(string=html).write_pdf()`. The existing `output_renderer.py` templates already produce standalone HTML with embedded CSS -- these are ready for PDF conversion.
+
+**Why not alternatives:**
+- **xhtml2pdf**: Pure Python (no system deps) but limited to CSS 2.1. No flexbox/grid. Existing templates use modern CSS.
+- **pdfkit/wkhtmltopdf**: Requires headless WebKit binary. wkhtmltopdf is archived (Jan 2023), no longer maintained.
+- **reportlab**: Low-level PDF builder. Would require rewriting all templates as Python code instead of reusing HTML.
+
+**Confidence:** HIGH -- WeasyPrint 68.1 verified on PyPI, system deps verified from official docs.
+
+---
+
+### 3. python-docx (write path -- already installed)
+
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `python-docx` | **>=1.2.0** (already in deps) | Generate DOCX from structured skill output | Already installed for read. Write path uses same library: `Document()`, `add_heading()`, `add_paragraph()`, `add_table()`. No new dependency needed. |
+
+**Integration point:** New `services/export_service.py` alongside PDF export. Takes structured JSON output (from structured output feature) and builds DOCX programmatically. Unlike PDF (which converts existing HTML), DOCX generation maps structured data to Word elements directly.
+
+**Key capabilities already available in 1.2.0:**
+- Headings (levels 1-9)
+- Paragraphs with bold/italic/underline runs
+- Tables with cell spanning and built-in styles
+- Page breaks
+- Document properties (title, author)
+- Styles (built-in Word styles like "Heading 1", "List Bullet", table styles)
+
+**Why not HTML-to-DOCX conversion:**
+- No reliable HTML-to-DOCX converter exists in Python
+- `mammoth` goes DOCX-to-HTML only (wrong direction)
+- `htmldocx` is unmaintained and produces poor output
+- Building from structured JSON gives full control over Word formatting
+
+**Confidence:** HIGH -- python-docx 1.2.0 docs verified, already in pyproject.toml.
+
+---
+
+### 4. Presidio (PII redaction)
+
+| Technology | Version | Purpose | Why |
+|---|---|---|---|
+| `presidio-analyzer` | **>=2.2.362** | Detect PII entities in text | Microsoft's open-source PII detection. Supports 30+ entity types (names, emails, SSNs, phone numbers, credit cards, etc.). Pluggable recognizer architecture. |
+| `presidio-anonymizer` | **>=2.2.362** | Redact/mask/encrypt detected PII | Companion to analyzer. Supports mask, replace, encrypt, hash operators. |
+| `spacy` | **>=3.7** | NLP engine for Presidio | Required by presidio-analyzer for NER. |
+
+**spaCy model choice: `en_core_web_sm` (not `en_core_web_lg`)**
+
+Use the small model because:
+- NER accuracy difference is negligible (0.85 vs 0.86 recall on standard benchmarks)
+- `en_core_web_sm` is ~12MB vs `en_core_web_lg` at ~560MB
+- Presidio's pattern-based recognizers (regex for emails, SSNs, credit cards) do most of the heavy lifting -- spaCy NER only handles names/locations/organizations
+- For a founder-facing product processing business documents, the entity types are predictable (names, emails, phone numbers, addresses) -- not edge-case NLP
+
+**Installation:**
+```bash
+pip install presidio-analyzer presidio-anonymizer spacy
+python -m spacy download en_core_web_sm
+```
+
+**Integration point:** New `services/pii_service.py` that wraps Presidio. Called from:
+1. **Pre-LLM:** Optionally redact PII from uploaded documents before sending to Claude (privacy-preserving processing)
+2. **Post-LLM:** Redact PII from skill output before storage/display (contract review, legal docs)
+3. **Export:** Redact PII in exported PDF/DOCX on demand
+
+**Presidio usage pattern:**
 ```python
-# Filter: documents matching ANY selected tag (OR -- for browsing)
-stmt = stmt.where(Document.tags.overlap(["meeting-prep", "company-intel"]))
+from presidio_analyzer import AnalyzerEngine
+from presidio_anonymizer import AnonymizerEngine
 
-# Filter: documents matching ALL selected tags (AND -- for drill-down)
-stmt = stmt.where(Document.tags.contains(["meeting-prep", "company-intel"]))
+analyzer = AnalyzerEngine()  # loads spaCy model once
+anonymizer = AnonymizerEngine()
 
-# Autocomplete: distinct tags across tenant
-distinct_tags = await db.execute(
-    select(func.unnest(Document.tags).label("tag"))
-    .where(Document.deleted_at.is_(None))
-    .distinct()
-    .order_by(text("tag"))
-    .limit(50)
-)
+results = analyzer.analyze(text=content, language="en")
+redacted = anonymizer.anonymize(text=content, analyzer_results=results)
 ```
 
-**Sources:** `pipeline_service.py:276` uses `.overlap()`, `leads.py:325` uses `.contains()`, `entity_normalization.py:84` uses `.op("@>")`.
+**Why Presidio over alternatives:**
+- **regex-only**: Misses names, organizations, context-dependent PII
+- **AWS Comprehend / Google DLP**: External API calls, cost per request, data leaves your infra
+- **spaCy NER alone**: No anonymization layer, no pattern recognizers for structured PII (SSN, credit card)
+- **Presidio**: Local, free, combines regex + NER, built-in anonymization operators
+
+**Confidence:** HIGH -- presidio-analyzer 2.2.362 verified on PyPI, spaCy model tradeoffs verified from spaCy docs and Presidio docs.
 
 ---
 
-### 2. Cursor-Based Pagination -- Replacing Offset
+## No New Dependencies Needed For
 
-**Confidence:** HIGH (standard SQLAlchemy keyset pagination)
-
-**Why replace offset pagination:** The current `list_documents` endpoint uses `offset/limit` with a separate `COUNT(*)` query. Problems:
-- Skipped/duplicated items when data changes between page loads
-- `COUNT(*)` is a full table scan (slow at scale)
-- Not compatible with infinite scroll UX
-
-**Cursor approach using `created_at` + `id` (tiebreaker):**
-```python
-@router.get("/")
-async def list_documents(
-    document_type: str | None = None,
-    tags: list[str] | None = Query(None),
-    search: str | None = None,
-    cursor: str | None = None,       # ISO timestamp of last item
-    cursor_id: str | None = None,    # UUID tiebreaker
-    limit: int = Query(20, ge=1, le=100),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> DocumentCursorResponse:
-    base = select(Document).where(Document.deleted_at.is_(None))
-
-    if document_type:
-        base = base.where(Document.document_type == document_type)
-    if tags:
-        base = base.where(Document.tags.overlap(tags))
-    if search:
-        base = base.where(Document.title.ilike(f"%{search}%"))
-
-    # Keyset pagination
-    if cursor and cursor_id:
-        cursor_dt = datetime.fromisoformat(cursor)
-        cursor_uuid = UUID(cursor_id)
-        base = base.where(
-            or_(
-                Document.created_at < cursor_dt,
-                and_(
-                    Document.created_at == cursor_dt,
-                    Document.id < cursor_uuid,
-                ),
-            )
-        )
-
-    base = base.order_by(Document.created_at.desc(), Document.id.desc())
-    rows = (await db.execute(base.limit(limit + 1))).scalars().all()
-
-    has_more = len(rows) > limit
-    items = rows[:limit]
-
-    return DocumentCursorResponse(
-        documents=[_doc_to_list_item(doc) for doc in items],
-        has_more=has_more,
-        next_cursor=items[-1].created_at.isoformat() if items and has_more else None,
-        next_cursor_id=str(items[-1].id) if items and has_more else None,
-    )
-```
-
-**Why `limit + 1`:** Fetching one extra row to determine `has_more` avoids the expensive COUNT query. The current endpoint's separate COUNT will degrade at scale.
-
-**Backward compatibility:** Keep `offset` parameter as deprecated optional. If provided (and no `cursor`), fall back to offset behavior so existing frontend code doesn't break during migration.
+| Feature | Why No New Dep |
+|---|---|
+| **File upload** | `python-multipart` + `UploadFile` already in place. `api/files.py` handles upload, extraction, storage. Skill executor already processes `DOCUMENT_FILE:` inputs. |
+| **Multipart upload to skill** | Frontend already sends file IDs. Backend `_execute_with_tools()` already fetches `UploadedFile.extracted_text` from DB. |
+| **HTML rendering** | `output_renderer.py` + Jinja2 templates already handle this. Structured JSON output just changes the data source (JSON dict instead of parsed markdown sections). |
+| **Frontend markdown/HTML** | `react-markdown` + `DOMPurify` already handle display. |
 
 ---
 
-### 3. Infinite Scroll -- useInfiniteQuery + IntersectionObserver
+## Recommended Stack (all additions)
 
-**Confidence:** HIGH (`@tanstack/react-query` v5.91.2 already installed, IntersectionObserver already used)
+### pip install
 
-**Frontend pattern:**
-```typescript
-import { useInfiniteQuery } from '@tanstack/react-query'
+```bash
+# Upgrade existing
+pip install "anthropic>=0.93.0"
 
-const {
-  data,
-  fetchNextPage,
-  hasNextPage,
-  isFetchingNextPage,
-  isLoading,
-} = useInfiniteQuery({
-  queryKey: ['documents', { type: activeTab, tags: selectedTags, search: debouncedSearch }],
-  queryFn: ({ pageParam }) => fetchDocuments({
-    limit: 20,
-    cursor: pageParam?.cursor,
-    cursorId: pageParam?.cursorId,
-    documentType: activeTab === 'all' ? undefined : activeTab,
-    tags: selectedTags.length ? selectedTags : undefined,
-    search: debouncedSearch || undefined,
-  }),
-  initialPageParam: null as { cursor: string; cursorId: string } | null,
-  getNextPageParam: (lastPage) =>
-    lastPage.has_more
-      ? { cursor: lastPage.next_cursor, cursorId: lastPage.next_cursor_id }
-      : undefined,
-})
+# New: PDF generation
+pip install "weasyprint>=68.0"
 
-const documents = data?.pages.flatMap(p => p.documents) ?? []
+# New: PII redaction
+pip install "presidio-analyzer>=2.2.362" "presidio-anonymizer>=2.2.362" "spacy>=3.7"
+python -m spacy download en_core_web_sm
 ```
 
-**Sentinel element (reuse existing IntersectionObserver pattern from LandingPage.tsx):**
-```typescript
-const sentinelRef = useRef<HTMLDivElement>(null)
+### pyproject.toml changes
 
-useEffect(() => {
-  if (!sentinelRef.current || !hasNextPage) return
-  const observer = new IntersectionObserver(
-    ([entry]) => { if (entry.isIntersecting && !isFetchingNextPage) fetchNextPage() },
-    { rootMargin: '200px' }  // Pre-fetch 200px before visible
-  )
-  observer.observe(sentinelRef.current)
-  return () => observer.disconnect()
-}, [hasNextPage, fetchNextPage, isFetchingNextPage])
-
-// At bottom of document list:
-// <div ref={sentinelRef} aria-hidden="true" />
+```toml
+dependencies = [
+    # ... existing ...
+    "anthropic>=0.93.0",          # was >=0.86.0 -- upgrade for structured outputs
+    "weasyprint>=68.0",           # NEW: HTML-to-PDF export
+    "presidio-analyzer>=2.2.362", # NEW: PII detection
+    "presidio-anonymizer>=2.2.362", # NEW: PII anonymization
+    "spacy>=3.7",                 # NEW: NLP engine for Presidio
+]
 ```
 
-**Replaces:** The current manual `extraPages` state + `handleLoadMore` button pattern in DocumentLibrary.tsx. `useInfiniteQuery` handles all page accumulation, caching, and refetching automatically.
+### System dependencies (CI/Docker)
 
----
+```dockerfile
+# Add to Dockerfile
+RUN apt-get update && apt-get install -y \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libcairo2 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    shared-mime-info \
+    && rm -rf /var/lib/apt/lists/*
 
-### 4. Tag Input / Autocomplete -- Custom Component with cmdk
-
-**Confidence:** HIGH (cmdk v1.1.1 already in use)
-
-**Why NOT add a tag library (emblor, react-tag-input, etc.):** The project already has `cmdk` powering the command palette. A tag input with autocomplete is a small wrapper (~80 lines) around cmdk's `CommandInput` + `CommandGroup` + `CommandItem`. Adding a library for this is dependency bloat.
-
-**Component approach:**
-- Multi-select input built with `cmdk` primitives (same as `components/ui/command.tsx`)
-- Popover dropdown shows matching tags from autocomplete endpoint
-- Selected tags as removable pills (badge style, Tailwind)
-- Keyboard: Enter to select, Backspace to remove last, Escape to close, free-form entry allowed
-- Debounced API call for suggestions (reuse existing debounce pattern)
-
-**Autocomplete endpoint:**
-```python
-@router.get("/tags")
-async def list_tags(
-    q: str = Query("", max_length=100),
-    limit: int = Query(30, ge=1, le=100),
-    user: TokenPayload = Depends(require_tenant),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> list[str]:
-    """Distinct tags for autocomplete, optionally filtered by prefix."""
-    base = (
-        select(func.unnest(Document.tags).label("tag"))
-        .where(Document.deleted_at.is_(None))
-        .distinct()
-        .order_by(text("tag"))
-        .limit(limit)
-    )
-    if q:
-        # Use subquery to filter on the unnested value
-        from sqlalchemy import literal_column
-        subq = base.subquery()
-        stmt = select(subq.c.tag).where(subq.c.tag.ilike(f"{q}%"))
-    else:
-        stmt = base
-    result = await db.execute(stmt)
-    return [row[0] for row in result]
+# After pip install
+RUN python -m spacy download en_core_web_sm
 ```
 
----
+### macOS dev setup
 
-### 5. ILIKE Search on Title (V1)
-
-**Confidence:** HIGH (built into SQLAlchemy)
-
-```python
-if search:
-    # Escape user input for LIKE special chars
-    escaped = search.replace("%", "\\%").replace("_", "\\_")
-    base = base.where(Document.title.ilike(f"%{escaped}%"))
+```bash
+brew install cairo pango gdk-pixbuf libffi
 ```
-
-**V1 ILIKE is sufficient.** For document library scale (hundreds to low thousands per tenant), `ILIKE` with leading wildcard is fast enough. No index needed for V1.
-
-**V2 upgrade path if search gets slow:**
-```sql
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE INDEX idx_documents_title_trgm ON documents USING GIN (title gin_trgm_ops);
-```
-
-This would accelerate `ILIKE '%term%'` queries via trigram matching. But this is NOT needed for V1 -- premature optimization.
-
----
-
-### 6. Document Deduplication -- Content Hash
-
-**Confidence:** MEDIUM (approach is sound, but dedup strategy needs validation with real data)
-
-**Add `content_hash` column:**
-```python
-# In Document model
-content_hash: Mapped[str | None] = mapped_column(Text, nullable=True)
-```
-
-**Migration:**
-```sql
--- Statement 1: Add column
-ALTER TABLE documents ADD COLUMN content_hash TEXT;
-
--- Statement 2: Unique partial index (per tenant, non-deleted only)
-CREATE UNIQUE INDEX idx_documents_dedup
-    ON documents (tenant_id, content_hash)
-    WHERE content_hash IS NOT NULL AND deleted_at IS NULL;
-```
-
-**On document creation:** Compute SHA-256 from rendered HTML content. Check for existing hash before inserting -- if match found, return existing document instead of creating duplicate.
-
-**Fuzzy dedup (similar titles) is a UI concern, not a DB constraint.** Show a "possible duplicate" warning when title similarity is high, but don't block creation.
-
----
-
-## Supabase / PgBouncer Considerations
-
-| Concern | Mitigation |
-|---------|------------|
-| DDL migration (add columns + indexes) | Each DDL statement as individual commit per established workaround |
-| `unnest()` in tag autocomplete | Pure SQL function, works through PgBouncer transaction mode |
-| `ARRAY` operators (`@>`, `&&`) | Standard PostgreSQL, no PgBouncer issues |
-| GIN index creation | Regular `CREATE INDEX` (not `CONCURRENTLY`). At current scale, locks for milliseconds. |
-| RLS + cursor pagination | RLS adds `WHERE tenant_id = X` automatically. Cursor `WHERE created_at < Y` composes cleanly. |
-| `UNIQUE` partial index for dedup | Standard PostgreSQL, works through PgBouncer |
-
----
-
-## What NOT to Add
-
-| Library/Tech | Why Skip |
-|-------------|----------|
-| `emblor` / `react-tag-input` / `react-tagsinput` | cmdk already provides typeahead primitives; ~80 lines custom vs new dependency |
-| `react-infinite-scroll-component` | `useInfiniteQuery` + `IntersectionObserver` is simpler and already partially in codebase |
-| `react-virtuoso` | `@tanstack/react-virtual` already installed; only needed for 500+ visible items (unlikely with 20-item pages) |
-| `pg_trgm` extension | ILIKE sufficient for V1 title search; documented as V2 upgrade path |
-| Full-text search (`tsvector` on documents) | Overkill for title-only search; context store already has FTS if full-content needed |
-| Separate `document_tags` junction table | `TEXT[]` on document row is correct at this scale; junction table only needed for tag metadata (colors, hierarchy) |
-| Elasticsearch / Meilisearch | Title ILIKE on hundreds of docs; no external search engine needed |
-| `react-hook-form` | Tag input is a single component, not a form; controlled state is fine |
 
 ---
 
 ## Alternatives Considered
 
 | Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| Tags storage | `TEXT[]` column + GIN | Junction table (`document_tags`) | Over-normalized for simple string tags at this scale |
-| Tags storage | `TEXT[]` column + GIN | Tags in JSONB `metadata` | Can't GIN-index a nested JSONB array as efficiently; explicit column is clearer |
-| Pagination | Cursor (keyset) | Offset (current) | Offset skips/duplicates rows on mutation; bad for infinite scroll |
-| Pagination | Cursor (keyset) | Page numbers | Page numbers require COUNT; cursor is cheaper and UX is infinite scroll anyway |
-| Infinite scroll | `useInfiniteQuery` + sentinel | Manual page state (current) | Current `extraPages` state is fragile; `useInfiniteQuery` handles caching, refetch, stale data |
-| Tag input | Custom with cmdk | emblor library | Dependency for ~80 lines of code; cmdk already in bundle |
-| Title search | ILIKE (V1) | pg_trgm GIN | Premature optimization; ILIKE is fine for <5K rows per tenant |
-| Dedup | Content hash (SHA-256) | Title similarity matching | Hash catches exact dupes deterministically; fuzzy matching is UI warning, not constraint |
+|---|---|---|---|
+| PDF generation | WeasyPrint | xhtml2pdf | CSS 2.1 only, no flexbox/grid. Existing templates use modern CSS. |
+| PDF generation | WeasyPrint | pdfkit (wkhtmltopdf) | wkhtmltopdf archived Jan 2023, no longer maintained. |
+| PDF generation | WeasyPrint | reportlab | Low-level API, can't reuse HTML templates. |
+| PII detection | Presidio | regex-only | Misses names, orgs, context-dependent PII. |
+| PII detection | Presidio | AWS Comprehend | External API, per-request cost, data leaves infra. |
+| PII detection | Presidio | Custom spaCy NER | No built-in anonymization, no pattern recognizers. |
+| spaCy model | en_core_web_sm | en_core_web_lg | 50x larger (560MB vs 12MB), negligible accuracy gain for PII use case. |
+| DOCX generation | python-docx | docxtpl | Template-based, less control. python-docx already installed. |
+| Structured output | Anthropic native | instructor lib | Extra dependency. Anthropic SDK now has native `messages.parse()` with Pydantic. |
 
 ---
 
-## Migration Checklist
+## Version Compatibility Matrix
 
-Execute in order, each DDL as individual commit:
+| Package | Min Version | Python | Notes |
+|---|---|---|---|
+| anthropic | 0.93.0 | >=3.9 | GA structured outputs, `output_config` param |
+| weasyprint | 68.0 | >=3.10 | Requires system libs (cairo, pango) |
+| presidio-analyzer | 2.2.362 | >=3.10, <3.14 | Requires spaCy + model download |
+| presidio-anonymizer | 2.2.362 | >=3.10, <3.14 | Companion to analyzer |
+| spacy | 3.7+ | >=3.8 | NLP engine |
+| python-docx | 1.2.0 | >=3.7 | Already installed |
 
-1. `ALTER TABLE documents ADD COLUMN tags TEXT[] NOT NULL DEFAULT '{}'`
-2. `ALTER TABLE documents ADD COLUMN content_hash TEXT`
-3. `CREATE INDEX idx_documents_tags ON documents USING GIN (tags)`
-4. `CREATE UNIQUE INDEX idx_documents_dedup ON documents (tenant_id, content_hash) WHERE content_hash IS NOT NULL AND deleted_at IS NULL`
-5. `alembic stamp <revision>`
-6. Backfill script: extract tags from existing `metadata` JSONB (companies, skill names) into `tags` array
-7. Backfill script: compute `content_hash` for existing documents
-
----
-
-## Version Summary
-
-| Component | Current Version | Change Needed |
-|-----------|----------------|---------------|
-| `@tanstack/react-query` | ^5.91.2 | None -- use `useInfiniteQuery` (already available) |
-| `@tanstack/react-virtual` | ^3.13.23 | None -- available if list virtualization needed |
-| `cmdk` | ^1.1.1 | None -- use for tag autocomplete component |
-| SQLAlchemy | >=2.0 | None -- `ARRAY(Text)`, `.overlap()`, `.contains()` all available |
-| asyncpg | >=0.29 | None -- handles array types natively |
-| PostgreSQL | 15 (Supabase) | None -- GIN, ARRAY, ILIKE all built-in |
-| Alembic | >=1.14 | None -- migration file + SQL Editor execution |
+**Project Python:** >=3.12 (per pyproject.toml). All packages compatible.
 
 ---
 
 ## Sources
 
-- **Codebase (verified):** `db/models.py` lines 271, 571, 834, 977, 1202 -- ARRAY(Text) usage across 10+ models
-- **Codebase (verified):** `pipeline_service.py:276` -- `.overlap()` for array filtering
-- **Codebase (verified):** `leads.py:325` -- `.contains()` for array filtering
-- **Codebase (verified):** `entity_normalization.py:84` -- `.op("@>")` for array containment
-- **Codebase (verified):** `alembic/versions/028_*`, `040_*` -- GIN index creation patterns
-- **Codebase (verified):** `frontend/src/pages/LandingPage.tsx:116` -- IntersectionObserver pattern
-- **Codebase (verified):** `frontend/src/features/email/components/ThreadList.tsx` -- `@tanstack/react-virtual` usage
-- **Codebase (verified):** `frontend/src/features/navigation/components/CommandPalette.tsx` -- cmdk usage
-- **Codebase (verified):** `frontend/src/features/documents/components/DocumentLibrary.tsx` -- current offset pagination to replace
-- [Emblor tag input](https://github.com/JaleelB/emblor) -- evaluated and rejected (dependency overhead)
-- [shadcn/ui tag input discussion](https://github.com/shadcn-ui/ui/issues/3647) -- no official component; custom build is standard
+- [Anthropic Structured Outputs docs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) -- HIGH confidence
+- [WeasyPrint PyPI](https://pypi.org/project/weasyprint/) -- v68.1, HIGH confidence
+- [WeasyPrint installation docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) -- system deps, HIGH confidence
+- [Presidio analyzer PyPI](https://pypi.org/project/presidio-analyzer/) -- v2.2.362, HIGH confidence
+- [Presidio installation docs](https://microsoft.github.io/presidio/installation/) -- HIGH confidence
+- [Presidio spaCy/Stanza docs](https://microsoft.github.io/presidio/analyzer/nlp_engines/spacy_stanza/) -- model choice, HIGH confidence
+- [spaCy models page](https://spacy.io/models) -- en_core_web_sm vs lg accuracy, MEDIUM confidence
+- [python-docx docs](https://python-docx.readthedocs.io/en/latest/user/quickstart.html) -- write API, HIGH confidence
+- [Anthropic Python SDK PyPI](https://pypi.org/project/anthropic/) -- v0.93.0 latest, HIGH confidence

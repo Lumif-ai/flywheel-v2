@@ -19,6 +19,7 @@ Endpoints (ordered to prevent FastAPI path conflicts):
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 import secrets
@@ -27,7 +28,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel, field_validator
 from sqlalchemy import func, select, and_, text
 from sqlalchemy.dialects.postgresql import array as pg_array
@@ -621,6 +622,89 @@ async def get_document(
         output=run_output,
         rendered_html=run_html,
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /documents/{document_id}/export -- Export as PDF or DOCX
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{document_id}/export")
+async def export_document(
+    document_id: UUID,
+    format: str = Query(..., pattern="^(pdf|docx)$"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> StreamingResponse:
+    """Export document as PDF or DOCX for download."""
+    import io
+
+    result = await db.execute(
+        select(Document).where(
+            Document.id == document_id,
+            Document.deleted_at.is_(None),
+        )
+    )
+    doc = result.scalar_one_or_none()
+    if doc is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Document not found",
+        )
+
+    # Fetch linked SkillRun content
+    run_output: str | None = None
+    run_html: str | None = None
+    if doc.skill_run_id:
+        run_result = await db.execute(
+            select(SkillRun.output, SkillRun.rendered_html).where(
+                SkillRun.id == doc.skill_run_id
+            )
+        )
+        run_row = run_result.one_or_none()
+        if run_row:
+            run_output, run_html = run_row
+
+    if not run_output and not run_html:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Document has no exportable content",
+        )
+
+    from flywheel.services.document_export import export_as_pdf, export_as_docx
+
+    safe_title = re.sub(r"[^\w\s\-]", "", doc.title or "document").strip().replace(" ", "_")[:60]
+
+    try:
+        if format == "pdf":
+            content = await asyncio.to_thread(export_as_pdf, doc.document_type, run_output, run_html)
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{safe_title}.pdf"',
+                },
+            )
+        else:
+            content = await asyncio.to_thread(export_as_docx, doc.document_type, run_output, run_html)
+            return StreamingResponse(
+                io.BytesIO(content),
+                media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{safe_title}.docx"',
+                },
+            )
+    except RuntimeError as e:
+        raise HTTPException(
+            status_code=status.HTTP_501_NOT_IMPLEMENTED,
+            detail=str(e),
+        )
+    except Exception as e:
+        logger.exception("Export failed for document %s format=%s", document_id, format)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Export failed: {e}",
+        )
 
 
 # ---------------------------------------------------------------------------

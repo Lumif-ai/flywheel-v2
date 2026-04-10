@@ -4,6 +4,16 @@ COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
 WORKDIR /app
 
+# Install WeasyPrint system dependencies (Pango, Cairo, GDK-Pixbuf)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpango-1.0-0 \
+    libpangoft2-1.0-0 \
+    libharfbuzz-subset0 \
+    libcairo2 \
+    libgdk-pixbuf2.0-0 \
+    libffi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install dependencies first (cache layer)
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-install-project

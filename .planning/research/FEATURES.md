@@ -1,249 +1,103 @@
-# Feature Landscape: Library Redesign
+# Feature Landscape
 
-**Domain:** Document library with tagging, filtering, pagination, dedup for AI-produced content
-**Researched:** 2026-04-08
-**Overall confidence:** HIGH (based on codebase analysis + established SaaS patterns)
-
-## Current State (What Exists)
-
-Before mapping new features, here is what the library already has:
-
-| Existing | Implementation | Notes |
-|----------|---------------|-------|
-| Flat document list | `DocumentLibrary.tsx` — fetches all docs, client-side tab filter | Works but loads everything up front |
-| Type tabs | Dynamic tabs built from `document_type` field | Client-side only, counts from loaded docs |
-| Client-side search | Filters on title, companies, contacts in memory | No server-side search |
-| List/grid toggle | `ViewToggle` component with localStorage persistence | Already polished |
-| Date grouping | Today/Yesterday/This Week/Earlier buckets | Good UX, keep it |
-| Manual "Load More" | Button-based pagination, PAGE_SIZE=50 | Not infinite scroll — cursor-based offset |
-| Share via token | Generate share_token, copy link | Working |
-| Smart title cleanup | `displayTitle()` strips prefixes, resolves URLs, fallback to metadata | Already handles bad titles somewhat |
-| Document type styles | Color-coded icons per type (meeting-prep, company-intel, etc.) | Extensible via `TYPE_STYLES` map |
-
-**Key gaps the redesign addresses:** No tags. No company filter. No server-side search. No dedup. Titles still bad at source. No account linkage on the Document model (only loose `metadata_.companies` JSON array).
-
----
+**Domain:** Structured skill output, document export, file upload, PII redaction for AI-powered founder intelligence platform
+**Researched:** 2026-04-10
 
 ## Table Stakes
 
-Features users expect in any modern document library. Missing = product feels broken or amateur.
+Features users expect. Missing = product feels incomplete.
 
-| # | Feature | Why Expected | Complexity | Dependencies | Real-World Reference |
-|---|---------|-------------|------------|-------------|---------------------|
-| T1 | **Type tab filtering (server-side)** | Users already see tabs — but they only filter client-loaded docs. At 500+ docs, tabs must query server with counts from the full dataset. | Low | Existing `document_type` column + index `idx_documents_type` | Notion database views, Linear issue type filter |
-| T2 | **Company/Account dropdown filter** | Founders think in accounts ("show me everything on Acme"). Docs already have `metadata_.companies` but no filter UI or proper FK. | Medium | Account resolution (D4) adds `account_id` FK on documents, account list endpoint already exists | Salesforce files-per-account, HubSpot document associations |
-| T3 | **Text search (server-side)** | Current client-side search breaks at scale. Users type a company name or keyword and expect results. ILIKE on title + metadata is sufficient for <10K docs — no need for full-text search engine. | Medium | Backend endpoint changes, debounced input already exists at 300ms | Google Drive search bar, Notion quick search |
-| T4 | **Server-side pagination with cursor** | Current offset-based pagination works but gets slower as offset grows. Cursor-based (keyset on `created_at, id`) is the standard for sorted lists. | Medium | Backend: change from offset to `created_at < cursor` keyset pattern | Every modern SaaS list: Linear, Notion, Slack |
-| T5 | **Infinite scroll (hybrid)** | Users expect content to load as they scroll, not click "Load More." Hybrid = auto-load on scroll + show count ("Showing 150 of 2,341"). Keep "Load More" as accessibility fallback. | Medium | Frontend: IntersectionObserver trigger, backend: cursor pagination (T4) | Google Drive, Dropbox, Notion |
-| T6 | **Dedup on save** | Skills re-run and create duplicates. Users see "Meeting Prep: Acme" four times. Atomic dedup = hash(tenant_id + skill_name + normalized_title + date_bucket) with UPSERT. | Medium | Backend: content hash column, unique constraint, upsert logic in `create_from_content` endpoint | Gmail dedup, Slack message dedup |
-| T7 | **Smart title generation at source** | Current titles are "Company Intel: https://lumif.ai/" or "Meeting Prep: DOCUMENT_FILE:uuid". Frontend `displayTitle()` patches this but the source data is bad. Fix at write time in the save endpoint. | Low | Backend: title generation logic in `create_from_content`, skill_name + metadata heuristics | Notion auto-title from content, Google Docs "Untitled document" |
-| T8 | **Empty & loading states for filter combos** | Already exist but need updating for new filter combinations. "No documents match these filters" with clear-all action per active filter. | Low | None — already partially built | Linear empty states, Notion filtered-view empty |
-
----
+| Feature | Why Expected | Complexity | Existing Code | Notes |
+|---------|--------------|------------|---------------|-------|
+| PDF export that works | Every doc platform exports PDF. Users share with investors, partners, board. | Low | `document_export.py` exists with WeasyPrint. `DocumentViewer.tsx` has full export dropdown UI. Backend endpoint at `GET /documents/{id}/export?format=pdf`. | Wire is complete end-to-end. Needs WeasyPrint installed on prod + testing across skill types. |
+| DOCX export that works | Users need editable versions for client/investor decks. Google Docs import requires DOCX. | Low | `document_export.py` has full DOCX builder using python-docx. One-pager gets branded structured DOCX. Others get markdown-to-text fallback. | Wire complete. Generic skills get ugly plain-text DOCX. Improve fallback quality. |
+| Export preserves formatting | PDF/DOCX must look close to the web view. Broken formatting = "this tool is amateur". | Med | PDF uses `render_output_standalone()` which inlines CSS. DOCX has structured builder for one-pager only. | PDF path is solid via standalone HTML+CSS. DOCX generic path needs markdown heading/list/table parsing, not just `.split("\n")`. |
+| File upload for skill input | Users have contracts, pitch decks, competitive docs they want analyzed. Typed-text-only input is limiting. | Low | Full file upload pipeline exists: `POST /files/upload`, text extraction (PDF/DOCX/TXT via pdfplumber+python-docx), Supabase Storage, `UploadedFile` model. Skill executor already handles `document:` prefix for file IDs. | Backend complete. Frontend needs file picker in skill run UI, not just text input. |
+| Upload progress feedback | Users uploading 5MB PDFs need visual confirmation something is happening. | Low | None on frontend. | Indeterminate progress bar during upload, then "Extracting text..." state, then "Running skill..." state. Three-phase progress. |
+| Structured JSON skill output | Skills producing typed data (one-pager, legal review) need pixel-perfect rendering, not markdown-to-HTML. | Med | One-pager has full pipeline: `OnePagerData` TypeScript interface, `isOnePagerData()` type guard, `OnePagerRenderer.tsx`, JSON detection in `SkillRenderer.tsx`. Pattern established. | Extend pattern to legal review. Schema: `document_type` discriminator + `schema_version` + typed fields. |
+| Legal review with risk visualization | Legal doc reviews need severity colors, risk badges, clause-by-clause breakdown. Generic markdown is insufficient. | Med | Backend `legal_review.html` Jinja2 template exists with severity badges. No frontend React renderer yet (falls through to GenericRenderer). | Build `LegalReviewRenderer.tsx` following `OnePagerRenderer.tsx` pattern. Define `LegalReviewData` interface. |
+| One-pager interactive viewer | Value prop one-pagers need stats banners, comparison tables, CTA buttons. Already partially built. | Low | `OnePagerRenderer.tsx` is fully built and rendering from structured JSON. | Already table stakes and delivered. Polish only. |
 
 ## Differentiators
 
-Features that set the library apart. Not expected, but valued. These move Flywheel from "document dump" to "intelligence hub."
+Features that set product apart. Not expected, but valued.
 
-| # | Feature | Value Proposition | Complexity | Dependencies | Real-World Reference |
-|---|---------|-------------------|------------|-------------|---------------------|
-| D1 | **Tag system (auto + manual)** | Skills auto-tag on save (e.g., "investor-update", "competitor", "pricing"). Users can add/remove tags. Tags become a powerful cross-cutting filter axis orthogonal to type and company. | High | New `tags` JSONB array column on documents, GIN index, tag CRUD API, pill bar UI, skill ecosystem updates | Notion multi-select property, Dropbox tags, Gmail labels |
-| D2 | **Tag pill bar (horizontal filter)** | Clickable colored pills showing all tags in use, with counts. Click to filter, click again to remove. Multi-select OR logic. Sits below type tabs, above search. | Medium | D1 (tag system exists), tag aggregation query to get distinct tags with counts | Linear label pills, GitHub issue labels, Notion multi-select filter |
-| D3 | **Multi-axis filter composition** | All three axes (type tabs + company dropdown + tag pills) compose together with AND logic. "Show me Meeting Prep docs for Acme tagged investor-update." Active filters shown as removable chips. | Medium | T1 + T2 + D1 + D2 all working, backend must accept all filter params in one query | Linear compound filters, Notion combined database filters |
-| D4 | **Account resolution on save** | When a skill saves a document, it resolves the company to an Account record and sets `account_id` FK. This enables T2 (company filter) to use a proper FK join instead of slow JSONB search. Option C = skills call ensure_account first. | Medium | New `account_id` column on documents, account resolution logic, MCP tool updates | CRM document association (Salesforce, HubSpot) |
-| D5 | **Skill compliance / ecosystem updates** | All skills that save documents must: (1) provide meaningful titles, (2) include tags in metadata, (3) ensure account exists before save. This is an ecosystem change, not a UI feature. | Medium | Audit all skills, update save calls, update SKILL.md specs | Internal — no external reference |
-| D6 | **Keyboard shortcuts** | `/` to focus search, `Escape` to clear, `G` then `L` for grid/list toggle. Power users (founders) live in keyboard shortcuts. | Low | Frontend only, no backend changes | Linear (extensive shortcuts), Notion (`/` commands), Gmail |
-| D7 | **Bulk operations** | Select multiple docs, bulk tag, bulk delete, bulk export. Not MVP but becomes essential at 1K+ docs. | High | Multi-select UI, batch API endpoints, confirmation dialogs | Google Drive multi-select, Notion bulk operations |
-| D8 | **Saved views / smart filters** | Save a filter combination as a named view ("My Investor Docs", "Acme War Room"). Persistent per-user. | High | New `saved_views` table, view CRUD API, view switcher UI | Notion saved views, Linear custom views, Salesforce list views |
-
----
+| Feature | Value Proposition | Complexity | Existing Code | Notes |
+|---------|-------------------|------------|---------------|-------|
+| PII redaction before skill processing | Founders uploading NDAs/contracts expect confidentiality. Pre-processing strips PII before LLM sees it, then re-inserts in output. | High | Archived `pii-redactor` skill has full Presidio pipeline: detect, anonymize (4 modes), audit log, reverse mapping, seed mapping for cross-doc consistency. `redact.py` is 560 lines of production code. | Requires spaCy model download (~500MB `en_core_web_lg`). Move from archived CLI script to backend service. Pre-process flow: upload -> extract text -> detect PII -> anonymize -> run skill -> de-anonymize output. |
+| PII audit trail | Show user exactly what was redacted and why. Builds trust. "We found 12 PII entities and protected them." | Low | `generate_audit_log()` in `redact.py` produces markdown audit with entity type, confidence, line numbers. | Surface as collapsible section in legal review viewer. |
+| Smart export format selection | Auto-suggest PDF for sharing, DOCX for editing. Show "Share as PDF" vs "Edit in Word" labels. | Low | Export dropdown exists with both options. | Rename from "Download PDF" / "Download DOCX" to intent-based labels. |
+| One-pager as shareable landing page | One-pagers should be shareable as branded web pages, not just downloads. Already have share URL infra. | Med | `shareDocument()` API exists. Share URLs work. But shared view uses same renderer as logged-in view. | Shared one-pager could be a standalone branded page with CTA button that actually links out. |
+| Multi-file upload for skill input | Upload contract + amendment together. Legal review skill compares them. | Med | Skill executor already handles `supplementary_file_ids` for multi-file scenarios. `UploadedFile` model supports it. | Frontend needs multi-file picker. Skill prompt template needs to handle "primary doc" vs "supplementary docs" framing. |
+| Structured output schema registry | Central registry of JSON schemas per skill type. Validates LLM output. Enables automatic renderer dispatch. | Med | Ad-hoc: `isOnePagerData()` type guard in TS, `_try_parse_structured()` in Python. No formal registry. | Define schemas in shared location. Use `document_type` + `schema_version` as discriminator. Zod on frontend, Pydantic on backend. |
+| Export with brand customization | User uploads their logo, export uses it. | High | None. | Defer. Nice-to-have for enterprise tier. |
+| Inline PII highlighting | Before submitting, show user highlighted PII in their uploaded document. "We detected these. Proceed?" | Med | Detection exists in `redact.py`. No frontend visualization. | Show uploaded text with highlighted spans. User confirms before skill runs. Builds trust significantly. |
 
 ## Anti-Features
 
-Features to explicitly NOT build. These are traps that waste effort or harm the product.
+Features to explicitly NOT build.
 
-| # | Anti-Feature | Why Avoid | What to Do Instead |
-|---|-------------|-----------|-------------------|
-| A1 | **Folder hierarchy** | Documents are skill outputs, not user-created files. Folders create organizational burden and conflict with tags. Notion moved away from pure folders toward databases for this reason. | Use tags + type tabs + company filter as the three axes. Flat list with powerful filtering beats nested folders for AI-generated content. |
-| A2 | **Full-text search on content (day 1)** | PostgreSQL full-text search on document content requires indexing rendered HTML/markdown, adds significant complexity, and founders search by title/company 95% of the time. | Start with ILIKE on title + metadata fields. Add pg_trgm or tsvector later if search becomes a top user complaint. |
-| A3 | **Document versioning** | Skills produce new runs, not edits. Version control implies editing workflows that don't exist. Dedup with upsert handles the "re-run same skill" case. | Dedup on save (T6) handles the primary use case. If a skill re-runs, the old doc is updated in place, not versioned. |
-| A4 | **Drag-and-drop reordering** | Library items are time-ordered intelligence artifacts. Manual reordering implies curation effort that conflicts with the "automatic intelligence" value prop. | Keep time-based grouping (Today/Yesterday/etc). Let filtering handle "find what I need." |
-| A5 | **Inline document editing** | Documents are rendered skill outputs (HTML from markdown). Editing means either raw markdown editing (bad UX) or WYSIWYG on generated content (massive complexity, low value). | Documents are read-only artifacts. If content needs updating, re-run the skill. |
-| A6 | **Tag hierarchy / nested tags** | Adds complexity without proportional value at <5K docs. Notion offers it but most users don't use nested tags. | Flat tags with good naming conventions ("investor-q1", "investor-q2") cover the use case. |
-| A7 | **Real-time collaboration on filters** | Multi-user filter state sync. Massive complexity, minimal value for a founder tool. | Each user has their own filter state in URL params or localStorage. |
-| A8 | **Complex boolean filter builder** | Linear/Jira-style query builders with AND/OR/NOT nesting. Overkill for a document library with three filter axes. | Three fixed axes (type + company + tags) with implicit AND between axes, implicit OR within tags. Simple, predictable, fast. |
-
----
+| Anti-Feature | Why Avoid | What to Do Instead |
+|--------------|-----------|-------------------|
+| Real-time collaborative editing of exports | Scope explosion. Google Docs already does this. Users export to edit elsewhere. | Export clean DOCX that opens well in Google Docs / Word. |
+| Custom template builder | Users designing their own export templates is a product unto itself. | Ship good defaults. Iterate on templates based on feedback. |
+| OCR for scanned PDFs | pdfplumber handles text-based PDFs. OCR (Tesseract) adds massive complexity and unreliable results. | Reject image-only PDFs with clear error: "Please upload a text-based PDF." |
+| Client-side PII detection | Running spaCy/Presidio in-browser is infeasible (~500MB model). | Server-side only. Text never leaves your infra before redaction. |
+| PII redaction as user-togglable feature | Letting users skip PII redaction on legal docs creates liability. | Always redact for legal-category skills. Optional for other skill types. |
+| Universal file format support (XLS, PPT, images) | Each format is a rabbit hole. Start with the 80% case. | PDF + DOCX + TXT/MD only. Same as current `ALLOWED_MIMETYPES`. Expand later based on demand. |
+| Drag-and-drop reordering of export sections | Over-engineering. Users want to download, not rearrange. | Fixed section order matching the web view. |
 
 ## Feature Dependencies
 
 ```
-T4 (cursor pagination) --> T5 (infinite scroll)
-T1 (server-side type filter) --\
-T2 (company filter) ----------- --> D3 (multi-axis composition)
-D1 (tag system) --> D2 (pill bar) -/
-D4 (account resolution) --> T2 (company filter uses account_id FK)
-D5 (skill compliance) --> D1 (skills must send tags)
-D5 (skill compliance) --> T7 (skills must send good titles)
-D5 (skill compliance) --> D4 (skills must ensure account exists)
-T6 (dedup) -- standalone, no deps
-T7 (smart titles) -- standalone, no deps (backend-only)
-T8 (empty states) -- standalone, update as filters land
-D6 (keyboard shortcuts) -- standalone, add anytime
-D7 (bulk operations) -- after multi-axis filtering works
-D8 (saved views) -- after multi-axis filtering works
+File Upload API (exists) -> File Picker UI (new) -> Skill Run with File Input (connect)
+                                                  -> Multi-File Upload UI (new)
+
+Text Extraction (exists) -> PII Detection Service (port from archived) -> PII Anonymization
+                                                                       -> PII Audit Trail
+                                                                       -> Inline PII Preview (frontend)
+
+PII Anonymization -> Skill Execution -> PII De-anonymization -> Document Output
+                                                              -> Legal Review Renderer
+
+Structured JSON Schema (one-pager pattern) -> Legal Review Schema + Type Guard
+                                            -> LegalReviewRenderer.tsx
+                                            -> Legal Review DOCX Export
+                                            -> Schema Registry (future)
+
+render_output_standalone() (exists) -> WeasyPrint PDF (exists) -> PDF Export Endpoint (exists)
+                                                                -> Test all skill types
+
+python-docx builder (exists) -> Generic DOCX Improvement (markdown parsing)
+                              -> Legal Review DOCX (structured builder)
 ```
-
-**Critical path:** D4 (account resolution) + D5 (skill compliance) are prerequisites for T2 and D1 to have good data. Without skills sending proper tags and account IDs, the filtering UI has nothing to filter on.
-
----
 
 ## MVP Recommendation
 
-### Phase 1 — Backend Foundation + Data Quality (build first)
-1. **T6 — Dedup on save** (stop the bleeding — no more duplicate docs)
-2. **T7 — Smart title generation** (fix titles at source, not just display)
-3. **D4 — Account resolution** (add `account_id` FK to documents)
-4. **T4 — Cursor pagination** (backend prerequisite for everything else)
+Prioritize (in order):
 
-### Phase 2 — Filtering UI (build second)
-5. **T1 — Server-side type tabs** (upgrade existing tabs to query server)
-6. **T2 — Company dropdown** (using account_id FK from Phase 1)
-7. **T3 — Server-side search** (ILIKE on title + metadata)
-8. **T5 — Infinite scroll** (hybrid with IntersectionObserver)
+1. **PDF/DOCX export working end-to-end** -- The code exists. Just need WeasyPrint in prod dependencies, test each skill type, improve generic DOCX quality. Highest ROI: zero new code, just integration + polish.
 
-### Phase 3 — Tags + Polish (build third)
-9. **D1 — Tag system** (JSONB array + GIN index + CRUD)
-10. **D2 — Tag pill bar** (filter UI)
-11. **D3 — Multi-axis composition** (all three axes working together)
-12. **D5 — Skill ecosystem updates** (all skills send tags + account + good titles)
-13. **T8 — Empty state updates** (polish for new filter combinations)
+2. **File picker UI for skill input** -- Backend file upload + extraction + skill executor wiring all exist. Missing piece is a frontend file upload widget in the skill run flow. Users are blocked from using legal review and competitive analysis on their actual documents.
 
-### Defer
-- **D6 — Keyboard shortcuts**: Nice-to-have, add in any phase
-- **D7 — Bulk operations**: Wait for user demand at scale
-- **D8 — Saved views**: Wait for multi-axis filtering to prove its value
+3. **Legal review structured JSON output + renderer** -- Follow the one-pager pattern exactly. Define `LegalReviewData` interface, build `LegalReviewRenderer.tsx`, update skill prompt to output JSON. This is the second structured skill, proving the pattern scales.
 
----
+4. **PII redaction service** -- Port `redact.py` from archived CLI to a backend service module. Wire into skill executor as a pre-processing step for legal-category skills. This is the most complex feature but the most differentiated.
 
-## Tag Management UX Patterns (Deep Dive)
+5. **PII audit trail in legal review viewer** -- Once PII redaction is a service, surface the audit data in the legal review renderer. Low effort, high trust signal.
 
-Since tags are the highest-complexity differentiator, here are the specific patterns to follow:
-
-### Auto-Tagging by Skills (Write Path)
-- Skills include `tags: ["meeting-prep", "acme", "q2-review"]` in metadata on save
-- Backend validates tags (lowercase, alphanumeric + hyphens, max 50 chars)
-- Auto-tags are not special — users can remove them
-- **Pattern:** Notion auto-assigns properties on creation; same concept for skill-generated tags
-
-### User Tag Editing (Read Path)
-- **Inline pill display:** Tags shown as colored pills on document row/card
-- **Click-to-edit:** Click a tag area to open a popover with autocomplete input
-- **Autocomplete from existing:** As user types, show matching tags from the tenant's tag pool (max 10 suggestions)
-- **Create new:** If no match, show "Create tag: [typed-input]" option at bottom of dropdown
-- **Remove:** X button on each pill, or backspace in the edit popover
-- **Keyboard:** Arrow keys to navigate suggestions, Enter to select, Escape to close
-- **Pattern:** Notion multi-select property editor — popover with search + create + remove
-
-### Tag Pill Filter Bar (Filter Path)
-- Horizontal scrollable row of pills showing tags in use (with doc counts)
-- Click to toggle filter on/off (pill fills with color when active)
-- Multiple tags = OR logic ("show docs tagged investor OR competitor")
-- Combined with type tabs and company = AND logic
-- Show max ~8 pills visible, overflow indicator (" +12 more") with expand
-- **Pattern:** GitHub issue label filter, Linear label pills
-
-### Tag Color Assignment
-- Auto-assign from a palette of 8-10 colors based on deterministic hash of tag name
-- Same tag always gets same color across all views and sessions
-- Users do NOT manually pick colors (anti-feature: too much config overhead for a founder tool)
-- **Pattern:** Notion auto-colors for multi-select options
-
----
-
-## Infinite Scroll UX Patterns (Deep Dive)
-
-The hybrid approach is the consensus for SaaS document lists:
-
-### Implementation Pattern
-1. **Initial load:** Fetch first 50 docs with cursor pagination
-2. **Scroll trigger:** IntersectionObserver on a sentinel div ~200px before list end
-3. **Auto-load:** Fetch next 50 when sentinel becomes visible
-4. **Progress indicator:** "Showing 150 of 2,341" pinned at bottom
-5. **Loading state:** Skeleton rows/cards appear while fetching (already built)
-6. **End state:** "You've seen all documents" message when no more pages
-7. **Fallback:** If IntersectionObserver unavailable, "Load More" button remains (already built)
-
-### Preserving Scroll Position
-- When user navigates to a document detail and comes back, restore scroll position
-- Use React Router's `scrollRestoration` or manual position tracking via ref
-- **Critical for UX:** Losing scroll position after viewing a doc is the #1 complaint with infinite scroll lists
-
-### Filter Reset Behavior
-- When any filter changes, reset to first page (new cursor)
-- Show loading skeleton, not empty state, during filter transition
-- Preserve scroll position only within same filter set
-
----
-
-## Multi-Axis Filter Composition (Deep Dive)
-
-### Three Axes
-1. **Type tabs** (horizontal, top): Mutually exclusive single-select (All / Meeting Prep / Company Intel / ...)
-2. **Company dropdown** (left of search bar): Single-select dropdown with typeahead search, shows accounts with doc counts
-3. **Tag pills** (horizontal bar below tabs): Multi-select, OR within tags
-
-### Composition Logic
-- Between axes: AND (`type = meeting-prep AND account_id = X AND (tag = a OR tag = b)`)
-- Within tags: OR (selecting "investor" and "competitor" shows docs with either tag)
-- Type "All" tab = no type filter applied
-
-### Active Filter Chips
-- When company or tags are active, show removable chips below the filter bar
-- "Acme Corp x" | "investor x" | "competitor x" | "Clear all"
-- Chip removal resets that single axis, not all filters
-- **Pattern:** Google Drive active filter chips, Amazon product filter breadcrumbs
-
-### URL State
-- Encode filters in URL query params: `?type=meeting-prep&account=uuid&tags=investor,competitor`
-- Enables sharing filtered views and browser back/forward navigation
-- Debounce URL updates to avoid history spam during rapid filter changes
-- **Pattern:** Linear encodes filter state in URL (good); Notion does not (worse — can't share or bookmark views)
-
----
-
-## Dedup Strategy (Deep Dive)
-
-### Hash-Based Inline Dedup
-- **Hash key:** `sha256(tenant_id + skill_name + normalized_title + date_bucket)`
-- **Date bucket:** Truncate `created_at` to date (same skill + same title on same day = duplicate)
-- **Operation:** UPSERT — if hash exists, update content + metadata + updated_at; if not, insert
-- **Normalization:** Lowercase title, strip prefixes ("Meeting Prep: " etc.), collapse whitespace
-- **Column:** Add `content_hash TEXT` to documents table with unique constraint per tenant
-
-### Edge Cases
-- Different skill re-run same day = UPDATE (desired: latest output wins)
-- Same skill different day = INSERT (desired: separate docs for different dates)
-- User manually renames a doc = hash changes, no longer dedup-eligible (acceptable)
-- Bulk re-run of all skills = all docs updated in place, no new rows (desired)
-
----
+Defer:
+- **Multi-file upload**: Working single-file upload is the priority. Multi-file is a Phase 2 concern.
+- **Inline PII highlighting**: Nice UX polish but not blocking. Ship "we redacted N entities" summary first.
+- **Schema registry**: Two skills (one-pager + legal review) don't need a registry. Build it when there are 4+ structured skills.
+- **Brand customization on exports**: Enterprise feature. Not needed for founder dogfooding.
 
 ## Sources
 
-- [Notion tagging guide](https://www.thebricks.com/resources/how-to-use-tags-in-notion-a-comprehensive-guide) — MEDIUM confidence
-- [How to add tags in Notion (2026)](https://super.so/blog/how-to-add-tags-in-notion) — MEDIUM confidence
-- [Linear filters documentation](https://linear.app/docs/filters) — HIGH confidence
-- [Linear custom views](https://linear.app/docs/custom-views) — HIGH confidence
-- [Filter UX patterns for SaaS (Eleken)](https://www.eleken.co/blog-posts/filter-ux-and-ui-for-saas) — MEDIUM confidence
-- [Filter UX Design Patterns (Pencil & Paper)](https://www.pencilandpaper.io/articles/ux-pattern-analysis-enterprise-filtering) — MEDIUM confidence
-- [Pagination UI in 2026 (Eleken)](https://www.eleken.co/blog-posts/pagination-ui) — MEDIUM confidence
-- [Pagination vs infinite scroll (LogRocket)](https://blog.logrocket.com/ux-design/pagination-vs-infinite-scroll-ux/) — MEDIUM confidence
-- [Dropbox tags](https://help.dropbox.com/organize/dropbox-tags) — HIGH confidence
-- [Google Drive labels](https://help.folgo.com/article/330-what-are-google-drive-labels) — MEDIUM confidence
-- [Tag UX to implementation](https://schof.co/tags-ux-to-implementation/) — MEDIUM confidence
-- [Autocomplete UX best practices (Baymard)](https://baymard.com/blog/autocomplete-design) — HIGH confidence
-- [Complex filters UX (Smart Interface Design Patterns)](https://smart-interface-design-patterns.com/articles/complex-filtering/) — MEDIUM confidence
-- [AI-driven UX patterns SaaS 2026 (Orbix)](https://www.orbix.studio/blogs/ai-driven-ux-patterns-saas-2026) — LOW confidence
-- [Data deduplication (Wikipedia)](https://en.wikipedia.org/wiki/Data_deduplication) — HIGH confidence
-- [Hash-based dedup internals](https://pibytes.wordpress.com/2013/02/09/deduplication-internals-hash-based-part-2/) — MEDIUM confidence
+- Codebase analysis: `backend/src/flywheel/services/document_export.py`, `backend/src/flywheel/api/files.py`, `backend/src/flywheel/services/file_extraction.py`, `skills/_archived/pii-redactor/scripts/redact.py`
+- Existing renderers: `frontend/src/features/documents/components/renderers/OnePagerRenderer.tsx`, `frontend/src/features/documents/types/one-pager.ts`
+- Existing export UI: `frontend/src/features/documents/components/DocumentViewer.tsx` (lines 206-259)
+- Existing skill executor file handling: `backend/src/flywheel/services/skill_executor.py` (supplementary_file_ids pattern)
+- [Uploadcare UX Best Practices for File Upload](https://uploadcare.com/blog/file-uploader-ux-best-practices/)
+- [Microsoft Presidio Documentation](https://microsoft.github.io/presidio/)
+- [Eleken File Upload UI Tips](https://www.eleken.co/blog-posts/file-upload-ui)
