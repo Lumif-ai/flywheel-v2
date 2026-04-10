@@ -51,7 +51,7 @@ class CandidateTask(TypedDict):
     description: str
     source: str              # "email", "slack", etc.
     source_id: UUID          # email.id, slack_message.id, etc.
-    account_id: UUID | None
+    pipeline_entry_id: UUID | None
     task_type: str
     commitment_direction: str
     suggested_skill: str | None
@@ -158,7 +158,7 @@ async def extract_channel_tasks(
             # Dedup check
             dup_id, dup_title = await _find_duplicate(
                 session, tenant_id, user_id,
-                candidate["account_id"], candidate["title"],
+                candidate["pipeline_entry_id"], candidate["title"],
             )
 
             if dup_id is not None:
@@ -175,7 +175,7 @@ async def extract_channel_tasks(
                 user_id=user_id,
                 meeting_id=None,
                 email_id=candidate["email_id"],
-                account_id=candidate["account_id"],
+                pipeline_entry_id=candidate["pipeline_entry_id"],
                 title=candidate["title"],
                 description=candidate["description"],
                 source=candidate["source"],
@@ -322,8 +322,8 @@ async def extract_email_tasks(
         if suggested_skill and "email" in suggested_skill.lower():
             trust_level = "confirm"
 
-        # Resolve entity to account
-        account_id = await _resolve_entity_to_account(
+        # Resolve entity to pipeline entry
+        pipeline_entry_id = await _resolve_entity_to_account(
             session, tenant_id, score.sender_entity_id,
         )
 
@@ -332,7 +332,7 @@ async def extract_email_tasks(
             "description": description,
             "source": "email",
             "source_id": email.id,
-            "account_id": account_id,
+            "pipeline_entry_id": pipeline_entry_id,
             "task_type": "followup",
             "commitment_direction": commitment_direction,
             "suggested_skill": suggested_skill,

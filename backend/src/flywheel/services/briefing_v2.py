@@ -26,7 +26,6 @@ from sqlalchemy.orm import joinedload
 
 from flywheel.config import settings
 from flywheel.db.models import (
-    Account,
     Activity,
     ContextEntry,
     Document,

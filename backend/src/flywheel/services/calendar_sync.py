@@ -359,7 +359,7 @@ async def get_meeting_prep_suggestions(
                 if meeting.meeting_date
                 else None,
                 "attendees": meeting.attendees,
-                "account_id": str(meeting.account_id) if meeting.account_id else None,
+                "account_id": str(meeting.pipeline_entry_id or meeting.account_id) if (meeting.pipeline_entry_id or meeting.account_id) else None,
             }
         )
 

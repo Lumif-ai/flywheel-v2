@@ -17,7 +17,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
@@ -205,7 +205,7 @@ def _task_to_response(t: Task) -> dict:
         "tenant_id": t.tenant_id,
         "user_id": t.user_id,
         "meeting_id": t.meeting_id,
-        "account_id": t.account_id,
+        "account_id": t.pipeline_entry_id or t.account_id,
         "pipeline_entry_id": t.pipeline_entry_id,
         "email_id": t.email_id,
         "title": t.title,
@@ -262,7 +262,7 @@ async def list_tasks(
     if meeting_id is not None:
         base = base.where(Task.meeting_id == meeting_id)
     if account_id is not None:
-        base = base.where(Task.account_id == account_id)
+        base = base.where(or_(Task.account_id == account_id, Task.pipeline_entry_id == account_id))
     if pipeline_entry_id is not None:
         base = base.where(Task.pipeline_entry_id == pipeline_entry_id)
     if source is not None:
@@ -372,8 +372,7 @@ async def create_task(
         priority=body.priority,
         due_date=body.due_date,
         meeting_id=body.meeting_id,
-        account_id=body.account_id,
-        pipeline_entry_id=body.pipeline_entry_id,
+        pipeline_entry_id=body.pipeline_entry_id or body.account_id,
     )
     db.add(new_task)
     await db.flush()

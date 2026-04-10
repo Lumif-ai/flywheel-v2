@@ -59,7 +59,7 @@ async def _write_entry(
     content: str,
     confidence: str = "medium",
     entry_date: date | None = None,
-    account_id: UUID | None = None,
+    pipeline_entry_id: UUID | None = None,
 ) -> str:
     """Write or deduplicate a context entry.
 
@@ -118,7 +118,7 @@ async def _write_entry(
             content=content,
             confidence=confidence,
             date=entry_date,
-            account_id=account_id,
+            pipeline_entry_id=pipeline_entry_id,
             metadata_={},
         )
         db.add(entry)
@@ -166,7 +166,7 @@ async def write_contact(
     source_label: str = "email-context-engine",
     confidence: str = "medium",
     entry_date: date | None = None,
-    account_id: UUID | None = None,
+    pipeline_entry_id: UUID | None = None,
 ) -> str:
     """Write a contact entry to the context store.
 
@@ -202,7 +202,7 @@ async def write_contact(
         content="\n".join(lines),
         confidence=confidence,
         entry_date=entry_date,
-        account_id=account_id,
+        pipeline_entry_id=pipeline_entry_id,
     )
 
 
@@ -216,7 +216,7 @@ async def write_insight(
     source_label: str = "email-context-engine",
     confidence: str = "medium",
     entry_date: date | None = None,
-    account_id: UUID | None = None,
+    pipeline_entry_id: UUID | None = None,
 ) -> str:
     """Write a business insight to the context store.
 
@@ -238,7 +238,7 @@ async def write_insight(
         content=content,
         confidence=confidence,
         entry_date=entry_date,
-        account_id=account_id,
+        pipeline_entry_id=pipeline_entry_id,
     )
 
 
@@ -253,7 +253,7 @@ async def write_action_item(
     source_label: str = "email-context-engine",
     confidence: str = "medium",
     entry_date: date | None = None,
-    account_id: UUID | None = None,
+    pipeline_entry_id: UUID | None = None,
 ) -> str:
     """Write an action item to the context store.
 
@@ -282,7 +282,7 @@ async def write_action_item(
         content="\n".join(lines),
         confidence=confidence,
         entry_date=entry_date,
-        account_id=account_id,
+        pipeline_entry_id=pipeline_entry_id,
     )
 
 
@@ -296,7 +296,7 @@ async def write_deal_signal(
     source_label: str = "email-context-engine",
     confidence: str = "medium",
     entry_date: date | None = None,
-    account_id: UUID | None = None,
+    pipeline_entry_id: UUID | None = None,
 ) -> str:
     """Write a deal/commercial signal to the context store.
 
@@ -325,7 +325,7 @@ async def write_deal_signal(
         content="\n".join(lines),
         confidence=confidence,
         entry_date=entry_date,
-        account_id=account_id,
+        pipeline_entry_id=pipeline_entry_id,
     )
 
 
@@ -339,7 +339,7 @@ async def write_relationship_signal(
     source_label: str = "email-context-engine",
     confidence: str = "medium",
     entry_date: date | None = None,
-    account_id: UUID | None = None,
+    pipeline_entry_id: UUID | None = None,
 ) -> str:
     """Write a relationship signal to the insights context file.
 
@@ -368,5 +368,5 @@ async def write_relationship_signal(
         content=content,
         confidence=confidence,
         entry_date=entry_date,
-        account_id=account_id,
+        pipeline_entry_id=pipeline_entry_id,
     )
