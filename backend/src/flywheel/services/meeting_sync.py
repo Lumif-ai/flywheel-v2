@@ -134,11 +134,19 @@ async def sync_granola_meetings(
     factory: async_sessionmaker,
     tenant_id: UUID,
     user_id: UUID,
+    since_override: str | None = None,
 ) -> dict:
     """Pull meetings from Granola for a user, dedup, and insert new rows.
 
     Opens its own session via `factory()`, sets RLS context, runs the full
     sync logic, and returns stats.
+
+    Args:
+        factory: Async session factory.
+        tenant_id: Tenant UUID.
+        user_id: User UUID.
+        since_override: Optional ISO date string (e.g. '2025-01-01').
+            When provided, overrides the stored last_synced_at cursor.
 
     Returns:
         {"synced": int, "skipped": int, "already_seen": int, "total_from_provider": int}
@@ -181,7 +189,11 @@ async def sync_granola_meetings(
         api_key = decrypt_api_key(integration.credentials_encrypted)
 
         # 3. Fetch meetings from Granola (incremental via last_synced_at cursor)
-        raw_meetings = await granola_list_meetings(api_key, since=integration.last_synced_at)
+        if since_override:
+            sync_since = datetime.fromisoformat(since_override).replace(tzinfo=timezone.utc)
+        else:
+            sync_since = integration.last_synced_at
+        raw_meetings = await granola_list_meetings(api_key, since=sync_since, since_override=since_override)
 
         # 4. Dedup: find external_ids already present in the DB
         existing_ids: set[str] = set()

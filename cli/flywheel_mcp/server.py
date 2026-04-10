@@ -163,6 +163,9 @@ def flywheel_run_skill(
     - input_data: JSON string for structured input (e.g. '{"meeting_id": "uuid-here"}').
       Check input requirements from flywheel_fetch_skills to know what to pass.
 
+    IMPORTANT: For meeting-processor, use meeting IDs from flywheel_fetch_meetings,
+    NOT from Granola or other external sources. External IDs won't work.
+
     Returns a link to view the full results in the Flywheel web app.
     NOT for coding, file operations, or development tasks.
     """
@@ -197,7 +200,10 @@ def flywheel_run_skill(
 
             if status == "failed":
                 error = run.get("error") or run.get("error_message") or "Unknown error"
-                return f"Skill '{skill_name}' failed: {error}"
+                hint = ""
+                if "not found" in error.lower() and skill_name == "meeting-processor":
+                    hint = "\n\nHint: Make sure you're using Flywheel meeting IDs from flywheel_fetch_meetings, not Granola IDs. If the meeting isn't synced yet, run flywheel_sync_meetings first."
+                return f"Skill '{skill_name}' failed: {error}{hint}"
 
         # Timeout
         url = f"{client.frontend_url}/library"
@@ -512,11 +518,18 @@ def _format_pipeline_detail(data: dict) -> str:
 
 
 @mcp.tool(output_schema=None)
-def flywheel_sync_meetings() -> str:
-    """Sync meetings from Granola calendar integration. Call this at the start of the morning brief or when the user asks to refresh their meeting data. Returns count of new and updated meetings. After syncing, use flywheel_fetch_meetings to get unprocessed meetings."""
+def flywheel_sync_meetings(since: str = "") -> str:
+    """Sync meetings from Granola calendar integration.
+
+    - since: Optional ISO date string (e.g. '2025-01-01') to pull historical meetings.
+      Without this, only syncs meetings since last sync.
+      Use since='2020-01-01' to pull ALL historical meetings.
+
+    After syncing, use flywheel_fetch_meetings to get unprocessed meetings.
+    """
     try:
         client = FlywheelClient()
-        result = client.sync_meetings()
+        result = client.sync_meetings(since=since)
         new_count = result.get("new", 0)
         updated_count = result.get("updated", 0)
         if isinstance(new_count, int) and isinstance(updated_count, int):

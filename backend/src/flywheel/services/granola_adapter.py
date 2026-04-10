@@ -14,7 +14,7 @@ Real API (verified 2026-03-28):
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
@@ -71,12 +71,18 @@ async def test_connection(api_key: str) -> tuple[bool, str | None]:
 async def list_meetings(
     api_key: str,
     since: datetime | None = None,
-    limit: int = 30,
+    since_override: str | None = None,
 ) -> list[RawMeeting]:
-    """Fetch a page of meetings from Granola.
+    """Fetch ALL meetings from Granola, paginating through results.
 
     Uses created_after for incremental sync (not updated_after — Phase 60
     only ingests new meetings; updated content sync is Phase 61+).
+
+    Args:
+        api_key: Granola API key.
+        since: Datetime cursor for incremental sync. Ignored if since_override is set.
+        since_override: Optional ISO date string override (e.g. '2025-01-01').
+            When provided, used instead of `since`.
 
     Response JSON uses key "notes" (not "meetings").
     Field mapping: item["id"] -> external_id, item["created_at"] -> meeting_date,
@@ -84,52 +90,80 @@ async def list_meetings(
     Duration computed from calendar_event.start_time/end_time; None if absent.
     Attendees extracted from calendar_event.invitees.
     """
-    params: dict = {"page_size": limit}
-    if since:
-        params["created_after"] = since.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    PAGE_SIZE = 100
+
+    # Resolve the effective since datetime
+    effective_since: datetime | None = since
+    if since_override:
+        effective_since = datetime.fromisoformat(since_override).replace(
+            tzinfo=timezone.utc
+        )
+
+    params: dict = {"page_size": PAGE_SIZE}
+    if effective_since:
+        params["created_after"] = effective_since.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+    all_meetings: list[RawMeeting] = []
 
     async with httpx.AsyncClient(timeout=30) as client:
-        resp = await client.get(
-            f"{GRANOLA_API_BASE}/notes",
-            headers={"Authorization": f"Bearer {api_key}"},
-            params=params,
-        )
-        resp.raise_for_status()
-
-    meetings: list[RawMeeting] = []
-    for item in resp.json().get("notes", []):
-        cal = item.get("calendar_event") or {}
-
-        # Compute duration from calendar_event start/end times if both are present
-        start = cal.get("start_time")
-        end = cal.get("end_time")
-        duration_mins: Optional[int] = None
-        if start and end:
-            try:
-                duration_mins = int(
-                    (datetime.fromisoformat(end) - datetime.fromisoformat(start)).seconds // 60
-                )
-            except Exception:
-                pass
-
-        # Attendees from calendar_event.invitees; default to empty list
-        attendees = [
-            {"email": a.get("email"), "name": a.get("name"), "is_external": True}
-            for a in cal.get("invitees", [])
-        ]
-
-        meetings.append(
-            RawMeeting(
-                external_id=item["id"],
-                title=item.get("title") or "Untitled",
-                meeting_date=datetime.fromisoformat(item["created_at"]),
-                duration_mins=duration_mins,
-                attendees=attendees,
-                ai_summary=item.get("summary_text"),
+        while True:
+            resp = await client.get(
+                f"{GRANOLA_API_BASE}/notes",
+                headers={"Authorization": f"Bearer {api_key}"},
+                params=params,
             )
-        )
+            resp.raise_for_status()
 
-    return meetings
+            data = resp.json()
+            notes = data.get("notes", [])
+
+            for item in notes:
+                cal = item.get("calendar_event") or {}
+
+                # Compute duration from calendar_event start/end times if both are present
+                start = cal.get("start_time")
+                end = cal.get("end_time")
+                duration_mins: Optional[int] = None
+                if start and end:
+                    try:
+                        duration_mins = int(
+                            (datetime.fromisoformat(end) - datetime.fromisoformat(start)).seconds // 60
+                        )
+                    except Exception:
+                        pass
+
+                # Attendees from calendar_event.invitees; default to empty list
+                attendees = [
+                    {"email": a.get("email"), "name": a.get("name"), "is_external": True}
+                    for a in cal.get("invitees", [])
+                ]
+
+                all_meetings.append(
+                    RawMeeting(
+                        external_id=item["id"],
+                        title=item.get("title") or "Untitled",
+                        meeting_date=datetime.fromisoformat(item["created_at"]),
+                        duration_mins=duration_mins,
+                        attendees=attendees,
+                        ai_summary=item.get("summary_text"),
+                    )
+                )
+
+            # Pagination: check for cursor-based or offset-based next page
+            next_cursor = data.get("next_cursor") or data.get("next_page") or data.get("cursor")
+            if next_cursor:
+                params["cursor"] = next_cursor
+            elif len(notes) >= PAGE_SIZE:
+                # Offset-based fallback: use created_before set to oldest in batch
+                oldest_created_at = min(
+                    item["created_at"] for item in notes if item.get("created_at")
+                )
+                params["created_before"] = oldest_created_at
+            else:
+                # Fewer results than page size — no more pages
+                break
+
+    return all_meetings
 
 
 async def get_meeting_content(api_key: str, external_id: str) -> MeetingContent:

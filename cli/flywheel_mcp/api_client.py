@@ -165,9 +165,12 @@ class FlywheelClient:
             "get", "/api/v1/accounts/", params={"search": name, "limit": limit}
         )
 
-    def sync_meetings(self) -> dict:
+    def sync_meetings(self, since: str = "") -> dict:
         """POST /api/v1/meetings/sync -- trigger calendar sync."""
-        return self._request("post", "/api/v1/meetings/sync")
+        params = {}
+        if since:
+            params["since"] = since
+        return self._request("post", "/api/v1/meetings/sync", params=params)
 
     def save_document(
         self,

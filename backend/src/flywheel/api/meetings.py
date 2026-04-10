@@ -15,7 +15,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -54,6 +54,7 @@ VALID_PROCESSING_STATUSES = {
 
 @router.post("/sync")
 async def sync_meetings(
+    since: str | None = Query(None, description="ISO date to pull historical meetings"),
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict:
@@ -84,7 +85,7 @@ async def sync_meetings(
 
     # 2. Granola sync (independent — doesn't fail if not connected)
     try:
-        granola_result = await sync_granola_meetings(factory, user.tenant_id, user.sub)
+        granola_result = await sync_granola_meetings(factory, user.tenant_id, user.sub, since_override=since)
         results["providers"].append({"provider": "granola", **granola_result})
     except HTTPException:
         # Granola not connected — skip silently
