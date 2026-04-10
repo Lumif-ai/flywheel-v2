@@ -190,10 +190,12 @@ async def sync_granola_meetings(
 
         # 3. Fetch meetings from Granola (incremental via last_synced_at cursor)
         if since_override:
-            sync_since = datetime.fromisoformat(since_override).replace(tzinfo=timezone.utc)
+            # Historical pull — pass None for since to fetch ALL, pagination handles the rest
+            # The dedup step below skips meetings already in the DB
+            sync_since = None
         else:
             sync_since = integration.last_synced_at
-        raw_meetings = await granola_list_meetings(api_key, since=sync_since, since_override=since_override)
+        raw_meetings = await granola_list_meetings(api_key, since=sync_since)
 
         # 4. Dedup: find external_ids already present in the DB
         existing_ids: set[str] = set()

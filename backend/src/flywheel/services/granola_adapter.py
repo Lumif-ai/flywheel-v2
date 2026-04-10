@@ -71,18 +71,11 @@ async def test_connection(api_key: str) -> tuple[bool, str | None]:
 async def list_meetings(
     api_key: str,
     since: datetime | None = None,
-    since_override: str | None = None,
 ) -> list[RawMeeting]:
-    """Fetch ALL meetings from Granola, paginating through results.
+    """Fetch ALL meetings from Granola with cursor pagination.
 
-    Uses created_after for incremental sync (not updated_after — Phase 60
-    only ingests new meetings; updated content sync is Phase 61+).
-
-    Args:
-        api_key: Granola API key.
-        since: Datetime cursor for incremental sync. Ignored if since_override is set.
-        since_override: Optional ISO date string override (e.g. '2025-01-01').
-            When provided, used instead of `since`.
+    When ``since`` is provided, uses created_after for incremental sync.
+    When ``since`` is None, fetches all meetings (paginating through all pages).
 
     Response JSON uses key "notes" (not "meetings").
     Field mapping: item["id"] -> external_id, item["created_at"] -> meeting_date,
@@ -90,18 +83,11 @@ async def list_meetings(
     Duration computed from calendar_event.start_time/end_time; None if absent.
     Attendees extracted from calendar_event.invitees.
     """
-    PAGE_SIZE = 100
-
-    # Resolve the effective since datetime
-    effective_since: datetime | None = since
-    if since_override:
-        effective_since = datetime.fromisoformat(since_override).replace(
-            tzinfo=timezone.utc
-        )
+    PAGE_SIZE = 30  # Granola API rejects page_size > ~40
 
     params: dict = {"page_size": PAGE_SIZE}
-    if effective_since:
-        params["created_after"] = effective_since.replace(microsecond=0).isoformat().replace("+00:00", "Z")
+    if since:
+        params["created_after"] = since.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
     all_meetings: list[RawMeeting] = []
 
@@ -152,6 +138,8 @@ async def list_meetings(
             # Pagination: check for cursor-based or offset-based next page
             next_cursor = data.get("next_cursor") or data.get("next_page") or data.get("cursor")
             if next_cursor:
+                # Cursor pagination — remove created_after to avoid conflicts
+                params.pop("created_after", None)
                 params["cursor"] = next_cursor
             elif len(notes) >= PAGE_SIZE:
                 # Offset-based fallback: use created_before set to oldest in batch
