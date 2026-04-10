@@ -2,20 +2,20 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-08)
+See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v12.0 Library Redesign
+**Current focus:** v13.0 Skill Platform — Phase 105
 
 ## Current Position
 
-Milestone: v12.0 Library Redesign
-Phase: 104.2 of 104.2 (Skill Input Schema Validation)
-Plan: 2 of 2 complete
-Status: Phase Complete
-Last activity: 2026-04-10 — Plan 02 complete (MCP layer input_data support)
+Milestone: v13.0 Skill Platform
+Phase: 105 of 109 (Foundation + Export Infrastructure)
+Plan: 1 of 2 in current phase
+Status: Executing
+Last activity: 2026-04-10 — Completed 105-01 (foundation export infrastructure)
 
-Progress: [██████████] 100% (2/2 plans in Phase 104.2)
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -32,25 +32,31 @@ Progress: [██████████] 100% (2/2 plans in Phase 104.2)
 - v9.0: 8 phases, 25 plans
 - v10.0: 5 phases, 7 plans
 - v11.0: 5 phases, 10 plans
+- v12.0: 6 phases (4 + 2 inserted)
 
 ## Accumulated Context
 
 ### Decisions
 
-All v1.0-v11.0 decisions archived in PROJECT.md Key Decisions table and previous STATE.md snapshots.
+All v1.0-v12.0 decisions archived in PROJECT.md Key Decisions table.
 
-v12.0 design decisions (from design brief):
-- Three filtering axes: type tabs (automatic), company dropdown (automatic), tag pills (user-defined escape hatch)
-- Flat time-grouped list, not company-grouped sections (Norman: three-level nesting causes cognitive overload)
-- Fix titles at write time (skills generate readable titles) + migration for existing bad titles
-- Fix dedup at write time (same title + type + account within 1 hour = update) + migration for existing dupes
-- Account resolution Option C: skills create Account first, pass both account_id + company_name
-- Tag validation: max 20/doc, 200 unique/tenant, 50 chars, lowercase alphanumeric+hyphens
-- PgBouncer DDL constraint: each migration statement via SQL Editor, not Alembic transactions
-- Backend must complete before frontend (API dependency)
-- Skill ecosystem updates are last (backward-compatible params mean existing skills keep working)
-- [Phase 104.2]: input_data as JSON string in MCP tool signature for lean tool parameters
-- [Phase 104.2]: Hardcoded MCP-side validation removed in favor of server-side schema validation
+v13.0 Phase 105 Plan 01:
+- WeasyPrint system deps in Dockerfile only -- no local uv sync required
+- HTML sanitization at two points in export path (fragment wrapper + full-document body)
+- asyncio.to_thread wraps both PDF and DOCX export
+
+v13.0 pre-GSD context:
+- Pre-GSD code exists for one-pager skill, export service, OnePagerRenderer — needs validation against research findings
+- WeasyPrint NOT in pyproject.toml or Dockerfile — must fix before PDF export works
+- export_as_pdf is sync — must wrap in asyncio.to_thread
+- HTML sanitization gap in _wrap_fragment_as_document — XSS risk
+- Anthropic SDK upgrade to >=0.93.0 needed for output_config structured outputs
+- File upload backend ALREADY EXISTS (api/files.py, file_extraction.py, UploadedFile model)
+- PII redaction belongs at export/share boundary, not pre-storage
+- Archived pii-redactor script (560 lines) — port, don't rebuild
+- No more hardcoded is_xyz branches in skill executor
+- Legal doc advisor (Phase 107) ships MCP/CLI-first — user provides file path. Web file upload UI comes in Phase 108. No brainstorm needed — archived skill is v3.0 and mature. Phase 107 research defines the structured JSON schema.
+- No phase reordering — 107 before 108 is correct
 
 ### Pending Todos
 
@@ -61,22 +67,8 @@ v12.0 design decisions (from design brief):
 
 None active.
 
-### Roadmap Evolution
-
-- v12.0 roadmap created: Phases 101-104
-- Phase 104.1 inserted after Phase 104: Legacy Model Cleanup — rewire 9 backend files from Account/AccountContact/OutreachActivity to PipelineEntry/Contact/Activity (URGENT)
-- 104.1-02: outreach.py and timeline.py confirmed dead (no frontend callers), deleted entirely (735 lines removed)
-- 104.1-02: Dead frontend accounts/ components noted for future cleanup (not in scope)
-- 104.1-01: Used TIMESTAMP(timezone=True) for ai_summary_updated_at to match existing PipelineEntry column convention
-- 104.1-03: Reply signal uses direction=inbound + status=completed (Activity has no 'replied' status); pipeline partition: retired_at IS NULL AND stage NOT IN ('identified')
-- 104.1-05: Renamed auto_link_meeting_to_account -> auto_link_meeting_to_pipeline_entry; meetings.py now sets pipeline_entry_id (not account_id) when auto-linking
-- 104.1-04: Graduate endpoint sets stage='qualified' instead of graduated_at=now; partition predicate: retired_at IS NULL AND stage NOT IN ('identified'); response models: entity_type/stage/last_activity_at replace entity_level/relationship_status/last_interaction_at
-- Phase 104.2 inserted after Phase 104: Skill Input Schema Validation — two-step skill invocation with server-side input validation, repurpose parameters JSONB for input schemas (INSERTED)
-- 104.2-01: Used lightweight inline JSON schema validator instead of jsonschema library (pyproject.toml protected); input_data serialized as JSON prefix to input_text for backward compatibility
-- 104.2-02: input_data as JSON string in MCP tool signature; hardcoded meeting-processor UUID validation removed; input_requirements displayed in fetch_skills
-
 ## Session Continuity
 
 Last session: 2026-04-10
-Stopped at: Completed 104.2-02-PLAN.md (MCP layer input_data support) — Phase 104.2 complete
+Stopped at: Completed 105-01-PLAN.md — ready for 105-02
 Resume file: None

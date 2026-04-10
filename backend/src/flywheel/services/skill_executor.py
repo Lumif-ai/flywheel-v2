@@ -688,6 +688,7 @@ async def execute_run(run: SkillRun) -> None:
                     agent_connected=agent_connected,
                     system_prompt_override=db_system_prompt,
                     protected=(skill_meta or {}).get("protected", True),
+                    skill_parameters=(skill_meta or {}).get("parameters"),
                 )
             anthropic_breaker.record_success()
         except Exception as exec_err:
@@ -3215,6 +3216,7 @@ async def _execute_with_tools(
     agent_connected: bool = False,
     system_prompt_override: str | None = None,
     protected: bool = True,
+    skill_parameters: dict | None = None,
 ) -> tuple[str, dict, list]:
     """Execute a skill using AsyncAnthropic with the tool registry.
 
@@ -3302,14 +3304,25 @@ async def _execute_with_tools(
     total_output_tokens = 0
     tool_calls_made: list[dict] = []
 
+    # Extract output schema if skill declares one (outside loop -- doesn't change per iteration)
+    output_schema = (skill_parameters or {}).get("output_schema") if skill_parameters else None
+
     for _iteration in range(max_iterations):
-        response = await client.messages.create(
-            model="claude-sonnet-4-20250514",
-            max_tokens=4096,
-            system=system_prompt,
-            tools=tool_defs,
-            messages=messages,
-        )
+        create_kwargs: dict = {
+            "model": "claude-sonnet-4-20250514",
+            "max_tokens": 4096,
+            "system": system_prompt,
+            "tools": tool_defs,
+            "messages": messages,
+        }
+        if output_schema:
+            create_kwargs["output_config"] = {
+                "format": {
+                    "type": "json_schema",
+                    "schema": output_schema,
+                }
+            }
+        response = await client.messages.create(**create_kwargs)
 
         total_input_tokens += response.usage.input_tokens
         total_output_tokens += response.usage.output_tokens
