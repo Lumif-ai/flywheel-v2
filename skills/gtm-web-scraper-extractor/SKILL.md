@@ -25,6 +25,17 @@ tags:
 context-aware: true
 recipe-aware: true
 web_tier: 3
+parameters:
+  input_schema:
+    type: object
+    properties:
+      url:
+        type: string
+        format: uri
+        description: "URL of the webpage to scrape and extract information from"
+    required:
+      - url
+  input_description: "Requires a URL to scrape. Provide the full URL including https://."
 ---
 
 # Web Scraper / Data Extractor Skill

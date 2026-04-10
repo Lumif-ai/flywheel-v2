@@ -27,6 +27,17 @@ output:
   - context-store-writes
   - standalone-enriched-report
 web_tier: 1
+parameters:
+  input_schema:
+    type: object
+    properties:
+      meeting_id:
+        type: string
+        format: uuid
+        description: "UUID of the meeting to process (from flywheel_fetch_meetings)"
+    required:
+      - meeting_id
+  input_description: "Requires a meeting UUID. Use flywheel_fetch_meetings to find meeting IDs."
 ---
 
 # meeting-processor
@@ -630,7 +641,15 @@ print(enriched_output)
 - [ ] [item with owner and due date]
 ```
 
-## Step 9.5: Deliverables
+## Step 9.5: Save to Library
+
+**Library Contract (Standard 15):** When calling `flywheel_save_document` for each processed meeting:
+- **title**: `"Meeting Summary: {Company} — {Meeting Title}"`
+- **account_id**: Look up the primary company via `flywheel_fetch_account`. If not found, create it first. Pass the pipeline entry UUID. If no clear company (internal meetings), pass null.
+- **tags**: Include relevant tags: company name (slugified), meeting type, quarter. E.g., `["acme-corp", "discovery", "q2-2026"]`
+- **skill_name**: `"meeting-processor"`
+
+## Step 9.6: Deliverables
 
 **Always show the deliverables block after processing completes:**
 

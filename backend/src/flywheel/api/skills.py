@@ -28,6 +28,8 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sse_starlette.sse import EventSourceResponse
 
+import re as _re
+
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import ContextEntry, SkillDefinition, SkillRun, TenantSkill, WorkItem
@@ -47,6 +49,7 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 class StartRunRequest(BaseModel):
     skill_name: str
     input_text: str | None = None
+    input_data: dict | None = None  # Structured input validated against skill's input_schema
     work_item_id: UUID | None = None
 
 
@@ -164,6 +167,9 @@ async def _get_available_skills_db(db: AsyncSession, tenant_id: UUID) -> list[di
             "tags": list(sd.tags) if sd.tags else [],
             "web_tier": sd.web_tier,
             "tier_message": _get_tier_message(sd.web_tier),
+            "input_requirements": (sd.parameters or {}).get("input_description", ""),
+            "input_schema": (sd.parameters or {}).get("input_schema"),
+            "triggers": (sd.parameters or {}).get("triggers", []),
         }
         for sd in rows
     ]
@@ -189,6 +195,60 @@ def _run_to_dict(run: SkillRun, *, detail: bool = False) -> dict[str, Any]:
         d["attribution"] = run.attribution
         d["events_log"] = run.events_log
     return d
+
+
+def _validate_input_data(data: dict, schema: dict) -> str | None:
+    """Validate *data* against a JSON Schema-like *schema*.
+
+    Returns ``None`` on success or a human-readable error string on failure.
+    Supports: type, required, properties, format (uuid / uri).
+
+    This is a lightweight validator so that we don't need the ``jsonschema``
+    package as an explicit dependency.
+    """
+    # Top-level type check
+    schema_type = schema.get("type")
+    if schema_type == "object" and not isinstance(data, dict):
+        return f"Expected object, got {type(data).__name__}"
+
+    properties: dict = schema.get("properties", {})
+    required: list = schema.get("required", [])
+
+    # Check required fields
+    for field in required:
+        if field not in data:
+            return f"Missing required field: '{field}'"
+
+    # Validate each provided property against its sub-schema
+    for field, value in data.items():
+        if field not in properties:
+            continue  # extra fields are allowed
+        prop_schema = properties[field]
+        prop_type = prop_schema.get("type")
+        if prop_type == "string" and not isinstance(value, str):
+            return f"Field '{field}' must be a string"
+        if prop_type == "number" and not isinstance(value, (int, float)):
+            return f"Field '{field}' must be a number"
+        if prop_type == "integer" and not isinstance(value, int):
+            return f"Field '{field}' must be an integer"
+        if prop_type == "boolean" and not isinstance(value, bool):
+            return f"Field '{field}' must be a boolean"
+        if prop_type == "array" and not isinstance(value, list):
+            return f"Field '{field}' must be an array"
+
+        # Format checks (only for strings)
+        fmt = prop_schema.get("format")
+        if fmt and isinstance(value, str):
+            if fmt == "uuid":
+                try:
+                    UUID(value)
+                except ValueError:
+                    return f"Field '{field}' must be a valid UUID"
+            elif fmt == "uri":
+                if not _re.match(r"^https?://", value):
+                    return f"Field '{field}' must be a valid URL (starting with http:// or https://)"
+
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -304,7 +364,7 @@ async def start_run(
     await check_concurrent_run_limit(user.sub, db)
 
     # Validate skill exists in DB and is enabled for this tenant.
-    # If tenant has tenant_skills overrides, check those; otherwise allow all enabled skills.
+    # Fetch the full SkillDefinition so we can access parameters for input validation.
     has_overrides = await db.execute(
         select(TenantSkill.skill_id)
         .where(TenantSkill.tenant_id == user.tenant_id)
@@ -312,7 +372,7 @@ async def start_run(
     )
     if has_overrides.scalar_one_or_none() is not None:
         skill_check = await db.execute(
-            select(SkillDefinition.id)
+            select(SkillDefinition)
             .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
             .where(
                 SkillDefinition.name == body.skill_name,
@@ -323,19 +383,46 @@ async def start_run(
         )
     else:
         skill_check = await db.execute(
-            select(SkillDefinition.id)
+            select(SkillDefinition)
             .where(
                 SkillDefinition.name == body.skill_name,
                 SkillDefinition.enabled == True,  # noqa: E712
             )
         )
-    if skill_check.scalar_one_or_none() is None:
+    skill = skill_check.scalar_one_or_none()
+    if skill is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Skill '{body.skill_name}' not found",
         )
 
+    # --- Input validation against skill's input_schema ---
+    parameters = skill.parameters or {}
+    input_schema = parameters.get("input_schema")
+    if input_schema:
+        if body.input_data:
+            validation_error = _validate_input_data(body.input_data, input_schema)
+            if validation_error:
+                raise HTTPException(
+                    status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                    detail=f"Invalid input for skill '{body.skill_name}': {validation_error}",
+                )
+        elif not body.input_text:
+            input_desc = parameters.get(
+                "input_description",
+                "This skill requires structured input.",
+            )
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Skill '{body.skill_name}' requires input: {input_desc}",
+            )
+
     input_text = body.input_text or ""
+
+    # Serialize structured input_data into input_text prefix
+    if body.input_data:
+        data_context = json.dumps({"input_data": body.input_data})
+        input_text = f"{data_context}\n{input_text}" if input_text else data_context
 
     # If work_item_id provided, verify it exists and include its data
     if body.work_item_id:
