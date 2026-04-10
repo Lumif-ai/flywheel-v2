@@ -638,13 +638,24 @@ async def execute_run(run: SkillRun) -> None:
                     tool_calls = []
                 elif is_meeting_processor:
                     if not run.input_text:
-                        raise ValueError("meeting-processor requires input_text=meeting_id")
+                        raise ValueError(
+                            "meeting-processor requires input_text to be a meeting UUID. "
+                            "Use flywheel_fetch_meetings to get meeting IDs first."
+                        )
+                    try:
+                        parsed_meeting_id = UUID(run.input_text.strip())
+                    except ValueError:
+                        raise ValueError(
+                            f"meeting-processor input_text must be a valid meeting UUID, "
+                            f"got: '{run.input_text[:80]}'. "
+                            f"Use flywheel_fetch_meetings to get meeting IDs first."
+                        )
                     output, token_usage, tool_calls = await _execute_meeting_processor(
                         factory=factory,
                         run_id=run.id,
                         tenant_id=run.tenant_id,
                         user_id=run.user_id,
-                        meeting_id=UUID(run.input_text),
+                        meeting_id=parsed_meeting_id,
                         api_key=api_key,
                     )
                 elif is_flywheel:
@@ -2013,8 +2024,7 @@ async def _execute_meeting_processor(
                     processing_status="complete",
                     processed_at=datetime.now(timezone.utc),
                     meeting_type=meeting_type,
-                    account_id=account_id,
-                    pipeline_entry_id=pipeline_entry_id,
+                    pipeline_entry_id=pipeline_entry_id or account_id,
                     skill_run_id=run_id,
                 )
             )

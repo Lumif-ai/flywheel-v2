@@ -986,7 +986,7 @@ async def write_task_rows(
                 tenant_id=tenant_id,
                 user_id=user_id,
                 meeting_id=meeting_id,
-                account_id=account_id,
+                pipeline_entry_id=account_id,
                 source="meeting-processor",
                 title=t.get("title", "Untitled task"),
                 description=t.get("description"),
