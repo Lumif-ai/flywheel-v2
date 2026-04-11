@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v13.0 Skill Platform — Phase 110
+**Current focus:** v13.0 Skill Platform — Phase 111
 
 ## Current Position
 
 Milestone: v13.0 Skill Platform
-Phase: 110 of 111 (Synthesis Infrastructure)
-Plan: 2 of 2 in current phase
-Status: Phase Complete
-Last activity: 2026-04-10 — Completed 110-02 (metadata pass-through for context writes)
+Phase: 111 of 111 (Pain Landscape Synthesis)
+Plan: 1 of 2 in current phase
+Status: In Progress
+Last activity: 2026-04-11 — Completed 111-01 (meeting-intelligence synthesis skill Steps 0-4)
 
 Progress: [██████████] 100%
 
@@ -54,6 +54,13 @@ v13.0 Phase 110 Plan 01:
 - read_context_file() default limit raised from 20 to 100 (backend max, fewer round-trips)
 - Metadata filtering documented as client-side only; pre-Phase-110 entries have empty metadata dict
 
+v13.0 Phase 111 Plan 01:
+- meeting-intelligence skill load limit: 1000 entries per file (single call, warns if has_more=true)
+- LLM model for synthesis: claude-opus-4-5 (not claude-3 — quality over cost for synthesis)
+- Hair-on-fire threshold: >70% urgency language ratio
+- Confidence thresholds: <10 EARLY SIGNAL, 10-25 EMERGING PATTERN, 25+ STRONG PATTERN
+- Meeting count in entry content not evidence_count (prevents inflation on re-runs)
+
 v13.0 Phase 110 Plan 02:
 - source and confidence promoted to explicit params in write_context() (backward compatible)
 - metadata only added to POST body when non-None and non-empty (conditional inclusion)
@@ -84,5 +91,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-11
-Stopped at: Completed 110-01-PLAN.md (backfilled) — Phase 110 complete, ready for Phase 111
+Stopped at: Completed 111-01-PLAN.md — meeting-intelligence synthesis skill (Steps 0-4)
 Resume file: None

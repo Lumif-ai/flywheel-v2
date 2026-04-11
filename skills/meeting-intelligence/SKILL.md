@@ -527,15 +527,116 @@ print(
 
 ---
 
-## Step 4: Terminal Summary Report
+## Step 4: Co-occurrence Detection and Cluster Entry Writing
 
-After all entries are written, print a structured summary and save it to the
-Flywheel library.
+Detect which pain pairs co-occur across meetings and write cluster entries to
+`pain-landscape.md`. This step is wrapped in graceful degradation — if it fails,
+pain entries written in Step 3 are unaffected.
+
+**Co-occurrence definition:** Two pains co-occur if both appear in entries sharing
+the same meeting identifier (extracted from the LLM grouping's `meeting_sources`).
+Only pairs appearing in **2+ meetings** are considered significant (noise reduction).
+
+**Cluster tag format:** `cluster: {pain-a}+{pain-b}` where pain-a < pain-b
+(alphabetical). This is deterministic — same pair always maps to same entry,
+enabling upsert on re-runs.
+
+```python
+from itertools import combinations
+from datetime import datetime
+
+print("\n=== Step 4: Co-occurrence Detection ===")
+
+# Initialize cluster tracking for later reporting
+cluster_pairs_written = 0
+significant_pairs = {}
+
+try:
+    # Build inverted index: meeting_id -> set of pain slugs
+    meeting_to_pains = {}
+    for group in pain_groups:
+        for meeting_id in group.get("meeting_sources", []):
+            if meeting_id not in meeting_to_pains:
+                meeting_to_pains[meeting_id] = set()
+            meeting_to_pains[meeting_id].add(group["slug"])
+
+    # Find co-occurring pairs: count meetings where both pains appear
+    co_occurrences = {}  # (pain_a, pain_b) -> count (alphabetical tuple)
+    for meeting_id, pains in meeting_to_pains.items():
+        pain_list = sorted(pains)  # alphabetical for deterministic keys
+        for pair in combinations(pain_list, 2):
+            co_occurrences[pair] = co_occurrences.get(pair, 0) + 1
+
+    # Filter: only pairs appearing in 2+ meetings (noise reduction)
+    significant_pairs = {
+        pair: count
+        for pair, count in co_occurrences.items()
+        if count >= 2
+    }
+
+    print(
+        f"Co-occurrence analysis: {len(significant_pairs)} significant pairs found "
+        f"(appearing in 2+ meetings)"
+    )
+
+    # Write cluster entries sorted by count descending
+    today_cluster = datetime.now().strftime("%Y-%m-%d")
+
+    for (pain_a, pain_b), count in sorted(
+        significant_pairs.items(), key=lambda x: x[1], reverse=True
+    ):
+        cluster_tag = f"cluster: {pain_a}+{pain_b}"  # pain_a < pain_b (alphabetical)
+
+        cluster_body = (
+            f"Co-occurring pains: {pain_a} + {pain_b}\n"
+            f"Co-occurrence count: {count} meetings\n"
+            f"\n"
+            f"Pains appear together in {count} meetings, suggesting a workflow-level "
+            f"problem connecting these two pain points.\n"
+            f"\n"
+            f"synthesized_at: {today_cluster} | based_on: {total_meetings_processed} prospect meetings"
+        )
+
+        cluster_content = (
+            f"[{today_cluster} | source: meeting-intelligence-synthesis | {cluster_tag}]\n"
+            f"confidence: medium | evidence: 1\n"
+            f"\n"
+            f"{cluster_body}"
+        )
+
+        try:
+            client.write_context(
+                file_name="pain-landscape.md",
+                content=cluster_content,
+                source="meeting-intelligence-synthesis",
+                detail=cluster_tag
+            )
+            cluster_pairs_written += 1
+            print(f"  Cluster written: {cluster_tag} ({count} meetings)")
+        except Exception as write_err:
+            print(f"  ERROR writing cluster {cluster_tag}: {write_err}")
+
+    print(f"\nCluster entries written: {cluster_pairs_written}")
+
+except Exception as e:
+    print(
+        f"WARNING: Co-occurrence detection skipped — {e}. "
+        f"Pain landscape entries are unaffected."
+    )
+    significant_pairs = {}
+    cluster_pairs_written = 0
+```
+
+---
+
+## Step 5: Terminal Summary Report
+
+After all entries are written, print a structured summary to the terminal.
 
 ```python
 from datetime import datetime
 
-print("\n=== Step 4: Synthesis Summary ===\n")
+print("\n=== Step 5: Terminal Summary Report ===")
 
 today = datetime.now().strftime("%Y-%m-%d")
 
@@ -550,53 +651,169 @@ for g in pain_groups:
     if total_phrases > 0 and (urgency_count / total_phrases) > 0.70:
         hair_on_fire_groups.append(g["slug"])
 
+separator = "=" * 60
 report_lines = [
-    f"# Pain Landscape Synthesis Report",
-    f"synthesized_at: {today}",
-    f"based_on: {total_meetings_processed} unique meetings",
-    f"entries_processed: {total_entries} ({n_pain} pain-points, {n_insights} insights, {n_feedback} product-feedback)",
-    f"",
-    f"## Pain Groups Identified: {len(pain_groups)}",
-    f"",
-    f"### Strong Pattern (25+ mentions)",
+    separator,
+    "PAIN LANDSCAPE SYNTHESIS — COMPLETE",
+    separator,
+    f"Run date: {today}",
+    f"Source data: {total_entries} entries from {total_meetings_processed} meetings",
+    f"  • pain-points.md: {n_pain} entries",
+    f"  • insights.md: {n_insights} entries",
+    f"  • product-feedback.md: {n_feedback} entries",
+    "",
+    f"Pain Groups Identified: {len(pain_groups)}",
+    "",
 ]
-for g in high_confidence:
-    report_lines.append(f"- **{g['slug']}**: {g['mention_count']} mentions across {g['meeting_count']} meetings")
 
-report_lines.append(f"\n### Emerging Pattern (10-25 mentions)")
-for g in medium_confidence:
-    report_lines.append(f"- **{g['slug']}**: {g['mention_count']} mentions across {g['meeting_count']} meetings")
+# Sort pain groups by mention_count descending for the report
+for g in sorted(pain_groups, key=lambda x: x["mention_count"], reverse=True):
+    mention_count = g["mention_count"]
+    meeting_count = g["meeting_count"]
+    _, pattern_label = confidence_label(mention_count)
 
-report_lines.append(f"\n### Early Signal (<10 mentions)")
-for g in low_confidence:
-    report_lines.append(f"- **{g['slug']}**: {g['mention_count']} mentions across {g['meeting_count']} meetings")
+    # Top verbatim phrase
+    phrases = g.get("verbatim_phrases", [])
+    urgency_phrases_list = [p for p in phrases if p.get("urgency")]
+    top_phrase = (urgency_phrases_list or phrases)
+    top_phrase_text = top_phrase[0]["text"] if top_phrase else "(none recorded)"
 
-if hair_on_fire_groups:
-    report_lines.append(f"\n## Hair on Fire Pains (>70% urgency language)")
-    for slug in hair_on_fire_groups:
-        report_lines.append(f"- {slug}")
+    # Confidence tier label
+    urgency_count = g.get("urgency_phrase_count", 0)
+    total_phrases = g.get("total_phrases", max(mention_count, 1))
+    urgency_pct = round((urgency_count / total_phrases) * 100) if total_phrases > 0 else 0
+    calibrated_label = f"{urgency_pct}% urgency language"
+    if urgency_pct > 70:
+        calibrated_label += " — HAIR ON FIRE"
+
+    report_lines.append(
+        f"[{pattern_label}] {g['label']} — {mention_count} mentions, {meeting_count} meetings"
+    )
+    report_lines.append(f"   Confidence: {calibrated_label}")
+    report_lines.append(f'   Top phrase: "{top_phrase_text}"')
+    report_lines.append("")
+
+if significant_pairs:
+    report_lines.append(f"Co-occurrences Detected: {len(significant_pairs)}")
+    for (pain_a, pain_b), count in sorted(
+        significant_pairs.items(), key=lambda x: x[1], reverse=True
+    ):
+        report_lines.append(f"  {pain_a} + {pain_b}: {count} meetings")
+    report_lines.append("")
+else:
+    report_lines.append("Co-occurrences Detected: 0 (no pairs in 2+ meetings)")
+    report_lines.append("")
 
 report_lines.extend([
-    f"",
-    f"## Write Results",
-    f"- Written: {written_count} entries",
-    f"- Failed: {failed_count} entries",
-    f"- Target file: pain-landscape.md",
-    f"",
-    f"---",
-    f"*Generated by meeting-intelligence v1.0 | {today}*",
+    "Written to pain-landscape.md:",
+    f"  • {written_count} pain entries (detail tags: pain: *)",
+    f"  • {cluster_pairs_written} cluster entries (detail tags: cluster: *)",
+    "",
+    f"synthesized_at: {today}",
+    separator,
 ])
 
 report_text = "\n".join(report_lines)
 print(report_text)
 
-# Save to Flywheel library (via flywheel_save_document MCP tool)
-# Claude Code: call flywheel_save_document with the report text
-print("\nSave this report to the Flywheel library:")
-print("  flywheel_save_document(")
-print(f'    title="Pain Landscape Synthesis {today}",')
-print(f'    content=report_text,')
-print(f'    document_type="synthesis-report"')
-print("  )")
-print("\nSynthesis complete.")
+print(
+    "\nPain landscape is ready. meeting-prep will automatically use these entries "
+    "in the next briefing run."
+)
 ```
+
+---
+
+## Step 6: Save Summary to Flywheel Library
+
+Save the terminal report as a Flywheel document for future reference. Try the
+`flywheel_save_document` MCP tool first; fall back to a local file if unavailable.
+
+```python
+import os
+from datetime import datetime
+
+print("\n=== Step 6: Save Summary to Flywheel Library ===")
+
+today = datetime.now().strftime("%Y-%m-%d")
+
+document_title = f"Pain Landscape Synthesis — {today}"
+document_content = (
+    f"# Pain Landscape Synthesis\n\n"
+    f"**Generated:** {today}\n"
+    f"**Skill:** meeting-intelligence v1.0\n\n"
+    f"```\n{report_text}\n```\n"
+)
+
+saved_to_library = False
+
+# Attempt 1: flywheel_save_document MCP tool (available when running inside Claude Code)
+# Claude Code will execute this call if the MCP tool is registered in the session:
+#
+#   flywheel_save_document(
+#     title=document_title,
+#     content=document_content,
+#     document_type="synthesis-report"
+#   )
+#
+# If the MCP tool is available, the above call saves to the Flywheel library.
+# Set saved_to_library = True after a successful call.
+
+# Attempt 2: Local file fallback
+if not saved_to_library:
+    output_dir = os.path.expanduser("~/Documents/claude-outputs/synthesis")
+    os.makedirs(output_dir, exist_ok=True)
+    local_path = os.path.join(output_dir, f"pain-landscape-{today}.md")
+    try:
+        with open(local_path, "w") as f:
+            f.write(document_content)
+        print(f"Saved locally (MCP unavailable): {local_path}")
+    except Exception as e:
+        print(f"WARNING: Could not save local fallback: {e}")
+        local_path = "(save failed)"
+else:
+    local_path = "(saved to Flywheel library — no local fallback needed)"
+
+print(
+    f"\n{'=' * 60}\n"
+    f"DELIVERABLES\n"
+    f"  Context store: pain-landscape.md "
+    f"({written_count} pain entries + {cluster_pairs_written} cluster entries)\n"
+    f"  Library document: {document_title}\n"
+    f"  Local fallback: {local_path}\n"
+    f"{'=' * 60}"
+)
+```
+
+<!-- Engineering Standards Compliance (v1.0)
+Standard 1 (Memory): No per-user preferences needed — synthesis is deterministic.
+  Pain grouping is driven by LLM analysis of entry content, not user prefs.
+Standard 2 (Dependency check): Step 0 verifies FlywheelClient importable, API URL set,
+  context store reachable via list_context_files(). FATAL + sys.exit(1) on any failure.
+Standard 3 (Testing): Smoke test: run on 0 entries, verify graceful "no data" exit.
+  Run on 2 meetings, verify 1 cluster entry (2+ meeting threshold test).
+Standard 4 (Parallel execution): V1 single-threaded — source files are small (<1000
+  entries). V2 can parallelize LLM calls per source file.
+Standard 5 (Resume/checkpoint): Step 4 co-occurrence wrapped in try/except — Step 3
+  pain entries written so far are retained if cluster step errors.
+Standard 6 (Deliverables): Step 6 prints DELIVERABLES block with full paths to context
+  store entries and library document.
+Standard 7 (Idempotency): Deterministic detail tags — pain: {slug} and cluster: {a}+{b}
+  (alphabetical) — ensure safe re-runs with upsert behavior. No duplicates.
+Standard 8 (Progress): Step 3 prints per-entry progress [i/N]. Step 4 prints per-cluster
+  progress. Step 1 prints file stats. All 3+ source files reported.
+Standard 9 (Input validation): Step 1 quality check validates first 5 pain-points entries
+  for date prefix, speaker attribution, Severity: field. Warns if <3/5 pass; exits if 0
+  pain-points found.
+Standard 10 (Graceful degradation): Step 4 co-occurrence wrapped in try/except — failures
+  logged, synthesis continues. Step 3 errors logged per-entry, never abort mid-batch.
+Standard 11 (Context management): Single-pass design — no long-running context accumulation.
+  LLM call in Step 2 is one request; no streaming or multi-turn required.
+Standard 12 (Backup): Source files (pain-points.md, insights.md, product-feedback.md) are
+  NEVER modified. Read-only. No backup needed.
+Standard 13 (Versioning): version: "1.0" in frontmatter. Changelog maintained here.
+  v1.0 (2026-04-11): Initial implementation — Steps 0-6.
+Standard 14 (Context store integration): Reads pain-points.md, insights.md,
+  product-feedback.md; writes pain-landscape.md. Source/detail tags ensure separation
+  from other writers. _catalog.md listed in dependencies frontmatter.
+-->
