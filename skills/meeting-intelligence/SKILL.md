@@ -113,30 +113,30 @@ LOAD_LIMIT = 1000  # Pull all entries in one request (current API supports up to
 
 print("=== Step 1: Load Source Data ===")
 
-def load_all_entries(client, file_name, limit=LOAD_LIMIT):
-    """Load all entries from a context store file.
+def load_all_entries(client, file_name, page_size=100):
+    """Load all entries from a context store file using pagination.
 
-    NOTE: read_context_file() accepts 'limit' but not 'offset' in the current API.
-    We load with limit=1000 to capture all entries in one call. If total > 1000,
-    a warning is printed — contact engineering to enable server-side pagination.
+    Uses read_context_file() with offset parameter (added in Phase 110).
+    Loops until has_more is false to ensure all entries are retrieved.
     """
-    try:
-        resp = client.read_context_file(file_name, limit=limit)
-    except Exception as e:
-        print(f"  WARNING: Could not load {file_name}: {e}")
-        return []
+    all_entries = []
+    offset = 0
 
-    entries = resp.get("entries", [])
-    total = resp.get("total", len(entries))
-    has_more = resp.get("has_more", False)
+    while True:
+        try:
+            resp = client.read_context_file(file_name, limit=page_size, offset=offset)
+        except Exception as e:
+            print(f"  WARNING: Could not load {file_name} (offset={offset}): {e}")
+            break
 
-    if has_more or total > limit:
-        print(
-            f"  WARNING: {file_name} has {total} entries, only first {limit} loaded. "
-            f"Pagination not yet supported — contact engineering."
-        )
+        items = resp.get("items", resp.get("entries", []))
+        all_entries.extend(items)
 
-    return entries
+        if not resp.get("has_more", False):
+            break
+        offset += page_size
+
+    return all_entries
 
 all_loaded = {}
 for source_file in SOURCE_FILES:
@@ -408,14 +408,32 @@ def build_entry_body(group, total_meetings_processed):
     urgency_phrases_list = [p for p in verbatim_phrases if p.get("urgency")]
     mild_phrases_list = [p for p in verbatim_phrases if not p.get("urgency")]
 
+    # Cap total verbatim phrases at 3-5 per spec (SYNTH-01)
+    # Prioritize urgency phrases, fill remaining with mild
+    combined_phrases = []
+    for p in urgency_phrases_list[:4]:
+        combined_phrases.append({**p, "_category": "urgency"})
+    remaining = max(0, 5 - len(combined_phrases))
+    for p in mild_phrases_list[:remaining]:
+        combined_phrases.append({**p, "_category": "mild"})
+    # Ensure at least 3 if available
+    if len(combined_phrases) < 3 and len(verbatim_phrases) >= 3:
+        for p in verbatim_phrases[:3]:
+            if p not in [cp for cp in combined_phrases]:
+                combined_phrases.append({**p, "_category": "urgency" if p.get("urgency") else "mild"})
+                if len(combined_phrases) >= 3:
+                    break
+
     language_lines = []
-    if urgency_phrases_list:
+    urgency_display = [p for p in combined_phrases if p["_category"] == "urgency"]
+    mild_display = [p for p in combined_phrases if p["_category"] == "mild"]
+    if urgency_display:
         language_lines.append("Language (urgency):")
-        for p in urgency_phrases_list[:5]:
+        for p in urgency_display:
             language_lines.append(f'- "{p["text"]}" ({p.get("speaker", "prospect")})')
-    if mild_phrases_list:
+    if mild_display:
         language_lines.append("Language (mild):")
-        for p in mild_phrases_list[:3]:
+        for p in mild_display:
             language_lines.append(f'- "{p["text"]}" ({p.get("speaker", "prospect")})')
     if not language_lines:
         language_lines.append("Language: (no verbatim phrases extracted)")
@@ -747,17 +765,18 @@ document_content = (
 
 saved_to_library = False
 
-# Attempt 1: flywheel_save_document MCP tool (available when running inside Claude Code)
-# Claude Code will execute this call if the MCP tool is registered in the session:
-#
-#   flywheel_save_document(
-#     title=document_title,
-#     content=document_content,
-#     document_type="synthesis-report"
-#   )
-#
-# If the MCP tool is available, the above call saves to the Flywheel library.
-# Set saved_to_library = True after a successful call.
+# Attempt 1: Save to Flywheel library via MCP tool
+# Claude Code will execute this tool call at runtime:
+try:
+    flywheel_save_document(
+        title=document_title,
+        content=document_content,
+        document_type="synthesis-report"
+    )
+    saved_to_library = True
+    print(f"Saved to Flywheel library: {document_title}")
+except Exception as e:
+    print(f"Library save skipped (MCP unavailable): {e}")
 
 # Attempt 2: Local file fallback
 if not saved_to_library:
