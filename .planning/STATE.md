@@ -5,15 +5,15 @@
 See: .planning/PROJECT.md (updated 2026-04-10)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v13.0 Skill Platform — Phase 105
+**Current focus:** v13.0 Skill Platform — Phase 110
 
 ## Current Position
 
 Milestone: v13.0 Skill Platform
-Phase: 105 of 109 (Foundation + Export Infrastructure)
+Phase: 110 of 111 (Synthesis Infrastructure)
 Plan: 2 of 2 in current phase
 Status: Phase Complete
-Last activity: 2026-04-10 — Completed 105-02 (structured outputs wiring)
+Last activity: 2026-04-10 — Completed 110-02 (metadata pass-through for context writes)
 
 Progress: [██████████] 100%
 
@@ -50,6 +50,11 @@ v13.0 Phase 105 Plan 02:
 - output_schema extraction placed outside tool loop (invariant per execution)
 - output_renderer structured_data pipeline confirmed already complete (no changes needed)
 
+v13.0 Phase 110 Plan 02:
+- source and confidence promoted to explicit params in write_context() (backward compatible)
+- metadata only added to POST body when non-None and non-empty (conditional inclusion)
+- CLI path (context_utils.py) explicitly flagged as unable to carry metadata — FlywheelClient required for Phase 110+ writes
+
 v13.0 pre-GSD context:
 - Pre-GSD code exists for one-pager skill, export service, OnePagerRenderer — needs validation against research findings
 - WeasyPrint NOT in pyproject.toml or Dockerfile — must fix before PDF export works
@@ -75,5 +80,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-10
-Stopped at: Completed 105-02-PLAN.md — Phase 105 complete, ready for Phase 106
+Stopped at: Completed 110-02-PLAN.md — Phase 110 complete, ready for Phase 111
 Resume file: None
