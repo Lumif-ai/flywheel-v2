@@ -20,7 +20,6 @@ import { QuickAddRow } from './QuickAddRow'
 import { PipelineSidePanel } from './PipelineSidePanel'
 import { ContactDetailPanel } from './ContactDetailPanel'
 import { ContactDetailRow } from './ContactDetailRow'
-import { ExpandToggleCell } from './cell-renderers/ExpandToggleCell'
 import type {
   PipelineListItem,
   PipelineGridRow,

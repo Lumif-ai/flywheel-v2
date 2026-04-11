@@ -48,7 +48,7 @@ const columnDefs: ColDef<ContactListItem>[] = [
     field: 'source',
     width: 130,
     sortable: false,
-    cellStyle: { color: '#6B7280', fontSize: '12px' } as React.CSSProperties,
+    cellStyle: { color: '#6B7280', fontSize: '12px' } as Record<string, string>,
   },
   // 6. Title
   {

@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { animationClasses, staggerDelay } from '@/lib/animations'
-import type { CrawlItem, CrawlItemMeta, EditedCategory } from '../hooks/useOnboarding'
+import type { CrawlItem, EditedCategory } from '../hooks/useOnboarding'
 
 // ---------------------------------------------------------------------------
 // Category icon mapping

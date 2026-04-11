@@ -10,7 +10,6 @@ import {
   Pencil,
   Loader2,
   Linkedin,
-  ExternalLink,
 } from 'lucide-react'
 import type { ContactListItem, PipelineActivity } from '../types/pipeline'
 import { useContactActivities } from '../hooks/useContactActivities'

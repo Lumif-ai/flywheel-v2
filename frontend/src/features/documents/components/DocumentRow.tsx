@@ -7,6 +7,8 @@ interface DocumentRowProps {
   document: DocumentListItem
   onView?: (doc: DocumentListItem) => void
   onShare?: (doc: DocumentListItem) => void
+  onAddTag?: (doc: DocumentListItem) => void
+  onDelete?: (doc: DocumentListItem) => void | Promise<void>
 }
 
 export function DocumentRow({ document, onView, onShare }: DocumentRowProps) {

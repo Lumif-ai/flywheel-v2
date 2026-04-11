@@ -1,9 +1,8 @@
 import { useState } from 'react'
-import { Brain, Edit2, Check, X } from 'lucide-react'
+import { Edit2, Check, X } from 'lucide-react'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { BrandedCard } from '@/components/ui/branded-card'
-import { EmptyState } from '@/components/ui/empty-state'
 import { Textarea } from '@/components/ui/textarea'
 import { updateAccount, queryKeys } from '../../api'
 

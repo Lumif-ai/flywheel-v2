@@ -1,4 +1,4 @@
-export type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'stage' | 'result' | 'clarify' | 'error' | 'done'
+export type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'stage' | 'result' | 'clarify' | 'error' | 'done' | 'crawl_error' | 'discovery'
 
 export interface SSEEvent {
   type: SSEEventType

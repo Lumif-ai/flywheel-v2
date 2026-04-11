@@ -7,7 +7,7 @@
  */
 
 import { useState, useCallback } from 'react'
-import { Linkedin, Calendar, ArrowRight, Loader2, FileText, ExternalLink } from 'lucide-react'
+import { Linkedin, Calendar, ArrowRight, Loader2, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { api } from '@/lib/api'
 import { useSSE } from '@/lib/sse'

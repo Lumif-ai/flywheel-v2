@@ -10,7 +10,6 @@ import {
   SidebarMenuSkeleton,
 } from '@/components/ui/sidebar'
 import { useStreams } from '@/features/briefing/hooks/useStreams'
-import { StreamDensityCard } from './DensityIndicator'
 
 const streamItemStyle = {
   active: {

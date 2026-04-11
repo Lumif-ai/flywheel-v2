@@ -2,7 +2,7 @@ import { useState, useMemo, useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router'
 import {
   Users, TrendingUp, Briefcase, DollarSign,
-  Search, X, SlidersHorizontal, ChevronDown,
+  Search, X, ChevronDown,
 } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import { useRelationships } from '../hooks/useRelationships'

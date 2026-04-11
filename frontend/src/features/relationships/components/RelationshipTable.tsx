@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useNavigate } from 'react-router'
 import {
-  ArrowUpDown, ArrowUp, ArrowDown, Users, Building2, Globe,
+  ArrowUpDown, ArrowUp, ArrowDown, Building2,
   Circle, User, Clock, Zap,
 } from 'lucide-react'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'

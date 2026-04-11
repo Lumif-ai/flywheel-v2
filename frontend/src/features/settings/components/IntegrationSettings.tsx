@@ -73,7 +73,6 @@ function IntegrationCard({
 }
 
 function ConnectCard({
-  provider,
   label,
   description,
   icon: Icon,

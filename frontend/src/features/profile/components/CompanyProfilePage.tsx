@@ -5,11 +5,8 @@ import {
   Package,
   UserCheck,
   TrendingUp,
-  Edit3,
   Check,
-  X,
   Upload,
-  Download,
   FileText,
   Globe,
   Clock,
@@ -26,7 +23,6 @@ import {
   AlertTriangle,
   Swords,
   ChevronDown,
-  ChevronRight,
   Users,
   Cpu,
   MapPin,
@@ -95,7 +91,7 @@ function isProductCategory(category: string) {
 // About section — structured grid
 // ---------------------------------------------------------------------------
 
-function AboutSection({ group, editMode, onEdit }: { group: ProfileGroup; editMode: boolean; onEdit: () => void }) {
+function AboutSection({ group }: { group: ProfileGroup }) {
   // Parse the raw content to extract structured fields
   const raw = group.raw_content || ''
   const lines = raw.split('\n').filter((l) => l.trim())
@@ -211,7 +207,7 @@ function AboutSection({ group, editMode, onEdit }: { group: ProfileGroup; editMo
 // Product card (expandable)
 // ---------------------------------------------------------------------------
 
-function ProductCard({ tab, editMode }: { tab: ProductTab; editMode: boolean }) {
+function ProductCard({ tab, editMode: _editMode }: { tab: ProductTab; editMode: boolean }) {
   const [expanded, setExpanded] = useState(false)
 
   // Extract overview description from the first section
@@ -1086,7 +1082,7 @@ export function CompanyProfilePage() {
                 {editMode ? (
                   <SectionCard group={aboutGroup} editMode={editMode} />
                 ) : (
-                  <AboutSection group={aboutGroup} editMode={editMode} onEdit={() => {}} />
+                  <AboutSection group={aboutGroup} />
                 )}
               </section>
             )}

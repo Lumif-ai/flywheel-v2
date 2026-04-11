@@ -34,7 +34,6 @@ interface Page {
 /* ------------------------------------------------------------------ */
 
 const CORAL = "#E94D35"
-const ORANGE = "#F97316"
 const PAGE_BG = "#FEFCFB"
 const LINE_COLOR = "#D1D5DB"
 const ACCENT_HEADER = CORAL

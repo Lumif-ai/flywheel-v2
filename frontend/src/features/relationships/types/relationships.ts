@@ -7,6 +7,7 @@ export interface RelationshipListItem {
   relationship_type: string[]
   entity_type: string
   stage: string
+  status?: string
   ai_summary: string | null
   signal_count: number
   primary_contact_name: string | null

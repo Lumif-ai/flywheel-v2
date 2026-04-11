@@ -1718,6 +1718,28 @@ async def _execute_meeting_processor(
 
         content = await get_meeting_content(granola_key, external_id)
 
+        # Tag attendees as internal/external based on tenant domain
+        # (Granola adapter marks all as is_external=True by default)
+        if content and content.attendees:
+            async with factory() as _td_sess:
+                await _td_sess.execute(
+                    sa_text("SELECT set_config('app.tenant_id', :tid, true)"),
+                    {"tid": str(tenant_id)},
+                )
+                _tenant_domain = (await _td_sess.execute(
+                    select(Tenant.domain).where(Tenant.id == tenant_id)
+                )).scalar_one_or_none()
+
+            if _tenant_domain:
+                _td_lower = _tenant_domain.lower()
+                for att in content.attendees:
+                    email = (att.get("email") or "").lower()
+                    if "@" in email and email.rsplit("@", 1)[1] == _td_lower:
+                        att["is_external"] = False
+                logger.info(
+                    "Run %s: tagged attendees against tenant domain %s", run_id, _td_lower
+                )
+
         if not content or not content.transcript:
             # Mark as failed and return early
             async with factory() as session:

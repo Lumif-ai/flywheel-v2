@@ -133,7 +133,7 @@ export function TaskCommitmentCard({ task, onSelect }: TaskCommitmentCardProps) 
         {/* Skills hidden from user-facing UI */}
         {false && task.suggested_skill && (
           <div className="flex items-center justify-between">
-            <TaskSkillChip skillName={task.suggested_skill} />
+            <TaskSkillChip skillName={task.suggested_skill ?? ''} />
             {task.status === 'confirmed' && (
               <Button
                 variant="outline"

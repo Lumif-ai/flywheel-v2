@@ -9,9 +9,6 @@ interface FlywheelMagneticProps {
 // --- Palette & constants ---------------------------------------------------
 
 const COLORS = ["#E94D35", "#F97316", "#FB923C", "#FDBA74"] as const
-const RING_COLOR = "#E94D35"
-const GLOW_COLOR = "rgba(233, 77, 53, 0.35)"
-
 const SPAWN_INTERVAL_MS = 120      // new particle every N ms
 const MAX_FREE_PARTICLES = 60      // cap in-flight particles
 const MAX_LOCKED_PARTICLES = 220   // cap orbiting particles

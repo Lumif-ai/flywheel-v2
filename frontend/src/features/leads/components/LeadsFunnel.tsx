@@ -10,7 +10,7 @@ interface LeadsFunnelProps {
   isLoading: boolean
 }
 
-export function LeadsFunnel({ funnel, total, activeStage, onStageChange, isLoading }: LeadsFunnelProps) {
+export function LeadsFunnel({ funnel, activeStage, onStageChange, isLoading }: LeadsFunnelProps) {
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent, index: number) => {
       let nextIndex = -1

@@ -1,5 +1,5 @@
 import { useCallback, useRef } from 'react'
-import type { ColDef, GridApi, ColumnState, ICellRendererParams } from 'ag-grid-community'
+import type { ColDef, GridApi, ColumnState, ICellRendererParams, GridState } from 'ag-grid-community'
 import { Mail, Linkedin } from 'lucide-react'
 import { STAGE_COLORS } from '../types/lead'
 import { badges } from '@/lib/design-tokens'
@@ -269,12 +269,23 @@ const columnDefs: ColDef<LeadRow>[] = [
 export function useLeadsColumns() {
   const gridApiRef = useRef<GridApi | null>(null)
 
-  const getInitialState = (): { columnState: ColumnState[] } | undefined => {
+  const getInitialState = (): GridState | undefined => {
     try {
       const raw = localStorage.getItem(COLUMN_STATE_KEY)
       if (!raw) return undefined
       const parsed = JSON.parse(raw) as ColumnState[]
-      return { columnState: parsed }
+      // Map persisted column state into ag-grid GridState sub-objects
+      return {
+        columnOrder: { orderedColIds: parsed.map((c) => c.colId) },
+        columnSizing: {
+          columnSizingModel: parsed
+            .filter((c) => c.width != null)
+            .map((c) => ({ colId: c.colId, width: c.width! })),
+        },
+        columnVisibility: {
+          hiddenColIds: parsed.filter((c) => c.hide).map((c) => c.colId),
+        },
+      }
     } catch {
       return undefined
     }

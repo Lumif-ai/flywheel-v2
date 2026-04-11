@@ -71,7 +71,7 @@ export function MeetingIngest({ onComplete, onSkip }: MeetingIngestProps = {}) {
   const { createdStreams, skipToBriefing, goToBriefing } = useOnboarding()
 
   // Allow parent to override callbacks (used by TeamOnboarding)
-  const handleComplete = onComplete ?? goToBriefing
+  const handleComplete = onComplete ?? (() => goToBriefing())
   const handleSkip = onSkip ?? skipToBriefing
 
   // Local state

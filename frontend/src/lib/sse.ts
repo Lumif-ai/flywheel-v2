@@ -1,12 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useAuthStore } from '@/stores/auth'
-
-type SSEEventType = 'thinking' | 'text' | 'skill_start' | 'stage' | 'result' | 'clarify' | 'error' | 'done' | 'crawl_error' | 'discovery'
-
-interface SSEEvent {
-  type: SSEEventType
-  data: Record<string, unknown>
-}
+import type { SSEEventType, SSEEvent } from '@/types/events'
 
 export function useSSE(
   url: string | null,

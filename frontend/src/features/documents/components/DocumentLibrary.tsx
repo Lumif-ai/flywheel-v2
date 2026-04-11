@@ -17,7 +17,7 @@ import {
   deleteDocument,
   updateDocumentTags,
 } from '../api'
-import type { DocumentListItem, TypeCountItem, TagCountItem } from '../api'
+import type { DocumentListItem, TagCountItem } from '../api'
 import { getTypeStyle } from '../utils'
 
 // ---------------------------------------------------------------------------
@@ -412,7 +412,6 @@ export function DocumentLibrary() {
   const [selectedCompany, setSelectedCompany] = useState<string | null>(null)
   const [shareToast, setShareToast] = useState<string | null>(null)
   const [addTagDoc, setAddTagDoc] = useState<DocumentListItem | null>(null)
-  const scrollRef = useRef<HTMLDivElement>(null)
   const sentinelRef = useRef<HTMLDivElement>(null)
 
   // Debounce search

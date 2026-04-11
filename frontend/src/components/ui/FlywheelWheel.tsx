@@ -37,7 +37,6 @@ export function FlywheelWheel({ size = 120, className }: FlywheelWheelProps) {
     // Colors
     const coral = '#E94D35'
     const coralLight = '#F97316'
-    const coralGlow = 'rgba(233, 77, 53, 0.3)'
 
     // Particles for energy effect
     interface Particle {
@@ -146,7 +145,6 @@ export function FlywheelWheel({ size = 120, className }: FlywheelWheelProps) {
       for (let i = 0; i < spokeCount; i++) {
         const baseAngle = (i / spokeCount) * Math.PI * 2
         const startAngle = baseAngle + 0.15
-        const endAngle = baseAngle - 0.15
 
         const sx = Math.cos(startAngle) * hubR
         const sy = Math.sin(startAngle) * hubR

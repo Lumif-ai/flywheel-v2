@@ -9,7 +9,6 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { typography, colors, spacing } from '@/lib/design-tokens'
 import { useCreateTask } from '@/features/tasks/hooks/useCreateTask'
 import { useUpdateTaskStatus } from '@/features/tasks/hooks/useUpdateTaskStatus'
-import { VALID_TRANSITIONS } from '@/features/tasks/types/tasks'
 import type { TaskStatus } from '@/features/tasks/types/tasks'
 import type { TaskItem } from '@/features/briefing/types/briefing-v2'
 

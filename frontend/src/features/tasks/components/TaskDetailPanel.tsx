@@ -602,7 +602,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
               </div>
 
               {/* Skills hidden from user-facing UI */}
-              {false && task.suggested_skill && (
+              {false && task?.suggested_skill && (
                 <div
                   style={{
                     marginTop: '24px',
@@ -623,9 +623,9 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                     Skill
                   </label>
                   <div className="flex items-center justify-between">
-                    <TaskSkillChip skillName={task.suggested_skill} />
+                    <TaskSkillChip skillName={task?.suggested_skill ?? ''} />
                   </div>
-                  {task.skill_context && (
+                  {task?.skill_context && (
                     <p
                       style={{
                         fontSize: '12px',
@@ -635,21 +635,21 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                         lineHeight: '1.4',
                       }}
                     >
-                      {JSON.stringify(task.skill_context).slice(0, 100)}
-                      {JSON.stringify(task.skill_context).length > 100 ? '...' : ''}
+                      {JSON.stringify(task?.skill_context).slice(0, 100)}
+                      {JSON.stringify(task?.skill_context).length > 100 ? '...' : ''}
                     </p>
                   )}
 
                   {/* Generate / Regenerate button */}
-                  {(task.status === 'confirmed' || task.status === 'in_progress') && (
+                  {(task?.status === 'confirmed' || task?.status === 'in_progress') && (
                     <Button
                       variant="default"
                       size="sm"
                       disabled={skillExecution.isExecuting}
                       onClick={() =>
                         skillExecution.execute(
-                          task.suggested_skill!,
-                          task.skill_context ?? {},
+                          task?.suggested_skill ?? '',
+                          task?.skill_context ?? {},
                         )
                       }
                       className="mt-3 w-full"
@@ -662,7 +662,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                       ) : (
                         <>
                           <Zap className="size-3.5" data-icon="inline-start" />
-                          {task.metadata?.generated_output
+                          {task?.metadata?.generated_output
                             ? 'Regenerate Deliverable'
                             : 'Generate Deliverable'}
                         </>
@@ -689,8 +689,8 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                         size="sm"
                         onClick={() =>
                           skillExecution.execute(
-                            task.suggested_skill!,
-                            task.skill_context ?? {},
+                            task?.suggested_skill ?? '',
+                            task?.skill_context ?? {},
                           )
                         }
                         style={{ color: '#EF4444', padding: '2px 8px' }}
@@ -716,7 +716,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                     >
                       <ExternalLink className="size-3.5 shrink-0" />
                       <a
-                        href={`/skills/runs/${skillExecution.result.run_id}`}
+                        href={`/skills/runs/${skillExecution.result?.run_id}`}
                         target="_blank"
                         rel="noopener noreferrer"
                         style={{ color: '#22C55E', fontWeight: 500 }}
@@ -728,7 +728,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
 
                   {/* Previously generated output from metadata */}
                   {!skillExecution.result &&
-                    Boolean(task.metadata?.generated_output) && (
+                    Boolean(task?.metadata?.generated_output) && (
                       <div
                         style={{
                           marginTop: '12px',
@@ -738,7 +738,7 @@ export function TaskDetailPanel({ taskId, onClose }: TaskDetailPanelProps) {
                       >
                         <span style={{ fontWeight: 500 }}>Generated Output:</span>{' '}
                         <a
-                          href={String(task.metadata!.generated_output)}
+                          href={String(task?.metadata?.generated_output)}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{ color: 'var(--brand-coral)' }}

@@ -1,5 +1,5 @@
 import { sanitizeHTML } from '@/lib/sanitize'
-import { spacing, typography, colors } from '@/lib/design-tokens'
+import { spacing, typography } from '@/lib/design-tokens'
 
 interface MeetingPrepRendererProps {
   renderedHtml: string

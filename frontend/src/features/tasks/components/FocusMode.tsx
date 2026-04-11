@@ -5,7 +5,6 @@ import { toast } from 'sonner'
 import { useFocusModeStore } from '../stores/focusModeStore'
 import { useUpdateTaskStatus } from '../hooks/useUpdateTaskStatus'
 import { useUpdateTask } from '../hooks/useUpdateTask'
-import { TaskSkillChip } from './TaskSkillChip'
 import type { Task, TaskStatus, Priority } from '../types/tasks'
 
 // ---------------------------------------------------------------------------

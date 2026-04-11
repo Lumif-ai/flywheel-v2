@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router'
 import { useQuery } from '@tanstack/react-query'
 import { ArrowLeft, X } from 'lucide-react'

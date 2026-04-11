@@ -1,5 +1,5 @@
-import { useMemo } from 'react'
-import { spacing, typography, colors } from '@/lib/design-tokens'
+import React, { useMemo } from 'react'
+import { spacing, typography } from '@/lib/design-tokens'
 
 interface GenericRendererProps {
   output: string
@@ -65,7 +65,7 @@ function renderInline(text: string): string {
 // ---------------------------------------------------------------------------
 
 function renderContentBlocks(lines: string[]) {
-  const blocks: JSX.Element[] = []
+  const blocks: React.JSX.Element[] = []
   let listItems: string[] = []
   let orderedItems: string[] = []
   let blockKey = 0
@@ -210,7 +210,7 @@ function renderContentBlocks(lines: string[]) {
 // Main component
 // ---------------------------------------------------------------------------
 
-export function GenericRenderer({ output, skillName }: GenericRendererProps) {
+export function GenericRenderer({ output }: GenericRendererProps) {
   const sections = useMemo(() => parseSections(output), [output])
 
   return (
@@ -222,7 +222,6 @@ export function GenericRenderer({ output, skillName }: GenericRendererProps) {
       }}
     >
       {sections.map((section, i) => {
-        const isEven = i % 2 === 0
         return (
           <section
             key={i}

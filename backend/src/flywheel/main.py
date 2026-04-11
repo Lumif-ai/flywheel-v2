@@ -163,6 +163,18 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Security headers
+    @app.middleware("http")
+    async def security_headers(request: Request, call_next):
+        response = await call_next(request)
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        if settings.environment == "production":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        return response
+
     # Response compression — applies to all JSON responses > 500 bytes
     app.add_middleware(GZipMiddleware, minimum_size=500)
 
