@@ -50,6 +50,10 @@ v13.0 Phase 105 Plan 02:
 - output_schema extraction placed outside tool loop (invariant per execution)
 - output_renderer structured_data pipeline confirmed already complete (no changes needed)
 
+v13.0 Phase 110 Plan 01:
+- read_context_file() default limit raised from 20 to 100 (backend max, fewer round-trips)
+- Metadata filtering documented as client-side only; pre-Phase-110 entries have empty metadata dict
+
 v13.0 Phase 110 Plan 02:
 - source and confidence promoted to explicit params in write_context() (backward compatible)
 - metadata only added to POST body when non-None and non-empty (conditional inclusion)
@@ -79,6 +83,6 @@ None active.
 
 ## Session Continuity
 
-Last session: 2026-04-10
-Stopped at: Completed 110-02-PLAN.md — Phase 110 complete, ready for Phase 111
+Last session: 2026-04-11
+Stopped at: Completed 110-01-PLAN.md (backfilled) — Phase 110 complete, ready for Phase 111
 Resume file: None
