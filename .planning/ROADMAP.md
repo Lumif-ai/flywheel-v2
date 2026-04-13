@@ -14,9 +14,9 @@
 - ✅ **v9.0 Unified Pipeline** — Phases 83–90 (shipped 2026-04-06)
 - ✅ **v10.0 Contact Outreach Pipeline** — Phases 91–94 (shipped 2026-04-07)
 - ✅ **v11.0 Briefing Page Redesign** — Phases 96–100 (shipped 2026-04-08)
-- **v12.0 Library Redesign** — Phases 101–104
-- **v14.0 Meeting Intelligence Synthesis** — Phases 110–111
-- **v15.0 Broker Module MVP** — Phases 112–117
+- ✅ **v12.0 Library Redesign** — Phases 101–104, 104.1, 104.2, 105–106 (shipped 2026-04-10)
+- ✅ **v14.0 Meeting Intelligence Synthesis** — Phases 110–111 (shipped 2026-04-11)
+- ✅ **v15.0 Broker Module MVP** — Phases 112–119 (shipped 2026-04-13)
 
 ## Phases
 
@@ -177,16 +177,22 @@
 
 ---
 
-### v12.0 Library Redesign
+<details>
+<summary>✅ v12.0 Library Redesign (Phases 101-106) — SHIPPED 2026-04-10</summary>
 
-**Milestone Goal:** Transform the document library from an unorganized flat dump into a scalable, filterable document surface with three filtering axes (type, company, tags), server-side pagination, atomic dedup, and a tagging system — ready for multi-module and team scale.
+- [x] **Phase 101: Schema and Data Migration** — Tags column, account_id FK, dedup indexes, title cleanup, duplicate merge, account_id backfill
+- [x] **Phase 102: Write Path and API** — Dedup-on-save, readable titles, account resolution, tag validation, filtered list, tag/type counts, tag PATCH
+- [x] **Phase 103: Library UI and Tag Management** — Type tabs, company filter, tag bar, list/grid views, infinite scroll, search, tag autocomplete
+- [x] **Phase 104: Skill Ecosystem** — Standard 15 documented; 2/8 skills compliant (meeting-processor, one-pager); rest tracked as tech debt
+- [x] **Phase 104.1: Legacy Model Cleanup** — Rewire 9 backend files to PipelineEntry/Contact/Activity (INSERTED) ✓ 2026-04-09
+- [x] **Phase 104.2: Skill Input Schema Validation** — Two-step skill invocation with server-side input validation (INSERTED) ✓ 2026-04-10
+- [x] **Phase 105: Foundation Export Infrastructure** — WeasyPrint deps, HTML sanitization, async PDF/DOCX export
+- [x] **Phase 106: One-Pager Skill** — output_schema, token_budget, OnePagerRenderer, end-to-end pipeline
 
-- [ ] **Phase 101: Schema and Data Migration** — Tags column, account_id FK, dedup indexes, bad title cleanup, duplicate merge, account_id backfill (7 requirements)
-- [ ] **Phase 102: Write Path and API** — Dedup-on-save, readable titles, account resolution, tag validation, filtered list endpoint, tag/type counts, tag PATCH, backward compat, observability (10 requirements)
-- [ ] **Phase 103: Library UI and Tag Management** — Type tabs, company filter, tag bar, list/grid views, infinite scroll, search, tag pills, menus, empty states, tag autocomplete, tag removal, tag input (14 requirements)
-- [ ] **Phase 104: Skill Ecosystem** — Standard 15 in skill-standards.md, skill-creator update, 8 skill patches, integration test (4 requirements)
-- [x] **Phase 104.1: Legacy Model Cleanup** — Rewire 9 backend files still referencing Account/AccountContact/OutreachActivity to use PipelineEntry/Contact/Activity (INSERTED) ✓ 2026-04-09
-- [x] **Phase 104.2: Skill Input Schema Validation** — Two-step skill invocation with server-side input validation, input_data support, enriched fetch_skills response (INSERTED) ✓ 2026-04-10
+</details>
+
+_Full phase details archived to `.planning/milestones/v12.0-ROADMAP.md`_
+_Tech debt: Phase 104 skill adoption — most skills don't pass account_id/tags to flywheel_save_document_
 
 ## Phase Details
 
@@ -450,6 +456,17 @@ Plans:
 | 110. Synthesis Infrastructure | v14.0 | 0/0 | Pending | — |
 | 111. Pain Landscape Synthesis | v14.0 | 0/0 | Pending | — |
 
+### Phase 120: Briefing Intelligence Surface
+
+**Goal:** Surface cross-meeting intelligence (pain landscape, co-occurrence patterns) in the daily briefing page and wire pain-landscape.md into the meeting-prep skill — fulfilling the v14.0 spec's core acceptance criterion: "meeting-prep must produce noticeably better briefings."
+**Depends on:** Phase 111
+**Plans:** 3 plans
+
+Plans:
+- [ ] 120-01-PLAN.md — Backend: _build_market_patterns() + Pydantic models + narrative injection
+- [ ] 120-02-PLAN.md — Frontend: MarketPatternsSection component + BriefingPageV2 wiring
+- [ ] 120-03-PLAN.md — Skill: meeting-prep Step 0c + Market Context HTML section
+
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
@@ -468,55 +485,36 @@ Plans:
 *v12.0 milestone added: 2026-04-08 — Library Redesign (4 phases, 37 requirements)*
 *v14.0 milestone added: 2026-04-11 — Meeting Intelligence Synthesis (2 phases, 7 requirements)*
 
-### v14.0 Meeting Intelligence Synthesis
+<details>
+<summary>✅ v14.0 Meeting Intelligence Synthesis (Phases 110-111) — SHIPPED 2026-04-11</summary>
 
-### Phase 110: Synthesis Infrastructure Prerequisites
-**Goal:** Fix two Flywheel platform gaps so the synthesis engine can read all entries from a context file and filter by meeting type. PREREQ-01: Document and validate FlywheelClient.read_context_file() as the skill read pattern. PREREQ-02: Add meeting_type to context entry metadata JSONB in meeting-processor.
-**Depends on:** None (independent of v12.0)
-**Plans:** 2 plans
+- [x] **Phase 110: Synthesis Infrastructure Prerequisites** — Pagination read pattern, meeting_type metadata in context entries (2/2 plans)
+- [x] **Phase 111: Pain Landscape Synthesis Skill** — Cross-meeting pattern detection, pain entry writing, co-occurrence clusters, library save (2/2 plans)
 
-Plans:
-- [ ] 110-01-PLAN.md — Pagination read pattern: add offset to read_context_file() + document in context-protocol.md
-- [ ] 110-02-PLAN.md — Meeting type metadata: add metadata param to write_context() + update meeting-processor Step 5
+</details>
 
-### Phase 111: Pain Landscape Synthesis Skill
-**Goal:** A Flywheel skill (`/synthesize`) that reads pain-points, insights, and product-feedback from the context store, identifies cross-meeting patterns using LLM analysis, and writes one rich entry per pain to pain-landscape.md. Confidence calibrated. Idempotent via deterministic upsert. meeting-prep automatically gets smarter.
-**Depends on:** Phase 110
-**Plans:** 2 plans
+<details>
+<summary>✅ v15.0 Broker Module MVP (Phases 112-119) — SHIPPED 2026-04-13</summary>
 
-Plans:
-- [ ] 111-01-PLAN.md — Core synthesis pipeline (data load, LLM grouping, pain entry writing with calibration)
-- [ ] 111-02-PLAN.md — Co-occurrence detection, terminal report, library save, skill finalization
+- [x] Phase 112: Foundation (3/3 plans)
+- [x] Phase 113: Contract Intake (5/5 plans)
+- [x] Phase 114: Gap Analysis + Carrier Selection (3/3 plans)
+- [x] Phase 115: Solicitation (4/4 plans)
+- [x] Phase 116: Quote Comparison (3/3 plans)
+- [x] Phase 117: Client Delivery (3/3 plans)
+- [x] Phase 118: Broker Navigation & Module Shell (2/2 plans)
+- [x] Phase 119: Broker API-Frontend Wiring Fixes — Gap Closure (2/2 plans)
 
-### Phase 104.2: Skill Input Schema Validation (INSERTED)
+</details>
 
-**Goal:** Two-step skill invocation with server-side input validation. Repurpose parameters JSONB for input schemas, enrich fetch_skills response with input requirements, add server-side validation in start_run, support structured input_data alongside input_text.
-**Depends on:** Phase 104
-**Plans:** 2 plans
+_Full phase details archived to `.planning/milestones/v15.0-ROADMAP.md`_
 
-Plans:
-- [ ] 104.2-01-PLAN.md — Backend validation + skill input schemas
-- [ ] 104.2-02-PLAN.md — MCP layer (input_data support, input requirements display, remove hardcoded validation)
-
-### Phase 104.1: Legacy Model Cleanup
-**Goal:** Every backend file uses PipelineEntry/Contact/Activity instead of Account/AccountContact/OutreachActivity. No references to old models remain. All active endpoints work correctly.
-**Depends on:** Phase 104 (but can run independently -- no v12.0 dependency)
-**Plans:** 5 plans
-
-Plans:
-- [ ] 104.1-01-PLAN.md — Migration (ai_summary_updated_at) + easy wins (meetings.py, skill_executor.py)
-- [ ] 104.1-02-PLAN.md — Delete dead code (outreach.py, timeline.py)
-- [ ] 104.1-03-PLAN.md — Rewire signals.py + synthesis_engine.py
-- [ ] 104.1-04-PLAN.md — Rewire relationships.py (8 endpoints, highest complexity)
-- [ ] 104.1-05-PLAN.md — Rewire meeting_processor_web.py + seed_crm.py
-
-*v15.0 milestone added: 2026-04-11 — Broker Module MVP (6 phases, 46 requirements)*
-
-### v15.0 Broker Module MVP
+<!-- ARCHIVED v15.0 PHASES BELOW — kept for reference, collapsed above -->
+<!-- Original phase details:
 
 ### Phase 112: Foundation
 **Goal**: Broker-module tenants see a "Broker" nav item in the sidebar linking to an empty dashboard page; the 6 broker database tables exist with ORM models; all broker API routes are gated by module check; non-broker tenants see no change
-**Depends on**: None (independent of v12.0/v14.0 — builds on existing tenant.settings, feature flags, and pipeline infrastructure)
+**Depends on**: None
 **Requirements**: FOUND-01, FOUND-02, FOUND-03, FOUND-04, FOUND-05, FOUND-06, FOUND-07
 **Success Criteria** (what must be TRUE):
   1. A tenant with `"broker"` in `tenant.settings.modules` sees a "Broker" nav item in the sidebar and can navigate to `/broker` which renders a placeholder dashboard page
@@ -587,3 +585,26 @@ Plans:
 - [ ] 117-01-PLAN.md — Status transition enforcement, DDL migration (recommendation columns), frontend status badges
 - [ ] 117-02-PLAN.md — Recommendation drafter engine + API endpoints (draft/edit/approve-send) + document library save
 - [ ] 117-03-PLAN.md — Frontend DeliveryPanel (preview/edit/send recommendation) + project detail integration
+
+### Phase 118: Broker Navigation & Module Shell
+**Goal**: Broker tenants see a purpose-built sidebar (Dashboard, Email, Projects, Clients, Carriers) replacing the GTM nav entirely; GTM tenants are unaffected; all 5 broker routes have stub pages and lazy-loaded routing
+**Depends on**: Phase 112
+**Requirements**: REQ-03, REQ-04
+**Plans:** 2 plans
+
+Plans:
+- [ ] 118-01-PLAN.md — BrokerSidebarContent component (5 nav items) + AppSidebar switch (brokerEnabled renders broker sidebar, hides GTM nav)
+- [ ] 118-02-PLAN.md — Stub route pages for /broker/projects, /broker/clients, /broker/carriers + lazy-loaded routing + redirect guards
+
+### Phase 119: Broker API-Frontend Wiring Fixes (Gap Closure)
+**Goal**: Fix all 6 critical blockers from v15.0 milestone audit — missing quotes list endpoint, serializer field gaps, response shape mismatches, query key alignment, and status transition gap
+**Depends on**: Phases 112-118
+**Requirements**: SOLIC-06, SOLIC-07, QUOTE-06, QUOTE-07, DELIV-02, DELIV-04, DELIV-05, INTAKE-08, GAP-07
+**Gap Closure:** Closes all critical gaps from .planning/v15.0-MILESTONE-AUDIT.md
+**Plans:** 2 plans
+
+Plans:
+- [x] 119-01-PLAN.md — Backend: add GET /projects/{id}/quotes endpoint, extend _project_to_dict (9 fields), fix _coverage_to_dict (description), fix GET /carriers response shape, set project.status="analyzing"
+- [x] 119-02-PLAN.md — Frontend: align mutation query keys to ['broker-project', id], fix api.ts return types, fix DraftSolicitationsResponse.skipped type
+
+END OF v15.0 ARCHIVED PHASES -->

@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v15.0 Broker Module MVP — Phase 118 Broker Navigation & Module Shell
+**Current focus:** v15.0 Broker Module MVP — Phase 119 Broker API-Frontend Wiring Fixes
 
 ## Current Position
 
 Milestone: v15.0 Broker Module MVP
-Phase: 118 — Broker Navigation & Module Shell
+Phase: 119 — Broker API-Frontend Wiring Fixes (Gap Closure)
 Plan: 02 of 02 complete
 Status: Complete
-Last activity: 2026-04-13 — Plan 02 complete (stub pages + route registration)
+Last activity: 2026-04-13 — Completed 119-02 frontend wiring fixes
 
-Progress: [██████████] 100%
+Progress: [##########] 100%
 
 ## Performance Metrics
 
@@ -185,6 +185,13 @@ v15.0 Phase 118 Plan 01:
 - Dashboard nav uses exact match (p === '/broker') to prevent false active on sub-routes
 - Old single-item broker SidebarGroup removed — superseded by full content replacement ternary
 - StreamSidebar placed inside GTM branch (broker tenants see zero GTM content)
+- [Phase 119]: description field mapped from display_name (backward-compat: both keys present)
+- [Phase 119]: Flat array returns for small collections (carriers, quotes) — no pagination wrapper
+
+v15.0 Phase 119 Plan 02:
+- editRecommendation returns RecommendationDraftResponse (same shape as draftRecommendation, not BrokerProject)
+- sendRecommendation returns { status, sent_at, document_id } (unique shape from backend)
+- CarrierSettings already handles flat array correctly -- no changes needed
 
 ### Pending Todos
 
@@ -213,5 +220,5 @@ v15.0 Phase 117 Plan 03:
 ## Session Continuity
 
 Last session: 2026-04-13
-Stopped at: Completed 118-02-PLAN.md — Phase 118 fully complete (both plans done)
+Stopped at: Completed 119-02-PLAN.md — Phase 119 complete, all broker wiring fixes done
 Resume file: None
