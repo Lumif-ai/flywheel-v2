@@ -2,18 +2,18 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-11)
+See: .planning/PROJECT.md (updated 2026-04-13)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v15.0 Broker Module MVP — Phase 119 Broker API-Frontend Wiring Fixes
+**Current focus:** Planning next milestone
 
 ## Current Position
 
-Milestone: v15.0 Broker Module MVP
-Phase: 119 — Broker API-Frontend Wiring Fixes (Gap Closure)
-Plan: 02 of 02 complete
-Status: Complete
-Last activity: 2026-04-13 — Completed 119-02 frontend wiring fixes
+Milestone: v16.0 Briefing Intelligence Surface — IN PROGRESS
+Phase: 120-briefing-intelligence-surface (Plan 1/N complete)
+Plan: 120-01 complete — market_patterns backend wired
+Status: Active
+Last activity: 2026-04-13 — 120-01 complete
 
 Progress: [##########] 100%
 
@@ -38,7 +38,7 @@ Progress: [##########] 100%
 
 ### Decisions
 
-All v1.0-v12.0 decisions archived in PROJECT.md Key Decisions table.
+All v1.0-v15.0 decisions archived in PROJECT.md Key Decisions table.
 
 v13.0 Phase 105 Plan 01:
 - WeasyPrint system deps in Dockerfile only -- no local uv sync required
@@ -192,15 +192,27 @@ v15.0 Phase 119 Plan 02:
 - editRecommendation returns RecommendationDraftResponse (same shape as draftRecommendation, not BrokerProject)
 - sendRecommendation returns { status, sent_at, document_id } (unique shape from backend)
 - CarrierSettings already handles flat array correctly -- no changes needed
+- [Phase 120-briefing-intelligence-surface]: meeting-prep v4.1: FlywheelClient instantiated locally in Step 0c using _fl_client; Section 1.95 numbered to slot between existing sections; load 5 pain entries, display top 3; any failure path sets pain_landscape_context=[] and continues silently
 
 ### Pending Todos
 
 - Title matching false positives in _filter_unprepped (requires meeting_id on SkillRun — deferred from 66.1)
 - Private import coupling in flywheel_ritual.py (documented as tech debt)
 
+### Roadmap Evolution
+
+- Phase 120 added: Briefing Intelligence Surface — wire pain-landscape.md into briefing API + meeting-prep skill, add Market Patterns section to BriefingPageV2
+- Phase 120 Plan 01 complete: market_patterns backend — PainPatternItem/MarketPatternsSection models, _build_market_patterns() section builder, narrative injection with top_pain_patterns
+
 ### Blockers/Concerns
 
 None active.
+
+v16.0 Phase 120 Plan 01:
+- market_patterns uses default_factory=MarketPatternsSection (not Optional/None) — guarantees always-present field for frontend type contract
+- Confidence sorting done in Python not SQL (alphabetical 'high' < 'low' < 'medium' is wrong for severity); CONFIDENCE_ORDER = {"high": 2, "medium": 1, "low": 0}
+- detail.like("pain: %") filter distinguishes pain entries from cluster entries in pain-landscape.md
+- top_pain_patterns limited to 3 slugs max in narrative facts to avoid 5s LLM circuit breaker timeout
 
 v15.0 Phase 117 Plan 01:
 - validate_transition uses late import in contract_analyzer.py (circular dependency avoidance)
@@ -220,5 +232,5 @@ v15.0 Phase 117 Plan 03:
 ## Session Continuity
 
 Last session: 2026-04-13
-Stopped at: Completed 119-02-PLAN.md — Phase 119 complete, all broker wiring fixes done
+Stopped at: Phase 120 Plan 01 complete — market_patterns backend (briefing_v2.py + briefing.py)
 Resume file: None
