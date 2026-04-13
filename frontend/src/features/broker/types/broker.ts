@@ -251,6 +251,12 @@ export interface ManualQuotePayload {
   confidence?: string
 }
 
+export interface RecommendationDraftResponse {
+  subject: string
+  body_html: string
+  recipient: string
+}
+
 export interface DraftSolicitationsResponse {
   drafts: CarrierQuote[]
   portal_submissions: Array<{
@@ -260,5 +266,5 @@ export interface DraftSolicitationsResponse {
     portal_url: string
     documents: SolicitationDocument[]
   }>
-  skipped: Array<{ carrier: string; reason: string }>
+  skipped: Array<{ carrier_config_id: string; carrier_name: string; carrier: string; reason: string }>
 }

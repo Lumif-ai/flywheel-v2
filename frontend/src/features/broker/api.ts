@@ -14,6 +14,7 @@ import type {
   FollowupResponse,
   GapAnalysisResponse,
   ManualQuotePayload,
+  RecommendationDraftResponse,
   UpdateCarrierPayload,
 } from './types/broker'
 
@@ -110,8 +111,8 @@ export function draftFollowups(projectId: string): Promise<FollowupResponse> {
   return api.post<FollowupResponse>(`/broker/projects/${projectId}/draft-followups`)
 }
 
-export function draftRecommendation(projectId: string, recipientEmail?: string): Promise<BrokerProject> {
-  return api.post<BrokerProject>(
+export function draftRecommendation(projectId: string, recipientEmail?: string): Promise<RecommendationDraftResponse> {
+  return api.post<RecommendationDraftResponse>(
     `/broker/projects/${projectId}/draft-recommendation`,
     recipientEmail ? { recipient_email: recipientEmail } : undefined
   )
@@ -120,10 +121,10 @@ export function draftRecommendation(projectId: string, recipientEmail?: string):
 export function editRecommendation(
   projectId: string,
   data: { subject?: string; body?: string; recipient_email?: string }
-): Promise<BrokerProject> {
-  return api.put<BrokerProject>(`/broker/projects/${projectId}/recommendation-draft`, data)
+): Promise<RecommendationDraftResponse> {
+  return api.put<RecommendationDraftResponse>(`/broker/projects/${projectId}/recommendation-draft`, data)
 }
 
-export function sendRecommendation(projectId: string): Promise<BrokerProject> {
-  return api.post<BrokerProject>(`/broker/projects/${projectId}/approve-send-recommendation`)
+export function sendRecommendation(projectId: string): Promise<{ status: string; sent_at: string; document_id: string }> {
+  return api.post<{ status: string; sent_at: string; document_id: string }>(`/broker/projects/${projectId}/approve-send-recommendation`)
 }

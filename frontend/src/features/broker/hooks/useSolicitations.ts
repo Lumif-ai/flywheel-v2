@@ -23,7 +23,7 @@ export function useDraftSolicitations(projectId: string) {
     mutationFn: (carrierConfigIds: string[]) => draftSolicitations(projectId, carrierConfigIds),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
-      qc.invalidateQueries({ queryKey: ['broker', 'project', projectId] })
+      qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
       toast.success('Solicitation drafts created')
     },
     onError: () => toast.error('Failed to create solicitation drafts'),
@@ -36,7 +36,7 @@ export function useApproveSend(projectId: string) {
     mutationFn: (quoteId: string) => approveSendSolicitation(quoteId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
-      qc.invalidateQueries({ queryKey: ['broker', 'project', projectId] })
+      qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
       toast.success('Solicitation email sent')
     },
     onError: () => toast.error('Failed to send solicitation email'),
@@ -61,7 +61,7 @@ export function useConfirmPortal(projectId: string) {
     mutationFn: (quoteId: string) => confirmPortalSubmission(quoteId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
-      qc.invalidateQueries({ queryKey: ['broker', 'project', projectId] })
+      qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
       toast.success('Portal submission confirmed')
     },
     onError: () => toast.error('Failed to confirm portal submission'),
