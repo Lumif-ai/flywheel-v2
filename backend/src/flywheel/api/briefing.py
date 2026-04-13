@@ -10,7 +10,7 @@ from __future__ import annotations
 import datetime
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.api.deps import get_tenant_db, require_tenant
@@ -209,6 +209,19 @@ class AttentionSection(BaseModel):
     drafts: list[AttentionItem] = []
 
 
+class PainPatternItem(BaseModel):
+    slug: str
+    label: str
+    confidence: str
+    content: str
+    synthesized_at: str | None = None
+
+
+class MarketPatternsSection(BaseModel):
+    patterns: list[PainPatternItem] = []
+    total_count: int = 0
+
+
 class BriefingV2Response(BaseModel):
     narrative_summary: str
     today: TodaySection
@@ -219,6 +232,9 @@ class BriefingV2Response(BaseModel):
     # so consumers can access tasks either via today.tasks (contextual) or
     # tasks_today (flat shortcut) without extra navigation.
     tasks_today: list[TaskItem] = []
+    market_patterns: MarketPatternsSection = Field(
+        default_factory=MarketPatternsSection
+    )
 
 
 # ---------------------------------------------------------------------------

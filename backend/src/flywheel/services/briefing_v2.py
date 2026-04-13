@@ -80,6 +80,9 @@ async def assemble_briefing_v2(
     )
     team_activity_count = sum(g["count"] for g in team_activity)
 
+    # 3b. Build market patterns before narrative so top patterns can be mentioned
+    market_patterns_data = await _build_market_patterns(session, tid)
+
     # 4. Generate narrative LAST (needs counts from all sections)
     narrative = await _generate_narrative(
         session,
@@ -90,6 +93,7 @@ async def assemble_briefing_v2(
         attention_count=attention_count,
         team_activity_count=team_activity_count,
         tz=tz,
+        market_patterns=market_patterns_data,
     )
 
     return {
@@ -100,6 +104,7 @@ async def assemble_briefing_v2(
         # tasks_today is a CONVENIENCE COPY of today.tasks at the top level.
         # Both contain identical data. This duplication is intentional per API-01.
         "tasks_today": today_section["tasks"],
+        "market_patterns": market_patterns_data,
     }
 
 
@@ -117,6 +122,7 @@ async def _generate_narrative(
     attention_count: int = 0,
     team_activity_count: int = 0,
     tz: str | None = None,
+    market_patterns: dict | None = None,
 ) -> str:
     """Generate a 2-3 sentence narrative summary using Claude Haiku.
 
@@ -237,6 +243,15 @@ async def _generate_narrative(
             "recent_skills": skill_names,
         }
 
+        # 4b. Inject top pain patterns (max 3 slugs — keep token count low)
+        top_pains: list[str] = []
+        if market_patterns and market_patterns.get("patterns"):
+            top_pains = [
+                p["slug"].replace("-", " ")
+                for p in market_patterns["patterns"][:3]
+            ]
+        facts["top_pain_patterns"] = top_pains
+
         # 5. Check circuit breaker
         if not anthropic_breaker.can_execute():
             return _template_fallback(facts)
@@ -255,6 +270,10 @@ async def _generate_narrative(
                         "skill names that ran, or active pipeline entries by name. "
                         "If there are pending_reachouts, nudge the founder to reach out to "
                         "them (e.g. 'You have reachouts pending for X and Y — worth sending '). "
+                        "If top_pain_patterns is non-empty, briefly mention 1-2 of the most "
+                        "pressing market pains (e.g. 'Your top prospect concern is X — worth "
+                        "referencing in today\\'s meetings'). Keep this to one sentence — do not "
+                        "over-explain. "
                         "Keep the tone encouraging and action-oriented. Do not use bullet points or "
                         "headers -- just flowing prose. Do not greet by name (the UI handles that)."
                     ),
@@ -310,6 +329,65 @@ def _template_fallback(facts: dict) -> str:
         return "Your day is clear. A great time to focus on strategic work."
 
     return ". ".join(parts) + "."
+
+
+# ---------------------------------------------------------------------------
+# Market patterns section builder
+# ---------------------------------------------------------------------------
+
+
+CONFIDENCE_ORDER = {"high": 2, "medium": 1, "low": 0}
+
+
+async def _build_market_patterns(
+    session: AsyncSession, tenant_id: UUID
+) -> dict:
+    """Read top pain patterns from pain-landscape.md context entries.
+
+    Returns dict with patterns list and total_count. Empty default on failure.
+    Confidence sorting is done in Python (alphabetical SQL sort is wrong:
+    'high' < 'low' < 'medium' alphabetically, not by severity).
+    """
+    try:
+        stmt = (
+            select(ContextEntry)
+            .where(
+                ContextEntry.file_name == "pain-landscape.md",
+                ContextEntry.deleted_at.is_(None),
+                ContextEntry.detail.like("pain: %"),  # exclude cluster entries
+            )
+            .order_by(ContextEntry.date.desc(), ContextEntry.created_at.desc())
+            .limit(20)
+        )
+        result = await session.execute(stmt)
+        entries = result.scalars().all()
+
+        # Sort by confidence severity in Python (not SQL — alphabetical sort is wrong)
+        sorted_entries = sorted(
+            entries,
+            key=lambda e: CONFIDENCE_ORDER.get(e.confidence or "", 0),
+            reverse=True,
+        )
+
+        patterns = []
+        for e in sorted_entries:
+            slug = e.detail.replace("pain: ", "").strip() if e.detail else ""
+            patterns.append({
+                "slug": slug,
+                "label": slug.replace("-", " ").title(),
+                "confidence": e.confidence or "low",
+                "content": e.content or "",
+                "synthesized_at": e.date.isoformat() if e.date else None,
+            })
+
+        return {
+            "patterns": patterns,
+            "total_count": len(patterns),
+        }
+
+    except Exception:
+        logger.warning("Failed to build market patterns", exc_info=True)
+        return {"patterns": [], "total_count": 0}
 
 
 # ---------------------------------------------------------------------------
