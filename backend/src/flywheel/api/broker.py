@@ -174,16 +174,25 @@ def _project_to_dict(p: BrokerProject) -> dict[str, Any]:
     """Serialize a BrokerProject to a JSON-friendly dict."""
     return {
         "id": str(p.id),
+        "tenant_id": str(p.tenant_id),
         "name": p.name,
         "project_type": p.project_type,
         "description": p.description,
         "contract_value": float(p.contract_value) if p.contract_value is not None else None,
         "currency": p.currency,
         "location": p.location,
+        "language": p.language,
         "status": p.status,
         "analysis_status": p.analysis_status,
         "source": p.import_source,
+        "source_ref": p.external_ref,
+        "notes": None,
         "metadata": p.metadata_,
+        "recommendation_subject": p.recommendation_subject,
+        "recommendation_body": p.recommendation_body,
+        "recommendation_status": p.recommendation_status,
+        "recommendation_sent_at": p.recommendation_sent_at.isoformat() if p.recommendation_sent_at else None,
+        "recommendation_recipient": p.recommendation_recipient,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
     }
@@ -197,6 +206,8 @@ def _coverage_to_dict(c: ProjectCoverage) -> dict[str, Any]:
         "coverage_type": c.coverage_type,
         "category": c.category,
         "display_name": c.display_name,
+        "description": c.display_name,
+        "language": getattr(c, 'language', None),
         "required_limit": float(c.required_limit) if c.required_limit is not None else None,
         "required_deductible": float(c.required_deductible) if c.required_deductible is not None else None,
         "required_terms": c.required_terms,
@@ -394,6 +405,44 @@ async def get_project(
     project_dict["activities"] = [_activity_to_dict(a) for a in activities]
 
     return project_dict
+
+
+# ---------------------------------------------------------------------------
+# GET /broker/projects/{project_id}/quotes — List quotes for a project
+# ---------------------------------------------------------------------------
+
+
+@router.get("/projects/{project_id}/quotes")
+async def list_project_quotes(
+    project_id: UUID,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> list[dict[str, Any]]:
+    """List all carrier quotes for a project, newest first."""
+    # Verify project exists and belongs to tenant
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Fetch quotes
+    quotes_result = await db.execute(
+        select(CarrierQuote)
+        .where(
+            CarrierQuote.broker_project_id == project_id,
+            CarrierQuote.tenant_id == user.tenant_id,
+        )
+        .order_by(CarrierQuote.created_at.desc())
+    )
+    quotes = quotes_result.scalars().all()
+
+    return [_quote_to_dict(q) for q in quotes]
 
 
 # ---------------------------------------------------------------------------
@@ -922,6 +971,7 @@ async def trigger_analysis(
 
     # Set status immediately
     project.analysis_status = "running"
+    project.status = "analyzing"
     await db.commit()
 
     # Add background task (passes only primitives — session is closed after response)
@@ -1044,7 +1094,7 @@ async def list_carriers(
         .order_by(CarrierConfig.carrier_name)
     )
     carriers = result.scalars().all()
-    return {"items": [_carrier_to_dict(c) for c in carriers], "total": len(carriers)}
+    return [_carrier_to_dict(c) for c in carriers]
 
 
 @router.post("/carriers", status_code=201)
@@ -1340,6 +1390,7 @@ async def draft_solicitations(
                 skipped.append({
                     "carrier_config_id": str(carrier_config_id),
                     "carrier_name": carrier.carrier_name,
+                    "carrier": carrier.carrier_name,
                     "reason": "No email address configured",
                 })
                 if method == "email":
@@ -1348,6 +1399,7 @@ async def draft_solicitations(
                 skipped.append({
                     "carrier_config_id": str(carrier_config_id),
                     "carrier_name": carrier.carrier_name,
+                    "carrier": carrier.carrier_name,
                     "reason": f"Invalid email format: {carrier.email_address}",
                 })
                 if method == "email":
@@ -1728,6 +1780,7 @@ def _quote_to_dict(quote: CarrierQuote) -> dict[str, Any]:
         "draft_subject": quote.draft_subject,
         "draft_body": quote.draft_body,
         "draft_status": quote.draft_status,
+        "documents": [],
         "created_at": quote.created_at.isoformat() if quote.created_at else None,
         "updated_at": quote.updated_at.isoformat() if quote.updated_at else None,
     }
