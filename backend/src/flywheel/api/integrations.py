@@ -228,7 +228,7 @@ async def google_calendar_callback(
     integration.settings = {"sync_token": None}
     await db.commit()
 
-    return RedirectResponse(url="/settings", status_code=302)
+    return RedirectResponse(url=f"{settings.frontend_url}/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -322,7 +322,7 @@ async def gmail_callback(
     integration.settings = {}
     await db.commit()
 
-    return RedirectResponse(url="/settings", status_code=302)
+    return RedirectResponse(url=f"{settings.frontend_url}/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -419,7 +419,7 @@ async def gmail_read_callback(
     integration.settings = {"history_id": None}
     await db.commit()
 
-    return RedirectResponse(url="/settings", status_code=302)
+    return RedirectResponse(url=f"{settings.frontend_url}/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -511,7 +511,7 @@ async def outlook_callback(
     integration.settings = {}
     await db.commit()
 
-    return RedirectResponse(url="/settings", status_code=302)
+    return RedirectResponse(url=f"{settings.frontend_url}/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------
@@ -606,7 +606,7 @@ async def slack_callback(
     }
     await db.commit()
 
-    return RedirectResponse(url="/settings", status_code=302)
+    return RedirectResponse(url=f"{settings.frontend_url}/settings", status_code=302)
 
 
 # ---------------------------------------------------------------------------

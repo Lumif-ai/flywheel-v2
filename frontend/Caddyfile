@@ -1,9 +1,11 @@
 :{$PORT}
 
+# Reverse proxy API requests to the backend service
+reverse_proxy /api/* {$BACKEND_URL:http://localhost:8000}
+
+# SPA: serve static files with fallback to index.html
 root * /srv
 file_server
-
-# SPA fallback: serve index.html for all non-file routes
 try_files {path} /index.html
 
 # Security headers
@@ -13,5 +15,5 @@ header {
 	Referrer-Policy "strict-origin-when-cross-origin"
 	Permissions-Policy "camera=(), microphone=(), geolocation=()"
 	Strict-Transport-Security "max-age=31536000; includeSubDomains"
-	Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'"
+	Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https:; connect-src 'self' {$BACKEND_URL:http://localhost:8000} https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'"
 }

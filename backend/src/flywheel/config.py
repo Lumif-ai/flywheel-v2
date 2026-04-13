@@ -36,7 +36,7 @@ class Settings(BaseSettings):
 
     # Email (Resend)
     resend_api_key: str = ""  # empty = email disabled, log instead
-    email_domain: str = "flywheel.app"  # verified domain in Resend
+    email_domain: str = "lumif.ai"  # verified domain in Resend
 
     # Frontend URL (for email links)
     frontend_url: str = "http://localhost:5173"

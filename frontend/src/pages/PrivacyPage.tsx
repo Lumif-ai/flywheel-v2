@@ -180,7 +180,7 @@ export function PrivacyPage() {
       <h2>11. Contact</h2>
       <p>
         For privacy-related questions or to exercise your rights, contact us at{' '}
-        <a href="mailto:legal@flywheel.app">legal@flywheel.app</a>.
+        <a href="mailto:legal@lumif.ai">legal@lumif.ai</a>.
       </p>
     </div>
   )

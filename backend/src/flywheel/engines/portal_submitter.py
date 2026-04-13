@@ -11,6 +11,7 @@ Usage:
 import asyncio
 import importlib
 import importlib.util
+import os
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -64,7 +65,7 @@ async def submit_to_portal(
     carrier_config: dict,
     coverages: list[dict],
     documents: list[dict],
-    api_base_url: str = "http://localhost:8000",
+    api_base_url: str = os.environ.get("FLYWHEEL_API_URL", "http://localhost:8000"),
     auth_token: str | None = None,
 ) -> dict:
     """Orchestrate portal submission via Playwright.
@@ -155,7 +156,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Submit to carrier portal via Playwright")
     parser.add_argument("--project-id", required=True, help="Project UUID")
     parser.add_argument("--carrier-config-id", required=True, help="CarrierConfig UUID")
-    parser.add_argument("--api-base-url", default="http://localhost:8000", help="Backend API URL")
+    parser.add_argument("--api-base-url", default=os.environ.get("FLYWHEEL_API_URL", "http://localhost:8000"), help="Backend API URL")
     parser.add_argument("--auth-token", default=None, help="Bearer token for API calls")
     args = parser.parse_args()
 

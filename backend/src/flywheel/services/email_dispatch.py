@@ -3,7 +3,7 @@
 Routes outbound email to the user's connected email integration:
 1. Gmail (via Gmail API) -- if connected
 2. Outlook (via Microsoft Graph) -- if connected
-3. Resend (noreply@flywheel.app) -- fallback when no integration connected
+3. Resend (noreply@lumif.ai) -- fallback when no integration connected
 """
 
 from __future__ import annotations
@@ -107,7 +107,7 @@ async def send_email_as_user(
             )
             return {"provider": "outlook", "message_id": None, **result_dict}
 
-    # Fallback: send via Resend (noreply@flywheel.app)
+    # Fallback: send via Resend (noreply@lumif.ai)
     from flywheel.services.email import send_email
 
     resend_result = await send_email(to, subject, body_html)

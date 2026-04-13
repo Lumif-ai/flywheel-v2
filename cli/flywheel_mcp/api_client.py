@@ -26,9 +26,9 @@ class FlywheelClient:
     def __init__(self) -> None:
         self._token = get_token()
         self._api_url = get_api_url()
-        # Frontend is hosted at the same origin as the API
+        # Frontend may be on a different domain than the API
         self.frontend_url = os.environ.get(
-            "FLYWHEEL_FRONTEND_URL", self._api_url
+            "FLYWHEEL_FRONTEND_URL", "https://uat-flywheel.lumif.ai"
         )
         self._client = httpx.Client(
             base_url=self._api_url,

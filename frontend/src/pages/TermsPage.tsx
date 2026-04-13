@@ -101,7 +101,7 @@ export function TermsPage() {
       <h2>13. Contact</h2>
       <p>
         For questions about these Terms, contact us at{' '}
-        <a href="mailto:legal@flywheel.app">legal@flywheel.app</a>.
+        <a href="mailto:legal@lumif.ai">legal@lumif.ai</a>.
       </p>
     </div>
   )

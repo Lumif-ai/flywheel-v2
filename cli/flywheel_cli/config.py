@@ -18,7 +18,7 @@ CREDENTIALS_FILE = FLYWHEEL_DIR / "credentials.json"
 # ---------------------------------------------------------------------------
 
 # Production defaults — safe to embed (anon key is public, same as frontend bundle)
-_DEFAULT_API_URL = "https://methodical-jessenia-unannotated.ngrok-free.dev"
+_DEFAULT_API_URL = "https://uat-flywheel-backend.lumif.ai"
 _DEFAULT_SUPABASE_URL = "https://qudaxjkjzhjqxrmapggi.supabase.co"
 _DEFAULT_SUPABASE_ANON_KEY = (
     "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9."
