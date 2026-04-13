@@ -1,6 +1,6 @@
 ---
 name: meeting-prep
-version: "4.0"
+version: "4.1"
 description: >
   Full-depth bidirectional meeting preparation skill. Supports 8 meeting types
   (discovery, follow-up, investor, advisory, partnership, customer success,
@@ -107,6 +107,65 @@ Also load supplementary context for hypothesis synthesis:
 - Read `positioning.md` for value propositions and messaging
 - Read `competitive-intel.md` for competitive landscape
 - Read `market-taxonomy.md` for vertical context and industry classification
+
+### 0c: Load Pain Landscape Context
+
+Load pain patterns synthesized from past prospect meetings. These reveal recurring themes
+across your pipeline — useful context when preparing for any prospect meeting.
+
+```python
+print("Loading pain landscape context...")
+
+# FlywheelClient setup (meeting-prep uses context_utils for other reads;
+# pain-landscape.md requires structured entry access via FlywheelClient)
+_flywheel_path = os.environ.get(
+    "FLYWHEEL_CLIENT_PATH",
+    os.path.expanduser("~/Projects/flywheel-v2/cli")
+)
+if os.path.exists(_flywheel_path):
+    sys.path.insert(0, _flywheel_path)
+    try:
+        from flywheel_mcp.api_client import FlywheelClient as _FlywheelClient
+        _api_url = os.environ.get("FLYWHEEL_API_URL", "http://localhost:8000")
+        _fl_client = _FlywheelClient(base_url=_api_url)
+    except Exception as _e:
+        _fl_client = None
+        print(f"  NOTE: FlywheelClient unavailable ({_e}); Market Context will be skipped.")
+else:
+    _fl_client = None
+    print("  NOTE: flywheel-v2 not found at expected path; Market Context will be skipped.")
+
+try:
+    if _fl_client is None:
+        raise RuntimeError("FlywheelClient not available")
+    pain_resp = _fl_client.read_context_file("pain-landscape.md", limit=100)
+    pain_entries = pain_resp.get("items", [])
+    # Filter to individual pain entries only (exclude co-occurrence clusters)
+    # Pain entries have detail like "pain: manual-coi-tracking"
+    # Cluster entries have detail like "cluster: pain-a+pain-b" — skip these
+    pain_entries = [
+        e for e in pain_entries
+        if (e.get("detail") or "").startswith("pain: ")
+    ]
+    # Sort: high confidence first, then medium, then low
+    CONFIDENCE_ORDER = {"high": 2, "medium": 1, "low": 0}
+    pain_entries.sort(
+        key=lambda e: CONFIDENCE_ORDER.get(e.get("confidence") or "", 0),
+        reverse=True,
+    )
+    pain_landscape_context = pain_entries[:5]  # top 5 patterns for briefing
+    if pain_landscape_context:
+        print(f"  pain-landscape.md: {len(pain_landscape_context)} patterns loaded")
+    else:
+        print("  pain-landscape.md: No patterns found. Run /synthesize after meetings to enable market context.")
+except Exception as e:
+    print(f"  WARNING: Could not load pain-landscape.md: {e}")
+    pain_landscape_context = []
+```
+
+If `pain_landscape_context` is empty (no synthesis run yet, or FlywheelClient unavailable), the skill
+continues normally — the Market Context section is simply omitted from the briefing. Do not fail or warn
+the user loudly. Market context is additive intelligence, not required content.
 
 ## Step 1: Get Meeting Details & Build Attendee List
 
@@ -632,6 +691,43 @@ Render rules:
 
 If `ci_file` was not loaded (Step 2.6), omit this section entirely.
 
+**Section 1.95 -- Market Pain Patterns (from pain-landscape.md):**
+
+Include this section ONLY when `pain_landscape_context` is non-empty (patterns were loaded in Step 0c).
+
+Template (use the top 3 patterns from `pain_landscape_context[:3]`):
+
+```html
+<div class="section" style="margin: 24px 0; padding: 20px; background: rgba(233,77,53,0.04); border-radius: 12px; border-left: 3px solid #E94D35;">
+  <h2 style="margin-top: 0;">Market Pain Patterns</h2>
+  <p style="color: #6B7280; margin-bottom: 16px;">Based on {len(pain_landscape_context)} pattern(s) from past prospect meetings:</p>
+  <ul style="margin: 0; padding-left: 20px;">
+    {# For each entry in pain_landscape_context[:3]: #}
+    <li style="margin-bottom: 10px;">
+      <span style="font-weight: 600;">{entry["detail"].replace("pain: ", "").replace("-", " ").title()}</span>
+      <span style="display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 999px; font-size: 12px;
+        background: {'#22C55E' if entry.get('confidence') == 'high' else '#F97316' if entry.get('confidence') == 'medium' else '#6B7280'};
+        color: white;">{entry.get("confidence", "low")}</span>
+      {# If "HAIR ON FIRE" appears in entry content (case-insensitive): #}
+      {# <span style="margin-left: 6px; color: #E94D35; font-size: 12px; font-weight: 600;">(!) Hair on fire</span> #}
+      {# If entry has synthesized_at date: #}
+      {# <span style="display: block; font-size: 12px; color: #6B7280; margin-top: 2px;">Last synthesized: {entry["synthesized_at"]}</span> #}
+    </li>
+    {# End loop #}
+  </ul>
+  <p style="margin-top: 16px; margin-bottom: 0; font-size: 13px; color: #6B7280;">
+    Reference these themes if they come up in today's conversation.
+  </p>
+</div>
+```
+
+Render rules for this section:
+- **Label:** `entry["detail"]` starts with `"pain: "` — strip prefix, replace hyphens with spaces, title-case (e.g., `"pain: manual-coi-tracking"` → `"Manual Coi Tracking"`).
+- **Confidence badge:** Green (`#22C55E`) for high, orange (`#F97316`) for medium, gray (`#6B7280`) for low.
+- **Hair-on-fire indicator:** Check if `entry.get("content", "") + " ".join(entry.get("content_lines", []))` contains the string `"HAIR ON FIRE"` (case-insensitive). If yes, render the `(!) Hair on fire` span in brand coral.
+- **Synthesized date:** If `entry.get("synthesized_at")` exists, show it below the label in muted small text.
+- **Empty state:** If `pain_landscape_context` is empty, omit this section entirely. Do NOT render an empty card or placeholder.
+
 **Section 2 -- Why This Matters (Exposure & Value):**
 - Exposure Risk -- 2-4 bullet points with metrics and confidence tags
 - Pain Points for This Role -- 3-5 bullet points ranked by evidence
@@ -841,6 +937,7 @@ When running in Claude Code (CLI), use direct Python calls to context_utils inst
 
 | Version | Date | Changes |
 |---------|------|---------|
+| 4.1 | 2026-04-13 | **Pain landscape integration.** Step 0c: Load pain-landscape.md entries via FlywheelClient before briefing generation. Filters to individual pain entries only (detail must start with `"pain: "`), excludes cluster entries. Sorts by confidence (high first). Graceful degradation: FlywheelClient unavailable or empty pain-landscape.md → `pain_landscape_context = []` → skill continues without error. Step 8: Market Pain Patterns section (Section 1.95) in HTML briefing — shows top 3 patterns with label, confidence badge, hair-on-fire indicator; omitted entirely when pain_landscape_context is empty. |
 | 4.0 | 2026-03-17 | **Major refactor: meeting types + multi-person support.** Added references/meeting-types.md with type-specific overrides for Steps 5/6/7/8 across 8 meeting types (discovery, follow-up, investor, advisory, partnership, customer-success, internal, hiring). Step 1 now builds attendee list (their-side + our-side). Step 3 loops over attendees with group dynamics mapping for multi-person. Steps 5/6/7 route to type-specific logic. Step 7 paradigm flips for investor/hiring (answers, not questions). Step 8 adds Section 0.5 (Attendee Dossiers) for multi-person, meeting type badge, desired outcome in header. Backward compatible: single-person discovery meetings work exactly as before. |
 | 3.8 | 2026-03-17 | Extracted Steps 2.5/2.6 to references/ (transcript-synthesis.md, call-intelligence-integration.md). Added dependency verification (Step 0a). Added input validation gate (Step 1b) with meeting type detection. Added briefing quality checklist (references/briefing-quality-checklist.md) with 8 meeting types, multi-person gates, and confidence scoring. Integrated quality gate into Step 8. |
 | 3.7 | 2026-03-13 | Step 2.6 now auto-runs call intelligence inline for deep tier / deep dive requests; non-deep tiers use cache only |
