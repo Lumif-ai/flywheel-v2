@@ -42,6 +42,7 @@ from flywheel.engines.voice_context_writer import write_voice_to_context
 from flywheel.db.session import get_session_factory, tenant_session
 from flywheel.services.gmail_read import (
     TokenRevokedException,
+    find_pdf_attachments,
     get_history,
     get_message_body,
     get_message_headers,
@@ -915,6 +916,350 @@ async def sync_gmail(
 
 
 # ---------------------------------------------------------------------------
+# Broker attachment detection hook
+# ---------------------------------------------------------------------------
+
+
+async def _process_broker_attachments(
+    db: AsyncSession,
+    integration: Integration,
+    factory=None,
+) -> int:
+    """Process recently synced emails for PDF attachments (broker tenants only).
+
+    Fetches full Gmail messages for recently synced emails and checks for PDF
+    attachments. For each message with PDFs, creates a draft BrokerProject and
+    BrokerActivity record for dashboard surfacing.
+
+    Called once per sync cycle ONLY for broker-enabled tenants (no performance
+    impact on non-broker tenants).
+
+    Returns:
+        Number of new PDF-bearing messages detected.
+    """
+    from flywheel.services.gmail_read import get_valid_credentials
+
+    # Query emails synced in the last sync interval (5 min window)
+    from datetime import timedelta
+    since = datetime.now(timezone.utc) - timedelta(seconds=SYNC_INTERVAL + 30)
+    result = await db.execute(
+        select(Email.gmail_message_id).where(
+            Email.tenant_id == integration.tenant_id,
+            Email.synced_at >= since,
+        ).limit(50)
+    )
+    message_ids = [row[0] for row in result.all()]
+    if not message_ids:
+        return 0
+
+    # Fetch credentials and build service
+    creds = await get_valid_credentials(integration)
+
+    detected = 0
+    for gmail_msg_id in message_ids:
+        try:
+            # Fetch full message to inspect attachments
+            def _fetch(mid=gmail_msg_id):
+                from googleapiclient.discovery import build as _build
+                service = _build("gmail", "v1", credentials=creds)
+                return (
+                    service.users()
+                    .messages()
+                    .get(userId="me", id=mid, format="full")
+                    .execute()
+                )
+
+            msg = await asyncio.to_thread(_fetch)
+            await _check_broker_attachments(db, msg, integration.tenant_id)
+            detected += 1
+        except Exception:
+            logger.debug(
+                "Failed to check broker attachments for message %s",
+                gmail_msg_id,
+            )
+            # Non-fatal per message
+
+    if detected > 0:
+        await db.commit()
+        logger.info(
+            "Broker attachment check: processed %d messages for integration %s",
+            detected,
+            integration.id,
+        )
+
+    return detected
+
+
+async def _check_broker_attachments(
+    session: AsyncSession,
+    msg: dict,
+    tenant_id: UUID,
+) -> None:
+    """Check if a Gmail message has PDF attachments and record it for broker processing.
+
+    Creates a draft BrokerProject and a BrokerActivity entry with
+    activity_type='pdf_attachment_detected' so the broker dashboard can
+    surface messages needing review.
+
+    Idempotent: skips messages already recorded via metadata_ JSONB query.
+    Does not commit — relies on the caller's transaction boundary.
+    """
+    from flywheel.db.models import BrokerActivity, BrokerProject
+
+    pdf_attachments = find_pdf_attachments(msg)
+    if not pdf_attachments:
+        return
+
+    # Extract message metadata
+    headers = {
+        h["name"].lower(): h["value"]
+        for h in msg.get("payload", {}).get("headers", [])
+    }
+    message_id = msg.get("id", "")
+    sender = headers.get("from", "unknown")
+    subject = headers.get("subject", "No subject")
+
+    # Idempotent check: skip if already recorded for this message
+    existing = (
+        await session.execute(
+            select(BrokerActivity).where(
+                BrokerActivity.tenant_id == tenant_id,
+                BrokerActivity.activity_type == "pdf_attachment_detected",
+                BrokerActivity.metadata_["message_id"].as_string() == message_id,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing:
+        return  # Already detected, skip
+
+    # Create a draft BrokerProject (broker_project_id is NOT NULL on BrokerActivity)
+    project = BrokerProject(
+        tenant_id=tenant_id,
+        name=subject,
+        project_type="construction",
+        status="new_request",
+        analysis_status="pending",
+        import_source="email",
+        external_ref=message_id,
+        metadata_={"sender": sender, "gmail_message_id": message_id},
+    )
+    session.add(project)
+    await session.flush()  # Get project.id
+
+    activity = BrokerActivity(
+        tenant_id=tenant_id,
+        broker_project_id=project.id,
+        activity_type="pdf_attachment_detected",
+        actor_type="system",
+        metadata_={
+            "message_id": message_id,
+            "sender": sender,
+            "subject": subject,
+            "pdf_count": len(pdf_attachments),
+            "filenames": [a["filename"] for a in pdf_attachments],
+            "total_size": sum(a["size"] for a in pdf_attachments),
+        },
+    )
+    session.add(activity)
+    # Don't commit — let the sync loop commit at its natural boundary
+
+
+async def _check_broker_enabled(session: AsyncSession, tenant_id: UUID) -> bool:
+    """Check if a tenant has the broker module enabled (via tenant settings)."""
+    from flywheel.db.models import Tenant
+
+    result = await session.execute(
+        select(Tenant).where(Tenant.id == tenant_id)
+    )
+    tenant = result.scalar_one_or_none()
+    if not tenant:
+        return False
+    modules = (tenant.settings or {}).get("modules", [])
+    return "broker" in modules
+
+
+async def _detect_carrier_quotes(
+    db: AsyncSession,
+    integration: Integration,
+    factory=None,
+) -> int:
+    """Detect carrier quote emails by sender domain matching against CarrierConfig.
+
+    For each recently synced email, checks if the sender domain matches an active
+    CarrierConfig. If a match is found with a PDF attachment and a solicited
+    CarrierQuote exists, auto-links it (sets status='received') and updates project
+    status (soliciting -> quotes_partial -> quotes_complete).
+
+    Returns:
+        Number of carrier quote emails detected.
+    """
+    from datetime import timedelta
+
+    from flywheel.db.models import BrokerActivity, BrokerProject, CarrierConfig, CarrierQuote
+
+    tenant_id = integration.tenant_id
+
+    # Query emails synced in the last sync interval (5 min window)
+    since = datetime.now(timezone.utc) - timedelta(seconds=SYNC_INTERVAL + 30)
+    result = await db.execute(
+        select(Email).where(
+            Email.tenant_id == tenant_id,
+            Email.synced_at >= since,
+        ).limit(50)
+    )
+    emails = result.scalars().all()
+    if not emails:
+        return 0
+
+    detected = 0
+
+    for email_row in emails:
+        try:
+            # Extract sender domain
+            from_addr = email_row.from_address
+            if not from_addr or "@" not in from_addr:
+                continue
+            sender_domain = from_addr.split("@")[1].lower()
+
+            # Match against active CarrierConfig rows for this tenant
+            carrier_result = await db.execute(
+                select(CarrierConfig).where(
+                    CarrierConfig.tenant_id == tenant_id,
+                    CarrierConfig.is_active.is_(True),
+                    CarrierConfig.email_address.isnot(None),
+                )
+            )
+            carriers = carrier_result.scalars().all()
+
+            # Find carrier whose email domain matches sender
+            matched_carrier = None
+            for carrier in carriers:
+                if carrier.email_address and "@" in carrier.email_address:
+                    carrier_domain = carrier.email_address.split("@")[1].lower()
+                    if carrier_domain == sender_domain:
+                        matched_carrier = carrier
+                        break
+
+            if matched_carrier is None:
+                continue
+
+            # Flag the email metadata
+            metadata = dict(email_row.metadata_ or {})
+            metadata["is_carrier_quote"] = True
+            metadata["carrier_config_id"] = str(matched_carrier.id)
+            email_row.metadata_ = metadata
+
+            # Check if email has PDF attachment
+            has_pdf = False
+            attachments = metadata.get("attachments", [])
+            if attachments:
+                has_pdf = any(
+                    "pdf" in (att.get("mime_type", "") or "").lower()
+                    for att in attachments
+                )
+            if not has_pdf:
+                has_pdf = metadata.get("has_attachments", False)
+
+            if not has_pdf:
+                await db.commit()
+                detected += 1
+                continue
+
+            # Look for a matching solicited CarrierQuote
+            quote_result = await db.execute(
+                select(CarrierQuote).where(
+                    CarrierQuote.tenant_id == tenant_id,
+                    CarrierQuote.carrier_config_id == matched_carrier.id,
+                    CarrierQuote.status == "solicited",
+                )
+            )
+            solicited_quotes = quote_result.scalars().all()
+
+            # Filter to quotes whose project is in an active solicitation state
+            matched_quote = None
+            for sq in solicited_quotes:
+                proj_result = await db.execute(
+                    select(BrokerProject).where(
+                        BrokerProject.id == sq.broker_project_id,
+                        BrokerProject.status.in_(("soliciting", "quotes_partial")),
+                    )
+                )
+                proj = proj_result.scalar_one_or_none()
+                if proj:
+                    matched_quote = sq
+                    break
+
+            if matched_quote is None:
+                # PDF attachment but no matching solicited quote — just flag metadata
+                await db.commit()
+                detected += 1
+                continue
+
+            # Update quote: received
+            matched_quote.status = "received"
+            matched_quote.received_at = datetime.now(timezone.utc)
+            matched_quote.source_email_id = email_row.id
+
+            # Update project status based on all quotes
+            project_result = await db.execute(
+                select(BrokerProject).where(
+                    BrokerProject.id == matched_quote.broker_project_id
+                )
+            )
+            project = project_result.scalar_one()
+
+            all_quotes_result = await db.execute(
+                select(CarrierQuote).where(
+                    CarrierQuote.broker_project_id == project.id
+                )
+            )
+            all_quotes = all_quotes_result.scalars().all()
+
+            all_received = all(
+                q.status in ("received", "extracted", "reviewed", "selected")
+                for q in all_quotes
+            )
+            if all_received:
+                project.status = "quotes_complete"
+            else:
+                project.status = "quotes_partial"
+
+            # Log BrokerActivity
+            activity = BrokerActivity(
+                tenant_id=tenant_id,
+                broker_project_id=project.id,
+                activity_type="quote_received",
+                actor_type="system",
+                description=f"Quote received from {matched_carrier.carrier_name} via email",
+                metadata_={
+                    "carrier_config_id": str(matched_carrier.id),
+                    "carrier_name": matched_carrier.carrier_name,
+                    "email_id": str(email_row.id),
+                },
+            )
+            db.add(activity)
+            await db.commit()
+            detected += 1
+
+        except Exception:
+            logger.debug(
+                "Failed to detect carrier quote for email %s",
+                getattr(email_row, "id", "unknown"),
+            )
+            # Non-fatal per email
+
+    if detected > 0:
+        logger.info(
+            "Carrier quote detection: %d emails matched for integration %s",
+            detected,
+            integration.id,
+        )
+
+    return detected
+
+
+# ---------------------------------------------------------------------------
 # Per-integration wrapper
 # ---------------------------------------------------------------------------
 
@@ -955,6 +1300,23 @@ async def _sync_one_integration(factory, integration: Integration) -> int:
             intg.credentials_encrypted = None
             await db.commit()
             return 0
+
+        # Broker PDF attachment detection — check once per sync cycle
+        if count > 0:
+            try:
+                broker_enabled = await _check_broker_enabled(db, intg.tenant_id)
+                if broker_enabled:
+                    await _process_broker_attachments(
+                        db, intg, factory=factory
+                    )
+                    await _detect_carrier_quotes(
+                        db, intg, factory=factory
+                    )
+            except Exception:
+                logger.exception(
+                    "Broker attachment check failed for integration %s (non-fatal)",
+                    intg.id,
+                )
 
         # Check if voice profile needs initialization (runs once per user)
         existing_profile = await db.execute(

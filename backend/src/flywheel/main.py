@@ -44,6 +44,7 @@ from flywheel.api.tenant import router as tenant_router
 from flywheel.api.user import router as user_router
 from flywheel.api.work_items import router as work_items_router
 from flywheel.api.pipeline import router as pipeline_router
+from flywheel.api.broker import router as broker_router
 from flywheel.api.saved_views import router as saved_views_router
 from flywheel.api.leads import router as leads_router
 from flywheel.api.accounts import router as accounts_router
@@ -238,6 +239,7 @@ def create_app() -> FastAPI:
     app.include_router(saved_views_router, prefix="/api/v1")
     app.include_router(pipeline_router, prefix="/api/v1")
     app.include_router(leads_router, prefix="/api/v1")
+    app.include_router(broker_router, prefix="/api/v1")
 
     return app
 

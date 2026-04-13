@@ -149,6 +149,11 @@ async def list_tenants(
     items = []
     for tenant, role in result.all():
         settings = tenant.settings or {}
+        features = settings.get("features", {})
+        # Derive module-based feature flags
+        modules = settings.get("modules", [])
+        if "broker" in modules:
+            features["broker"] = True
         items.append(
             TenantListItem(
                 id=str(tenant.id),
@@ -156,7 +161,7 @@ async def list_tenants(
                 slug=settings.get("slug", tenant.name.lower().replace(" ", "-")),
                 plan=settings.get("plan", "free"),
                 member_limit=settings.get("member_limit", DEFAULT_MEMBER_LIMIT),
-                features=settings.get("features", {}),
+                features=features,
             )
         )
     return items

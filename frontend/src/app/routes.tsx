@@ -80,6 +80,43 @@ const TasksPage = lazy(() =>
   import('@/features/tasks/components/TasksPage').then((m) => ({ default: m.TasksPage }))
 )
 
+// Lazy-loaded broker pages
+const BrokerDashboard = lazy(() =>
+  import('@/features/broker/components/BrokerDashboard').then(
+    (m) => ({ default: m.BrokerDashboard })
+  )
+)
+const BrokerProjectDetail = lazy(() =>
+  import('@/features/broker/components/BrokerProjectDetail').then(
+    (m) => ({ default: m.BrokerProjectDetail })
+  )
+)
+const CarrierSettings = lazy(() =>
+  import('@/features/broker/components/CarrierSettings').then(
+    (m) => ({ default: m.CarrierSettings })
+  )
+)
+const BrokerEmailPage = lazy(() =>
+  import('@/features/broker/pages/BrokerEmailPage').then(
+    (m) => ({ default: m.BrokerEmailPage })
+  )
+)
+const BrokerProjectsPage = lazy(() =>
+  import('@/features/broker/pages/BrokerProjectsPage').then(
+    (m) => ({ default: m.BrokerProjectsPage })
+  )
+)
+const BrokerClientsPage = lazy(() =>
+  import('@/features/broker/pages/BrokerClientsPage').then(
+    (m) => ({ default: m.BrokerClientsPage })
+  )
+)
+const BrokerCarriersPage = lazy(() =>
+  import('@/features/broker/pages/BrokerCarriersPage').then(
+    (m) => ({ default: m.BrokerCarriersPage })
+  )
+)
+
 // Lazy-loaded public pages (infrequently accessed)
 const LoginPage = lazy(() =>
   import('@/pages/LoginPage').then((m) => ({ default: m.LoginPage }))
@@ -112,6 +149,7 @@ export function AppRoutes() {
   const tasksEnabled = useFeatureFlag('tasks')
   const pipelineEnabled = useFeatureFlag('pipeline')
   const meetingsEnabled = useFeatureFlag('meetings')
+  const brokerEnabled = useFeatureFlag('broker')
 
   return (
     <Routes>
@@ -138,6 +176,14 @@ export function AppRoutes() {
       {meetingsEnabled && <Route path="/meetings/:id" element={<Suspense fallback={null}><MeetingDetailPage /></Suspense>} />}
       {tasksEnabled && <Route path="/tasks" element={<Suspense fallback={null}><TasksPage /></Suspense>} />}
       {!tasksEnabled && <Route path="/tasks" element={<Navigate to="/" replace />} />}
+      {brokerEnabled && <Route path="/broker" element={<Suspense fallback={null}><BrokerDashboard /></Suspense>} />}
+      {brokerEnabled && <Route path="/broker/projects/:id" element={<Suspense fallback={null}><BrokerProjectDetail /></Suspense>} />}
+      {brokerEnabled && <Route path="/broker/settings/carriers" element={<Suspense fallback={null}><CarrierSettings /></Suspense>} />}
+      {brokerEnabled && <Route path="/broker/email" element={<Suspense fallback={null}><BrokerEmailPage /></Suspense>} />}
+      {brokerEnabled && <Route path="/broker/projects" element={<Suspense fallback={null}><BrokerProjectsPage /></Suspense>} />}
+      {brokerEnabled && <Route path="/broker/clients" element={<Suspense fallback={null}><BrokerClientsPage /></Suspense>} />}
+      {brokerEnabled && <Route path="/broker/carriers" element={<Suspense fallback={null}><BrokerCarriersPage /></Suspense>} />}
+      {!brokerEnabled && <Route path="/broker/*" element={<Navigate to="/" replace />} />}
       {/* Legacy relationship routes -> pipeline with filter */}
       <Route path="/relationships/prospects" element={<Navigate to="/pipeline?relationshipType=prospect" replace />} />
       <Route path="/relationships/customers" element={<Navigate to="/pipeline?relationshipType=customer" replace />} />

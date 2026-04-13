@@ -1941,3 +1941,456 @@ class SavedView(Base):
     updated_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
+
+
+# ---------------------------------------------------------------------------
+# BROKER MODULE TABLES (6 tables for insurance broker vertical)
+# ---------------------------------------------------------------------------
+
+
+class CarrierConfig(Base):
+    """Per-tenant carrier setup — portals, emails, automation scripts."""
+
+    __tablename__ = "carrier_configs"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "carrier_name", "carrier_type",
+                         name="uq_carrier_config_tenant_name_type"),
+        Index("idx_carrier_config_tenant", "tenant_id",
+              postgresql_where=text("is_active = true")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+
+    # Carrier identity
+    carrier_name: Mapped[str] = mapped_column(Text, nullable=False)
+    carrier_type: Mapped[str] = mapped_column(Text, server_default=text("'insurance'"))
+    carrier_code: Mapped[str | None] = mapped_column(Text)
+    logo_url: Mapped[str | None] = mapped_column(Text)
+
+    # Submission method
+    submission_method: Mapped[str] = mapped_column(Text, server_default=text("'email'"))
+
+    # Portal config
+    portal_url: Mapped[str | None] = mapped_column(Text)
+    portal_limit: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    portal_credentials: Mapped[bytes | None] = mapped_column(LargeBinary)
+
+    # Carrier identity in CRM
+    carrier_pipeline_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Carrier capabilities
+    coverage_types: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    regions: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    min_project_value: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    max_project_value: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+
+    # Carrier performance
+    avg_response_days: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    avg_premium_ratio: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    total_quotes: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+    total_selected: Mapped[int] = mapped_column(Integer, server_default=text("0"))
+
+    # Notes & state
+    notes: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+    email_address: Mapped[str | None] = mapped_column(Text)
+
+    # Import/sync (SPEC REQ-06)
+    import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+    external_id: Mapped[str | None] = mapped_column(Text)
+    external_ref: Mapped[str | None] = mapped_column(Text)
+
+    # Metadata
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
+class BrokerProject(Base):
+    """A construction project that needs insurance/surety coverage."""
+
+    __tablename__ = "broker_projects"
+    __table_args__ = (
+        Index("idx_broker_project_tenant_status", "tenant_id", "status",
+              postgresql_where=text("deleted_at IS NULL")),
+        Index("idx_broker_project_pipeline", "pipeline_entry_id",
+              postgresql_where=text("pipeline_entry_id IS NOT NULL")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    pipeline_entry_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Project details
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    project_type: Mapped[str] = mapped_column(Text, server_default=text("'construction'"))
+    description: Mapped[str | None] = mapped_column(Text)
+    contract_value: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    currency: Mapped[str] = mapped_column(Text, server_default=text("'MXN'"))
+    start_date: Mapped[datetime.date | None] = mapped_column(Date)
+    end_date: Mapped[datetime.date | None] = mapped_column(Date)
+    location: Mapped[str | None] = mapped_column(Text)
+    distance_km: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    language: Mapped[str] = mapped_column(Text, server_default=text("'en'"))
+
+    # Workflow state
+    status: Mapped[str] = mapped_column(Text, server_default=text("'new_request'"))
+
+    # Source tracking
+    source_email_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    source_document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("uploaded_files.id"), nullable=True
+    )
+    email_thread_ids: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+
+    # AI analysis
+    analysis_status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    analysis_completed_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True)
+    )
+    critical_findings: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'[]'::jsonb")
+    )
+
+    # Recommendation delivery
+    recommendation_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendation_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendation_status: Mapped[str | None] = mapped_column(Text, nullable=True)
+    recommendation_sent_at: Mapped[datetime.datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
+    recommendation_recipient: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+    # Import/sync (SPEC REQ-06)
+    import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+    external_id: Mapped[str | None] = mapped_column(Text)
+    external_ref: Mapped[str | None] = mapped_column(Text)
+
+    # Metadata
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    deleted_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    # Relationships
+    coverages: Mapped[list["ProjectCoverage"]] = relationship(
+        back_populates="broker_project", cascade="all, delete-orphan"
+    )
+    quotes: Mapped[list["CarrierQuote"]] = relationship(
+        back_populates="broker_project", cascade="all, delete-orphan"
+    )
+    activities: Mapped[list["BrokerActivity"]] = relationship(
+        back_populates="broker_project", cascade="all, delete-orphan"
+    )
+
+
+class ProjectCoverage(Base):
+    """Individual insurance/surety line required by the contract."""
+
+    __tablename__ = "project_coverages"
+    __table_args__ = (
+        Index("idx_coverage_project", "broker_project_id"),
+        Index("idx_coverage_tenant_category", "tenant_id", "category"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    broker_project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_projects.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Coverage details
+    coverage_type: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'insurance'"))
+    display_name: Mapped[str | None] = mapped_column(Text)
+    language: Mapped[str] = mapped_column(Text, server_default=text("'en'"))
+
+    # Requirements (from contract)
+    required_limit: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    required_deductible: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    required_terms: Mapped[str | None] = mapped_column(Text)
+    contract_clause: Mapped[str | None] = mapped_column(Text)
+
+    # Current state (from existing policies)
+    current_limit: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    current_carrier: Mapped[str | None] = mapped_column(Text)
+    current_policy_number: Mapped[str | None] = mapped_column(Text)
+    current_expiry: Mapped[datetime.date | None] = mapped_column(Date)
+
+    # Gap analysis
+    gap_status: Mapped[str] = mapped_column(Text, server_default=text("'unknown'"))
+    gap_amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    gap_notes: Mapped[str | None] = mapped_column(Text)
+
+    # Source provenance
+    source: Mapped[str] = mapped_column(Text, server_default=text("'ai_extraction'"))
+    source_document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("uploaded_files.id"), nullable=True
+    )
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_section: Mapped[str | None] = mapped_column(Text)
+    source_excerpt: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(Text, server_default=text("'high'"))
+    is_manual_override: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+
+    # Import/sync (SPEC REQ-06)
+    import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+
+    # Metadata
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    # Relationships
+    broker_project: Mapped["BrokerProject"] = relationship(
+        back_populates="coverages"
+    )
+    quotes: Mapped[list["CarrierQuote"]] = relationship(
+        back_populates="coverage"
+    )
+
+
+class CarrierQuote(Base):
+    """A quote from a carrier for one or more coverage lines."""
+
+    __tablename__ = "carrier_quotes"
+    __table_args__ = (
+        Index("idx_quote_project", "broker_project_id"),
+        Index("idx_quote_coverage", "coverage_id"),
+        Index("idx_quote_tenant_status", "tenant_id", "status"),
+        Index("idx_quote_source_dedup", "source_hash", unique=True,
+              postgresql_where=text("source_hash IS NOT NULL")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    broker_project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    coverage_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("project_coverages.id", ondelete="SET NULL"), nullable=True
+    )
+    carrier_config_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("carrier_configs.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Carrier details
+    carrier_name: Mapped[str] = mapped_column(Text, nullable=False)
+    carrier_type: Mapped[str] = mapped_column(Text, server_default=text("'insurance'"))
+
+    # Quote terms
+    premium: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    deductible: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    limit_amount: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    coinsurance: Mapped[float | None] = mapped_column(Numeric, nullable=True)
+    term_months: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    validity_date: Mapped[datetime.date | None] = mapped_column(Date)
+
+    # Detailed terms
+    exclusions: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    conditions: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    endorsements: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
+    terms_detail: Mapped[dict] = mapped_column(
+        JSONB, server_default=text("'{}'::jsonb")
+    )
+
+    # Comparison flags
+    is_best_price: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    is_best_coverage: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    is_recommended: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    has_critical_exclusion: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    critical_exclusion_detail: Mapped[str | None] = mapped_column(Text)
+
+    # Workflow state
+    status: Mapped[str] = mapped_column(Text, server_default=text("'pending'"))
+    solicited_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    received_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    selected_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+
+    # Source provenance
+    source: Mapped[str] = mapped_column(Text, server_default=text("'ai_extraction'"))
+    source_document_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("uploaded_files.id"), nullable=True
+    )
+    source_page: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_section: Mapped[str | None] = mapped_column(Text)
+    source_excerpt: Mapped[str | None] = mapped_column(Text)
+    source_email_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    source_hash: Mapped[str | None] = mapped_column(Text)
+    confidence: Mapped[str] = mapped_column(Text, server_default=text("'high'"))
+    is_manual_override: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+
+    # Solicitation draft (stored here instead of EmailDraft which has NOT NULL email_id FK)
+    draft_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
+    draft_body: Mapped[str | None] = mapped_column(Text, nullable=True)
+    draft_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # null, "pending", "approved", "sent"
+
+    # Import/sync (SPEC REQ-06)
+    import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+
+    # Metadata
+    language: Mapped[str] = mapped_column(Text, server_default=text("'en'"))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    # Relationships
+    broker_project: Mapped["BrokerProject"] = relationship(
+        back_populates="quotes"
+    )
+    coverage: Mapped["ProjectCoverage | None"] = relationship(
+        back_populates="quotes"
+    )
+    submission_documents: Mapped[list["SubmissionDocument"]] = relationship(
+        back_populates="carrier_quote", cascade="all, delete-orphan"
+    )
+
+
+class SubmissionDocument(Base):
+    """Documents included in a carrier solicitation."""
+
+    __tablename__ = "submission_documents"
+    __table_args__ = (
+        Index("idx_submission_doc_quote", "carrier_quote_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    carrier_quote_id: Mapped[UUID] = mapped_column(
+        ForeignKey("carrier_quotes.id", ondelete="CASCADE"), nullable=False
+    )
+    uploaded_file_id: Mapped[UUID] = mapped_column(
+        ForeignKey("uploaded_files.id"), nullable=False
+    )
+
+    # Document classification
+    document_type: Mapped[str] = mapped_column(Text, nullable=False)
+    display_name: Mapped[str | None] = mapped_column(Text)
+    included: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
+
+    # Import/sync (SPEC REQ-06)
+    import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+
+    # Metadata
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    # Relationships
+    carrier_quote: Mapped["CarrierQuote"] = relationship(
+        back_populates="submission_documents"
+    )
+
+
+class BrokerActivity(Base):
+    """Timeline events for broker projects."""
+
+    __tablename__ = "broker_activities"
+    __table_args__ = (
+        Index("idx_broker_activity_project", "broker_project_id", text("occurred_at DESC")),
+        Index("idx_broker_activity_tenant", "tenant_id", text("occurred_at DESC")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    broker_project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_projects.id", ondelete="CASCADE"), nullable=False
+    )
+
+    # Event details
+    activity_type: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    carrier_name: Mapped[str | None] = mapped_column(Text)
+    coverage_type: Mapped[str | None] = mapped_column(Text)
+
+    # Actor
+    actor_type: Mapped[str] = mapped_column(Text, server_default=text("'system'"))
+    user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+
+    # Related entities
+    email_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    document_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    carrier_quote_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("carrier_quotes.id", ondelete="SET NULL"), nullable=True
+    )
+
+    # Import/sync (SPEC REQ-06)
+    import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
+
+    # Metadata
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    occurred_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    # Relationships
+    broker_project: Mapped["BrokerProject"] = relationship(
+        back_populates="activities"
+    )

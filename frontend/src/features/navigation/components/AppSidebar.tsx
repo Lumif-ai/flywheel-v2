@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useLocation, useSearchParams, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare, Bookmark } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare, Bookmark, Shield } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'
@@ -22,6 +22,7 @@ import {
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { TenantSwitcher } from './TenantSwitcher'
 import { StreamSidebar } from '@/features/streams/components/StreamSidebar'
+import { BrokerSidebarContent } from './BrokerSidebarContent'
 
 export function AppSidebar() {
   const location = useLocation()
@@ -30,6 +31,7 @@ export function AppSidebar() {
   const tasksEnabled = useFeatureFlag('tasks')
   const pipelineEnabled = useFeatureFlag('pipeline')
   const meetingsEnabled = useFeatureFlag('meetings')
+  const brokerEnabled = useFeatureFlag('broker')
 
   const { state, hasApiKey, isAnonymous: isAnonymousServer } = useLifecycleState()
   const user = useAuthStore((s) => s.user)
@@ -94,184 +96,192 @@ export function AppSidebar() {
       </SidebarHeader>
 
       <SidebarContent>
-        {showApiKeyBanner && (
-          <div className="mx-3 mb-2">
-            <Link
-              to="/settings"
-              className="flex items-center gap-1.5 no-underline hover:opacity-80 transition-opacity"
-              style={{
-                fontSize: '12px',
-                color: 'var(--secondary-text)',
-                padding: '6px 8px',
-                borderRadius: '6px',
-              }}
-            >
-              <Lock className="size-3 shrink-0" />
-              <span>Add your API key for unlimited research</span>
-            </Link>
-          </div>
-        )}
-
-        {/* General navigation */}
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname === '/'}
-                  render={<NavLink to="/" />}
-                  tooltip="Briefing"
-                >
-                  <Home className="size-4" />
-                  <span>Briefing</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname === '/profile'}
-                  render={<NavLink to="/profile" />}
-                  tooltip="Company Profile"
-                >
-                  <Building2 className="size-4" />
-                  <span>Company Profile</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname.startsWith('/documents')}
-                  render={<NavLink to="/documents" />}
-                  tooltip="Library"
-                >
-                  <FileText className="size-4" />
-                  <span>Library</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              {emailEnabled && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname.startsWith('/email')}
-                  render={<NavLink to="/email" />}
-                  tooltip="Email"
-                >
-                  <Mail className="size-4" />
-                  <span>Email</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              )}
-              {meetingsEnabled && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname.startsWith('/meetings')}
-                  render={<NavLink to="/meetings" />}
-                  tooltip="Meetings"
-                >
-                  <CalendarDays className="size-4" />
-                  <span>Meetings</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              )}
-              {tasksEnabled && (
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={location.pathname.startsWith('/tasks')}
-                  render={<NavLink to="/tasks" />}
-                  tooltip="Tasks"
-                >
-                  <CheckSquare className="size-4" />
-                  <span>Tasks</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-              )}
-            </SidebarMenu>
-          </SidebarGroupContent>
-        </SidebarGroup>
-
-        {/* Pipeline — unified section */}
-        {pipelineEnabled && (
-        <SidebarGroup>
-          <SidebarGroupLabel
-            style={{
-              fontSize: '11px',
-              fontWeight: 600,
-              textTransform: 'uppercase',
-              letterSpacing: '0.06em',
-              color: 'var(--secondary-text)',
-            }}
-          >
-            Pipeline
-          </SidebarGroupLabel>
-          <SidebarGroupContent>
-            <SidebarMenu>
-              {/* All entries */}
-              <SidebarMenuItem>
-                <SidebarMenuButton
-                  isActive={isPipelinePath && !activeRelType}
-                  render={<NavLink to="/pipeline" />}
-                  tooltip="All"
-                >
-                  <TrendingUp className="size-4" />
-                  <span>All</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
-
-              {/* Built-in relationship filters */}
-              {[
-                { label: 'Customers', type: 'customer', icon: <TrendingUp className="size-4" /> },
-                { label: 'Advisors', type: 'advisor', icon: <Briefcase className="size-4" /> },
-                { label: 'Investors', type: 'investor', icon: <DollarSign className="size-4" /> },
-              ].map(({ label, type, icon }) => (
-                <SidebarMenuItem key={type}>
-                  <SidebarMenuButton
-                    isActive={isPipelinePath && activeRelType === type}
-                    render={<NavLink to={`/pipeline?relationshipType=${type}`} />}
-                    tooltip={label}
-                  >
-                    {icon}
-                    <span>{label}</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-              ))}
-            </SidebarMenu>
-
-            {/* Saved Views */}
-            {savedViews.length > 0 && (
-              <>
-                <SidebarGroupLabel
+        {brokerEnabled ? (
+          <BrokerSidebarContent />
+        ) : (
+          <>
+            {/* API key banner — GTM only */}
+            {showApiKeyBanner && (
+              <div className="mx-3 mb-2">
+                <Link
+                  to="/settings"
+                  className="flex items-center gap-1.5 no-underline hover:opacity-80 transition-opacity"
                   style={{
-                    fontSize: '11px',
-                    fontWeight: 600,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
+                    fontSize: '12px',
                     color: 'var(--secondary-text)',
-                    marginTop: '8px',
+                    padding: '6px 8px',
+                    borderRadius: '6px',
                   }}
                 >
-                  Saved Views
-                </SidebarGroupLabel>
+                  <Lock className="size-3 shrink-0" />
+                  <span>Add your API key for unlimited research</span>
+                </Link>
+              </div>
+            )}
+
+            {/* General navigation — GTM only */}
+            <SidebarGroup>
+              <SidebarGroupContent>
                 <SidebarMenu>
-                  {savedViews.map((view) => (
-                    <SidebarMenuItem key={view.id}>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={location.pathname === '/'}
+                      render={<NavLink to="/" />}
+                      tooltip="Briefing"
+                    >
+                      <Home className="size-4" />
+                      <span>Briefing</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={location.pathname === '/profile'}
+                      render={<NavLink to="/profile" />}
+                      tooltip="Company Profile"
+                    >
+                      <Building2 className="size-4" />
+                      <span>Company Profile</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={location.pathname.startsWith('/documents')}
+                      render={<NavLink to="/documents" />}
+                      tooltip="Library"
+                    >
+                      <FileText className="size-4" />
+                      <span>Library</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  {emailEnabled && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={location.pathname.startsWith('/email')}
+                      render={<NavLink to="/email" />}
+                      tooltip="Email"
+                    >
+                      <Mail className="size-4" />
+                      <span>Email</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  )}
+                  {meetingsEnabled && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={location.pathname.startsWith('/meetings')}
+                      render={<NavLink to="/meetings" />}
+                      tooltip="Meetings"
+                    >
+                      <CalendarDays className="size-4" />
+                      <span>Meetings</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  )}
+                  {tasksEnabled && (
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={location.pathname.startsWith('/tasks')}
+                      render={<NavLink to="/tasks" />}
+                      tooltip="Tasks"
+                    >
+                      <CheckSquare className="size-4" />
+                      <span>Tasks</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                  )}
+                </SidebarMenu>
+              </SidebarGroupContent>
+            </SidebarGroup>
+
+            {/* Pipeline — GTM only */}
+            {pipelineEnabled && (
+            <SidebarGroup>
+              <SidebarGroupLabel
+                style={{
+                  fontSize: '11px',
+                  fontWeight: 600,
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.06em',
+                  color: 'var(--secondary-text)',
+                }}
+              >
+                Pipeline
+              </SidebarGroupLabel>
+              <SidebarGroupContent>
+                <SidebarMenu>
+                  {/* All entries */}
+                  <SidebarMenuItem>
+                    <SidebarMenuButton
+                      isActive={isPipelinePath && !activeRelType}
+                      render={<NavLink to="/pipeline" />}
+                      tooltip="All"
+                    >
+                      <TrendingUp className="size-4" />
+                      <span>All</span>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+
+                  {/* Built-in relationship filters */}
+                  {[
+                    { label: 'Customers', type: 'customer', icon: <TrendingUp className="size-4" /> },
+                    { label: 'Advisors', type: 'advisor', icon: <Briefcase className="size-4" /> },
+                    { label: 'Investors', type: 'investor', icon: <DollarSign className="size-4" /> },
+                  ].map(({ label, type, icon }) => (
+                    <SidebarMenuItem key={type}>
                       <SidebarMenuButton
-                        render={<NavLink to={buildViewUrl(view)} />}
-                        tooltip={view.name}
+                        isActive={isPipelinePath && activeRelType === type}
+                        render={<NavLink to={`/pipeline?relationshipType=${type}`} />}
+                        tooltip={label}
                       >
-                        <Bookmark className="size-4" />
-                        <span>{view.name}</span>
+                        {icon}
+                        <span>{label}</span>
                       </SidebarMenuButton>
                     </SidebarMenuItem>
                   ))}
                 </SidebarMenu>
-              </>
-            )}
-          </SidebarGroupContent>
-        </SidebarGroup>
-        )}
 
-        <SidebarGroup>
-          <SidebarGroupContent>
-            <StreamSidebar />
-          </SidebarGroupContent>
-        </SidebarGroup>
+                {/* Saved Views */}
+                {savedViews.length > 0 && (
+                  <>
+                    <SidebarGroupLabel
+                      style={{
+                        fontSize: '11px',
+                        fontWeight: 600,
+                        textTransform: 'uppercase',
+                        letterSpacing: '0.06em',
+                        color: 'var(--secondary-text)',
+                        marginTop: '8px',
+                      }}
+                    >
+                      Saved Views
+                    </SidebarGroupLabel>
+                    <SidebarMenu>
+                      {savedViews.map((view) => (
+                        <SidebarMenuItem key={view.id}>
+                          <SidebarMenuButton
+                            render={<NavLink to={buildViewUrl(view)} />}
+                            tooltip={view.name}
+                          >
+                            <Bookmark className="size-4" />
+                            <span>{view.name}</span>
+                          </SidebarMenuButton>
+                        </SidebarMenuItem>
+                      ))}
+                    </SidebarMenu>
+                  </>
+                )}
+              </SidebarGroupContent>
+            </SidebarGroup>
+            )}
+
+            {/* Streams — GTM only */}
+            <SidebarGroup>
+              <SidebarGroupContent>
+                <StreamSidebar />
+              </SidebarGroupContent>
+            </SidebarGroup>
+          </>
+        )}
       </SidebarContent>
 
       <SidebarFooter className="p-4" style={{ borderTop: '1px solid var(--subtle-border)' }}>

@@ -522,6 +522,76 @@ async def get_message_id_header(creds: Credentials, message_id: str) -> str | No
     return await asyncio.to_thread(_get)
 
 
+# ---------------------------------------------------------------------------
+# Attachment helpers
+# ---------------------------------------------------------------------------
+
+
+async def get_attachment(
+    creds: Credentials,
+    message_id: str,
+    attachment_id: str,
+) -> bytes:
+    """Download a Gmail attachment by ID. Returns raw bytes.
+
+    Args:
+        creds: Valid Gmail OAuth2 credentials.
+        message_id: Gmail message ID containing the attachment.
+        attachment_id: Attachment ID from message payload.
+
+    Returns:
+        Raw attachment bytes.
+    """
+
+    def _get():
+        service = build("gmail", "v1", credentials=creds)
+        result = (
+            service.users()
+            .messages()
+            .attachments()
+            .get(userId="me", messageId=message_id, id=attachment_id)
+            .execute()
+        )
+        # Gmail uses URL-safe base64 (no padding)
+        return base64.urlsafe_b64decode(result["data"])
+
+    return await asyncio.to_thread(_get)
+
+
+def find_pdf_attachments(msg: dict) -> list[dict]:
+    """Find all PDF attachments in a Gmail message.
+
+    Walks the message payload parts recursively looking for application/pdf
+    MIME type parts that have an attachmentId.
+
+    Args:
+        msg: Full Gmail message dict (format="full") from the API.
+
+    Returns:
+        List of dicts with keys: filename, attachment_id, size.
+    """
+    attachments: list[dict] = []
+    payload = msg.get("payload", {})
+
+    def _walk(parts: list):
+        for part in parts:
+            mime = part.get("mimeType", "")
+            body = part.get("body", {})
+            if mime == "application/pdf" and body.get("attachmentId"):
+                attachments.append(
+                    {
+                        "filename": part.get("filename", "document.pdf"),
+                        "attachment_id": body["attachmentId"],
+                        "size": body.get("size", 0),
+                    }
+                )
+            if "parts" in part:
+                _walk(part["parts"])
+
+    _walk(payload.get("parts", []))
+    return attachments
+
+
 async def get_profile(creds: Credentials) -> dict:
     """Fetch the authenticated user's Gmail profile.
 

@@ -16,6 +16,7 @@
 - ✅ **v11.0 Briefing Page Redesign** — Phases 96–100 (shipped 2026-04-08)
 - **v12.0 Library Redesign** — Phases 101–104
 - **v14.0 Meeting Intelligence Synthesis** — Phases 110–111
+- **v15.0 Broker Module MVP** — Phases 112–117
 
 ## Phases
 
@@ -508,3 +509,81 @@ Plans:
 - [ ] 104.1-03-PLAN.md — Rewire signals.py + synthesis_engine.py
 - [ ] 104.1-04-PLAN.md — Rewire relationships.py (8 endpoints, highest complexity)
 - [ ] 104.1-05-PLAN.md — Rewire meeting_processor_web.py + seed_crm.py
+
+*v15.0 milestone added: 2026-04-11 — Broker Module MVP (6 phases, 46 requirements)*
+
+### v15.0 Broker Module MVP
+
+### Phase 112: Foundation
+**Goal**: Broker-module tenants see a "Broker" nav item in the sidebar linking to an empty dashboard page; the 6 broker database tables exist with ORM models; all broker API routes are gated by module check; non-broker tenants see no change
+**Depends on**: None (independent of v12.0/v14.0 — builds on existing tenant.settings, feature flags, and pipeline infrastructure)
+**Requirements**: FOUND-01, FOUND-02, FOUND-03, FOUND-04, FOUND-05, FOUND-06, FOUND-07
+**Success Criteria** (what must be TRUE):
+  1. A tenant with `"broker"` in `tenant.settings.modules` sees a "Broker" nav item in the sidebar and can navigate to `/broker` which renders a placeholder dashboard page
+  2. A tenant without `"broker"` in their modules array cannot access any `/api/v1/broker/*` endpoint (receives HTTP 403) and does not see the Broker nav item
+  3. `GET /api/v1/broker/health` returns `{"status": "ok"}` for broker-enabled tenants, confirming the API router skeleton is registered and module-gated
+  4. All 6 broker tables exist in PostgreSQL with correct FKs, indexes, and `tenant_id` columns
+  5. SQLAlchemy ORM models for all 6 tables follow existing patterns
+**Plans**: 3 plans
+
+Plans:
+- [ ] 112-01-PLAN.md — Database tables (6 broker tables) + ORM models + migration script
+- [ ] 112-02-PLAN.md — Module gating decorator + broker API router + feature flag propagation
+- [ ] 112-03-PLAN.md — Frontend: sidebar nav item, /broker route, placeholder dashboard
+
+### Phase 113: Contract Intake
+**Goal**: A broker creates a project, triggers AI contract analysis, sees extracted coverage requirements with confidence scoring on a project detail page, with a dashboard showing all projects
+**Depends on**: Phase 112
+**Requirements**: INTAKE-01 through INTAKE-11
+**Plans**: 5 plans
+Plans:
+- [ ] 113-01-PLAN.md — Backend CRUD endpoints (project create/list/detail/delete, coverage update, document upload, dashboard stats)
+- [ ] 113-02-PLAN.md — Contract analyzer AI engine (Claude PDF-native + tool_use structured extraction)
+- [ ] 113-03-PLAN.md — Gmail attachment helper + create-from-email endpoint + async analysis trigger
+- [ ] 113-04-PLAN.md — Dashboard frontend (API client, hooks, KPI cards, project table, create dialog)
+- [ ] 113-05-PLAN.md — Project detail frontend (coverage table with inline edit, activity timeline, route)
+
+### Phase 114: Gap Analysis + Carrier Selection
+**Goal**: After contract analysis, broker runs gap detection and sees ranked carrier recommendations, selects which carriers to solicit
+**Depends on**: Phase 113
+**Requirements**: GAP-01 through GAP-07
+**Plans:** 3 plans
+
+Plans:
+- [ ] 114-01-PLAN.md — Gap detection engine + analyze-gaps endpoint (GAP-01, GAP-02)
+- [ ] 114-02-PLAN.md — Carrier CRUD + carrier matching endpoint (GAP-03, GAP-04)
+- [ ] 114-03-PLAN.md — Frontend: gap analysis view, carrier selection, carrier settings (GAP-05, GAP-06, GAP-07)
+
+### Phase 115: Solicitation
+**Goal**: Broker sends solicitation emails to carriers and submits via carrier portals, with email approval flow and submission package building
+**Depends on**: Phase 114
+**Requirements**: SOLIC-01 through SOLIC-08
+**Plans:** 4 plans
+
+Plans:
+- [ ] 115-01-PLAN.md — Schema migration (CarrierQuote draft columns) + submission builder + AI solicitation drafter engines
+- [ ] 115-02-PLAN.md — Solicitation API endpoints (draft, edit, approve-send, portal screenshot/confirm, status update)
+- [ ] 115-03-PLAN.md — Portal submission engine (Playwright orchestrator) + Mapfre Mexico portal script
+- [ ] 115-04-PLAN.md — Frontend: email approval UI, portal submission UI, solicitation panel, CarrierSelection wiring
+
+### Phase 116: Comparison + Recommendation
+**Goal**: Quote lifecycle — Gmail detection, AI extraction, pure Python comparison matrix with critical exclusion alerts, follow-up drafting
+**Depends on**: Phase 115
+**Requirements**: QUOTE-01 through QUOTE-08
+**Plans:** 3 plans
+
+Plans:
+- [ ] 116-01-PLAN.md — Quote extraction engine (AI/tool_use) + quote comparison engine (pure Python ranking)
+- [ ] 116-02-PLAN.md — Gmail quote detection hook + API endpoints (extract, manual entry, comparison, follow-ups)
+- [ ] 116-03-PLAN.md — Frontend: QuoteTracking timeline + ComparisonMatrix grid in project detail
+
+### Phase 117: Client Delivery
+**Goal**: Broker generates a client recommendation email based on the best quote comparison, manages project status lifecycle, and links deliverables in the document library
+**Depends on**: Phase 116
+**Requirements**: DELIV-01 through DELIV-05
+**Plans:** 3 plans
+
+Plans:
+- [ ] 117-01-PLAN.md — Status transition enforcement, DDL migration (recommendation columns), frontend status badges
+- [ ] 117-02-PLAN.md — Recommendation drafter engine + API endpoints (draft/edit/approve-send) + document library save
+- [ ] 117-03-PLAN.md — Frontend DeliveryPanel (preview/edit/send recommendation) + project detail integration

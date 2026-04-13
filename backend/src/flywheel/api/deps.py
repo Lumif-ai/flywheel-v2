@@ -171,3 +171,28 @@ async def get_db_unscoped() -> AsyncGenerator[AsyncSession, None]:
     """Yield a plain session without tenant scope (account-level ops)."""
     async for session in get_db():
         yield session
+
+
+def require_module(module_name: str):
+    """Dependency factory: raises 403 if tenant lacks the given module."""
+
+    async def _check_module(
+        user: TokenPayload = Depends(require_tenant),
+        db: AsyncSession = Depends(get_db_unscoped),
+    ) -> TokenPayload:
+        from flywheel.db.models import Tenant
+
+        tenant = (
+            await db.execute(select(Tenant).where(Tenant.id == user.tenant_id))
+        ).scalar_one_or_none()
+        if tenant is None:
+            raise HTTPException(status_code=403, detail="Tenant not found")
+        modules = (tenant.settings or {}).get("modules", [])
+        if module_name not in modules:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Module '{module_name}' not enabled for this tenant",
+            )
+        return user
+
+    return _check_module

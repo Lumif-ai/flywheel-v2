@@ -2,18 +2,18 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-04-10)
+See: .planning/PROJECT.md (updated 2026-04-11)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v13.0 Skill Platform — Phase 111
+**Current focus:** v15.0 Broker Module MVP — Phase 118 Broker Navigation & Module Shell
 
 ## Current Position
 
-Milestone: v13.0 Skill Platform
-Phase: 111 of 111 (Pain Landscape Synthesis)
-Plan: 2 of 2 in current phase
+Milestone: v15.0 Broker Module MVP
+Phase: 118 — Broker Navigation & Module Shell
+Plan: 02 of 02 complete
 Status: Complete
-Last activity: 2026-04-11 — Completed 111-02 (meeting-intelligence synthesis skill Steps 4-6, skill complete)
+Last activity: 2026-04-13 — Plan 02 complete (stub pages + route registration)
 
 Progress: [██████████] 100%
 
@@ -86,6 +86,106 @@ v13.0 pre-GSD context:
 - Legal doc advisor (Phase 107) ships MCP/CLI-first — user provides file path. Web file upload UI comes in Phase 108. No brainstorm needed — archived skill is v3.0 and mature. Phase 107 research defines the structured JSON schema.
 - No phase reordering — 107 before 108 is correct
 
+v15.0 Phase 112 Plan 01:
+- ORM models follow exact PipelineEntry pattern (server_default, TIMESTAMP(timezone=True), Mapped annotations)
+- BrokerActivity indexes use text() for DESC ordering in composite index
+- All 6 tables include import_source per SPEC REQ-06; external_id/external_ref on carrier_configs and broker_projects only
+
+v15.0 Phase 112 Plan 02:
+- require_module uses get_db_unscoped (tenants table not RLS-scoped)
+- broker feature flag derived at response time from modules array, not stored separately
+
+v15.0 Phase 112 Plan 03:
+- Broker nav item in own SidebarGroup after Pipeline (visually separated as module)
+- broker=false added to COMPILE_TIME defaults (prevents accidental exposure to non-broker tenants)
+- Shield icon chosen for broker identity in sidebar
+
+v15.0 Phase 113 Plan 01:
+- Adapted plan field names to actual model: name (not client_name/project_name), project_type (not contract_type)
+- Single BrokerActivity per coverage update with updated_fields list in metadata (not one per field)
+- Document refs stored in project metadata_ JSONB (documents array) for flexible schema
+
+v15.0 Broker Module MVP:
+- Broker module is a Flywheel feature, not a separate product — same codebase, same deployment, feature-flagged per tenant
+- 6 new tables, 2 AI engines (contract_analyzer, quote_extractor), 2 business logic modules (gap_detector, quote_comparator)
+- Playwright portal automation runs locally in broker's Claude Code instance (not server-side) — no credential storage
+- Mandatory screenshot gate before portal form submission — no auto-submit
+- AI extractions are starting points, broker always reviews — confidence scoring + mandatory review
+- Single carrier portal for MVP (Mapfre Mexico), all others via email solicitation
+- broker_migration.py handles Supabase PgBouncer DDL workaround (individual transactions per statement)
+- Phase 112 recommended for Codex (pure mechanical), Phases 113-116 split Codex/Claude Code, Phase 117 Codex
+
+v15.0 Phase 113 Plan 04:
+- Native select element for contract type (no shadcn Select component in UI library)
+- Simple HTML table for project list (not ag-grid) — faster initial build, sufficient for MVP
+- KPI loading skeleton added (not in plan) for polish
+
+v15.0 Phase 113 Plan 02:
+- AI extraction fields mapped to ORM columns: limit_amount string -> required_limit Numeric, confidence_score float -> confidence text (high/medium/low)
+- Raw extraction values preserved in metadata_ JSONB for audit trail
+- Contract summary stored in project metadata_ JSONB (not a dedicated column)
+- Detected language auto-updates project.language field
+
+v15.0 Phase 113 Plan 03:
+- Used tenant.settings.modules (not TenantModule table) for broker module check in Gmail sync
+- Broker PDF detection creates draft BrokerProject (broker_project_id NOT NULL on BrokerActivity)
+- PDF detection runs as post-sync pass fetching full messages only for broker tenants
+- import_source/external_ref used (not source/source_ref) matching actual ORM columns
+
+v15.0 Phase 113 Plan 05:
+- Confidence displayed as text badge (high/medium/low) matching ORM string column, not numeric percentage
+- Inline edit uses query invalidation on success (not optimistic update) for simplicity
+- Used actual model field names (name, project_type) per Plan 04 decisions
+
+v15.0 Phase 114 Plan 01:
+- Reused existing _coverage_to_dict for ORM-to-dict conversion before gap detection (pure Python engine takes/returns dicts)
+- Gap results persisted via ORM attribute assignment, not raw SQL, for consistency with existing broker.py patterns
+- BrokerActivity metadata stores full summary dict for audit trail
+
+v15.0 Phase 114 Plan 02:
+- IntegrityError caught with explicit rollback before raising 409 (prevents session corruption)
+- Carrier matching done in Python rather than complex SQL (simpler, testable, small carrier count per tenant)
+- Match sort: (-match_score, avg_response_days or 999) for deterministic ordering
+
+v15.0 Phase 114 Plan 03:
+- Other-category coverages merged into Insurance Coverages section (not silently dropped)
+- CarrierSelection visibility gated on project status (gaps_identified and later only)
+- Carrier form uses comma-separated text for coverage_types/regions (MVP simplicity)
+- Sonner toast for mutation feedback (consistent with rest of app)
+
+v15.0 Phase 115 Plan 01:
+- Draft columns on CarrierQuote (not EmailDraft) due to NOT NULL email_id FK constraint
+- Sonnet model for solicitation drafting (cost-effective for email generation)
+- Filename regex heuristics for document classification (simple, extensible)
+
+v15.0 Phase 115 Plan 02:
+- PII cleanup (null draft_body) after send matches email copilot approve pattern
+- Status auto-update to "soliciting" only when ALL quotes solicited (REQ-38)
+- Email validation via simple regex before draft generation (skip with reason if invalid)
+- Portal track creates CarrierQuote with draft_status=null (no email draft needed)
+
+v15.0 Phase 115 Plan 03:
+- Optional Playwright import via try/except -- server never fails on missing dependency
+- Dynamic carrier script loading via importlib -- extensible without code changes to engine
+- Screenshot saved to /tmp with timestamp -- local artifact for review gate
+- httpx for screenshot upload (also optional) -- no hard dependency on upload capability
+- [Phase 115]: Portal quotes identified by null draft_subject + non-null carrier_config_id
+
+v15.0 Phase 116 Plan 01:
+- claude-opus-4-6 default for quote_extraction engine (quality over cost for financial data)
+- Multi-coverage quotes create separate CarrierQuote rows per line item (shared hash prefix)
+- Critical exclusion detection in both AI prompt AND comparator ranking logic
+
+v15.0 Phase 116 Plan 03:
+- refetchInterval on useBrokerQuotes polls every 10s only when any quote has status "extracting"
+- ComparisonMatrix derives carrier columns dynamically from data (no hardcoded list)
+- Needs follow-up status computed client-side (>7 days since solicited_at)
+
+v15.0 Phase 118 Plan 01:
+- Dashboard nav uses exact match (p === '/broker') to prevent false active on sub-routes
+- Old single-item broker SidebarGroup removed — superseded by full content replacement ternary
+- StreamSidebar placed inside GTM branch (broker tenants see zero GTM content)
+
 ### Pending Todos
 
 - Title matching false positives in _filter_unprepped (requires meeting_id on SkillRun — deferred from 66.1)
@@ -95,8 +195,23 @@ v13.0 pre-GSD context:
 
 None active.
 
+v15.0 Phase 117 Plan 01:
+- validate_transition uses late import in contract_analyzer.py (circular dependency avoidance)
+- ALLOWED_TRANSITIONS: 11 states, recommended/delivered between quotes_complete and bound
+- Terminal states (bound, cancelled) cannot transition further
+
+v15.0 Phase 117 Plan 02:
+- Sonnet model for recommendation drafting (cost-effective, same as solicitation drafter)
+- 3000 max_tokens for recommendation (longer than solicitation due to comparison detail)
+- Document saved to library with module="broker" and type="broker-recommendation"
+
+v15.0 Phase 117 Plan 03:
+- 3-state pattern (no-draft/pending/sent) mirrors EmailApproval but for recommendation
+- Inline confirmation dialog instead of modal (lighter UX for single action)
+- Warning banner when no recommended quotes exist (advisory, not blocking)
+
 ## Session Continuity
 
-Last session: 2026-04-11
-Stopped at: Completed 111-02-PLAN.md — meeting-intelligence synthesis skill complete (Steps 4-6)
+Last session: 2026-04-13
+Stopped at: Completed 118-02-PLAN.md — Phase 118 fully complete (both plans done)
 Resume file: None

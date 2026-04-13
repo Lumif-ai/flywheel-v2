@@ -24,6 +24,7 @@ const COMPILE_TIME: Record<string, boolean> = {
   meetings: true,
   crm: true,
   briefing_v2: import.meta.env.VITE_FEATURE_BRIEFING_V2 !== 'false',
+  broker: false,
 }
 
 /**
