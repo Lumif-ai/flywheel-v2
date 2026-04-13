@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { NavLink, useLocation, useSearchParams, Link } from 'react-router'
-import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare, Bookmark, Shield } from 'lucide-react'
+import { Home, Settings, FileText, Building2, Lock, Mail, TrendingUp, Briefcase, DollarSign, LogOut, CalendarDays, CheckSquare, Bookmark } from 'lucide-react'
 import { useLifecycleState } from '@/features/navigation/hooks/useLifecycleState'
 import { useAuthStore } from '@/stores/auth'
 import { useOAuthSignIn } from '@/hooks/useOAuthSignIn'

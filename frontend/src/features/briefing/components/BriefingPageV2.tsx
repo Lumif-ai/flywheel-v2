@@ -5,6 +5,7 @@ import { TodaySection } from '@/features/briefing/components/TodaySection'
 import { TasksSection } from '@/features/briefing/components/TasksSection'
 import { NeedsAttentionSection } from '@/features/briefing/components/NeedsAttentionSection'
 import { TeamActivitySection } from '@/features/briefing/components/TeamActivitySection'
+import { MarketPatternsSection } from '@/features/briefing/components/MarketPatternsSection'
 import { ChatPanelV2 } from '@/features/briefing/components/ChatPanelV2'
 import { ColdStartCard } from '@/features/briefing/components/ColdStartCard'
 import { spacing, typography, colors } from '@/lib/design-tokens'
@@ -71,6 +72,11 @@ export function BriefingPageV2() {
             <>
               {/* Daily Brief narrative section */}
               <DailyBriefSection narrative={data?.narrative_summary} isLoading={isLoading} />
+
+              {/* Market Pain Patterns — intelligence from /synthesize */}
+              <div style={{ marginTop: spacing.section }}>
+                <MarketPatternsSection patterns={data?.market_patterns} isLoading={isLoading} />
+              </div>
 
               {/* Today's meetings */}
               <div style={{ marginTop: spacing.section }}>

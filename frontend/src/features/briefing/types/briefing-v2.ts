@@ -50,10 +50,24 @@ export interface AttentionSection {
   drafts: AttentionItem[]
 }
 
+export interface PainPattern {
+  slug: string
+  label: string
+  confidence: string          // "high" | "medium" | "low"
+  content: string             // raw content string from context entry
+  synthesized_at: string | null
+}
+
+export interface MarketPatternsData {
+  patterns: PainPattern[]
+  total_count: number
+}
+
 export interface BriefingV2Response {
   narrative_summary: string
   today: TodaySection
   attention_items: AttentionSection
   team_activity: TeamActivityGroup[]
   tasks_today: TaskItem[]
+  market_patterns?: MarketPatternsData
 }
