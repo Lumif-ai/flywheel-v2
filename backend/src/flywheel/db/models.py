@@ -1980,11 +1980,6 @@ class CarrierConfig(Base):
     portal_limit: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     portal_credentials: Mapped[bytes | None] = mapped_column(LargeBinary)
 
-    # Carrier identity in CRM
-    carrier_pipeline_entry_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
-    )
-
     # Carrier capabilities
     coverage_types: Mapped[list[str]] = mapped_column(
         ARRAY(Text), server_default=text("'{}'::text[]")
@@ -2004,7 +1999,11 @@ class CarrierConfig(Base):
     # Notes & state
     notes: Mapped[str | None] = mapped_column(Text)
     is_active: Mapped[bool] = mapped_column(Boolean, server_default=text("true"))
-    email_address: Mapped[str | None] = mapped_column(Text)
+
+    # Phase 129/130 additions
+    context_entity_id: Mapped[UUID | None] = mapped_column(nullable=True)  # NO ForeignKey
+    created_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    updated_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
 
     # Import/sync (SPEC REQ-06)
     import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
@@ -2022,6 +2021,213 @@ class CarrierConfig(Base):
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
 
+    # Relationships
+    contacts: Mapped[list["CarrierContact"]] = relationship(
+        "CarrierContact", back_populates="carrier_config", cascade="all, delete-orphan"
+    )
+
+
+class BrokerClient(Base):
+    __tablename__ = "broker_clients"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "normalized_name",
+                         name="uq_broker_client_tenant_name"),
+        Index("idx_broker_client_tenant", "tenant_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    normalized_name: Mapped[str] = mapped_column(Text, nullable=False)
+    legal_name: Mapped[str | None] = mapped_column(Text)
+    domain: Mapped[str | None] = mapped_column(Text)
+    tax_id: Mapped[str | None] = mapped_column(Text)
+    industry: Mapped[str | None] = mapped_column(Text)
+    location: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(Text)
+    context_entity_id: Mapped[UUID | None] = mapped_column(nullable=True)  # NO ForeignKey
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    contacts: Mapped[list["BrokerClientContact"]] = relationship(
+        "BrokerClientContact", back_populates="broker_client", cascade="all, delete-orphan"
+    )
+    projects: Mapped[list["BrokerProject"]] = relationship(
+        "BrokerProject", back_populates="client"
+    )
+
+
+class BrokerClientContact(Base):
+    __tablename__ = "broker_client_contacts"
+    __table_args__ = (
+        Index("idx_broker_client_contact_client", "broker_client_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    broker_client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_clients.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str | None] = mapped_column(Text)
+    is_primary: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    broker_client: Mapped["BrokerClient"] = relationship(
+        back_populates="contacts"
+    )
+
+
+class CarrierContact(Base):
+    __tablename__ = "carrier_contacts"
+    __table_args__ = (
+        Index("idx_carrier_contact_carrier", "carrier_config_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    carrier_config_id: Mapped[UUID] = mapped_column(
+        ForeignKey("carrier_configs.id", ondelete="CASCADE"), nullable=False
+    )
+    name: Mapped[str | None] = mapped_column(Text)
+    email: Mapped[str | None] = mapped_column(Text)
+    phone: Mapped[str | None] = mapped_column(Text)
+    role: Mapped[str] = mapped_column(Text, server_default=text("'submissions'"))
+    is_primary: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    carrier_config: Mapped["CarrierConfig"] = relationship(
+        back_populates="contacts"
+    )
+
+
+class SolicitationDraft(Base):
+    __tablename__ = "solicitation_drafts"
+    __table_args__ = (
+        Index("idx_solicitation_draft_project", "broker_project_id"),
+        Index("idx_solicitation_draft_carrier", "carrier_config_id"),
+        Index("idx_solicitation_draft_status", "tenant_id", "status",
+              postgresql_where=text("status IN ('draft', 'pending')")),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    broker_project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    carrier_config_id: Mapped[UUID] = mapped_column(
+        ForeignKey("carrier_configs.id", ondelete="CASCADE"), nullable=False
+    )
+    carrier_quote_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("carrier_quotes.id", ondelete="SET NULL"), nullable=True
+    )
+    subject: Mapped[str | None] = mapped_column(Text)
+    body: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'draft'"))
+    sent_to_email: Mapped[str | None] = mapped_column(Text)
+    created_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    approved_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    approved_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    broker_project: Mapped["BrokerProject"] = relationship(
+        back_populates="solicitation_drafts"
+    )
+
+
+class BrokerRecommendation(Base):
+    __tablename__ = "broker_recommendations"
+    __table_args__ = (
+        Index("idx_broker_recommendation_project", "broker_project_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    broker_project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    subject: Mapped[str] = mapped_column(Text, nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
+    recipient_email: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(Text, server_default=text("'draft'"))
+    created_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    approved_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    approved_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    sent_at: Mapped[datetime.datetime | None] = mapped_column(TIMESTAMP(timezone=True))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    broker_project: Mapped["BrokerProject"] = relationship(
+        back_populates="recommendations"
+    )
+
+
+class BrokerProjectEmail(Base):
+    __tablename__ = "broker_project_emails"
+    __table_args__ = (
+        Index("idx_broker_project_email_project", "broker_project_id"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    broker_project_id: Mapped[UUID] = mapped_column(
+        ForeignKey("broker_projects.id", ondelete="CASCADE"), nullable=False
+    )
+    email_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    thread_id: Mapped[str | None] = mapped_column(Text)
+    direction: Mapped[str] = mapped_column(Text, server_default=text("'inbound'"))
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
 
 class BrokerProject(Base):
     """A construction project that needs insurance/surety coverage."""
@@ -2030,8 +2236,6 @@ class BrokerProject(Base):
     __table_args__ = (
         Index("idx_broker_project_tenant_status", "tenant_id", "status",
               postgresql_where=text("deleted_at IS NULL")),
-        Index("idx_broker_project_pipeline", "pipeline_entry_id",
-              postgresql_where=text("pipeline_entry_id IS NOT NULL")),
     )
 
     id: Mapped[UUID] = mapped_column(
@@ -2039,9 +2243,6 @@ class BrokerProject(Base):
     )
     tenant_id: Mapped[UUID] = mapped_column(
         ForeignKey("tenants.id"), nullable=False
-    )
-    pipeline_entry_id: Mapped[UUID | None] = mapped_column(
-        ForeignKey("pipeline_entries.id", ondelete="SET NULL"), nullable=True
     )
 
     # Project details
@@ -2060,13 +2261,18 @@ class BrokerProject(Base):
     status: Mapped[str] = mapped_column(Text, server_default=text("'new_request'"))
     approval_status: Mapped[str] = mapped_column(Text, server_default=text("'draft'"))
 
+    # Client relationship (Phase 129/130 addition)
+    client_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("broker_clients.id", ondelete="SET NULL"), nullable=True
+    )
+    context_entity_id: Mapped[UUID | None] = mapped_column(nullable=True)  # NO ForeignKey
+    created_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    updated_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+
     # Source tracking
     source_email_id: Mapped[UUID | None] = mapped_column(nullable=True)
     source_document_id: Mapped[UUID | None] = mapped_column(
         ForeignKey("uploaded_files.id"), nullable=True
-    )
-    email_thread_ids: Mapped[list[str]] = mapped_column(
-        ARRAY(Text), server_default=text("'{}'::text[]")
     )
 
     # AI analysis
@@ -2077,15 +2283,6 @@ class BrokerProject(Base):
     critical_findings: Mapped[dict] = mapped_column(
         JSONB, server_default=text("'[]'::jsonb")
     )
-
-    # Recommendation delivery
-    recommendation_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
-    recommendation_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    recommendation_status: Mapped[str | None] = mapped_column(Text, nullable=True)
-    recommendation_sent_at: Mapped[datetime.datetime | None] = mapped_column(
-        TIMESTAMP(timezone=True), nullable=True
-    )
-    recommendation_recipient: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     # Import/sync (SPEC REQ-06)
     import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
@@ -2113,6 +2310,15 @@ class BrokerProject(Base):
     )
     activities: Mapped[list["BrokerActivity"]] = relationship(
         back_populates="broker_project", cascade="all, delete-orphan"
+    )
+    client: Mapped["BrokerClient | None"] = relationship(
+        "BrokerClient", back_populates="projects", lazy="selectin"
+    )
+    recommendations: Mapped[list["BrokerRecommendation"]] = relationship(
+        "BrokerRecommendation", back_populates="broker_project", cascade="all, delete-orphan"
+    )
+    solicitation_drafts: Mapped[list["SolicitationDraft"]] = relationship(
+        "SolicitationDraft", back_populates="broker_project", cascade="all, delete-orphan"
     )
 
 
@@ -2244,9 +2450,6 @@ class CarrierQuote(Base):
     )
 
     # Comparison flags
-    is_best_price: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    is_best_coverage: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
-    is_recommended: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     has_critical_exclusion: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
     critical_exclusion_detail: Mapped[str | None] = mapped_column(Text)
 
@@ -2269,10 +2472,9 @@ class CarrierQuote(Base):
     confidence: Mapped[str] = mapped_column(Text, server_default=text("'high'"))
     is_manual_override: Mapped[bool] = mapped_column(Boolean, server_default=text("false"))
 
-    # Solicitation draft (stored here instead of EmailDraft which has NOT NULL email_id FK)
-    draft_subject: Mapped[str | None] = mapped_column(Text, nullable=True)
-    draft_body: Mapped[str | None] = mapped_column(Text, nullable=True)
-    draft_status: Mapped[str | None] = mapped_column(Text, nullable=True)  # null, "pending", "approved", "sent"
+    # Phase 129/130 additions
+    created_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
+    updated_by_user_id: Mapped[UUID | None] = mapped_column(nullable=True)
 
     # Import/sync (SPEC REQ-06)
     import_source: Mapped[str] = mapped_column(Text, server_default=text("'manual'"))
