@@ -31,6 +31,7 @@ from flywheel.db.models import (
     WorkStream,
     WorkStreamEntity,
 )
+from flywheel.utils.domains import is_generic_domain
 
 logger = logging.getLogger(__name__)
 
@@ -323,10 +324,7 @@ def _extract_meeting_contact(
             continue
         local, domain = email.rsplit("@", 1)
         # Skip common personal/free email domains
-        if domain.lower() in {
-            "gmail.com", "yahoo.com", "hotmail.com", "outlook.com",
-            "icloud.com", "protonmail.com", "aol.com", "mail.com",
-        }:
+        if is_generic_domain(domain.lower()):
             # Use local part as attendee name if no better option
             if attendee_name is None:
                 attendee_name = local.replace(".", " ").title()

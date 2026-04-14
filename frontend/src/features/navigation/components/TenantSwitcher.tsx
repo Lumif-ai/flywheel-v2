@@ -42,7 +42,7 @@ export function TenantSwitcher() {
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-sm font-semibold text-foreground truncate block">
-            {activeTenant?.name ?? 'Flywheel'}
+            Flywheel
           </span>
         </div>
         <ChevronsUpDown className="size-4 text-muted-foreground shrink-0" />

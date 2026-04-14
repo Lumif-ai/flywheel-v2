@@ -43,6 +43,7 @@ from flywheel.db.models import (
     WorkStream,
 )
 from flywheel.db.session import get_session_factory
+from flywheel.utils.domains import is_generic_domain
 
 logger = logging.getLogger(__name__)
 
@@ -233,7 +234,10 @@ async def promote(
         ).scalar_one_or_none()
 
         if not company:
-            company = Company(domain=email_domain, name=email_domain)
+            company = Company(
+                domain=email_domain,
+                name=None if is_generic_domain(email_domain) else email_domain,
+            )
             db.add(company)
             await db.flush()
 
@@ -257,13 +261,23 @@ async def promote(
                 )
             ).scalar_one_or_none()
 
+        # Tenant name resolution priority:
+        # 1. Company.name (from intel/website scrape) if not None
+        # 2. Non-generic email domain
+        # 3. "Personal"
+        resolved_name = (
+            (company.name if company and company.name else None)
+            or (email_domain if email_domain and not is_generic_domain(email_domain) else None)
+            or "Personal"
+        )
+
         if anon_tenant:
             anon_tenant.company_id = company.id if company else None
-            anon_tenant.name = (company.name if company else None) or email_domain or "Personal"
+            anon_tenant.name = resolved_name
             tenant = anon_tenant
         else:
             tenant = Tenant(
-                name=email_domain or "Personal",
+                name=resolved_name,
                 company_id=company.id if company else None,
             )
             db.add(tenant)
@@ -375,7 +389,10 @@ async def promote_oauth(
             await db.execute(select(Company).where(Company.domain == email_domain))
         ).scalar_one_or_none()
         if not company:
-            company = Company(domain=email_domain, name=email_domain)
+            company = Company(
+                domain=email_domain,
+                name=None if is_generic_domain(email_domain) else email_domain,
+            )
             db.add(company)
             await db.flush()
 
@@ -393,13 +410,23 @@ async def promote_oauth(
                 await db.execute(select(Tenant).where(Tenant.id == anon_tenant_id))
             ).scalar_one_or_none()
 
+        # Tenant name resolution priority:
+        # 1. Company.name (from intel/website scrape) if not None
+        # 2. Non-generic email domain
+        # 3. "Personal"
+        resolved_name = (
+            (company.name if company and company.name else None)
+            or (email_domain if email_domain and not is_generic_domain(email_domain) else None)
+            or "Personal"
+        )
+
         if anon_tenant:
             anon_tenant.company_id = company.id if company else None
-            anon_tenant.name = (company.name if company else None) or email_domain or "Personal"
+            anon_tenant.name = resolved_name
             tenant = anon_tenant
         else:
             tenant = Tenant(
-                name=email_domain or "Personal",
+                name=resolved_name,
                 company_id=company.id if company else None,
             )
             db.add(tenant)

@@ -13,6 +13,8 @@ from decimal import Decimal
 from uuid import UUID
 
 from sqlalchemy import func, select, update
+
+from flywheel.utils.domains import is_generic_domain
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from flywheel.db.models import (
@@ -54,7 +56,7 @@ def _extract_entities(content: str) -> list[str]:
     # Email domains
     for match in _EMAIL_DOMAIN_RE.finditer(content):
         domain = match.group(1)
-        if domain and not domain.endswith(("gmail.com", "yahoo.com", "hotmail.com", "outlook.com")):
+        if domain and not is_generic_domain(domain):
             entities.add(domain)
 
     # @mentions

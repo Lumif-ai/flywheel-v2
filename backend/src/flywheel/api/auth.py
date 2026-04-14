@@ -31,6 +31,7 @@ from flywheel.auth.supabase_client import get_supabase_admin
 from flywheel.config import settings
 from flywheel.db.models import ContextEntry, Integration, Profile, SkillRun, Tenant, UserTenant
 from flywheel.middleware.rate_limit import limiter
+from flywheel.utils.domains import is_generic_domain
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +219,8 @@ async def me(
     if row is None and user.email:
         # First login after magic link -- create profile + tenant + user_tenants
         domain = user.email.split("@")[1] if "@" in user.email else "Personal"
-        tenant = Tenant(name=domain)
+        tenant_name = "Personal" if is_generic_domain(domain) else domain
+        tenant = Tenant(name=tenant_name)
         db.add(tenant)
         await db.flush()
 
