@@ -95,24 +95,9 @@ const BrokerProjectDetail = lazy(() =>
     (m) => ({ default: m.BrokerProjectDetail })
   )
 )
-const CarrierSettings = lazy(() =>
-  import('@/features/broker/components/CarrierSettings').then(
-    (m) => ({ default: m.CarrierSettings })
-  )
-)
-const BrokerEmailPage = lazy(() =>
-  import('@/features/broker/pages/BrokerEmailPage').then(
-    (m) => ({ default: m.BrokerEmailPage })
-  )
-)
 const BrokerProjectsPage = lazy(() =>
   import('@/features/broker/pages/BrokerProjectsPage').then(
     (m) => ({ default: m.BrokerProjectsPage })
-  )
-)
-const BrokerClientsPage = lazy(() =>
-  import('@/features/broker/pages/BrokerClientsPage').then(
-    (m) => ({ default: m.BrokerClientsPage })
   )
 )
 const BrokerCarriersPage = lazy(() =>
@@ -197,11 +182,12 @@ export function AppRoutes() {
       <Route path="/broker" element={<BrokerGuard><BrokerLayout /></BrokerGuard>}>
         <Route index element={<Suspense fallback={null}><BrokerDashboard /></Suspense>} />
         <Route path="projects/:id" element={<Suspense fallback={null}><BrokerProjectDetail /></Suspense>} />
-        <Route path="settings/carriers" element={<Suspense fallback={null}><CarrierSettings /></Suspense>} />
-        <Route path="email" element={<Suspense fallback={null}><BrokerEmailPage /></Suspense>} />
         <Route path="projects" element={<Suspense fallback={null}><BrokerProjectsPage /></Suspense>} />
-        <Route path="clients" element={<Suspense fallback={null}><BrokerClientsPage /></Suspense>} />
         <Route path="carriers" element={<Suspense fallback={null}><BrokerCarriersPage /></Suspense>} />
+        {/* Redirects for removed routes */}
+        <Route path="settings/carriers" element={<Navigate to="/broker/carriers" replace />} />
+        <Route path="email" element={<Navigate to="/email" replace />} />
+        <Route path="clients" element={<Navigate to="/broker/projects" replace />} />
       </Route>
       {/* Legacy relationship routes -> pipeline with filter */}
       <Route path="/relationships/prospects" element={<Navigate to="/pipeline?relationshipType=prospect" replace />} />

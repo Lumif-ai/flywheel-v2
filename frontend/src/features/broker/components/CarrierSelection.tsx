@@ -152,8 +152,8 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
       <div className="rounded-xl border border-dashed p-8 text-center space-y-2">
         <p className="text-muted-foreground">
           No carriers configured. Go to{' '}
-          <Link to="/broker/settings/carriers" className="text-blue-600 hover:underline">
-            Settings &gt; Carriers
+          <Link to="/broker/carriers" className="text-blue-600 hover:underline">
+            Carriers
           </Link>{' '}
           to add your first carrier.
         </p>

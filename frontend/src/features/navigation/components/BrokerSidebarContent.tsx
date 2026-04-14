@@ -1,6 +1,6 @@
 import { useLocation } from 'react-router'
 import { NavLink } from 'react-router'
-import { Home, Mail, FolderKanban, Users, Shield } from 'lucide-react'
+import { Home, Mail, FolderKanban, Shield } from 'lucide-react'
 import {
   SidebarGroup,
   SidebarGroupContent,
@@ -11,9 +11,8 @@ import {
 
 const BROKER_NAV = [
   { label: 'Dashboard', to: '/broker',          icon: Home,         match: (p: string) => p === '/broker' },
-  { label: 'Email',     to: '/broker/email',     icon: Mail,         match: (p: string) => p.startsWith('/broker/email') },
+  { label: 'Email',     to: '/email',            icon: Mail,         match: (p: string) => p.startsWith('/email') },
   { label: 'Projects',  to: '/broker/projects',  icon: FolderKanban, match: (p: string) => p.startsWith('/broker/projects') },
-  { label: 'Clients',   to: '/broker/clients',   icon: Users,        match: (p: string) => p.startsWith('/broker/clients') },
   { label: 'Carriers',  to: '/broker/carriers',  icon: Shield,       match: (p: string) => p.startsWith('/broker/carriers') },
 ] as const
 
