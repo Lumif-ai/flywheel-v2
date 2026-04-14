@@ -102,6 +102,7 @@ export interface DashboardTasksResponse {
 export interface CreateProjectPayload {
   name: string
   project_type?: string
+  client_id?: string
   notes?: string
 }
 

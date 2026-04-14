@@ -2,7 +2,7 @@ import { useState, useCallback } from 'react'
 import { AllCommunityModule } from 'ag-grid-community'
 import type { ColDef, GridApi, ICellRendererParams } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
-import { Plus, Edit2, Power, Loader2 } from 'lucide-react'
+import { Plus, Edit2, Power, Users, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import {
   Dialog,
@@ -19,6 +19,7 @@ import { useCarriers } from '../hooks/useCarriers'
 import { useCreateCarrier, useUpdateCarrier, useDeleteCarrier } from '../hooks/useCarrierMutations'
 import type { CarrierConfig, UpdateCarrierPayload } from '../types/broker'
 import { CarrierForm, type CarrierFormState, EMPTY_FORM, carrierToForm, formToPayload } from '../components/CarrierForm'
+import { CarrierContactsDialog } from '../components/CarrierContactsDialog'
 
 const CARRIER_STATUS_COLORS: StatusBadgeColors = {
   active:   { bg: '#DCFCE7', text: '#15803D' },
@@ -26,16 +27,26 @@ const CARRIER_STATUS_COLORS: StatusBadgeColors = {
 }
 
 function ActionsRenderer(props: ICellRendererParams<CarrierConfig>) {
-  const { openEdit, setConfirmDeactivate } = props.context as {
+  const { openEdit, setConfirmDeactivate, openContacts } = props.context as {
     openEdit: (carrier: CarrierConfig) => void
     setConfirmDeactivate: (id: string) => void
+    openContacts: (carrier: CarrierConfig) => void
   }
   const carrier = props.data
   if (!carrier) return null
 
   return (
     <div className="flex items-center gap-1 h-full">
-      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(carrier)}>
+      <Button
+        variant="ghost"
+        size="icon"
+        className="h-7 w-7"
+        title="Manage Contacts"
+        onClick={(e) => { e.stopPropagation(); openContacts(carrier) }}
+      >
+        <Users className="h-3.5 w-3.5" />
+      </Button>
+      <Button variant="ghost" size="icon" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); openEdit(carrier) }}>
         <Edit2 className="h-3.5 w-3.5" />
       </Button>
       {carrier.is_active && (
@@ -43,7 +54,7 @@ function ActionsRenderer(props: ICellRendererParams<CarrierConfig>) {
           variant="ghost"
           size="icon"
           className="h-7 w-7 text-orange-600 hover:text-orange-700"
-          onClick={() => setConfirmDeactivate(carrier.id)}
+          onClick={(e) => { e.stopPropagation(); setConfirmDeactivate(carrier.id) }}
         >
           <Power className="h-3.5 w-3.5" />
         </Button>
@@ -63,7 +74,6 @@ const columnDefs: ColDef<CarrierConfig>[] = [
     minWidth: 120,
     valueFormatter: (params) => params.value != null ? `$${params.value.toLocaleString()}` : '',
   },
-  { field: 'email_address', headerName: 'Email', flex: 1.5, minWidth: 160 },
   {
     field: 'coverage_types',
     headerName: 'Coverage',
@@ -96,7 +106,7 @@ const columnDefs: ColDef<CarrierConfig>[] = [
   },
   {
     headerName: '',
-    width: 90,
+    width: 110,
     pinned: 'right',
     sortable: false,
     resizable: false,
@@ -115,6 +125,7 @@ export function BrokerCarriersPage() {
   const [editingCarrier, setEditingCarrier] = useState<CarrierConfig | null>(null)
   const [form, setForm] = useState<CarrierFormState>(EMPTY_FORM)
   const [confirmDeactivate, setConfirmDeactivate] = useState<string | null>(null)
+  const [contactsCarrier, setContactsCarrier] = useState<CarrierConfig | null>(null)
 
   const { restoreColumnState, onColumnStateChanged, gridApiRef } =
     useColumnPersistence('broker-carriers-columns')
@@ -137,6 +148,10 @@ export function BrokerCarriersPage() {
     setEditingCarrier(carrier)
     setForm(carrierToForm(carrier))
     setDialogOpen(true)
+  }
+
+  function openContacts(carrier: CarrierConfig) {
+    setContactsCarrier(carrier)
   }
 
   function handleSubmit(e: React.FormEvent) {
@@ -249,7 +264,7 @@ export function BrokerCarriersPage() {
             onColumnVisible={onColumnStateChanged}
             defaultColDef={{ resizable: true, sortable: true, filter: true }}
             sortingOrder={['asc', 'desc', null]}
-            context={{ openEdit, setConfirmDeactivate }}
+            context={{ openEdit, setConfirmDeactivate, openContacts }}
           />
         </div>
       </div>
@@ -293,6 +308,16 @@ export function BrokerCarriersPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Carrier Contacts Dialog */}
+      {contactsCarrier && (
+        <CarrierContactsDialog
+          carrierId={contactsCarrier.id}
+          carrierName={contactsCarrier.carrier_name}
+          open={!!contactsCarrier}
+          onClose={() => setContactsCarrier(null)}
+        />
+      )}
     </div>
   )
 }

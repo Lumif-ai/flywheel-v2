@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 Milestone: v18.0 Broker Data Model v2
 Phase: 132 of 132 (Frontend -- Clients)
-Plan: 1 of 3 in current phase — Plan 01 complete
+Plan: 2 of 3 in current phase — Plans 01-02 complete
 Status: In progress
-Last activity: 2026-04-15 — Plan 01 complete (broker types + 13 API functions + 8 hooks, fetchCarriers shape fixed)
+Last activity: 2026-04-15 — Plan 02 complete (BrokerClientsPage ag-Grid, sidebar Clients link, route registration)
 
-Progress: [████████░░] 73% (8/11 plans)
+Progress: [████████░░] 82% (9/11 plans)
 
 ## Performance Metrics
 
@@ -58,6 +58,8 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 131-04]: draft-followups returns draft content only (does not persist to CarrierQuote — dropped columns); Phase 132 can create SolicitationDraft rows if needed
 - [Phase 132-01]: useCarriers uses TanStack Query select to extract items array — preserves BrokerCarriersPage backward compatibility after fetchCarriers shape change to { items, total }
 - [Phase 132-01]: fetchBrokerProjects accepts optional client_id param enabling project filtering by client in Phase 132 UI
+- [Phase 132-02]: BrokerClientsPage uses onRowClicked + stopPropagation in ActionsRenderer buttons to avoid double-navigation on edit/delete
+- [Phase 132-02]: ActionsRenderer uses onDeleteRow context key with window.confirm — clients use hard delete not soft deactivation like carriers
 
 ### Key Constraints (v18.0)
 
@@ -80,5 +82,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 132-01-PLAN.md (BrokerClient types, 13 API functions, 8 hooks, fetchCarriers shape fix, useCarriers select transform)
+Stopped at: Completed 132-02-PLAN.md — checkpoint:human-verify (BrokerClientsPage, sidebar Clients link, routes registered)
 Resume file: None

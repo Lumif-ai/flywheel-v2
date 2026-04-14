@@ -19,7 +19,6 @@ export interface CarrierFormState {
   submission_method: string
   portal_url: string
   portal_limit: string
-  email_address: string
   coverage_types: string
   regions: string
   min_project_value: string
@@ -34,7 +33,6 @@ export const EMPTY_FORM: CarrierFormState = {
   submission_method: 'email',
   portal_url: '',
   portal_limit: '',
-  email_address: '',
   coverage_types: '',
   regions: '',
   min_project_value: '',
@@ -50,7 +48,6 @@ export function carrierToForm(carrier: CarrierConfig): CarrierFormState {
     submission_method: carrier.submission_method,
     portal_url: carrier.portal_url ?? '',
     portal_limit: carrier.portal_limit != null ? String(carrier.portal_limit) : '',
-    email_address: carrier.email_address ?? '',
     coverage_types: (carrier.coverage_types ?? []).join(', '),
     regions: (carrier.regions ?? []).join(', '),
     min_project_value: carrier.min_project_value != null ? String(carrier.min_project_value) : '',
@@ -67,7 +64,6 @@ export function formToPayload(form: CarrierFormState): CreateCarrierPayload {
     submission_method: form.submission_method,
     portal_url: form.portal_url.trim() || null,
     portal_limit: form.portal_limit ? Number(form.portal_limit) : null,
-    email_address: form.email_address.trim() || null,
     coverage_types: form.coverage_types
       .split(',')
       .map((s) => s.trim())
@@ -151,13 +147,6 @@ export function CarrierForm({
             />
             <p className="text-xs text-muted-foreground">Projects above this value use portal submission</p>
           </div>
-        </div>
-      )}
-
-      {form.submission_method === 'email' && (
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Email Address</label>
-          <Input value={form.email_address} onChange={set('email_address')} placeholder="submissions@carrier.com" type="email" />
         </div>
       )}
 
