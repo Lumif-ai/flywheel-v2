@@ -9,7 +9,6 @@ import type {
   ComparisonMatrix,
   CreateCarrierPayload,
   CreateProjectPayload,
-  DashboardStats,
   DashboardTasksResponse,
   DraftSolicitationsResponse,
   FollowupResponse,
@@ -31,10 +30,6 @@ export function fetchBrokerProjects(params: {
     if (v !== undefined && v !== null) serialized[k] = v
   }
   return api.get<BrokerProjectListResponse>('/broker/projects', { params: serialized })
-}
-
-export function fetchDashboardStats(): Promise<DashboardStats> {
-  return api.get<DashboardStats>('/broker/dashboard-stats')
 }
 
 export function fetchGateCounts(): Promise<GateCounts> {

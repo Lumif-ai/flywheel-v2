@@ -65,13 +65,6 @@ export interface BrokerProjectDetail extends BrokerProject {
   activities: BrokerActivity[]
 }
 
-export interface DashboardStats {
-  total_projects: number
-  projects_by_status: Record<string, number>
-  projects_needing_action: number
-  recent_projects: BrokerProject[]
-}
-
 export interface BrokerProjectListResponse {
   items: BrokerProject[]
   total: number
