@@ -13,7 +13,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import func, select, text
+from sqlalchemy import exists, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -183,6 +183,7 @@ def _project_to_dict(p: BrokerProject) -> dict[str, Any]:
         "location": p.location,
         "language": p.language,
         "status": p.status,
+        "approval_status": p.approval_status,
         "analysis_status": p.analysis_status,
         "source": p.import_source,
         "source_ref": p.external_ref,
@@ -270,6 +271,107 @@ async def broker_health(
 ):
     """Health check for broker module — verifies module access."""
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# GET /broker/gate-counts — Gate strip counts
+# ---------------------------------------------------------------------------
+
+
+@router.get("/gate-counts")
+async def get_gate_counts(
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Return counts for each gate in the broker workflow strip."""
+    base = (
+        select(BrokerProject.id, BrokerProject.created_at)
+        .where(
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+        .order_by(BrokerProject.created_at.asc())
+    )
+
+    # Review: gaps identified, not yet approved
+    review_q = base.where(
+        BrokerProject.status == "gaps_identified",
+        BrokerProject.approval_status == "draft",
+    )
+    review_rows = (await db.execute(review_q)).all()
+
+    # Approve: approved projects with at least one pending carrier draft
+    has_pending_draft = exists(
+        select(CarrierQuote.id).where(
+            CarrierQuote.broker_project_id == BrokerProject.id,
+            CarrierQuote.draft_status == "pending",
+        )
+    )
+    approve_q = base.where(
+        BrokerProject.status == "gaps_identified",
+        BrokerProject.approval_status == "approved",
+        has_pending_draft,
+    )
+    approve_rows = (await db.execute(approve_q)).all()
+
+    # Export: quotes complete or recommended
+    export_q = base.where(
+        BrokerProject.status.in_(["quotes_complete", "recommended"]),
+    )
+    export_rows = (await db.execute(export_q)).all()
+
+    def _gate(rows: list) -> dict[str, Any]:
+        return {
+            "count": len(rows),
+            "oldest_project_id": str(rows[0].id) if rows else None,
+        }
+
+    return {
+        "review": _gate(review_rows),
+        "approve": _gate(approve_rows),
+        "export": _gate(export_rows),
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/projects/{project_id}/approve — Gate 1 approval
+# ---------------------------------------------------------------------------
+
+
+@router.post("/projects/{project_id}/approve")
+async def approve_project(
+    project_id: UUID,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Approve a broker project (Gate 1). Returns 409 if already approved."""
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if not project:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    if project.approval_status == "approved":
+        raise HTTPException(status_code=409, detail="Project already approved")
+
+    project.approval_status = "approved"
+
+    activity = BrokerActivity(
+        tenant_id=user.tenant_id,
+        broker_project_id=project.id,
+        activity_type="project_approved",
+        actor_type="user",
+    )
+    db.add(activity)
+
+    await db.commit()
+    await db.refresh(project)
+    return _project_to_dict(project)
 
 
 # ---------------------------------------------------------------------------

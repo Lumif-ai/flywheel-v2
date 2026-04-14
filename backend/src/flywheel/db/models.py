@@ -2058,6 +2058,7 @@ class BrokerProject(Base):
 
     # Workflow state
     status: Mapped[str] = mapped_column(Text, server_default=text("'new_request'"))
+    approval_status: Mapped[str] = mapped_column(Text, server_default=text("'draft'"))
 
     # Source tracking
     source_email_id: Mapped[UUID | None] = mapped_column(nullable=True)
