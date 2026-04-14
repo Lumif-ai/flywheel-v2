@@ -174,10 +174,37 @@ NEW_TABLES: list[str] = [
 ]
 
 
+def _rls_statements(table: str) -> list[str]:
+    """Generate RLS enablement statements for a broker table."""
+    setting = "current_setting('app.tenant_id', true)::uuid"
+    return [
+        f"ALTER TABLE {table} ENABLE ROW LEVEL SECURITY",
+        f"ALTER TABLE {table} FORCE ROW LEVEL SECURITY",
+        f"GRANT SELECT, INSERT, UPDATE, DELETE ON {table} TO app_user",
+        (
+            f"CREATE POLICY tenant_isolation_select ON {table} "
+            f"FOR SELECT USING (tenant_id = {setting})"
+        ),
+        (
+            f"CREATE POLICY tenant_isolation_insert ON {table} "
+            f"FOR INSERT WITH CHECK (tenant_id = {setting})"
+        ),
+        (
+            f"CREATE POLICY tenant_isolation_update ON {table} "
+            f"FOR UPDATE USING (tenant_id = {setting}) "
+            f"WITH CHECK (tenant_id = {setting})"
+        ),
+        (
+            f"CREATE POLICY tenant_isolation_delete ON {table} "
+            f"FOR DELETE USING (tenant_id = {setting})"
+        ),
+    ]
+
+
 async def run_migration() -> None:
     factory = get_session_factory()
 
-    # DDL statements only — RLS handled in broker_data_model_rls.py (plan 02)
+    # DDL statements only — RLS handled separately via --rls flag
     for stmt in STATEMENTS:
         async with factory() as session:
             await session.execute(text(stmt))
@@ -187,5 +214,21 @@ async def run_migration() -> None:
     print("\nAll DDL applied. Run: alembic stamp 059_broker_data_model_tables")
 
 
+async def run_rls() -> None:
+    factory = get_session_factory()
+    for table in NEW_TABLES:
+        for rls_stmt in _rls_statements(table):
+            async with factory() as session:
+                await session.execute(text(rls_stmt))
+                await session.commit()
+            print(f"OK: {rls_stmt[:80]}...")
+    print("\nAll RLS policies applied.")
+    print("Run: alembic stamp 059_broker_data_model_tables")
+
+
 if __name__ == "__main__":
-    asyncio.run(run_migration())
+    import sys
+    if "--rls" in sys.argv:
+        asyncio.run(run_rls())
+    else:
+        asyncio.run(run_migration())
