@@ -156,7 +156,8 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "quotes_partial": {"quotes_complete", "cancelled"},
     "quotes_complete": {"recommended", "cancelled"},
     "recommended": {"delivered", "cancelled"},
-    "delivered": {"bound", "cancelled"},
+    "delivered": {"binding", "cancelled"},
+    "binding": {"bound", "cancelled"},
     "bound": set(),  # terminal
     "cancelled": set(),  # terminal
 }
