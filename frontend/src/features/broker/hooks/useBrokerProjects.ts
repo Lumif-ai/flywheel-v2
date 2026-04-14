@@ -6,6 +6,7 @@ interface UseBrokerProjectsParams {
   offset?: number
   status?: string
   search?: string
+  client_id?: string
 }
 
 export function useBrokerProjects(params: UseBrokerProjectsParams) {

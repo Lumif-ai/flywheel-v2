@@ -290,3 +290,88 @@ export interface DraftSolicitationsResponse {
   }>
   skipped: Array<{ carrier_config_id: string; carrier_name: string; carrier: string; reason: string }>
 }
+
+// --- Broker Clients ---
+export interface BrokerClient {
+  id: string
+  tenant_id: string
+  name: string
+  normalized_name: string
+  legal_name: string | null
+  domain: string | null
+  tax_id: string | null
+  industry: string | null
+  location: string | null
+  notes: string | null
+  context_entity_id: string | null
+  metadata: Record<string, unknown>
+  created_at: string
+  updated_at: string
+}
+
+export interface BrokerClientListResponse {
+  items: BrokerClient[]
+  total: number
+  page: number
+  page_size: number
+}
+
+export interface CreateClientPayload {
+  name: string
+  legal_name?: string | null
+  domain?: string | null
+  tax_id?: string | null
+  industry?: string | null
+  location?: string | null
+  notes?: string | null
+}
+
+// --- Client Contacts ---
+export interface BrokerClientContact {
+  id: string
+  broker_client_id: string
+  name: string
+  email: string | null
+  phone: string | null
+  role: string | null
+  is_primary: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateClientContactPayload {
+  name: string
+  email?: string | null
+  phone?: string | null
+  role?: string | null
+  is_primary?: boolean
+}
+
+// --- Carrier Contacts ---
+export interface CarrierContact {
+  id: string
+  carrier_config_id: string
+  name: string
+  email: string | null
+  phone: string | null
+  role: string
+  is_primary: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateCarrierContactPayload {
+  name?: string | null
+  email?: string | null
+  phone?: string | null
+  role?: string
+  is_primary?: boolean
+}
+
+export interface UpdateContactPayload {
+  name?: string | null
+  email?: string | null
+  phone?: string | null
+  role?: string | null
+  is_primary?: boolean | null
+}

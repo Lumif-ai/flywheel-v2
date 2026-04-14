@@ -1,15 +1,21 @@
 import { api } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import type {
+  BrokerClient,
+  BrokerClientContact,
+  BrokerClientListResponse,
   BrokerProject,
   BrokerProjectDetail,
   BrokerProjectListResponse,
   CarrierConfig,
+  CarrierContact,
   CarrierMatchResponse,
   CarrierQuote,
   ComparisonMatrix,
+  CreateCarrierContactPayload,
   CreateCarrierPayload,
-  CreateProjectPayload,
+  CreateClientContactPayload,
+  CreateClientPayload,
   DashboardTasksResponse,
   DraftSolicitationsResponse,
   FollowupResponse,
@@ -18,6 +24,7 @@ import type {
   ManualQuotePayload,
   RecommendationDraftResponse,
   UpdateCarrierPayload,
+  UpdateContactPayload,
 } from './types/broker'
 
 export function fetchBrokerProjects(params: {
@@ -25,6 +32,7 @@ export function fetchBrokerProjects(params: {
   offset?: number
   status?: string
   search?: string
+  client_id?: string
 }): Promise<BrokerProjectListResponse> {
   const serialized: Record<string, unknown> = {}
   for (const [k, v] of Object.entries(params)) {
@@ -57,8 +65,8 @@ export function analyzeGaps(projectId: string): Promise<GapAnalysisResponse> {
   return api.post<GapAnalysisResponse>(`/broker/projects/${projectId}/analyze-gaps`)
 }
 
-export function fetchCarriers(): Promise<CarrierConfig[]> {
-  return api.get<CarrierConfig[]>('/broker/carriers')
+export function fetchCarriers(): Promise<{ items: CarrierConfig[]; total: number }> {
+  return api.get<{ items: CarrierConfig[]; total: number }>('/broker/carriers')
 }
 
 export function createCarrier(payload: CreateCarrierPayload): Promise<CarrierConfig> {
@@ -164,4 +172,67 @@ export function sendRecommendation(projectId: string): Promise<{ status: string;
 
 export function approveProject(projectId: string): Promise<BrokerProjectDetail> {
   return api.post<BrokerProjectDetail>(`/broker/projects/${projectId}/approve`)
+}
+
+// --- Client API ---
+export function fetchClients(params: {
+  search?: string
+  page?: number
+  page_size?: number
+} = {}): Promise<BrokerClientListResponse> {
+  const serialized: Record<string, unknown> = {}
+  for (const [k, v] of Object.entries(params)) {
+    if (v !== undefined && v !== null) serialized[k] = v
+  }
+  return api.get<BrokerClientListResponse>('/broker/clients', { params: serialized })
+}
+
+export function fetchClient(clientId: string): Promise<BrokerClient> {
+  return api.get<BrokerClient>(`/broker/clients/${clientId}`)
+}
+
+export function createClient(payload: CreateClientPayload): Promise<BrokerClient> {
+  return api.post<BrokerClient>('/broker/clients', payload)
+}
+
+export function updateClient(id: string, payload: Partial<CreateClientPayload>): Promise<BrokerClient> {
+  return api.put<BrokerClient>(`/broker/clients/${id}`, payload)
+}
+
+export function deleteClient(id: string): Promise<void> {
+  return api.delete<void>(`/broker/clients/${id}`)
+}
+
+// --- Client Contact API ---
+export function fetchClientContacts(clientId: string): Promise<{ items: BrokerClientContact[]; total: number }> {
+  return api.get(`/broker/clients/${clientId}/contacts`)
+}
+
+export function createClientContact(clientId: string, payload: CreateClientContactPayload): Promise<BrokerClientContact> {
+  return api.post(`/broker/clients/${clientId}/contacts`, payload)
+}
+
+export function updateClientContact(clientId: string, contactId: string, payload: UpdateContactPayload): Promise<BrokerClientContact> {
+  return api.put(`/broker/clients/${clientId}/contacts/${contactId}`, payload)
+}
+
+export function deleteClientContact(clientId: string, contactId: string): Promise<void> {
+  return api.delete(`/broker/clients/${clientId}/contacts/${contactId}`)
+}
+
+// --- Carrier Contact API ---
+export function fetchCarrierContacts(carrierId: string): Promise<{ items: CarrierContact[]; total: number }> {
+  return api.get(`/broker/carriers/${carrierId}/contacts`)
+}
+
+export function createCarrierContact(carrierId: string, payload: CreateCarrierContactPayload): Promise<CarrierContact> {
+  return api.post(`/broker/carriers/${carrierId}/contacts`, payload)
+}
+
+export function updateCarrierContact(carrierId: string, contactId: string, payload: UpdateContactPayload): Promise<CarrierContact> {
+  return api.put(`/broker/carriers/${carrierId}/contacts/${contactId}`, payload)
+}
+
+export function deleteCarrierContact(carrierId: string, contactId: string): Promise<void> {
+  return api.delete(`/broker/carriers/${carrierId}/contacts/${contactId}`)
 }
