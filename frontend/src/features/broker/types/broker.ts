@@ -18,14 +18,18 @@ export interface BrokerProject {
   tenant_id: string
   name: string
   project_type: string
+  description: string | null
+  location: string | null
   status: BrokerProjectStatus
   analysis_status: AnalysisStatus
+  approval_status: string
   contract_value: number | null
   currency: string
   language: string | null
   source: 'manual' | 'email'
   source_ref: string | null
   notes: string | null
+  metadata: Record<string, unknown> | null
   recommendation_subject: string | null
   recommendation_body: string | null
   recommendation_status: 'pending' | 'sent' | null
