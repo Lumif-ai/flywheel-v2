@@ -24,6 +24,9 @@ export function TenantSwitcher() {
     queryFn: async () => {
       const data = await api.get<Tenant[]>('/tenants')
       setTenants(data)
+      if (!activeTenant && data.length > 0) {
+        setActiveTenant(data[0])
+      }
       return data
     },
   })

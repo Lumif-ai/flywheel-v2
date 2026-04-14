@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Loader2 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { useTenantStore } from '@/stores/tenant'
@@ -19,6 +19,18 @@ export function TenantSettings() {
   const queryClient = useQueryClient()
   const activeTenant = useTenantStore((s) => s.activeTenant)
   const setActiveTenant = useTenantStore((s) => s.setActiveTenant)
+
+  // Settings page is standalone (no sidebar), so TenantSwitcher never runs.
+  // Fetch tenants directly here if activeTenant isn't set yet.
+  useQuery({
+    queryKey: ['tenants'],
+    queryFn: async () => {
+      const data = await api.get<Tenant[]>('/tenants')
+      if (!activeTenant && data.length > 0) setActiveTenant(data[0])
+      return data
+    },
+    enabled: !activeTenant,
+  })
   const [editName, setEditName] = useState(activeTenant?.name ?? '')
   const [deleteOpen, setDeleteOpen] = useState(false)
 

@@ -10,10 +10,10 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 ## Current Position
 
 Milestone: v16.0 Briefing Intelligence Surface — IN PROGRESS
-Phase: 120-briefing-intelligence-surface (Plan 1/N complete)
-Plan: 120-01 complete — market_patterns backend wired
+Phase: 120-briefing-intelligence-surface (Plan 2/N complete)
+Plan: 120-02 complete — MarketPatternsSection frontend component wired
 Status: Active
-Last activity: 2026-04-13 — 120-01 complete
+Last activity: 2026-04-13 — 120-02 complete
 
 Progress: [##########] 100%
 
@@ -194,6 +194,12 @@ v15.0 Phase 119 Plan 02:
 - CarrierSettings already handles flat array correctly -- no changes needed
 - [Phase 120-briefing-intelligence-surface]: meeting-prep v4.1: FlywheelClient instantiated locally in Step 0c using _fl_client; Section 1.95 numbered to slot between existing sections; load 5 pain entries, display top 3; any failure path sets pain_landscape_context=[] and continues silently
 
+v16.0 Phase 120 Plan 02:
+- MarketPatternsSection prop is MarketPatternsData | undefined (not PainPattern[]) — parent passes data?.market_patterns (full object), component handles undefined internally
+- colors.subtleBorder is correct token name (plan erroneously referenced colors.borderSubtle which doesn't exist)
+- Top 5 patterns cap in loaded view for consistent card density with other briefing sections
+- Pre-existing Shield unused import in AppSidebar.tsx removed (blocked build, Rule 3 auto-fix)
+
 ### Pending Todos
 
 - Title matching false positives in _filter_unprepped (requires meeting_id on SkillRun — deferred from 66.1)
@@ -203,6 +209,8 @@ v15.0 Phase 119 Plan 02:
 
 - Phase 120 added: Briefing Intelligence Surface — wire pain-landscape.md into briefing API + meeting-prep skill, add Market Patterns section to BriefingPageV2
 - Phase 120 Plan 01 complete: market_patterns backend — PainPatternItem/MarketPatternsSection models, _build_market_patterns() section builder, narrative injection with top_pain_patterns
+- Phase 120 Plan 02 complete: MarketPatternsSection frontend — PainPattern/MarketPatternsData TS interfaces, loading/empty/loaded component, wired into BriefingPageV2 between narrative and today sections
+- Phase 120 Plan 03 complete: meeting-prep SKILL.md v4.1 — Step 0c pain landscape loading via local FlywheelClient, Section 1.95 Market Pain Patterns in HTML briefing
 
 ### Blockers/Concerns
 
@@ -232,5 +240,5 @@ v15.0 Phase 117 Plan 03:
 ## Session Continuity
 
 Last session: 2026-04-13
-Stopped at: Phase 120 Plan 01 complete — market_patterns backend (briefing_v2.py + briefing.py)
+Stopped at: Phase 120 Plan 02 complete — MarketPatternsSection frontend component wired into BriefingPageV2 (120-02-PLAN.md)
 Resume file: None
