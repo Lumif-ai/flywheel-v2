@@ -6,12 +6,14 @@ Gated by require_module("broker") — returns 403 for non-broker tenants.
 from __future__ import annotations
 
 import asyncio
+import io
 import re
 from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import exists, func, select, text
 from sqlalchemy.exc import IntegrityError
@@ -103,6 +105,10 @@ class UpdateCarrierBody(BaseModel):
     avg_response_days: float | None = None
     is_active: bool | None = None
     notes: str | None = None
+
+
+class ExportComparisonBody(BaseModel):
+    quote_ids: list[UUID] | None = None
 
 
 class DraftSolicitationsBody(BaseModel):
@@ -372,6 +378,136 @@ async def approve_project(
     await db.commit()
     await db.refresh(project)
     return _project_to_dict(project)
+
+
+# ---------------------------------------------------------------------------
+# GET /broker/dashboard-tasks — Urgency-ordered task list
+# ---------------------------------------------------------------------------
+
+
+@router.get("/dashboard-tasks")
+async def get_dashboard_tasks(
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Return urgency-ordered task list for broker dashboard.
+
+    Task priority: review (1) > approve (2) > export (3) > followup (4).
+    Capped at 50 tasks total.
+    """
+    tasks: list[dict[str, Any]] = []
+
+    # 1. "review" tasks (priority 1) — projects needing coverage review
+    review_result = await db.execute(
+        select(BrokerProject)
+        .where(
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.status == "gaps_identified",
+            BrokerProject.approval_status == "draft",
+            BrokerProject.deleted_at.is_(None),
+        )
+        .order_by(BrokerProject.created_at.asc())
+    )
+    for p in review_result.scalars().all():
+        tasks.append({
+            "type": "review",
+            "priority": 1,
+            "project_id": str(p.id),
+            "project_name": p.name,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "message": "Review extracted coverages",
+        })
+
+    # 2. "approve" tasks (priority 2) — approved projects with pending drafts
+    approve_result = await db.execute(
+        select(BrokerProject)
+        .where(
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.status == "gaps_identified",
+            BrokerProject.approval_status == "approved",
+            BrokerProject.deleted_at.is_(None),
+            exists(
+                select(CarrierQuote.id).where(
+                    CarrierQuote.broker_project_id == BrokerProject.id,
+                    CarrierQuote.draft_status == "pending",
+                )
+            ),
+        )
+        .order_by(BrokerProject.created_at.asc())
+    )
+    for p in approve_result.scalars().all():
+        tasks.append({
+            "type": "approve",
+            "priority": 2,
+            "project_id": str(p.id),
+            "project_name": p.name,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "message": "Approve & send solicitations",
+        })
+
+    # 3. "export" tasks (priority 3) — projects ready for comparison export
+    export_result = await db.execute(
+        select(BrokerProject)
+        .where(
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.status.in_(("quotes_complete", "recommended")),
+            BrokerProject.deleted_at.is_(None),
+        )
+        .order_by(BrokerProject.created_at.asc())
+    )
+    for p in export_result.scalars().all():
+        tasks.append({
+            "type": "export",
+            "priority": 3,
+            "project_id": str(p.id),
+            "project_name": p.name,
+            "created_at": p.created_at.isoformat() if p.created_at else None,
+            "message": "Export comparison for client",
+        })
+
+    # 4. "followup" tasks (priority 4) — overdue solicitations (>7 days, no response)
+    followup_result = await db.execute(
+        select(
+            CarrierQuote.id.label("quote_id"),
+            CarrierQuote.solicited_at,
+            BrokerProject.id.label("project_id"),
+            BrokerProject.name.label("project_name"),
+            CarrierConfig.carrier_name,
+        )
+        .join(BrokerProject, CarrierQuote.broker_project_id == BrokerProject.id)
+        .join(CarrierConfig, CarrierQuote.carrier_config_id == CarrierConfig.id)
+        .where(
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+            CarrierQuote.draft_status == "sent",
+            CarrierQuote.status == "pending",
+            CarrierQuote.solicited_at.isnot(None),
+            func.now() - CarrierQuote.solicited_at > text("interval '7 days'"),
+        )
+        .order_by(CarrierQuote.solicited_at.asc())
+    )
+    for row in followup_result.all():
+        days_overdue = (
+            (datetime.now(timezone.utc) - row.solicited_at).days
+            if row.solicited_at
+            else 0
+        )
+        tasks.append({
+            "type": "followup",
+            "priority": 4,
+            "project_id": str(row.project_id),
+            "project_name": row.project_name,
+            "quote_id": str(row.quote_id),
+            "solicited_at": row.solicited_at.isoformat() if row.solicited_at else None,
+            "carrier_name": row.carrier_name,
+            "days_overdue": days_overdue,
+            "message": f"Follow up with {row.carrier_name}",
+        })
+
+    # Cap at 50 tasks (already in priority order from concatenation)
+    tasks = tasks[:50]
+
+    return {"tasks": tasks, "total": len(tasks)}
 
 
 # ---------------------------------------------------------------------------
@@ -2244,6 +2380,144 @@ async def get_comparison(
         comparison["partial"] = True
 
     return comparison
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/projects/{project_id}/export-comparison — Excel export
+# ---------------------------------------------------------------------------
+
+
+def _build_comparison_xlsx(comparison: dict, project_name: str) -> bytes:
+    """Build an Excel workbook from comparison data. Pure function, no async."""
+    import openpyxl
+    from openpyxl.styles import Font, PatternFill
+
+    wb = openpyxl.Workbook()
+    wb.remove(wb.active)
+
+    # Group coverages by category — coverages is a LIST not a dict
+    categories: dict[str, list] = {}
+    for cov_data in comparison.get("coverages", []):
+        cat = cov_data.get("category", "insurance")
+        categories.setdefault(cat, []).append(cov_data)
+
+    header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+    header_font = Font(bold=True, color="FFFFFF")
+    exclusion_fill = PatternFill(start_color="FFC7CE", end_color="FFC7CE", fill_type="solid")
+
+    for cat_name, cov_list in categories.items():
+        ws = wb.create_sheet(title=cat_name.capitalize())
+
+        # Collect unique carriers across all coverages in this category
+        carrier_map: dict[str, str] = {}  # carrier_id -> name
+        carrier_names: list[str] = []
+        for cov in cov_list:
+            for quote in cov.get("quotes", []):
+                cid = quote.get("carrier_config_id") or quote.get("carrier_id")
+                if cid and cid not in carrier_map:
+                    carrier_map[cid] = quote.get("carrier_name", "Unknown")
+                    carrier_names.append(quote.get("carrier_name", "Unknown"))
+
+        # Header row
+        headers = ["Coverage", "Required Limit"] + carrier_names
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.font = header_font
+            cell.fill = header_fill
+
+        # Coverage rows
+        row = 2
+        carrier_id_list = list(carrier_map.keys())
+        for cov in cov_list:
+            ws.cell(row=row, column=1, value=cov.get("display_name", cov.get("coverage_type", "")))
+            req_limit = cov.get("required_limit")
+            ws.cell(row=row, column=2, value=float(req_limit) if req_limit is not None else None)
+
+            for q in cov.get("quotes", []):
+                cid = q.get("carrier_config_id") or q.get("carrier_id")
+                if cid in carrier_map:
+                    col_idx = carrier_id_list.index(cid) + 3
+                    premium = q.get("premium") or q.get("quoted_premium")
+                    ws.cell(row=row, column=col_idx, value=float(premium) if premium is not None else None)
+
+                    if q.get("has_critical_exclusion"):
+                        ws.cell(row=row, column=col_idx).fill = exclusion_fill
+            row += 1
+
+        # Auto-width columns
+        for col_cells in ws.columns:
+            max_len = max((len(str(cell.value or "")) for cell in col_cells), default=10)
+            ws.column_dimensions[col_cells[0].column_letter].width = min(max_len + 2, 40)
+
+    # If no categories found, create a single empty sheet
+    if not categories:
+        wb.create_sheet(title="No Data")
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+@router.post("/projects/{project_id}/export-comparison")
+async def export_comparison(
+    project_id: UUID,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    body: ExportComparisonBody | None = None,
+) -> StreamingResponse:
+    """Export quote comparison as .xlsx file.
+
+    Reuses compare_quotes engine, then builds Excel in a thread to avoid
+    blocking the async event loop. Optional quote_ids filter.
+    """
+    from flywheel.engines.quote_comparator import compare_quotes
+
+    # Verify project
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Load coverages
+    cov_result = await db.execute(
+        select(ProjectCoverage).where(
+            ProjectCoverage.broker_project_id == project_id
+        )
+    )
+    coverages = cov_result.scalars().all()
+    coverage_dicts = [_coverage_to_dict(c) for c in coverages]
+
+    # Load quotes in comparable statuses
+    quote_query = select(CarrierQuote).where(
+        CarrierQuote.broker_project_id == project_id,
+        CarrierQuote.status.in_(("extracted", "reviewed", "selected")),
+    )
+    # Optional filter by quote_ids
+    if body and body.quote_ids:
+        quote_query = quote_query.where(CarrierQuote.id.in_(body.quote_ids))
+
+    quote_result = await db.execute(quote_query)
+    quotes = quote_result.scalars().all()
+    quote_dicts = [_quote_to_dict(q) for q in quotes]
+
+    # Compute comparison
+    comparison = compare_quotes(coverage_dicts, quote_dicts)
+
+    # Build Excel in thread (openpyxl is synchronous)
+    content = await asyncio.to_thread(_build_comparison_xlsx, comparison, project.name or "comparison")
+
+    safe_name = re.sub(r"[^\w\s\-]", "", project.name or "comparison").strip().replace(" ", "_")[:60]
+    return StreamingResponse(
+        io.BytesIO(content),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{safe_name}_comparison.xlsx"'},
+    )
 
 
 # ---------------------------------------------------------------------------
