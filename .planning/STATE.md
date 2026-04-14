@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 ## Current Position
 
 Milestone: v18.0 Broker Data Model v2
-Phase: 130 of 132 (Schema -- Modifications)
-Plan: 2 of 2 in current phase (plan 02 complete — phase 130 done)
+Phase: 131 of 132 (Backend -- Atomic Release)
+Plan: 1 of 4 in current phase (plan 01 complete — ORM models + broker/ package scaffold)
 Status: In progress
-Last activity: 2026-04-15 — Plan 02 complete (seed carrier emails, 9 CHECK constraints, 1 FK, 15 column drops, alembic stamped 061)
+Last activity: 2026-04-15 — Plan 01 complete (3 ORM models updated, 6 new models added, broker/ package scaffold created)
 
-Progress: [████░░░░░░] 36% (4/11 plans)
+Progress: [████░░░░░░] 45% (5/11 plans)
 
 ## Performance Metrics
 
@@ -30,7 +30,7 @@ Progress: [████░░░░░░] 36% (4/11 plans)
 |-------|-------|-------|----------|
 | 129. Schema -- New Tables | 2/2 | — | — |
 | 130. Schema -- Modifications | 2/2 | — | — |
-| 131. Backend -- Atomic Release | 0/4 | — | — |
+| 131. Backend -- Atomic Release | 1/4 | — | — |
 | 132. Frontend -- Clients | 0/3 | — | — |
 
 ## Accumulated Context
@@ -45,6 +45,9 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 130]: All 14 new columns nullable — existing application code runs unchanged
 - [Phase 130-02]: ALLOWED_TRANSITIONS delivered->binding->bound; binding is intermediate state before bound
 - [Phase 130-02]: broker_activities FK uses NOT VALID then VALIDATE — tolerates orphan rows gracefully
+- [Phase 131-01]: 6 new models inserted between CarrierConfig and BrokerProject so BrokerClient is defined before BrokerProject FK client_id references it — avoids forward-ref issues
+- [Phase 131-01]: broker.py preserved as backup; Python resolves package (broker/) over module (broker.py) for `from flywheel.api.broker import router`
+- [Phase 131-01]: REQUIRES_CLIENT_STATES added to _shared.py — validate_transition enforces client_id must be set before advancing past 'analyzing' state
 
 ### Key Constraints (v18.0)
 
@@ -67,5 +70,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 130-02-PLAN.md (seed carrier emails, 9 CHECK constraints, 1 FK, 15 column drops, alembic stamped 061; Phase 130 complete)
+Stopped at: Completed 131-01-PLAN.md (3 ORM models updated, 6 new models added, broker/ package scaffold created with __init__.py + _shared.py + main_router.py)
 Resume file: None

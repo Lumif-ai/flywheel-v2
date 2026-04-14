@@ -11,6 +11,7 @@ Public functions:
   write_action_item()        -- write an action item or commitment
   write_deal_signal()        -- write a deal/commercial signal
   write_relationship_signal() -- write a relationship signal (stored in insights)
+  create_context_entity()    -- upsert a ContextEntity and return its id (broker use)
 
 Private helper:
   _write_entry()  -- core dedup + insert/increment logic
@@ -370,3 +371,52 @@ async def write_relationship_signal(
         entry_date=entry_date,
         pipeline_entry_id=pipeline_entry_id,
     )
+
+
+async def create_context_entity(
+    db: AsyncSession,
+    tenant_id: UUID,
+    name: str,
+    entity_type: str,
+    aliases: list[str] | None = None,
+    metadata: dict | None = None,
+) -> UUID:
+    """Upsert a ContextEntity and return its id.
+
+    Uses ON CONFLICT (tenant_id, name, entity_type) DO UPDATE to handle
+    concurrent creation safely. Does NOT call db.commit() -- caller owns transaction.
+
+    Args:
+        entity_type: One of 'broker_client', 'carrier', 'broker_project'
+    """
+    from flywheel.db.models import ContextEntity
+    from sqlalchemy import func
+
+    stmt = (
+        pg_insert(ContextEntity)
+        .values(
+            tenant_id=tenant_id,
+            name=name,
+            entity_type=entity_type,
+            aliases=aliases or [],
+            metadata_=metadata or {},
+            mention_count=1,
+            first_seen_at=func.now(),
+            last_seen_at=func.now(),
+        )
+        .on_conflict_do_update(
+            index_elements=["tenant_id", "name", "entity_type"],
+            set_={
+                "last_seen_at": func.now(),
+                "mention_count": ContextEntity.mention_count + 1,
+            },
+        )
+        .returning(ContextEntity.id)
+    )
+    result = await db.execute(stmt)
+    entity_id = result.scalar_one()
+    logger.debug(
+        "create_context_entity: upserted entity %s (%s) for tenant %s",
+        name, entity_type, tenant_id,
+    )
+    return entity_id
