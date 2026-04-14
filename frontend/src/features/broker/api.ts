@@ -133,3 +133,7 @@ export function editRecommendation(
 export function sendRecommendation(projectId: string): Promise<{ status: string; sent_at: string; document_id: string }> {
   return api.post<{ status: string; sent_at: string; document_id: string }>(`/broker/projects/${projectId}/approve-send-recommendation`)
 }
+
+export function approveProject(projectId: string): Promise<BrokerProjectDetail> {
+  return api.post<BrokerProjectDetail>(`/broker/projects/${projectId}/approve`)
+}
