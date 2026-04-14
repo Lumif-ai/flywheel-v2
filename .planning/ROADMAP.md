@@ -515,6 +515,39 @@ Plans:
 - [ ] 124-02-PLAN.md — TaskList + ProjectPipelineGrid + BrokerDashboard rewrite + cleanup
 - [ ] 124-03-PLAN.md — BrokerProjectsPage with search, filters, ag-grid + human verification
 
+### Phase 125: Project Detail Tabbed Layout
+**Goal**: A broker navigates to a project and sees a structured tabbed layout with Overview content, step indicator, and right sidebar — the shell that all other tabs hang off
+**Depends on**: Phase 124
+**Requirements**: DET-01, DET-02, DET-03, DET-04, DET-05, OVER-01, OVER-02, OVER-03
+**Plans:** 2 plans
+
+Plans:
+- [ ] 125-01-PLAN.md — Tabbed shell: types update, ProjectHeader, StepIndicator, ProjectSidebar, URL-synced tabs
+- [ ] 125-02-PLAN.md — Overview tab: ClientProfile, documents list, activity timeline
+
+
+### Phase 126: Coverage Tab + Existing Tab Wiring
+**Goal**: A broker can review AI-extracted coverages in ag-grid with inline editing, approve the project (Gate 1), select carriers (Gate 2), and track quotes with auto-refresh — the three middle tabs are fully functional
+**Depends on**: Phase 125
+**Requirements**: COV-01..06, CAR-01..04, QUO-01..05 (15 requirements)
+**Plans:** 2 plans
+
+Plans:
+- [ ] 126-01-PLAN.md — Coverage tab: ag-grid with inline editing, confidence dots, gap alert, approve project button
+- [ ] 126-02-PLAN.md — Carriers tab + Quotes tab wiring to existing components
+
+
+### Phase 127: Comparison View + Excel Export
+**Goal**: A broker sees a side-by-side matrix of all carrier quotes with critical exclusion alerts, toggles, carrier selection, and Excel export
+**Depends on**: Phase 126, Phase 123
+**Requirements**: CMP-01..12, XLS-01..05 (17 requirements)
+**Plans:** 3 plans
+
+Plans:
+- [ ] 127-01-PLAN.md — Comparison grid engine: sticky table, two-row cells, carrier headers, total premium footer, exclusion alert, utils
+- [ ] 127-02-PLAN.md — ComparisonView shell, toolbar toggles, Insurance/Surety tabs, CompareTab rewrite
+- [ ] 127-03-PLAN.md — Excel export blob download helper + export button in toolbar
+
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
