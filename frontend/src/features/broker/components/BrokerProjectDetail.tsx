@@ -7,6 +7,7 @@ import { useBrokerProject } from '../hooks/useBrokerProject'
 import { ProjectHeader } from './ProjectHeader'
 import { StepIndicator } from './StepIndicator'
 import { ProjectSidebar } from './ProjectSidebar'
+import { OverviewTab } from './tabs/OverviewTab'
 import { CoverageTab } from './tabs/CoverageTab'
 import { CarriersTab } from './tabs/CarriersTab'
 import { QuotesTab } from './tabs/QuotesTab'
@@ -77,9 +78,7 @@ export function BrokerProjectDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
           <div className="lg:col-span-2">
             <TabsContent value="overview">
-              <div className="text-muted-foreground">
-                Overview content coming in Plan 02
-              </div>
+              <OverviewTab project={project} />
             </TabsContent>
             <TabsContent value="coverage">
               <CoverageTab projectId={project.id} />
