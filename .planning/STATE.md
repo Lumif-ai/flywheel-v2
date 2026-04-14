@@ -11,9 +11,9 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 Milestone: v18.0 Broker Data Model v2
 Phase: 131 of 132 (Backend -- Atomic Release)
-Plan: 1 of 4 in current phase (plan 01 complete — ORM models + broker/ package scaffold)
+Plan: 2 of 4 in current phase (plan 02 complete — BrokerClientService, BrokerContactService, create_context_entity)
 Status: In progress
-Last activity: 2026-04-15 — Plan 01 complete (3 ORM models updated, 6 new models added, broker/ package scaffold created)
+Last activity: 2026-04-15 — Plan 02 complete (BrokerClientService + BrokerContactService created, create_context_entity added to context_store_writer.py)
 
 Progress: [████░░░░░░] 45% (5/11 plans)
 
@@ -30,7 +30,7 @@ Progress: [████░░░░░░] 45% (5/11 plans)
 |-------|-------|-------|----------|
 | 129. Schema -- New Tables | 2/2 | — | — |
 | 130. Schema -- Modifications | 2/2 | — | — |
-| 131. Backend -- Atomic Release | 1/4 | — | — |
+| 131. Backend -- Atomic Release | 2/4 | — | — |
 | 132. Frontend -- Clients | 0/3 | — | — |
 
 ## Accumulated Context
@@ -48,6 +48,8 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 131-01]: 6 new models inserted between CarrierConfig and BrokerProject so BrokerClient is defined before BrokerProject FK client_id references it — avoids forward-ref issues
 - [Phase 131-01]: broker.py preserved as backup; Python resolves package (broker/) over module (broker.py) for `from flywheel.api.broker import router`
 - [Phase 131-01]: REQUIRES_CLIENT_STATES added to _shared.py — validate_transition enforces client_id must be set before advancing past 'analyzing' state
+- [Phase 131-02]: create_context_entity uses local import for ContextEntity inside function body to avoid circular import risk
+- [Phase 131-02]: BrokerContactService.delete_contact uses contact_type: str param to handle both BrokerClientContact and CarrierContact in one method
 
 ### Key Constraints (v18.0)
 
@@ -70,5 +72,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 131-01-PLAN.md (3 ORM models updated, 6 new models added, broker/ package scaffold created with __init__.py + _shared.py + main_router.py)
+Stopped at: Completed 131-02-PLAN.md (BrokerClientService + BrokerContactService created, create_context_entity added to context_store_writer.py)
 Resume file: None
