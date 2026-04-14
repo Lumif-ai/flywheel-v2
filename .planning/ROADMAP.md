@@ -477,6 +477,33 @@ Plans:
 Plans:
 - [x] 121-01-PLAN.md — Persist middleware, TenantBootstrap gate, queryFn cleanup, BrokerGuard, volatile tenants
 
+
+### Phase 122: Shared Module Toolkit ✓
+
+**Goal:** Any module in the app can import a shared ag-grid theme, generic cell renderers, and column persistence hook -- and the GTM pipeline continues working identically after extraction
+**Depends on:** Phase 121
+**Requirements:** INFRA-01, INFRA-02, INFRA-03, INFRA-04
+**Plans:** 1 plan
+**Status:** Complete (2026-04-14)
+
+Plans:
+- [x] 122-01-PLAN.md — Extract shared grid module (theme, renderers, persistence hook) and rewire pipeline imports
+
+### Phase 123: Backend New Endpoints
+**Goal**: The broker frontend has all four backend endpoints it needs to power the gate strip, dashboard task list, project approval, and Excel export
+**Depends on**: Phase 122
+**Requirements**: API-01, API-02, API-03, API-04
+**Success Criteria** (what must be TRUE):
+  1. `GET /broker/gate-counts` returns review/approve/export counts with oldest project IDs — under 200ms for <100 projects
+  2. `GET /broker/dashboard-tasks` returns urgency-ordered task array (review > approve > export > followup)
+  3. `POST /broker/projects/:id/approve` sets approval_status=approved, returns 409 on duplicate
+  4. `POST /broker/projects/:id/export-comparison` returns .xlsx StreamingResponse via run_in_executor
+**Plans**: 2 plans
+
+Plans:
+- [ ] 123-01-PLAN.md — Migration + model update + gate-counts + approve endpoints
+- [ ] 123-02-PLAN.md — Dashboard tasks + Excel export-comparison endpoints
+
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
