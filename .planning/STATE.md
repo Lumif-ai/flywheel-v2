@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 Milestone: v18.0 Broker Data Model v2
 Phase: 131 of 132 (Backend -- Atomic Release)
-Plan: 3 of 4 in current phase (plan 03 complete — solicitations.py + recommendations.py sub-routers)
-Status: In progress
-Last activity: 2026-04-15 — Plan 03 complete (solicitations.py 5 endpoints, recommendations.py 3 endpoints, both included in main_router.py)
+Plan: 4 of 4 in current phase — ALL PLANS COMPLETE
+Status: Phase complete
+Last activity: 2026-04-15 — Plan 04 complete (clients.py 5 routes, contacts.py 8 routes, carriers.py 4 routes, projects.py 19 routes, quotes.py 6 routes, main_router.py 50 total routes, broker.py decommissioned)
 
-Progress: [█████░░░░░] 55% (6/11 plans)
+Progress: [███████░░░] 64% (7/11 plans)
 
 ## Performance Metrics
 
@@ -30,7 +30,7 @@ Progress: [█████░░░░░] 55% (6/11 plans)
 |-------|-------|-------|----------|
 | 129. Schema -- New Tables | 2/2 | — | — |
 | 130. Schema -- Modifications | 2/2 | — | — |
-| 131. Backend -- Atomic Release | 2/4 | — | — |
+| 131. Backend -- Atomic Release | 4/4 | — | — |
 | 132. Frontend -- Clients | 0/3 | — | — |
 
 ## Accumulated Context
@@ -53,6 +53,9 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 131-03]: approve_solicitation and approve_send_solicitation use user.sub (not user.user_id) — TokenPayload only exposes sub + tenant_id
 - [Phase 131-03]: build_submission_package not called from draft-solicitations — function creates SubmissionDocument FK to carrier_quotes.id; passing SolicitationDraft.id would corrupt data; empty documents list returned
 - [Phase 131-03]: approve-send accepts both 'pending' and 'approved' status — WRK-03 approve endpoint puts drafts in 'approved'; approve-send must accept both or the approve→send workflow is broken
+- [Phase 131-04]: portal-screenshot/portal-confirm use metadata_.portal_status (draft_status column dropped in Phase 130)
+- [Phase 131-04]: list_carriers returns dict {items, total} for consistency with all other list endpoints
+- [Phase 131-04]: draft-followups returns draft content only (does not persist to CarrierQuote — dropped columns); Phase 132 can create SolicitationDraft rows if needed
 
 ### Key Constraints (v18.0)
 
@@ -75,5 +78,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 131-03-PLAN.md (solicitations.py 5 endpoints + recommendations.py 3 endpoints + main_router.py updated)
+Stopped at: Completed 131-04-PLAN.md (Phase 131 complete — all broker endpoints migrated to sub-routers, broker.py decommissioned, 50 routes total)
 Resume file: None
