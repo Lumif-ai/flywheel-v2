@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 Milestone: v18.0 Broker Data Model v2
 Phase: 129 of 132 (Schema -- New Tables)
-Plan: 1 of 2 in current phase
+Plan: 2 of 2 in current phase (phase complete)
 Status: In progress
-Last activity: 2026-04-14 — Plan 01 complete (DDL migration scripts for 6 broker data model v2 tables)
+Last activity: 2026-04-15 — Plan 02 complete (RLS policies applied + migration executed, alembic stamped 059)
 
-Progress: [█░░░░░░░░░] 8% (1/11 plans)
+Progress: [██░░░░░░░░] 18% (2/11 plans)
 
 ## Performance Metrics
 
@@ -28,7 +28,7 @@ Progress: [█░░░░░░░░░] 8% (1/11 plans)
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 129. Schema -- New Tables | 1/2 | — | — |
+| 129. Schema -- New Tables | 2/2 | — | — |
 | 130. Schema -- Modifications | 0/2 | — | — |
 | 131. Backend -- Atomic Release | 0/4 | — | — |
 | 132. Frontend -- Clients | 0/3 | — | — |
@@ -40,10 +40,12 @@ Progress: [█░░░░░░░░░] 8% (1/11 plans)
 All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 
 **129-01 (2026-04-14):** metadata DB column name is 'metadata' not 'metadata_' — consistent with all existing broker tables; RLS deferred to plan 02
+- [Phase 129]: Alembic stamp applied via SQLAlchemy UPDATE (not CLI) because alembic env.py targets port 5434 which is unavailable; get_session_factory() uses correct pooler URL
 
 ### Key Constraints (v18.0)
 
 - PgBouncer workaround: each DDL statement as own committed transaction, then alembic stamp
+- Alembic stamp workaround: `alembic stamp` CLI targets port 5434 (direct DB), unavailable; use `UPDATE alembic_version SET version_num = 'XXX'` via get_session_factory() instead
 - Carrier email seed MUST happen BEFORE dropping email_address column (data loss risk)
 - Phase 131 is atomic: all model changes, services, endpoints, workflow restructure deploy together
 - Solicitation workflow restructure touches 15+ CarrierQuote refs -- all change simultaneously
@@ -60,6 +62,6 @@ None active.
 
 ## Session Continuity
 
-Last session: 2026-04-14
-Stopped at: Completed 129-01-PLAN.md (DDL migration + Alembic stub for 6 broker data model v2 tables)
+Last session: 2026-04-15
+Stopped at: Completed 129-02-PLAN.md (RLS policies applied + migration executed, alembic stamped 059)
 Resume file: None
