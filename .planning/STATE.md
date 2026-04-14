@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 
 Milestone: v18.0 Broker Data Model v2
 Phase: 131 of 132 (Backend -- Atomic Release)
-Plan: 2 of 4 in current phase (plan 02 complete — BrokerClientService, BrokerContactService, create_context_entity)
+Plan: 3 of 4 in current phase (plan 03 complete — solicitations.py + recommendations.py sub-routers)
 Status: In progress
-Last activity: 2026-04-15 — Plan 02 complete (BrokerClientService + BrokerContactService created, create_context_entity added to context_store_writer.py)
+Last activity: 2026-04-15 — Plan 03 complete (solicitations.py 5 endpoints, recommendations.py 3 endpoints, both included in main_router.py)
 
-Progress: [████░░░░░░] 45% (5/11 plans)
+Progress: [█████░░░░░] 55% (6/11 plans)
 
 ## Performance Metrics
 
@@ -50,6 +50,9 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 131-01]: REQUIRES_CLIENT_STATES added to _shared.py — validate_transition enforces client_id must be set before advancing past 'analyzing' state
 - [Phase 131-02]: create_context_entity uses local import for ContextEntity inside function body to avoid circular import risk
 - [Phase 131-02]: BrokerContactService.delete_contact uses contact_type: str param to handle both BrokerClientContact and CarrierContact in one method
+- [Phase 131-03]: approve_solicitation and approve_send_solicitation use user.sub (not user.user_id) — TokenPayload only exposes sub + tenant_id
+- [Phase 131-03]: build_submission_package not called from draft-solicitations — function creates SubmissionDocument FK to carrier_quotes.id; passing SolicitationDraft.id would corrupt data; empty documents list returned
+- [Phase 131-03]: approve-send accepts both 'pending' and 'approved' status — WRK-03 approve endpoint puts drafts in 'approved'; approve-send must accept both or the approve→send workflow is broken
 
 ### Key Constraints (v18.0)
 
@@ -72,5 +75,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 131-02-PLAN.md (BrokerClientService + BrokerContactService created, create_context_entity added to context_store_writer.py)
+Stopped at: Completed 131-03-PLAN.md (solicitations.py 5 endpoints + recommendations.py 3 endpoints + main_router.py updated)
 Resume file: None
