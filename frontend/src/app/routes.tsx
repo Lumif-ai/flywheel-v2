@@ -105,6 +105,16 @@ const BrokerCarriersPage = lazy(() =>
     (m) => ({ default: m.BrokerCarriersPage })
   )
 )
+const BrokerClientsPage = lazy(() =>
+  import('@/features/broker/pages/BrokerClientsPage').then(
+    (m) => ({ default: m.BrokerClientsPage })
+  )
+)
+const BrokerClientDetailPage = lazy(() =>
+  import('@/features/broker/pages/BrokerClientDetailPage').then(
+    (m) => ({ default: m.BrokerClientDetailPage })
+  )
+)
 
 // Lazy-loaded public pages (infrequently accessed)
 const LoginPage = lazy(() =>
@@ -187,7 +197,8 @@ export function AppRoutes() {
         {/* Redirects for removed routes */}
         <Route path="settings/carriers" element={<Navigate to="/broker/carriers" replace />} />
         <Route path="email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />
-        <Route path="clients" element={<Navigate to="/broker/projects" replace />} />
+        <Route path="clients" element={<Suspense fallback={null}><BrokerClientsPage /></Suspense>} />
+        <Route path="clients/:id" element={<Suspense fallback={null}><BrokerClientDetailPage /></Suspense>} />
       </Route>
       {/* Legacy relationship routes -> pipeline with filter */}
       <Route path="/relationships/prospects" element={<Navigate to="/pipeline?relationshipType=prospect" replace />} />

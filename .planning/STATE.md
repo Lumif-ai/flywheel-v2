@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v18.0 Broker Data Model v2 — Phase 131 (Backend -- Atomic Release)
+**Current focus:** v18.0 Broker Data Model v2 — Phase 132 (Frontend -- Clients)
 
 ## Current Position
 
 Milestone: v18.0 Broker Data Model v2
-Phase: 131 of 132 (Backend -- Atomic Release)
-Plan: 4 of 4 in current phase — ALL PLANS COMPLETE
-Status: Phase complete
-Last activity: 2026-04-15 — Plan 04 complete (clients.py 5 routes, contacts.py 8 routes, carriers.py 4 routes, projects.py 19 routes, quotes.py 6 routes, main_router.py 50 total routes, broker.py decommissioned)
+Phase: 132 of 132 (Frontend -- Clients)
+Plan: 1 of 3 in current phase — Plan 01 complete
+Status: In progress
+Last activity: 2026-04-15 — Plan 01 complete (broker types + 13 API functions + 8 hooks, fetchCarriers shape fixed)
 
-Progress: [███████░░░] 64% (7/11 plans)
+Progress: [████████░░] 73% (8/11 plans)
 
 ## Performance Metrics
 
@@ -31,7 +31,7 @@ Progress: [███████░░░] 64% (7/11 plans)
 | 129. Schema -- New Tables | 2/2 | — | — |
 | 130. Schema -- Modifications | 2/2 | — | — |
 | 131. Backend -- Atomic Release | 4/4 | — | — |
-| 132. Frontend -- Clients | 0/3 | — | — |
+| 132. Frontend -- Clients | 1/3 | — | — |
 
 ## Accumulated Context
 
@@ -56,6 +56,8 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 131-04]: portal-screenshot/portal-confirm use metadata_.portal_status (draft_status column dropped in Phase 130)
 - [Phase 131-04]: list_carriers returns dict {items, total} for consistency with all other list endpoints
 - [Phase 131-04]: draft-followups returns draft content only (does not persist to CarrierQuote — dropped columns); Phase 132 can create SolicitationDraft rows if needed
+- [Phase 132-01]: useCarriers uses TanStack Query select to extract items array — preserves BrokerCarriersPage backward compatibility after fetchCarriers shape change to { items, total }
+- [Phase 132-01]: fetchBrokerProjects accepts optional client_id param enabling project filtering by client in Phase 132 UI
 
 ### Key Constraints (v18.0)
 
@@ -78,5 +80,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 131-04-PLAN.md (Phase 131 complete — all broker endpoints migrated to sub-routers, broker.py decommissioned, 50 routes total)
+Stopped at: Completed 132-01-PLAN.md (BrokerClient types, 13 API functions, 8 hooks, fetchCarriers shape fix, useCarriers select transform)
 Resume file: None
