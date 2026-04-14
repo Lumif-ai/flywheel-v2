@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v18.0 Broker Data Model v2 — Phase 129 (Schema -- New Tables)
+**Current focus:** v18.0 Broker Data Model v2 — Phase 130 (Schema -- Modifications)
 
 ## Current Position
 
 Milestone: v18.0 Broker Data Model v2
-Phase: 129 of 132 (Schema -- New Tables)
-Plan: 2 of 2 in current phase (phase complete)
+Phase: 130 of 132 (Schema -- Modifications)
+Plan: 1 of 2 in current phase (plan 01 complete)
 Status: In progress
-Last activity: 2026-04-15 — Plan 02 complete (RLS policies applied + migration executed, alembic stamped 059)
+Last activity: 2026-04-15 — Plan 01 complete (14 additive columns added to 5 broker tables, alembic stamped 060)
 
-Progress: [██░░░░░░░░] 18% (2/11 plans)
+Progress: [███░░░░░░░] 27% (3/11 plans)
 
 ## Performance Metrics
 
@@ -29,7 +29,7 @@ Progress: [██░░░░░░░░] 18% (2/11 plans)
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 129. Schema -- New Tables | 2/2 | — | — |
-| 130. Schema -- Modifications | 0/2 | — | — |
+| 130. Schema -- Modifications | 1/2 | — | — |
 | 131. Backend -- Atomic Release | 0/4 | — | — |
 | 132. Frontend -- Clients | 0/3 | — | — |
 
@@ -41,6 +41,8 @@ All v1.0-v17.0 decisions archived in PROJECT.md Key Decisions table.
 
 **129-01 (2026-04-14):** metadata DB column name is 'metadata' not 'metadata_' — consistent with all existing broker tables; RLS deferred to plan 02
 - [Phase 129]: Alembic stamp applied via SQLAlchemy UPDATE (not CLI) because alembic env.py targets port 5434 which is unavailable; get_session_factory() uses correct pooler URL
+- [Phase 130]: broker_projects.client_id uses ON DELETE SET NULL — projects survive client deletion
+- [Phase 130]: All 14 new columns nullable — existing application code runs unchanged
 
 ### Key Constraints (v18.0)
 
@@ -63,5 +65,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 129-02-PLAN.md (RLS policies applied + migration executed, alembic stamped 059)
+Stopped at: Completed 130-01-PLAN.md (14 additive columns added to 5 broker tables, alembic stamped 060)
 Resume file: None
