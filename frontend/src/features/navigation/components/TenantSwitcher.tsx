@@ -17,18 +17,10 @@ export function TenantSwitcher() {
   const queryClient = useQueryClient()
   const activeTenant = useTenantStore((s) => s.activeTenant)
   const setActiveTenant = useTenantStore((s) => s.setActiveTenant)
-  const setTenants = useTenantStore((s) => s.setTenants)
 
   const { data: tenants } = useQuery({
     queryKey: ['tenants'],
-    queryFn: async () => {
-      const data = await api.get<Tenant[]>('/tenants')
-      setTenants(data)
-      if (!activeTenant && data.length > 0) {
-        setActiveTenant(data[0])
-      }
-      return data
-    },
+    queryFn: () => api.get<Tenant[]>('/tenants'),
   })
 
   const handleSwitch = async (tenant: Tenant) => {

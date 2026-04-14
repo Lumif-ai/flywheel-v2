@@ -10,6 +10,7 @@ import { MobileNav } from '@/features/navigation/components/MobileNav'
 import { CommandPalette } from '@/features/navigation/components/CommandPalette'
 import { AppRoutes } from '@/app/routes'
 import { AuthBootstrap } from '@/app/AuthBootstrap'
+import { TenantBootstrap } from '@/app/TenantBootstrap'
 import { useAuthStore } from '@/stores/auth'
 import { CriticalEmailAlert } from '@/features/email/components/CriticalEmailAlert'
 import { useEmailThreads } from '@/features/email/hooks/useEmailThreads'
@@ -39,7 +40,7 @@ try {
   if (persisted) {
     const { timestamp, data } = JSON.parse(persisted) as { timestamp: number; data: Array<{ queryKey: unknown; state: unknown }> }
     if (Date.now() - timestamp < CACHE_MAX_AGE) {
-      const VOLATILE_PREFIXES = ['email-threads', 'email-digest', 'thread-detail', 'meetings', 'company-profile']
+      const VOLATILE_PREFIXES = ['email-threads', 'email-digest', 'thread-detail', 'meetings', 'company-profile', 'tenants']
       for (const entry of data) {
         const key = (entry.queryKey as string[])?.[0] ?? ''
         if (VOLATILE_PREFIXES.some((p) => key.startsWith?.(p))) continue
@@ -59,7 +60,7 @@ if (typeof window !== 'undefined') {
     try {
       const cache = queryClient.getQueryCache().getAll()
       // Exclude frequently-changing data (email, meetings) from persistence
-      const VOLATILE_PREFIXES = ['email-threads', 'email-digest', 'thread-detail', 'meetings', 'company-profile']
+      const VOLATILE_PREFIXES = ['email-threads', 'email-digest', 'thread-detail', 'meetings', 'company-profile', 'tenants']
       const data = cache
         .filter((q) => q.state.status === 'success' && q.state.data != null)
         .filter((q) => !VOLATILE_PREFIXES.some((p) => (q.queryKey[0] as string)?.startsWith?.(p)))
@@ -115,26 +116,30 @@ function AppShell() {
 
   if (isMobile) {
     return (
-      <div className="flex flex-col h-dvh">
-        <main className="flex-1 overflow-auto pb-16">
-          <AppRoutes />
-        </main>
-        <MobileNav />
-        <AuthenticatedAlerts />
-      </div>
+      <TenantBootstrap>
+        <div className="flex flex-col h-dvh">
+          <main className="flex-1 overflow-auto pb-16">
+            <AppRoutes />
+          </main>
+          <MobileNav />
+          <AuthenticatedAlerts />
+        </div>
+      </TenantBootstrap>
     )
   }
 
   return (
-    <SidebarProvider>
-      <AppSidebar />
-      <SidebarInset>
-        <main className="flex-1 overflow-auto">
-          <AppRoutes />
-        </main>
-      </SidebarInset>
-      <AuthenticatedAlerts />
-    </SidebarProvider>
+    <TenantBootstrap>
+      <SidebarProvider>
+        <AppSidebar />
+        <SidebarInset>
+          <main className="flex-1 overflow-auto">
+            <AppRoutes />
+          </main>
+        </SidebarInset>
+        <AuthenticatedAlerts />
+      </SidebarProvider>
+    </TenantBootstrap>
   )
 }
 

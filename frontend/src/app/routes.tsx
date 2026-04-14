@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useParams } from 'react-router'
 import { AuthCallback } from '@/app/AuthCallback'
 import { useFeatureFlag } from '@/lib/feature-flags'
 import { useAuthStore } from '@/stores/auth'
+import { useTenantStore } from '@/stores/tenant'
 
 /** Redirect /relationships/:id to /pipeline/:id preserving the param */
 function RelationshipRedirect() {
@@ -134,6 +135,21 @@ const SpinnerPreview = lazy(() =>
   import('@/pages/SpinnerPreview').then((m) => ({ default: m.SpinnerPreview }))
 )
 
+/**
+ * Guards broker routes against two distinct states:
+ * - Tenant not loaded yet (activeTenant is null) → render nothing, don't redirect.
+ *   This prevents a destructive redirect on page refresh before hydration completes.
+ * - Tenant loaded but broker feature disabled → redirect to /.
+ */
+function BrokerGuard({ children }: { children: React.ReactNode }) {
+  const activeTenant = useTenantStore((s) => s.activeTenant)
+  const brokerEnabled = useFeatureFlag('broker')
+
+  if (!activeTenant) return null
+  if (!brokerEnabled) return <Navigate to="/" replace />
+  return <>{children}</>
+}
+
 /** Root "/" — landing page for anonymous users, briefing dashboard for authenticated */
 function HomePage() {
   const user = useAuthStore((s) => s.user)
@@ -149,7 +165,6 @@ export function AppRoutes() {
   const tasksEnabled = useFeatureFlag('tasks')
   const pipelineEnabled = useFeatureFlag('pipeline')
   const meetingsEnabled = useFeatureFlag('meetings')
-  const brokerEnabled = useFeatureFlag('broker')
 
   return (
     <Routes>
@@ -176,14 +191,13 @@ export function AppRoutes() {
       {meetingsEnabled && <Route path="/meetings/:id" element={<Suspense fallback={null}><MeetingDetailPage /></Suspense>} />}
       {tasksEnabled && <Route path="/tasks" element={<Suspense fallback={null}><TasksPage /></Suspense>} />}
       {!tasksEnabled && <Route path="/tasks" element={<Navigate to="/" replace />} />}
-      {brokerEnabled && <Route path="/broker" element={<Suspense fallback={null}><BrokerDashboard /></Suspense>} />}
-      {brokerEnabled && <Route path="/broker/projects/:id" element={<Suspense fallback={null}><BrokerProjectDetail /></Suspense>} />}
-      {brokerEnabled && <Route path="/broker/settings/carriers" element={<Suspense fallback={null}><CarrierSettings /></Suspense>} />}
-      {brokerEnabled && <Route path="/broker/email" element={<Suspense fallback={null}><BrokerEmailPage /></Suspense>} />}
-      {brokerEnabled && <Route path="/broker/projects" element={<Suspense fallback={null}><BrokerProjectsPage /></Suspense>} />}
-      {brokerEnabled && <Route path="/broker/clients" element={<Suspense fallback={null}><BrokerClientsPage /></Suspense>} />}
-      {brokerEnabled && <Route path="/broker/carriers" element={<Suspense fallback={null}><BrokerCarriersPage /></Suspense>} />}
-      {!brokerEnabled && <Route path="/broker/*" element={<Navigate to="/" replace />} />}
+      <Route path="/broker" element={<BrokerGuard><Suspense fallback={null}><BrokerDashboard /></Suspense></BrokerGuard>} />
+      <Route path="/broker/projects/:id" element={<BrokerGuard><Suspense fallback={null}><BrokerProjectDetail /></Suspense></BrokerGuard>} />
+      <Route path="/broker/settings/carriers" element={<BrokerGuard><Suspense fallback={null}><CarrierSettings /></Suspense></BrokerGuard>} />
+      <Route path="/broker/email" element={<BrokerGuard><Suspense fallback={null}><BrokerEmailPage /></Suspense></BrokerGuard>} />
+      <Route path="/broker/projects" element={<BrokerGuard><Suspense fallback={null}><BrokerProjectsPage /></Suspense></BrokerGuard>} />
+      <Route path="/broker/clients" element={<BrokerGuard><Suspense fallback={null}><BrokerClientsPage /></Suspense></BrokerGuard>} />
+      <Route path="/broker/carriers" element={<BrokerGuard><Suspense fallback={null}><BrokerCarriersPage /></Suspense></BrokerGuard>} />
       {/* Legacy relationship routes -> pipeline with filter */}
       <Route path="/relationships/prospects" element={<Navigate to="/pipeline?relationshipType=prospect" replace />} />
       <Route path="/relationships/customers" element={<Navigate to="/pipeline?relationshipType=customer" replace />} />

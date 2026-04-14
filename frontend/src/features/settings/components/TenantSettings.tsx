@@ -20,15 +20,12 @@ export function TenantSettings() {
   const activeTenant = useTenantStore((s) => s.activeTenant)
   const setActiveTenant = useTenantStore((s) => s.setActiveTenant)
 
-  // Settings page is standalone (no sidebar), so TenantSwitcher never runs.
-  // Fetch tenants directly here if activeTenant isn't set yet.
+  // Settings page is standalone (no TenantBootstrap wrapper), so Zustand persist
+  // hydration is the primary source. This fetch runs only when persist hasn't
+  // hydrated yet (e.g., cleared localStorage) to ensure activeTenant is available.
   useQuery({
     queryKey: ['tenants'],
-    queryFn: async () => {
-      const data = await api.get<Tenant[]>('/tenants')
-      if (!activeTenant && data.length > 0) setActiveTenant(data[0])
-      return data
-    },
+    queryFn: () => api.get<Tenant[]>('/tenants'),
     enabled: !activeTenant,
   })
   const [editName, setEditName] = useState(activeTenant?.name ?? '')
