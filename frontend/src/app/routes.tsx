@@ -81,6 +81,9 @@ const TasksPage = lazy(() =>
   import('@/features/tasks/components/TasksPage').then((m) => ({ default: m.TasksPage }))
 )
 
+// Broker layout (not lazy — tiny, always needed)
+import { BrokerLayout } from '@/features/broker/components/BrokerLayout'
+
 // Lazy-loaded broker pages
 const BrokerDashboard = lazy(() =>
   import('@/features/broker/components/BrokerDashboard').then(
@@ -191,13 +194,15 @@ export function AppRoutes() {
       {meetingsEnabled && <Route path="/meetings/:id" element={<Suspense fallback={null}><MeetingDetailPage /></Suspense>} />}
       {tasksEnabled && <Route path="/tasks" element={<Suspense fallback={null}><TasksPage /></Suspense>} />}
       {!tasksEnabled && <Route path="/tasks" element={<Navigate to="/" replace />} />}
-      <Route path="/broker" element={<BrokerGuard><Suspense fallback={null}><BrokerDashboard /></Suspense></BrokerGuard>} />
-      <Route path="/broker/projects/:id" element={<BrokerGuard><Suspense fallback={null}><BrokerProjectDetail /></Suspense></BrokerGuard>} />
-      <Route path="/broker/settings/carriers" element={<BrokerGuard><Suspense fallback={null}><CarrierSettings /></Suspense></BrokerGuard>} />
-      <Route path="/broker/email" element={<BrokerGuard><Suspense fallback={null}><BrokerEmailPage /></Suspense></BrokerGuard>} />
-      <Route path="/broker/projects" element={<BrokerGuard><Suspense fallback={null}><BrokerProjectsPage /></Suspense></BrokerGuard>} />
-      <Route path="/broker/clients" element={<BrokerGuard><Suspense fallback={null}><BrokerClientsPage /></Suspense></BrokerGuard>} />
-      <Route path="/broker/carriers" element={<BrokerGuard><Suspense fallback={null}><BrokerCarriersPage /></Suspense></BrokerGuard>} />
+      <Route path="/broker" element={<BrokerGuard><BrokerLayout /></BrokerGuard>}>
+        <Route index element={<Suspense fallback={null}><BrokerDashboard /></Suspense>} />
+        <Route path="projects/:id" element={<Suspense fallback={null}><BrokerProjectDetail /></Suspense>} />
+        <Route path="settings/carriers" element={<Suspense fallback={null}><CarrierSettings /></Suspense>} />
+        <Route path="email" element={<Suspense fallback={null}><BrokerEmailPage /></Suspense>} />
+        <Route path="projects" element={<Suspense fallback={null}><BrokerProjectsPage /></Suspense>} />
+        <Route path="clients" element={<Suspense fallback={null}><BrokerClientsPage /></Suspense>} />
+        <Route path="carriers" element={<Suspense fallback={null}><BrokerCarriersPage /></Suspense>} />
+      </Route>
       {/* Legacy relationship routes -> pipeline with filter */}
       <Route path="/relationships/prospects" element={<Navigate to="/pipeline?relationshipType=prospect" replace />} />
       <Route path="/relationships/customers" element={<Navigate to="/pipeline?relationshipType=customer" replace />} />

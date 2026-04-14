@@ -504,6 +504,17 @@ Plans:
 - [ ] 123-01-PLAN.md — Migration + model update + gate-counts + approve endpoints
 - [ ] 123-02-PLAN.md — Dashboard tasks + Excel export-comparison endpoints
 
+### Phase 124: Dashboard + Projects List
+**Goal**: A broker opens the app and immediately sees what needs attention (gate strip + task list), can scan all projects in an ag-grid table, and can navigate to any project or create a new one
+**Depends on**: Phase 122 (shared grid toolkit), Phase 123 (gate-counts and dashboard-tasks endpoints)
+**Requirements**: GATE-01, GATE-02, GATE-03, DASH-01, DASH-02, DASH-03, DASH-04, DASH-05, PROJ-01, PROJ-02, PROJ-03, PROJ-04
+**Plans**: 3 plans
+
+Plans:
+- [ ] 124-01-PLAN.md — Types, API, hooks, BrokerLayout + GateStrip, route restructure
+- [ ] 124-02-PLAN.md — TaskList + ProjectPipelineGrid + BrokerDashboard rewrite + cleanup
+- [ ] 124-03-PLAN.md — BrokerProjectsPage with search, filters, ag-grid + human verification
+
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*

@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-14)
 ## Current Position
 
 Milestone: v17.0 Broker Frontend MVP
-Phase: 122 of 128 (Shared Module Toolkit)
-Plan: 1 of 1 (complete)
-Status: Phase 122 complete
-Last activity: 2026-04-14 — Shared grid toolkit extracted (theme, 4 renderers, persistence hook)
+Phase: 123 of 128 (Backend New Endpoints)
+Plan: 2 of 2 (complete)
+Status: Phase 123 Complete
+Last activity: 2026-04-14 — dashboard-tasks + export-comparison endpoints added
 
-Progress: [█░░░░░░░░░] 14%
+Progress: [██░░░░░░░░] 14%
 
 ## Performance Metrics
 
@@ -48,10 +48,14 @@ v17.0:
 - Custom HTML table for comparison matrix — two-row cells + multi-sticky don't fit ag-grid model; use CSS Grid or native table
 - Gate strip goes in layout.tsx not per-page — prevents mount/unmount flicker and duplicate polling
 - Excel export must use run_in_executor — openpyxl is synchronous, would block FastAPI event loop
+- Dashboard tasks concatenated by priority (review > approve > export > followup), not re-sorted
+- Followup tasks are per-carrier-quote for carrier-level overdue visibility
 - CoverageTable migration must preserve is_manual_override business logic
 - No separate Clients page — client profile lives on project Overview tab
 - Consolidate /broker/settings/carriers into /broker/carriers
 - Zero new dependencies — entire stack already installed
+- Three separate queries for gate-counts over UNION — clarity and independent filterability
+- exists() subquery for approve gate — check pending carrier drafts without loading rows
 
 ### Pending Todos
 
@@ -65,5 +69,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-14
-Stopped at: Completed 122-01-PLAN.md — shared grid toolkit extracted, ready for Phase 123+
+Stopped at: Completed 123-02-PLAN.md — Phase 123 complete, all backend endpoints done
 Resume file: None

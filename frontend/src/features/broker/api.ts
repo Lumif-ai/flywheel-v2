@@ -10,9 +10,11 @@ import type {
   CreateCarrierPayload,
   CreateProjectPayload,
   DashboardStats,
+  DashboardTasksResponse,
   DraftSolicitationsResponse,
   FollowupResponse,
   GapAnalysisResponse,
+  GateCounts,
   ManualQuotePayload,
   RecommendationDraftResponse,
   UpdateCarrierPayload,
@@ -33,6 +35,14 @@ export function fetchBrokerProjects(params: {
 
 export function fetchDashboardStats(): Promise<DashboardStats> {
   return api.get<DashboardStats>('/broker/dashboard-stats')
+}
+
+export function fetchGateCounts(): Promise<GateCounts> {
+  return api.get<GateCounts>('/broker/gate-counts')
+}
+
+export function fetchDashboardTasks(): Promise<DashboardTasksResponse> {
+  return api.get<DashboardTasksResponse>('/broker/dashboard-tasks')
 }
 
 export function fetchBrokerProject(projectId: string): Promise<BrokerProjectDetail> {

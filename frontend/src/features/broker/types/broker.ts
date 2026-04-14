@@ -80,6 +80,28 @@ export interface BrokerProjectListResponse {
   has_more: boolean
 }
 
+export interface GateCounts {
+  review: { count: number; oldest_project_id: string | null }
+  approve: { count: number; oldest_project_id: string | null }
+  export: { count: number; oldest_project_id: string | null }
+}
+
+export interface DashboardTask {
+  type: 'review' | 'approve' | 'export' | 'followup'
+  priority: number
+  project_id: string
+  project_name: string
+  created_at: string | null
+  message: string
+  carrier_name?: string
+  days_overdue?: number
+}
+
+export interface DashboardTasksResponse {
+  tasks: DashboardTask[]
+  total: number
+}
+
 export interface CreateProjectPayload {
   name: string
   project_type?: string
