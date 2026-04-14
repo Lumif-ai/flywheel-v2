@@ -89,6 +89,7 @@ class CreateCarrierBody(BaseModel):
     min_project_value: float | None = None
     max_project_value: float | None = None
     avg_response_days: float | None = None
+    portal_limit: float | None = None
     notes: str | None = None
 
 
@@ -103,6 +104,7 @@ class UpdateCarrierBody(BaseModel):
     min_project_value: float | None = None
     max_project_value: float | None = None
     avg_response_days: float | None = None
+    portal_limit: float | None = None
     is_active: bool | None = None
     notes: str | None = None
 
@@ -258,6 +260,7 @@ def _carrier_to_dict(c: CarrierConfig) -> dict[str, Any]:
         "min_project_value": float(c.min_project_value) if c.min_project_value is not None else None,
         "max_project_value": float(c.max_project_value) if c.max_project_value is not None else None,
         "avg_response_days": float(c.avg_response_days) if c.avg_response_days is not None else None,
+        "portal_limit": float(c.portal_limit) if c.portal_limit is not None else None,
         "is_active": c.is_active,
         "notes": c.notes,
         "created_at": c.created_at.isoformat() if c.created_at else None,
@@ -1355,6 +1358,7 @@ async def create_carrier(
         min_project_value=body.min_project_value,
         max_project_value=body.max_project_value,
         avg_response_days=body.avg_response_days,
+        portal_limit=body.portal_limit,
         notes=body.notes,
     )
     db.add(carrier)

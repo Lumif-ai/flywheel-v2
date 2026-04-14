@@ -11,7 +11,7 @@ import {
 
 const BROKER_NAV = [
   { label: 'Dashboard', to: '/broker',          icon: Home,         match: (p: string) => p === '/broker' },
-  { label: 'Email',     to: '/email',            icon: Mail,         match: (p: string) => p.startsWith('/email') },
+  { label: 'Email',     to: '/broker/email',     icon: Mail,         match: (p: string) => p.startsWith('/broker/email') },
   { label: 'Projects',  to: '/broker/projects',  icon: FolderKanban, match: (p: string) => p.startsWith('/broker/projects') },
   { label: 'Carriers',  to: '/broker/carriers',  icon: Shield,       match: (p: string) => p.startsWith('/broker/carriers') },
 ] as const

@@ -186,7 +186,7 @@ export function AppRoutes() {
         <Route path="carriers" element={<Suspense fallback={null}><BrokerCarriersPage /></Suspense>} />
         {/* Redirects for removed routes */}
         <Route path="settings/carriers" element={<Navigate to="/broker/carriers" replace />} />
-        <Route path="email" element={<Navigate to="/email" replace />} />
+        <Route path="email" element={<Suspense fallback={null}><EmailPage /></Suspense>} />
         <Route path="clients" element={<Navigate to="/broker/projects" replace />} />
       </Route>
       {/* Legacy relationship routes -> pipeline with filter */}

@@ -119,6 +119,7 @@ export interface CarrierConfig {
   min_project_value: number | null
   max_project_value: number | null
   avg_response_days: number | null
+  portal_limit: number | null
   notes: string | null
   created_at: string
   updated_at: string
@@ -158,6 +159,7 @@ export interface CreateCarrierPayload {
   min_project_value?: number | null
   max_project_value?: number | null
   avg_response_days?: number | null
+  portal_limit?: number | null
   notes?: string | null
 }
 
@@ -172,6 +174,7 @@ export interface UpdateCarrierPayload {
   min_project_value?: number | null
   max_project_value?: number | null
   avg_response_days?: number | null
+  portal_limit?: number | null
   notes?: string | null
   is_active?: boolean
 }

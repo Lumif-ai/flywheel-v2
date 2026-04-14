@@ -56,6 +56,13 @@ const columnDefs: ColDef<CarrierConfig>[] = [
   { field: 'carrier_name', headerName: 'Name', flex: 2, minWidth: 180 },
   { field: 'carrier_type', headerName: 'Type', flex: 1, minWidth: 100 },
   { field: 'submission_method', headerName: 'Method', flex: 1, minWidth: 100 },
+  {
+    field: 'portal_limit',
+    headerName: 'Portal Threshold',
+    flex: 1,
+    minWidth: 120,
+    valueFormatter: (params) => params.value != null ? `$${params.value.toLocaleString()}` : '',
+  },
   { field: 'email_address', headerName: 'Email', flex: 1.5, minWidth: 160 },
   {
     field: 'coverage_types',

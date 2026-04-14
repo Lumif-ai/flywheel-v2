@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-14)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables — the founder's daily operating system
-**Current focus:** v17.0 Broker Frontend MVP — Phase 122 (Shared Module Toolkit)
+**Current focus:** v17.0 Broker Frontend MVP — Phase 128 (Carriers Page Route Cleanup)
 
 ## Current Position
 
 Milestone: v17.0 Broker Frontend MVP
-Phase: 123 of 128 (Backend New Endpoints)
-Plan: 2 of 2 (complete)
-Status: Phase 123 Complete
-Last activity: 2026-04-14 — dashboard-tasks + export-comparison endpoints added
+Phase: 128.1 of 128.1 (Tenant Name Fix)
+Plan: 1 of 1 (complete)
+Status: Complete
+Last activity: 2026-04-14 — Phase 128.1 Plan 01 complete (generic domain guard, tenant name resolution, sidebar branding)
 
-Progress: [██░░░░░░░░] 14%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -56,11 +56,37 @@ v17.0:
 - Zero new dependencies — entire stack already installed
 - Three separate queries for gate-counts over UNION — clarity and independent filterability
 - exists() subquery for approve gate — check pending carrier drafts without loading rows
+- Checkpoint auto-approved in autonomous mode when tsc + build pass — no human verification needed for compile-clean UI changes
+- URL tab sync via useSearchParams with replace:true to avoid history pollution
+- Thin tab wrapper pattern — tabs are pure import-and-render with projectId, no local state or data fetching
+- Step indicator colors derived from project status progression order
+- Back link navigates to /broker/projects not /broker dashboard
+- ClientProfile uses getStr helper with fallback key arrays for flexible metadata schema
+- Documents section casts metadata.documents as array with filter(Boolean) safety
+- ConfidenceDot as local component in CoverageTab rather than shared -- small and coverage-specific
+- Insurance/surety category split mirrors GapAnalysis.tsx logic for consistency
+- Z-index layering for sticky table: z-30 corners, z-20 header/footer, z-10 first column
+- Difference filter fallback: show all rows when filter would empty table
+- Totals computed over full coverages list, not filtered subset
+- Carrier filtering strips quotes from rows, not rows from table — empty cells visible
+- At-least-one-carrier guard prevents deselecting all carriers
+- Shared form extraction pattern: types + constants + conversion helpers + component in one file for cross-page reuse
+- ag-grid action column callbacks via context prop with separate renderer component
+- Clients redirect targets /broker/projects -- client profile lives on project Overview tab
+- Email sidebar links to shared /email route, not broker-specific page
+- Sidebar always shows "Flywheel" brand, not tenant name -- dropdown retains tenant names
+- Generic domain guard applied to both promote and promote-oauth flows
+- Company.name set to None for generic domains -- intel skill populates real name later
+- Shared GENERIC_DOMAINS constant in flywheel.utils.domains replaces all inline domain lists
 
 ### Pending Todos
 
 - Title matching false positives in _filter_unprepped (requires meeting_id on SkillRun — deferred from 66.1)
 - Private import coupling in flywheel_ritual.py (documented as tech debt)
+
+### Roadmap Evolution
+
+- Phase 128.1 inserted after Phase 128: Tenant Name Fix — sidebar always "Flywheel", generic domain guard, company name resolution priority (URGENT)
 
 ### Blockers/Concerns
 
@@ -69,5 +95,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-14
-Stopped at: Completed 123-02-PLAN.md — Phase 123 complete, all backend endpoints done
+Stopped at: Completed 128.1-01-PLAN.md — generic domain guard, tenant name resolution, sidebar branding (Phase 128.1 complete)
 Resume file: None

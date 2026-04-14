@@ -18,6 +18,7 @@ export interface CarrierFormState {
   carrier_type: string
   submission_method: string
   portal_url: string
+  portal_limit: string
   email_address: string
   coverage_types: string
   regions: string
@@ -32,6 +33,7 @@ export const EMPTY_FORM: CarrierFormState = {
   carrier_type: 'insurance',
   submission_method: 'email',
   portal_url: '',
+  portal_limit: '',
   email_address: '',
   coverage_types: '',
   regions: '',
@@ -47,6 +49,7 @@ export function carrierToForm(carrier: CarrierConfig): CarrierFormState {
     carrier_type: carrier.carrier_type,
     submission_method: carrier.submission_method,
     portal_url: carrier.portal_url ?? '',
+    portal_limit: carrier.portal_limit != null ? String(carrier.portal_limit) : '',
     email_address: carrier.email_address ?? '',
     coverage_types: (carrier.coverage_types ?? []).join(', '),
     regions: (carrier.regions ?? []).join(', '),
@@ -63,6 +66,7 @@ export function formToPayload(form: CarrierFormState): CreateCarrierPayload {
     carrier_type: form.carrier_type,
     submission_method: form.submission_method,
     portal_url: form.portal_url.trim() || null,
+    portal_limit: form.portal_limit ? Number(form.portal_limit) : null,
     email_address: form.email_address.trim() || null,
     coverage_types: form.coverage_types
       .split(',')
@@ -132,9 +136,21 @@ export function CarrierForm({
       </div>
 
       {form.submission_method === 'portal' && (
-        <div className="space-y-2">
-          <label className="text-sm font-medium">Portal URL</label>
-          <Input value={form.portal_url} onChange={set('portal_url')} placeholder="https://portal.carrier.com" />
+        <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Portal URL</label>
+            <Input value={form.portal_url} onChange={set('portal_url')} placeholder="https://portal.carrier.com" />
+          </div>
+          <div className="space-y-2">
+            <label className="text-sm font-medium">Portal Threshold ($)</label>
+            <Input
+              type="number"
+              value={form.portal_limit}
+              onChange={set('portal_limit')}
+              placeholder="e.g. 500000"
+            />
+            <p className="text-xs text-muted-foreground">Projects above this value use portal submission</p>
+          </div>
         </div>
       )}
 
