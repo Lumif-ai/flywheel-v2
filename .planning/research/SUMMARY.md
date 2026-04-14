@@ -1,176 +1,186 @@
 # Project Research Summary
 
-**Project:** Flywheel V2 — Structured Skill Output + Export + Upload + PII
-**Domain:** AI-powered document generation with structured output, multi-format export, file input, and PII redaction
-**Researched:** 2026-04-10
+**Project:** Broker Frontend MVP
+**Domain:** Insurance broker workflow management (comparison tools, project management, Excel deliverables)
+**Researched:** 2026-04-14
 **Confidence:** HIGH
 
 ## Executive Summary
 
-This milestone completes the output pipeline for Flywheel's skill engine: getting rich structured documents out of LLM skills and into user hands as polished PDFs, editable DOCX files, and interactive web views. The underlying infrastructure is largely in place — file upload, text extraction, HTML rendering, and export endpoints all exist. The primary work is wiring these systems together, filling dependency gaps, and extending the one-pager structured output pattern to additional skill types such as legal review.
+This is a frontend build-out on top of a complete backend (28 endpoints, 6 tables, 7 AI engines, 17 existing components). The project adds the missing UI surface that transforms a working API into a usable product. The core challenge is NOT technical novelty — the stack is already decided, the patterns are already proven in the codebase, and zero new dependencies are required. The challenge is disciplined execution: build in the right order to avoid regressions, preserve existing business logic during component rewrites, and avoid the CSS/ag-grid traps that look simple but cause production bugs.
 
-The recommended approach is to follow the one-pager precedent precisely for every new structured skill. This pattern is proven end-to-end across backend rendering (Jinja2 templates), frontend display (typed React renderers with type guards), and export (PDF via WeasyPrint, DOCX via python-docx). The biggest infrastructure gap is that WeasyPrint — already imported by the export service — is missing from pyproject.toml and from the Docker image's system libraries. This must be fixed before PDF export can reach production. PII redaction is the most complex new capability, requiring a service port from the archived pii-redactor skill plus an on-demand architecture that redacts at export/share time rather than before storage.
+The recommended approach is phased, dependency-first construction: extract shared infrastructure before building on it, build layout-level components before page-level ones, and build the comparison matrix (the crown jewel feature) only after the tab structure it lives in is stable. The 3-gate workflow (review extractions → approve solicitations → export comparison) maps to a natural build sequence that produces usable value at each phase.
 
-The key risk is fragile JSON parsing throughout the stack. The one-pager skill currently relies on prompt-only JSON enforcement, with bare JSON.parse in the frontend and startswith("{") detection on the backend. Upgrading to Anthropic's structured outputs API (output_config) eliminates this class of bug at the token level and should be the first architectural improvement. PII redaction carries a secondary risk of false positives destroying business-critical content (company names misidentified as PERSON entities); mitigation requires a restricted entity list, a score threshold, and a user preview before redaction is finalized.
+The primary risk is regressions on the existing GTM pipeline module during ag-grid infrastructure extraction. The secondary risk is the CSS sticky comparison matrix failing silently in Chrome when ancestor elements have overflow set. Both risks have clear mitigations: copy-first extraction with smoke testing, and using ag-grid pinned columns or CSS Grid instead of table-element sticky. The Excel export has one non-obvious pitfall: openpyxl workbook generation is synchronous and must be offloaded to a thread pool with `run_in_executor` to avoid blocking FastAPI's event loop.
 
 ## Key Findings
 
 ### Recommended Stack
 
-Most required technology is already installed. The only new pip dependencies are WeasyPrint (PDF generation), presidio-analyzer + presidio-anonymizer + spaCy (PII redaction), and an Anthropic SDK version bump from 0.84.0 to >=0.93.0 to enable native structured outputs. The SDK upgrade is the highest-leverage change: it replaces brittle prompt-only JSON enforcement with constrained decoding that guarantees schema-valid output.
-
-WeasyPrint requires system C libraries (Cairo, Pango, GDK-Pixbuf, libffi) that must be added to the Dockerfile before deployment — missing these causes a silent runtime ImportError that the export endpoint catches and converts to HTTP 501. For PII, the small spaCy model (en_core_web_sm, ~12MB) is recommended over en_core_web_lg (~560MB): Presidio's regex-based recognizers handle most structured PII (email, phone, SSN), and spaCy NER is only needed for names/organizations where the accuracy delta is negligible.
+No new dependencies are needed. Every feature in the spec maps to technologies already installed and used in production. React 19, Vite 6, TypeScript 5.5, Tailwind CSS 4, react-router 7, TanStack Query 5, Zustand 5, ag-grid Community 35, shadcn/ui (27 components installed), and openpyxl (system-wide Python) cover everything. The ag-grid Enterprise license (required for built-in Excel export) is correctly excluded — backend-generated xlsx via openpyxl is the right approach and matches the existing StreamingResponse download pattern already used twice in the codebase.
 
 **Core technologies:**
-- `anthropic>=0.93.0`: Structured outputs via `output_config` — eliminates JSON parse failures
-- `weasyprint>=68.0`: HTML-to-PDF using existing Jinja2 templates — only viable option with full CSS3 support
-- `presidio-analyzer + presidio-anonymizer>=2.2.362`: Local PII detection and anonymization — avoids external API cost and data egress
-- `spacy>=3.7` with `en_core_web_sm`: NLP engine for Presidio — small model, negligible accuracy tradeoff
-- `python-docx>=1.2.0`: Already installed; write path generates DOCX from structured JSON
+- React 19 + TypeScript 5.5: UI framework — already in use everywhere, no changes
+- ag-grid Community 35: interactive data grids — proven in pipeline module; broker extracts shared theme + renderers
+- shadcn/ui: component primitives — 27 components installed including Tabs, Badge, Dialog, Skeleton
+- TanStack Query 5: server state and polling — all existing broker hooks already use it
+- Native HTML table + Tailwind CSS sticky: comparison matrix — simpler and more correct than ag-grid for read-only multi-sticky layout
+- openpyxl + FastAPI StreamingResponse: Excel export — pattern already proven in documents.py and tenant.py
+- react-router useSearchParams: tab state in URL — already used in PipelinePage for filter state
 
 ### Expected Features
 
 **Must have (table stakes):**
-- PDF and DOCX export working end-to-end — code exists, dependencies missing; highest ROI fix
-- Export formatting that matches the web view — PDF path is solid; generic DOCX needs markdown heading/list parsing
-- File upload as skill input — backend pipeline complete; frontend file picker is the missing piece
-- Upload progress feedback — three-phase UX: uploading → extracting text → running skill
-- Structured JSON output for skills requiring typed rendering — one-pager pattern established; extend to legal review
-- Legal review renderer with risk visualization — severity badges, clause breakdown; backend template exists, React renderer does not
+- Side-by-side comparison matrix with frozen first column — brokers use Excel for this today; without it the tool has no value proposition
+- Coverage gap and exclusion visibility with critical exclusion alert box above matrix — brokers carry E&O liability; missed exclusions are career-ending
+- Excel export as .xlsx with two sheets (Insurance + Surety) — this is the actual deliverable that goes to the client
+- Task list ordered by urgency on dashboard — broker opens app 2x/day needing "what requires my attention and in what order"
+- Insurance vs Surety tab separation — Mexico construction requires both; mixing them is a domain error
+- Solicitation email review and approval — Gate 2 components exist; polish is needed
 
 **Should have (differentiators):**
-- PII redaction as a service before skill output is shared externally
-- PII audit trail surfaced in legal review viewer — "we protected 12 entities"
-- Intent-based export labels — "Share as PDF" vs "Edit in Word" instead of format names
-- Multi-file upload for skill input — infrastructure supports it; frontend and prompt framing needed
-- Inline PII preview before skill runs — show highlighted spans, user confirms
+- "Show Differences Only" toggle (default ON) — cuts matrix noise by 40-60%; Tufte-inspired data reduction
+- Two-row cell layout (premium bold top, limit+deductible muted below) — premium UI matching broker mental model
+- Persistent gate strip on every broker page ("Review: 3 | Approve: 1 | Export: 2") — eliminates dashboard round-trips
+- Horizontal step indicator on project detail (Extract > Review > Solicit > Compare > Deliver)
+- Carrier selection checkboxes in matrix headers — controls which carriers appear in Excel export
+- "Highlight Best Values" toggle (off by default) — safety colors always visible; competitive colors opt-in
+- Total premium sticky row at matrix bottom — the bottom-line number brokers and clients care most about
 
 **Defer (v2+):**
-- Multi-file upload (single-file first, multi-file is Phase 2)
-- Inline PII highlighting (show summary count first)
-- Schema registry for structured outputs (needed at 4+ structured skills, not 2)
-- Brand customization on exports (enterprise tier)
-- Shareable one-pager as standalone branded web page
+- Carrier roster management improvements — existing CarrierSettings.tsx is adequate for MVP
+- Client profile section on Overview tab — project info sidebar covers key metadata
+- TCOR (Total Cost of Risk) calculation — complex actuarial, separate InsurTech product
+- Analytics/reporting dashboard — win rates, placement time; separate module, not operational
+- Commission tracking — different data model, different regulatory requirements (Mexico CNSF)
 
 ### Architecture Approach
 
-The system follows a layered pipeline: skills execute via a tool_use loop in skill_executor.py, producing raw output stored in SkillRun.output; the output renderer converts this to HTML stored in SkillRun.rendered_html; the export service converts rendered HTML to PDF (via WeasyPrint) or structured JSON to DOCX (via python-docx); and the frontend's SkillRenderer dispatches to typed React renderers based on JSON type guards. Every new structured skill type requires coordinated additions across exactly four locations: TypeScript types + type guard, React renderer component, Jinja2 HTML template, and DOCX export branch in document_export.py. PII redaction belongs at the export/share boundary only — inserting it pre-storage destroys data that skills need (attendee names in meeting prep, emails in outreach).
+The architecture has four major structural decisions: (1) extract ag-grid infrastructure from pipeline to a shared module before broker uses it; (2) build the comparison matrix as a native HTML table with CSS sticky rather than ag-grid; (3) mount the gate strip in AppShell layout (not per-page) to prevent mount/unmount flicker and duplicate polling; (4) use `?tab=` URL query params with `replace: true` for tab state, matching the proven PipelinePage pattern.
 
 **Major components:**
-1. `skill_executor.py` — tool_use loop, file_ids resolution, structured output config injection
-2. `output_renderer.py` — TYPE_MAP dispatch, Jinja2 template rendering, HTML standalone wrapping for PDF
-3. `document_export.py` — PDF (WeasyPrint) and DOCX (python-docx) generation with structured data branches
-4. `pii_redactor.py` (new) — Presidio-based service called at export/share time, not during execution
-5. `SkillRenderer.tsx` — frontend dispatch hub via type guards to dedicated renderers
-6. `{Type}Renderer.tsx` components — rich interactive display of typed structured JSON
+1. `src/shared/grid/` — extracted theme, 4 generic cell renderers (DateCell, StatusPill, ExpandToggleCell, CurrencyCell), and `useColumnPersistence(storageKey)` hook; foundation for both pipeline and broker
+2. `BrokerGateStrip` in AppShell layout — persistent gate counts polling at 60s; renders null for non-broker tenants; single instance prevents duplicate fetches
+3. `BrokerProjectDetail` redesign — 5 tabs (Overview/Coverage/Carriers/Quotes/Compare) with `?tab=` URL state and step indicator above tabs
+4. `comparison/` subfolder — `ComparisonView` orchestrator, `ComparisonMatrix` (enhanced HTML table), `ComparisonCell` (two-row), `CriticalAlertBox`, `ComparisonToolbar`; the product's core deliverable surface
+5. `BrokerDashboard` redesign — task list ordered by urgency replaces KPI cards; requires new dashboard aggregation backend endpoint
+6. `ProjectsTable` — ag-grid adoption for projects list using shared grid toolkit
+7. Excel export — `GET /broker/projects/:id/export-comparison` returns StreamingResponse; frontend uses fetch + Blob + createObjectURL
 
 ### Critical Pitfalls
 
-1. **WeasyPrint not in dependencies + missing Docker system libs** — Add `weasyprint>=68.0` to pyproject.toml AND add `libpango1.0-0 libcairo2 libgdk-pixbuf2.0-0 libffi-dev` to Dockerfile before pip install. Failure mode is a silent runtime ImportError → HTTP 501 in production.
+1. **ag-grid extraction breaks pipeline** — PipelinePage.tsx is 757 lines with deeply coupled state. Moving cell renderers without updating all imports causes pipeline grid to silently render blank. Prevention: copy-first (shared is a copy, not a move), smoke-test `/pipeline` after every file move, TypeScript strict mode catches wrong paths at build time.
 
-2. **LLM JSON output is prompt-only enforced** — Migrate skills that require structured output to Anthropic's `output_config` API. Add a robust `_extract_json()` utility (strip markdown fences, find outermost `{}`/`[]`) as fallback. Never use bare JSON.parse without extraction preprocessing.
+2. **CSS sticky fails silently in Chrome on table elements** — Chrome has known bugs with `position: sticky` on `<td>/<th>` when any ancestor has `overflow: auto/hidden/scroll`. Current ComparisonMatrix has no sticky — the spec adds it. Prevention: use ag-grid `pinned: 'left'` (proven in PipelinePage) OR switch matrix to CSS Grid layout. Test in Chrome specifically.
 
-3. **PDF export blocks the async event loop** — Wrap `export_as_pdf()` in `asyncio.to_thread()`. WeasyPrint is CPU-bound and will stall all concurrent requests for 2-10 seconds per export.
+3. **CoverageTable inline edit loses `is_manual_override` flag during ag-grid migration** — ag-grid's `onCellValueChanged` replaces React-controlled inputs. The `is_manual_override: true` flag must survive the migration or the system treats manual corrections as AI extractions. Prevention: document all edit logic before rewriting; verify PATCH includes `is_manual_override: true` in network tab.
 
-4. **XSS via unsanitized HTML in export** — `_wrap_fragment_as_document()` in `document_export.py` skips the existing `sanitize_html()` function before serving HTML to browsers. Import and apply it consistently.
+4. **Excel export blocks FastAPI event loop** — openpyxl's `Workbook.save()` is synchronous CPU-bound. Running directly in async route freezes all concurrent requests for 50-200ms. Prevention: wrap workbook generation in `asyncio.run_in_executor(None, _build_workbook_sync, data)`.
 
-5. **Presidio false positives destroy business content** — Start with a restricted entity list (EMAIL_ADDRESS, PHONE_NUMBER, US_SSN only), set `score_threshold=0.7`, and build a domain allow-list for company/product names from the context store. Never redact silently — always show users a preview count and offer a review step.
+5. **Gate strip polling storm** — If gate strip is placed per-page instead of in layout, it remounts on navigation and creates duplicate polling. Prevention: single instance in AppShell, `refetchInterval: 60_000`, `staleTime: 25_000`; invalidate on project-status-changing mutations.
 
 ## Implications for Roadmap
 
-Based on combined research, the dependency graph and code readiness point to four natural phases:
+Based on research, suggested phase structure (7 phases):
 
-### Phase 1: Foundation Fixes + Export Working
-**Rationale:** The highest ROI work is making already-written code actually work in production. WeasyPrint dependency gaps and JSON fragility are blocking issues that affect everything downstream. Fix infrastructure before building features on top of it.
-**Delivers:** Working PDF export, working DOCX export, structured JSON output enforced by API (not prompt), hardened JSON extraction utility
-**Addresses:** PDF/DOCX export table stakes, export formatting fidelity
-**Avoids:** Pitfall 1 (WeasyPrint deps), Pitfall 2 (fragile JSON), Pitfall 4 (async blocking), Pitfall 5 (XSS)
-**Stack:** `anthropic>=0.93.0` upgrade, WeasyPrint system deps in Dockerfile, `asyncio.to_thread` for export
-**Research flag:** SKIP — all patterns are documented and code exists; no unknowns
+### Phase 1: Shared ag-grid Toolkit Extraction
+**Rationale:** Foundation that both pipeline and broker consume. Must be stable before any broker grid component is built. Doing this first ensures GTM never regresses and broker starts from a clean shared import surface.
+**Delivers:** `src/shared/grid/` with theme, 4 generic cell renderers, and `useColumnPersistence(storageKey)` hook; pipeline updated to import from shared; smoke test on `/pipeline` passes.
+**Addresses:** Prerequisite for project table, coverage table, carriers table
+**Avoids:** Pitfall 1 (pipeline breakage), Pitfall 7 (ag-grid version mismatch), Pitfall 9 (localStorage key collision)
 
-### Phase 2: Structured Legal Review Skill
-**Rationale:** Extending the one-pager pattern to a second skill type proves the pattern scales and delivers user value. Legal review is the natural second structured skill: backend Jinja2 template already exists, only the React renderer and TypeScript types are missing.
-**Delivers:** `LegalReviewData` TypeScript interface + type guard, `LegalReviewRenderer.tsx` with severity badges and clause breakdown, legal review DOCX export branch
-**Addresses:** Legal review structured rendering (table stakes), structured JSON schema extensibility
-**Avoids:** Pitfall 13 (optional fields must be marked optional in types), Pitfall 6 (dynamic DOCX column count), Pitfall 14 (centralized JSON extraction)
-**Uses:** Structured outputs API from Phase 1
-**Research flag:** SKIP — follows one-pager pattern exactly, all patterns documented in ARCHITECTURE.md
+### Phase 2: Gate Strip + Dashboard Redesign
+**Rationale:** Gate strip lives in AppShell layout — touching layout.tsx early, before other changes accumulate, reduces conflict risk. Dashboard task list is self-contained with new backend endpoints. Both require the same new backend aggregation endpoints so they bundle naturally.
+**Delivers:** Persistent gate strip on all broker pages; dashboard task list replacing KPI cards; `GET /broker/gate-counts` and `GET /broker/dashboard-tasks` backend endpoints; `useGateCounts` and `useDashboardTasks` hooks.
+**Avoids:** Pitfall 5 (polling storm — layout-level only, 60s interval), Pitfall 11 (BrokerGuard flash — gate strip inside guard)
 
-### Phase 3: File Upload for Skill Input
-**Rationale:** Backend file upload, extraction, and executor wiring all exist. The only missing piece is a frontend file picker in the skill run UI. This unblocks users from running legal review and competitive analysis on their own documents.
-**Delivers:** File upload dropzone in skill input form, `file_ids` field on `StartRunRequest`, file text injection into skill system prompt, three-phase progress UX (uploading → extracting → running)
-**Addresses:** File upload table stakes, upload progress feedback
-**Avoids:** Pitfall 8 (file security: magic byte validation, size limits, tenant-scoped storage, temp file cleanup)
-**Uses:** Existing `api/files.py`, `UploadedFile` model, executor's `extracted_text` resolution
-**Research flag:** SKIP — backend infrastructure complete, pattern is Option B from ARCHITECTURE.md
+### Phase 3: Tabbed Project Detail + Step Indicator
+**Rationale:** Structural change that all tab content hangs off. Must be stable before comparison matrix (Phase 5). Tab routing via `useSearchParams` is identical to the proven PipelinePage pattern — no unknowns.
+**Delivers:** BrokerProjectDetail redesigned with 5 tabs and step indicator; `?tab=` URL state with `replace: true`; existing components (CoverageTab, CarriersTab, QuotesTab) moved into tab structure.
+**Avoids:** Pitfall 6 (back button history pollution — use `replace: true`)
 
-### Phase 4: PII Redaction Service
-**Rationale:** Most complex new capability, deliberately deferred until the simpler features are stable. PII redaction at export/share boundary is architecturally clean and doesn't require touching the execution path. Port from the archived pii-redactor skill which has 560 lines of production-ready Presidio code.
-**Delivers:** `services/pii_redactor.py` service module, `redact_pii` query param on export endpoint, auto-redaction on shared document links, PII audit trail section in legal review renderer
-**Addresses:** PII redaction differentiator, PII audit trail, user trust for legal document processing
-**Avoids:** Pitfall 9 (false positives — restricted entity list, score threshold, allow-list), Pitfall 10 (model size — use en_core_web_sm, lazy-load singleton)
-**Uses:** `presidio-analyzer`, `presidio-anonymizer`, `spacy en_core_web_sm`
-**Research flag:** NEEDS PHASE RESEARCH — Presidio entity configuration for B2B sales context (company names, deal terminology) needs calibration against real Flywheel documents before finalizing the allow-list and score thresholds
+### Phase 4: Projects List Page (ag-grid Adoption)
+**Rationale:** Replaces HTML ProjectTable with ag-grid using shared toolkit. Self-contained. Can run in parallel with Phase 3. Delivers immediate sort/filter/search value.
+**Delivers:** ProjectsTable with ag-grid, status filter chips, search by name/client, sort by days-in-stage.
+**Avoids:** Pitfall 7 (import pattern must match pipeline exactly), Pitfall 9 (unique localStorage key)
+
+### Phase 5: Comparison Matrix Rebuild
+**Rationale:** Most complex component. Builds on stable tab structure from Phase 3. Requires the most careful CSS/layout work. Build after foundation is solid.
+**Delivers:** ComparisonMatrix with Insurance/Surety tabs; frozen first column + sticky headers; two-row ComparisonCell; CriticalAlertBox above tabs; "Show Differences Only" toggle; "Highlight Best Values" toggle; carrier checkboxes in headers; total premium sticky row.
+**Avoids:** Pitfall 3 (CSS sticky Chrome bugs — test in Chrome, use pinned columns as fallback), Pitfall 8 (two-row cell height — fixed 64px rowHeight, not autoHeight)
+
+### Phase 6: Excel Export
+**Rationale:** Simple once comparison data is available from Phase 5. One non-obvious pitfall (event loop) with a documented fix. Backend pattern already exists twice in the codebase.
+**Delivers:** Export endpoint returning formatted .xlsx with two sheets (Insurance + Surety), color fills, exclusion summary; frontend download via fetch + Blob + createObjectURL.
+**Avoids:** Pitfall 4 (event loop blocking — wrap openpyxl in `run_in_executor`)
+
+### Phase 7: CoverageTable ag-grid Migration + Polish
+**Rationale:** CoverageTable migration is the highest-risk individual component change due to `is_manual_override` business logic. Defer to last so it doesn't destabilize earlier phases. Polish bundles here.
+**Delivers:** CoverageTable on ag-grid with working inline edit; `is_manual_override: true` preserved; empty states for key screens; final UX polish.
+**Avoids:** Pitfall 2 (business logic loss — document full edit flow before rewriting)
 
 ### Phase Ordering Rationale
 
-- Phase 1 first because broken dependencies and fragile JSON parsing cascade into all other phases. Building on a cracked foundation wastes effort.
-- Phase 2 before Phase 3 because legal review is the primary use case for file upload. Having the renderer ready means file upload immediately surfaces rich output rather than markdown fallback.
-- Phase 3 before Phase 4 because PII redaction is most valuable on user-uploaded documents (contracts, NDAs). Without file upload, PII redaction has limited real-world testing surface.
-- Phase 4 last because it's the only phase with genuine unknowns (Presidio calibration) and requires Phases 2+3 to have meaningful test documents.
+- Phases 1 → 5 → 6 are a hard dependency chain: shared grid before broker grids; tab structure before comparison matrix; matrix before Excel export
+- Phases 2 and 3 can run in parallel (no shared files)
+- Phases 3 and 4 can run in parallel after Phase 1 completes
+- Phase 7 is deliberately last because it rewrites a working component with business logic risk
+- Each phase delivers usable value: Phase 2 makes every page more useful; Phase 3 makes existing components accessible; Phase 5 is the product's core deliverable
 
 ### Research Flags
 
-Phases needing deeper research during planning:
-- **Phase 4 (PII Redaction):** Presidio false positive rate in B2B sales context needs empirical calibration. Need to run against real Flywheel meeting prep output, company intel, and legal review documents to tune entity list and score thresholds. The archived `redact.py` has the scaffolding but entity configuration was CLI-oriented, not service-oriented.
+Phases likely needing deeper research during planning:
+- **Phase 5 (Comparison Matrix):** CSS sticky on table elements in Chrome has documented failure modes. Planning must explicitly choose between HTML table sticky vs ag-grid `pinned: 'left'` approach before implementation begins. A 30-minute prototype during planning would de-risk the choice.
 
 Phases with standard patterns (skip research-phase):
-- **Phase 1:** All changes are dependency additions and known async patterns. Official docs exist for all.
-- **Phase 2:** Exact copy of one-pager pattern, fully documented in codebase.
-- **Phase 3:** Option B architecture (file_ids on StartRunRequest) is well-specified in ARCHITECTURE.md.
+- **Phase 1:** Pure refactor of existing code. TypeScript and smoke tests validate correctness.
+- **Phase 2:** Standard polling + layout injection patterns. Backend aggregation endpoint design is the only open question (see Gaps).
+- **Phase 3:** Identical to proven PipelinePage useSearchParams pattern.
+- **Phase 4:** Uses shared toolkit from Phase 1. Standard ag-grid configuration.
+- **Phase 6:** StreamingResponse pattern already exists. `run_in_executor` is documented standard.
+- **Phase 7:** Risk is business logic preservation, not pattern research. Pre-flight documentation is the mitigation.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | All packages verified on PyPI. Anthropic SDK structured output API verified against official docs. WeasyPrint system deps verified from official installation docs. |
-| Features | HIGH | Based on direct codebase analysis. Existing code status verified line-by-line. Feature priorities derived from concrete code gaps, not speculation. |
-| Architecture | HIGH | Based entirely on reading the actual codebase (skill_executor.py, output_renderer.py, document_export.py, SkillRenderer.tsx). One-pager pattern is proven in production. |
-| Pitfalls | HIGH | Critical pitfalls verified by reading specific file + line numbers in the pre-GSD code. WeasyPrint Docker issue verified via GitHub issues. Presidio false positive rate cited from official evaluation docs. |
+| Stack | HIGH | Direct package.json inspection + codebase analysis. Zero new dependencies means zero compatibility uncertainty. |
+| Features | HIGH | Approved spec (SPEC-BROKER-FRONTEND-MVP.md) + domain research on major broker AMS systems validates feature set. Mexico construction specifics (seguros + fianzas) well-documented. |
+| Architecture | HIGH | All recommendations from reading actual production code with specific line numbers cited. Patterns verified as working in existing codebase. |
+| Pitfalls | HIGH (codebase) / MEDIUM (CSS, openpyxl) | Pitfalls 1, 2, 7, 9, 12 from direct code analysis. Pitfalls 3, 4, 5, 6, 8 from web research with multiple source agreement. |
 
 **Overall confidence:** HIGH
 
 ### Gaps to Address
 
-- **Structured outputs + tool_use interaction in production:** The Anthropic docs confirm these are compatible, but behavior when `output_config` is set and the model makes multiple tool_use rounds before `end_turn` needs empirical verification in the executor. Test this early in Phase 1 implementation.
-- **WeasyPrint Docker image size:** Adding system libs adds 150-250MB to the image. Whether this is acceptable for Railway deployment tiers needs a check against the current image size and Railway limits.
-- **Presidio entity calibration:** The specific allow-list and score thresholds for Flywheel's B2B domain cannot be determined from research alone — they require testing against real documents. Phase 4 must include a calibration step before final wiring.
+- **CSS sticky vs ag-grid pinned decision for comparison matrix:** Both solutions are viable but require different implementations. Phase 5 planning should explicitly choose the approach, ideally with a quick prototype to validate before full implementation.
+- **Dashboard aggregation endpoint urgency scoring:** The algorithm for ordering tasks by urgency (days waiting + gate type weighting) is not fully specified in research. Phase 2 planning should spec the urgency model before backend implementation begins.
+- **Gate-counts query performance at scale:** For MVP (< 100 projects per tenant), a simple COUNT with WHERE clauses is fine. Flag for monitoring post-launch. If tenant project counts grow, an indexed view may be needed.
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- `backend/src/flywheel/services/skill_executor.py` — execution flow, tool_use loop, file handling
-- `backend/src/flywheel/engines/output_renderer.py` — rendering pipeline, TYPE_MAP, structured data detection
-- `backend/src/flywheel/services/document_export.py` — PDF/DOCX generation, structured branches
-- `backend/src/flywheel/api/documents.py` — export endpoint, HTML content serving
-- `backend/src/flywheel/api/files.py` — file upload, text extraction pipeline
-- `frontend/src/features/documents/components/renderers/SkillRenderer.tsx` — frontend dispatch
-- `frontend/src/features/documents/components/renderers/OnePagerRenderer.tsx` — structured renderer pattern
-- `frontend/src/features/documents/types/one-pager.ts` — TypeScript type + type guard pattern
-- `skills/_archived/pii-redactor/scripts/redact.py` — Presidio implementation (560 lines)
-- [Anthropic Structured Outputs docs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) — structured output API
-- [Anthropic Python SDK PyPI](https://pypi.org/project/anthropic/) — v0.93.0 confirmed
-- [WeasyPrint PyPI](https://pypi.org/project/weasyprint/) — v68.1 confirmed
-- [WeasyPrint installation docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) — system deps
-- [Presidio analyzer PyPI](https://pypi.org/project/presidio-analyzer/) — v2.2.362 confirmed
-- [Presidio installation docs](https://microsoft.github.io/presidio/installation/) — setup
-- [python-docx docs](https://python-docx.readthedocs.io/en/latest/user/quickstart.html) — write API
+- `SPEC-BROKER-FRONTEND-MVP.md` — approved spec, post board review
+- `frontend/package.json` — direct dependency inspection
+- `frontend/src/features/pipeline/` — ag-grid patterns (PipelinePage.tsx 757 lines), 13 cell renderers, usePipelineColumns.ts 167 lines
+- `frontend/src/features/broker/` — 17 existing components, API functions, hooks, types
+- `frontend/src/app/layout.tsx` — AppShell architecture, SidebarInset structure
+- `backend/src/flywheel/api/documents.py` (lines 638-690) — StreamingResponse download pattern
+- `backend/src/flywheel/api/broker.py` — existing broker API patterns
 
 ### Secondary (MEDIUM confidence)
-- [spaCy models page](https://spacy.io/models) — sm vs lg accuracy comparison
-- [Presidio false positive analysis](https://anonym.legal/blog/false-positive-tax-pii-detection-precision-2025) — 22.7% precision in enterprise datasets
-- [WeasyPrint Docker GitHub issues](https://github.com/Kozea/WeasyPrint/issues/2221) — Railway-specific gobject dependency
+- [CSS-Tricks: Sticky header + sticky first column](https://css-tricks.com/a-table-with-both-a-sticky-header-and-a-sticky-first-column/) — sticky table implementation
+- [Polypane: All the ways position:sticky can fail](https://polypane.app/blog/getting-stuck-all-the-ways-position-sticky-can-fail/) — Chrome overflow ancestor failure modes
+- [AG Grid migration docs](https://www.ag-grid.com/react-data-grid/migration/) — module system compatibility
+- [AMS Comparison 2026: Epic vs HawkSoft vs AMS360](https://www.quotesweep.com/blog/ams-comparison-2026) — broker feature benchmarking
+- [Howden Mexico Surety Solutions](https://www.howdengroup.com/mx-es/world-class-surety-insurance-solutions) — Mexico fianza market validation
+- [TanStack Query polling patterns](https://javascript.plainenglish.io/tanstack-query-mastering-polling-ee11dc3625cb) — refetchInterval behavior
+
+### Tertiary (MEDIUM-LOW confidence)
+- [FastAPI Excel export patterns](https://github.com/fastapi/fastapi/issues/1277) — run_in_executor recommendation
+- [Insurance UX Design Trends 2025](https://www.g-co.agency/insights/insurance-ux-design-trends-industry-analysis) — dashboard patterns
+- [BrokerEdge workflow management](https://www.damcogroup.com/insurance/brokeredge-broker-management-software) — task management patterns
 
 ---
-*Research completed: 2026-04-10*
+*Research completed: 2026-04-14*
 *Ready for roadmap: yes*

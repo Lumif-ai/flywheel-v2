@@ -1,11 +1,9 @@
-import { useCallback, useRef } from 'react'
-import type { ColDef, GridApi, ColumnState } from 'ag-grid-community'
+import type { ColDef } from 'ag-grid-community'
 import { NextStepCell } from '../components/cell-renderers/NextStepCell'
 import { ContactStatusPill } from '../components/cell-renderers/ContactStatusPill'
 import { ChannelIconsCell } from '../components/cell-renderers/ChannelIconsCell'
+import { useColumnPersistence } from '@/shared/grid/useColumnPersistence'
 import type { ContactListItem } from '../types/pipeline'
-
-const COLUMN_STATE_KEY = 'pipeline-contacts-col-state'
 
 const columnDefs: ColDef<ContactListItem>[] = [
   // 1. Row number — pinned left
@@ -133,36 +131,8 @@ const columnDefs: ColDef<ContactListItem>[] = [
 ]
 
 export function useContactColumns() {
-  const gridApiRef = useRef<GridApi | null>(null)
-
-  const getSavedColumnState = (): ColumnState[] | null => {
-    try {
-      const raw = localStorage.getItem(COLUMN_STATE_KEY)
-      if (!raw) return null
-      return JSON.parse(raw) as ColumnState[]
-    } catch {
-      return null
-    }
-  }
-
-  /** Call from onGridReady to restore saved column widths/order/visibility */
-  const restoreColumnState = useCallback((api: GridApi) => {
-    const saved = getSavedColumnState()
-    if (saved) {
-      api.applyColumnState({ state: saved, applyOrder: true })
-    }
-  }, [])
-
-  const onColumnStateChanged = useCallback(() => {
-    const api = gridApiRef.current
-    if (!api) return
-    try {
-      const state = api.getColumnState()
-      localStorage.setItem(COLUMN_STATE_KEY, JSON.stringify(state))
-    } catch {
-      // localStorage write failure -- non-fatal
-    }
-  }, [])
+  const { restoreColumnState, onColumnStateChanged, gridApiRef } =
+    useColumnPersistence('pipeline-contacts-col-state')
 
   return {
     columnDefs,

@@ -1,8 +1,7 @@
 import type { ICellRendererParams } from 'ag-grid-community'
 import { formatDistanceToNow, format, differenceInDays } from 'date-fns'
-import type { PipelineListItem } from '../../types/pipeline'
 
-export function DateCell(props: ICellRendererParams<PipelineListItem>) {
+export function DateCell(props: ICellRendererParams) {
   const { value } = props
 
   if (!value) {

@@ -1,436 +1,582 @@
-# Architecture Patterns
+# Architecture Patterns: Broker Frontend MVP
 
-**Domain:** Structured skill output, document export, file upload, and PII redaction integration
-**Researched:** 2026-04-10
-**Confidence:** HIGH (based on direct codebase analysis, not web research)
-
----
-
-## Current Architecture (Deep Dive)
-
-### Execution Flow: API Call to Document in Library
-
-```
-1. POST /skills/runs (api/skills.py:StartRunRequest)
-     - skill_name, input_text, input_data (optional dict), work_item_id
-     - input_data gets JSON-serialized into input_text prefix (line 423-425)
-     - Creates SkillRun row (status=pending)
-     - Returns run_id + stream_url
-
-2. Job worker claims run -> execute_run(run) (skill_executor.py:485)
-     - Circuit breaker check
-     - Decrypts BYOK API key
-     - Loads skill metadata from DB (_load_skill_from_db, line 122)
-     - Creates ToolRegistry + RunContext
-
-3. Engine dispatch (skill_executor.py:591-691)
-     - IF engine_module or hardcoded engine skill -> dedicated Python engine
-       (company-intel, meeting-prep, email-scorer, meeting-processor, flywheel)
-     - ELSE -> _execute_with_tools() (line 3206) -- generic LLM tool_use loop
-
-4. _execute_with_tools (line 3206-3399)
-     - AsyncAnthropic client with tool_defs from registry
-     - System prompt: DB override > SKILL.md filesystem fallback
-     - Injects tenant context (positioning, ICPs, etc.)
-     - Anti-extraction prefix for protected skills
-     - Tool loop: max 25 iterations, calls registry.execute() for tool_use
-     - Returns: (output_text, token_usage, tool_calls)
-
-5. Post-execution (skill_executor.py:703-858)
-     - Render HTML: render_output(skill_name, output, attribution)
-     - Save to SkillRun: output + rendered_html + tokens + cost
-     - Create Document row linked to SkillRun (line 756-786)
-     - Build attribution + reasoning trace
-     - Emit SSE "done" event
-
-6. Frontend rendering (DocumentViewer.tsx -> SkillRenderer.tsx)
-     - Fetches document detail (output + rendered_html)
-     - SkillRenderer dispatches by type:
-       a. JSON parse attempt -> isOnePagerData() -> OnePagerRenderer
-       b. meeting-prep/flywheel -> MeetingPrepRenderer (pre-built HTML)
-       c. Everything else -> GenericRenderer (react-markdown)
-```
-
-### Key Models
-
-| Model | Table | Key Fields | Role |
-|-------|-------|-----------|------|
-| SkillDefinition | skill_definitions | name, system_prompt, engine_module, parameters, web_tier, protected | Skill metadata (seeded from SKILL.md) |
-| SkillRun | skill_runs | skill_name, input_text, output (Text), rendered_html (Text), attribution (JSONB), events_log (JSONB) | Execution record + content store |
-| Document | documents | title, document_type, skill_run_id (FK), storage_path, tags, account_id, share_token | Library artifact, links to SkillRun for content |
-| UploadedFile | uploaded_files | filename, mimetype, extracted_text, storage_path | File upload with text extraction |
-
-### Tool Registry (tools/__init__.py)
-
-Currently registered tools: `context_read`, `context_write`, `context_query`, `web_search` (Anthropic built-in), `web_fetch`, `file_read`, `file_write`, `python_execute`, `browser_*` (5 tools, agent-only).
-
-All tools receive `RunContext(tenant_id, user_id, run_id, budget, session_factory, focus_id)`.
-
-### Output Rendering Pipeline
-
-```
-output_renderer.py:
-  1. detect_output_type(skill_name) -> TYPE_MAP lookup -> template name
-  2. Structured JSON check: starts with "{" + has schema_version -> structured_data
-  3. parse_output_sections(raw) -> sections from ## headings
-  4. extract_key_facts(sections) -> key-value pairs for sidebars
-  5. Jinja2 template render with all data
-  
-render_output_standalone() wraps fragment in full HTML doc for PDF export
-```
-
-### Existing Structured Output (One-Pager Precedent)
-
-The one-pager skill already implements the full structured JSON pattern:
-
-- **Backend**: `output_renderer.py` line 507-514 detects `schema_version` in JSON output, passes as `structured_data` to Jinja2 template
-- **Backend template**: `outputs/one_pager.html` has two paths: `{% if structured_data %}` (JSON) and fallback (markdown sections)
-- **Frontend**: `SkillRenderer.tsx` line 39-48 tries `JSON.parse(output)`, uses `isOnePagerData()` type guard, routes to `OnePagerRenderer`
-- **Export**: `document_export.py` has `_try_parse_structured()` (line 343) checking for `schema_version`, dedicated `_build_one_pager_docx()`
-- **Types**: `one-pager.ts` defines TypeScript interfaces + type guard
-
-This is the **proven pattern** -- new structured skills should follow it exactly.
+**Domain:** Insurance broker workflow management (on existing React + Vite + Tailwind v4 app)
+**Researched:** 2026-04-14
+**Confidence:** HIGH (all recommendations derived from reading the actual codebase)
 
 ---
 
-## Integration Points for New Features
+## 1. Shared Module Toolkit Extraction
 
-### 1. Structured JSON Output (Extending the Pattern)
+### Problem
 
-**Where detection happens (3 layers, all must be extended):**
+ag-grid infrastructure is currently embedded in `features/pipeline/`: the theme config, 13 cell renderers, column state persistence hooks, and grid-related utilities. The broker module needs grids (projects table, carriers table) but must not import from `features/pipeline/` -- that creates a coupling where broker depends on GTM code.
 
-| Layer | File | Line | Current Logic | What to Add |
-|-------|------|------|---------------|-------------|
-| Backend renderer | `output_renderer.py` | 507-514 | Checks `schema_version` + `isinstance(dict)` -> `structured_data` | No change needed -- already generic |
-| Backend template | `templates/outputs/one_pager.html` | 2 | `{% if structured_data %}` branch | New template per skill type, OR extend TYPE_MAP |
-| Frontend dispatch | `SkillRenderer.tsx` | 39-48 | `JSON.parse()` -> `isOnePagerData()` | Add new type guards: `isDealTapeData()`, etc. |
-| Export DOCX | `document_export.py` | 96 | `document_type == "value-prop-one-pager"` | Add new document_type branches |
-| Export PDF | `document_export.py` | 39 | Uses `render_output_standalone()` which already handles structured_data | Likely works out of the box via template |
+### Recommended Architecture
 
-**New files needed per structured skill:**
-1. `frontend/src/features/documents/types/{skill-type}.ts` -- TypeScript interface + type guard
-2. `frontend/src/features/documents/components/renderers/{SkillType}Renderer.tsx` -- React component
-3. `backend/src/flywheel/engines/templates/outputs/{skill_type}.html` -- Jinja2 template (for HTML rendering + PDF)
-4. Extension in `document_export.py` `_build_{type}_docx()` -- if DOCX export needed
-
-**No changes needed:**
-- `output_renderer.py` already passes `structured_data` to templates generically
-- `TYPE_MAP` in `output_renderer.py` just needs a new entry (one line)
-- `SkillRenderer.tsx` just needs new type guard + import (3-5 lines)
-
-### 2. File Upload Integration with Skills
-
-**Current state:** File upload already exists (`api/files.py`). The `company-intel` engine already consumes uploaded files via `DOCUMENT_FILE:{file_id}` prefix in `input_text` (skill_executor.py line 913-974).
-
-**Pattern for file-aware skills:**
+Create `src/shared/grid/` as the extraction target. This is a new top-level directory alongside `src/lib/` and `src/components/`.
 
 ```
-Current flow (company-intel):
-  1. Frontend uploads file via POST /files/upload -> gets file_id
-  2. Frontend sends skill run with input_text = "DOCUMENT_FILE:{file_id}"
-  3. Executor detects prefix, loads UploadedFile.extracted_text from DB
-  4. Passes text to LLM instead of crawled web content
+src/
+  shared/
+    grid/
+      theme.ts                    # pipelineTheme extracted + renamed to flywheelGridTheme
+      hooks/
+        useColumnPersistence.ts   # generic version of usePipelineColumns' persist logic
+      cell-renderers/
+        DateCell.tsx              # generic -- used by both pipeline and broker
+        StatusPill.tsx            # generic pill renderer (parameterized colors)
+        ExpandToggleCell.tsx      # generic expand/collapse
+        CurrencyCell.tsx          # NEW -- broker needs currency formatting
+      index.ts                   # barrel export
 ```
 
-**Integration approach for new file-aware skills:**
+### Extraction Order (safe sequence)
 
-| Option | How | Pros | Cons |
-|--------|-----|------|------|
-| A. Reuse DOCUMENT_FILE prefix convention | Skills check input_text for prefix, load file text | Already proven, no API changes | Couples file handling to executor dispatch |
-| **B. Add file_ids to StartRunRequest** | New `file_ids: list[UUID]` field | Clean API, generic, any skill can use | Needs API change + executor change |
-| C. Separate upload-to-skill endpoint | POST /skills/runs/{id}/files | RESTful | Over-engineered for current needs |
+This order ensures GTM never breaks at any intermediate step:
 
-**Recommendation: Option B** because:
-- `StartRunRequest` already has `input_data: dict` for structured input
-- Adding `file_ids: list[UUID]` is one field
-- Executor resolves file_ids to extracted_text, injects into system prompt or input
-- No `DOCUMENT_FILE:` string parsing needed
-- Any skill can receive files without custom dispatch logic
+**Step 1: Copy theme to shared, re-export from pipeline.**
+- Copy `pipelineTheme` from `PipelinePage.tsx` lines 34-47 into `src/shared/grid/theme.ts` as `flywheelGridTheme`.
+- In `PipelinePage.tsx`, replace the inline theme with `import { flywheelGridTheme } from '@/shared/grid/theme'`.
+- GTM works identically. Zero behavior change.
 
-**Files to modify:**
-- `api/skills.py` -- Add `file_ids` to `StartRunRequest` (1 field)
-- `skill_executor.py` -- After line 565, resolve file_ids and inject extracted_text
-- Frontend skill input form -- Add file upload dropzone component
+**Step 2: Extract generic cell renderers.**
+- Copy `DateCell.tsx`, `ExpandToggleCell.tsx` to `src/shared/grid/cell-renderers/`.
+- These two are fully generic (no pipeline-specific types in their interfaces).
+- Update pipeline imports to point to `@/shared/grid/cell-renderers/DateCell`.
+- Remove originals from pipeline.
+- `StatusPill.tsx` is NEW -- a parameterized version that accepts `colorMap` prop, unlike `StagePill.tsx` which hardcodes pipeline stages.
 
-### 3. PII Redaction
+**Step 3: Extract column persistence hook.**
+- The pattern in `usePipelineColumns.ts` (lines 132-159) is: read from localStorage, apply on grid ready, save on column change.
+- Extract to `useColumnPersistence(storageKey: string)` that returns `{ restoreColumnState, onColumnStateChanged, gridApiRef }`.
+- `usePipelineColumns` becomes a thin wrapper: calls `useColumnPersistence('pipeline-col-state')` + defines pipeline-specific `columnDefs`.
 
-**Current state:** Zero PII infrastructure. The `presidio` package is listed in CLAUDE.md as pre-installed system-wide, but no code uses it.
+**Step 4: Broker uses shared.**
+- Broker grids import from `@/shared/grid/` directly.
+- Broker defines its own column defs in `features/broker/hooks/useProjectColumns.ts`.
 
-**Where PII redaction fits in the execution flow:**
+### What stays in pipeline (do NOT extract)
 
-```
-Option A: Pre-processing (before LLM call)
-  input_text -> PII_REDACT -> sanitized_input -> LLM -> output
-  Problem: LLM cannot use names/emails that skills need (meeting prep, outreach)
+These are pipeline-domain-specific and should NOT move to shared:
+- `NameCell.tsx` (renders company name + domain icon -- GTM concept)
+- `ContactCell.tsx` (renders contact avatar + name -- GTM concept)
+- `StagePill.tsx` (hardcoded pipeline stages)
+- `FitTierBadge.tsx` (hardcoded fit tiers)
+- `ChannelsCell.tsx`, `ChannelIconsCell.tsx` (GTM channel concept)
+- `AiInsightCell.tsx` (pipeline AI summary)
+- `OutreachStatusCell.tsx` (GTM outreach concept)
+- `ContactStatusPill.tsx` (GTM contact statuses)
+- `DatePickerEditor.tsx` (inline editing -- broker doesn't need inline grid editing in MVP)
 
-Option B: Post-processing (after LLM output, before storage)  
-  LLM -> output -> PII_REDACT -> sanitized_output -> DB
-  Problem: Loses original data, breaks re-rendering
+### GTM Non-Breakage Contract
 
-Option C: On-demand redaction (at export/share time) [RECOMMENDED]
-  LLM -> output -> DB (full data)
-  Export/Share -> PII_REDACT -> sanitized export
-  Preserves data for owner, redacts for external consumers
-
-Option D: Tool available to skills (skill decides when to redact)
-  Register pii_redact as a tool in ToolRegistry
-  Skills call it when generating external-facing content
-  Problem: Skills must remember to call it, inconsistent
-```
-
-**Recommendation: Option C (on-demand at export/share)** because:
-- Skills NEED PII to function (meeting prep needs names, outreach needs emails)
-- Owner viewing their own document should see full data
-- Redaction makes sense at the boundary: PDF export, DOCX export, share link
-- Can be implemented as a middleware/utility without touching executor
-
-**Integration points:**
-
-| File | Change | Purpose |
-|------|--------|---------|
-| NEW `services/pii_redactor.py` | Presidio-based redaction service | Core redaction logic |
-| `api/documents.py` export_document() | Add `redact_pii: bool` query param | PDF/DOCX export with optional redaction |
-| `api/documents.py` get_shared_document() | Apply PII redaction by default | Shared links auto-redact |
-| `services/document_export.py` | Accept `redact_pii` flag, call redactor | Export pipeline integration |
-
-**PII redactor service design:**
-
-```python
-# services/pii_redactor.py
-from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
-
-# Entity types to redact
-DEFAULT_ENTITIES = ["PERSON", "EMAIL_ADDRESS", "PHONE_NUMBER", "US_SSN"]
-
-def redact_text(text: str, entities: list[str] = None) -> str:
-    """Replace PII entities with [REDACTED] placeholders."""
-    
-def redact_html(html: str, entities: list[str] = None) -> str:
-    """Redact PII in HTML content while preserving markup."""
-    
-def redact_structured(data: dict, entities: list[str] = None) -> dict:
-    """Redact PII in structured JSON output (walks string values)."""
-```
-
-### 4. Document Export (Already Partially Built)
-
-**Current state:** Export endpoint exists at `GET /documents/{id}/export?format=pdf|docx` (documents.py line 631-706). Both PDF and DOCX work. Structured JSON export exists for one-pager DOCX.
-
-**What is missing:**
-- PDF export for structured JSON (currently uses generic HTML wrapping)
-- PII redaction option on export
-- DOCX templates for new structured skill types
-
-**Files already in place:**
-- `api/documents.py` line 631 -- export endpoint
-- `services/document_export.py` -- export_as_pdf(), export_as_docx()
-- Frontend `DocumentViewer.tsx` line 226-258 -- export dropdown with PDF/DOCX buttons
+The extraction is safe because:
+1. **Copy-first**: shared versions are copies, not moves. Pipeline imports update after verification.
+2. **No interface changes**: `flywheelGridTheme` is identical to `pipelineTheme` (same params object).
+3. **Barrel exports**: `@/shared/grid` barrel means pipeline can switch imports in one line per file.
+4. **Feature flag isolation**: broker code is gated by `useFeatureFlag('broker')` and `BrokerGuard`. Even if shared code has a bug, GTM-only tenants never render broker components.
 
 ---
 
-## Recommended Architecture for New Components
+## 2. Comparison Matrix Architecture
 
-### Component Boundaries
+### Why NOT ag-grid for the Comparison Matrix
 
-| Component | Responsibility | Communicates With |
-|-----------|---------------|-------------------|
-| `SkillRenderer` (frontend) | Dispatch to type-specific renderers | DocumentViewer, type-specific renderers |
-| `{Type}Renderer` (frontend) | Render structured JSON for a skill type | SkillRenderer (parent), design tokens |
-| `output_renderer.py` (backend) | Text->HTML rendering, template dispatch | skill_executor.py, document_export.py |
-| `document_export.py` (backend) | PDF/DOCX generation from output | documents API, pii_redactor |
-| `pii_redactor.py` (backend) NEW | PII detection + anonymization | document_export, documents API |
-| `api/files.py` (backend) | File upload + text extraction | Skills API (via file_ids on StartRunRequest) |
+The spec requires:
+- Two-row cells (premium top, limit+deductible bottom)
+- Sticky first column (coverage names) during horizontal scroll
+- Sticky header row during vertical scroll
+- Sticky total premium row at bottom
+- Conditional cell backgrounds (red/amber/green/blue)
+- Carrier selection checkboxes in column headers
+- "Show differences only" toggle that hides rows
+- Insurance/surety tabs with different column counts
 
-### Data Flow: Structured JSON Skill Run
+ag-grid CAN do all of this, but the cost is high:
+- Two-row cells require custom `cellRenderer` with forced row height -- already done in the existing `ComparisonMatrix.tsx` but as a plain table.
+- Sticky rows/columns in ag-grid require Enterprise license (`pinnedBottomRowData` is Community, but combined with sticky headers and custom cell backgrounds creates complexity).
+- The matrix is read-only (no editing, no sorting, no column reorder) -- ag-grid's value-add is in interactive grids.
+- The existing `ComparisonMatrix.tsx` (188 lines) already renders the correct structure as a plain HTML table.
 
-```
-SKILL.md defines output_schema in parameters JSONB
-  |
-  v
-_execute_with_tools() -> LLM outputs JSON string
-  |
-  v
-skill_executor.py stores raw JSON in SkillRun.output
-  |
-  v
-render_output() detects structured_data, renders via Jinja2 template
-  -> stored in SkillRun.rendered_html (for PDF/share/legacy)
-  |
-  v
-Frontend: SkillRenderer.tsx JSON.parse() -> type guard -> dedicated renderer
-  |                                                        |
-  v                                                        v
-Document library listing                           Rich React component
-  |
-  v
-Export: document_export.py checks structured, builds branded PDF/DOCX
-  |
-  v (optional)
-PII redactor strips sensitive data before export/share
-```
+**Recommendation: Enhance the existing HTML table approach.** Use CSS `position: sticky` for frozen column/row behavior. This is simpler, lighter, and matches the spec better.
 
-### Data Flow: File Upload + Skill Execution
+### Component Architecture
 
 ```
-Frontend: File upload dropzone
-  |
-  v
-POST /files/upload -> UploadedFile row (extracted_text stored)
-  |
-  v
-POST /skills/runs { skill_name, input_text, file_ids: [uuid] }
-  |
-  v
-skill_executor.py resolves file_ids:
-  - Loads UploadedFile.extracted_text for each
-  - Prepends to system prompt as "## Uploaded Documents\n{text}"
-  |
-  v
-Normal execution flow (LLM sees document content as context)
+features/broker/components/comparison/
+  ComparisonView.tsx          # Orchestrator: tabs + alerts + export button + toggles
+  ComparisonMatrix.tsx        # Single matrix (receives coverages + carriers for one tab)
+  ComparisonCell.tsx          # Two-row cell with conditional styling
+  CriticalAlertBox.tsx        # Alert box above tabs
+  ComparisonToolbar.tsx       # Export button + highlight toggle + differences toggle
+  useComparisonState.ts       # Toggle state, carrier selection, filtered rows
 ```
 
----
+### Sticky Column/Row Implementation
 
-## Patterns to Follow
+```css
+/* First column sticky */
+.comparison-matrix td:first-child,
+.comparison-matrix th:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: inherit; /* prevent transparency on scroll */
+}
 
-### Pattern 1: Structured Output Type Registration
+/* Header row sticky */
+.comparison-matrix thead th {
+  position: sticky;
+  top: 0;
+  z-index: 3; /* above sticky column */
+}
 
-Every new structured skill type requires coordinated changes across 4 files. Follow the one-pager precedent exactly.
+/* Corner cell (first-col + header) needs highest z-index */
+.comparison-matrix thead th:first-child {
+  z-index: 4;
+}
 
-**Backend:**
-```python
-# output_renderer.py - Add to TYPE_MAP
-TYPE_MAP = {
-    ...
-    "deal-tape": "deal_tape",
-    "ctx-deal-tape": "deal_tape",
+/* Total premium row sticky at bottom */
+.comparison-matrix tfoot td {
+  position: sticky;
+  bottom: 0;
+  z-index: 2;
 }
 ```
 
-**Frontend:**
+The matrix container needs `overflow: auto; max-height: calc(100dvh - 280px);` to enable both scrolls.
+
+### Two-Row Cell Component
+
 ```typescript
-// SkillRenderer.tsx - Add type guard check
-if (isDealTapeData(parsed)) {
-  return <DealTapeRenderer data={parsed} />
+interface ComparisonCellProps {
+  premium: number | null
+  limit: number | null
+  deductible: number | null
+  status: 'normal' | 'excluded' | 'insufficient' | 'best_price' | 'best_coverage' | 'critical'
+  highlightBest: boolean  // controlled by toggle
+  currency: string
+}
+
+function ComparisonCell({ premium, limit, deductible, status, highlightBest, currency }: ComparisonCellProps) {
+  // Status drives background color (always visible)
+  // highlightBest drives text color (only when toggle is on)
+  const bg = {
+    normal: 'bg-white',
+    excluded: 'bg-red-50',
+    insufficient: 'bg-amber-50',
+    critical: 'bg-red-50 border-l-4 border-red-500',
+    best_price: highlightBest ? 'bg-white' : 'bg-white',  // text color, not bg
+    best_coverage: highlightBest ? 'bg-white' : 'bg-white',
+  }[status]
+
+  if (status === 'excluded') {
+    return <td className={bg}><span className="text-red-600 font-bold text-sm">EXCLUDED</span></td>
+  }
+
+  return (
+    <td className={`px-3 py-2 min-w-[140px] ${bg}`}>
+      <div className="text-sm font-semibold">{formatCurrency(premium, currency)}</div>
+      <div className="text-xs text-muted-foreground">
+        Limit: {formatCurrency(limit, currency)} . Ded: {formatCurrency(deductible, currency)}
+      </div>
+    </td>
+  )
 }
 ```
 
-### Pattern 2: Export Extension
+### Data Flow
 
-```python
-# document_export.py - Add structured branch
-if structured and structured.get("document_type") == "deal-tape":
-    _build_deal_tape_docx(doc, structured, coral, dark, muted, light_gray)
+The existing `useComparison(projectId)` hook (in `useBrokerQuotes.ts`) already fetches `/broker/projects/:id/comparison` and returns `ComparisonMatrix` type with `coverages[]` containing `quotes[]` per coverage. The data structure already supports the matrix layout.
+
+For the insurance/surety split: filter `coverages` by `category` field. The backend already populates `category` as `'insurance'` or `'surety'` on each `ComparisonCoverage`.
+
+---
+
+## 3. Persistent Gate Strip
+
+### Problem
+
+The gate strip ("Review: 3 | Approve: 1 | Export: 2") must appear on EVERY broker route, above the main content. It needs its own data fetch (gate counts from a dashboard endpoint) and must not re-mount or flicker on route transitions.
+
+### Recommended Pattern: Layout-Level Component
+
+Place the gate strip in the layout layer, not in individual pages. The app already has a layout architecture:
+
+```
+AppLayout
+  -> AppShell
+       -> AppSidebar (persistent)
+       -> SidebarInset
+            -> main
+                 -> GateStrip (NEW -- persistent for broker)
+                 -> AppRoutes (page content)
+       -> AuthenticatedAlerts (persistent)
 ```
 
-### Pattern 3: File-Aware Skill Input
+### Implementation
+
+**Option A (Recommended): Conditional wrapper inside AppShell.**
+
+In `layout.tsx`, add the gate strip inside the `SidebarInset > main` block, gated on the broker feature flag:
+
+```typescript
+// In AppShell's desktop return:
+<SidebarInset>
+  <main className="flex-1 overflow-auto">
+    <BrokerGateStrip />  {/* renders null if not broker tenant */}
+    <AppRoutes />
+  </main>
+</SidebarInset>
+```
+
+`BrokerGateStrip` internally checks `useFeatureFlag('broker')` and returns `null` for GTM tenants. This means:
+- Zero impact on GTM (component renders nothing).
+- No route-level coordination needed.
+- Single data fetch shared across all broker pages.
+
+**Option B (Rejected): Per-page import.** Each broker page would import `<GateStrip />`. This causes:
+- Repeated code in 4+ pages.
+- Component unmounts/remounts on navigation (flash of loading).
+- Data refetch on every route change.
+
+### GateStrip Component
+
+```
+features/broker/components/GateStrip.tsx
+```
+
+```typescript
+function BrokerGateStrip() {
+  const brokerEnabled = useFeatureFlag('broker')
+  if (!brokerEnabled) return null
+
+  const { data: gateCounts } = useGateCounts()  // NEW hook
+  // Renders: Review: N | Approve: N | Export: N
+  // Each count is a link to /broker/projects?gate=review (filtered)
+  // Uses React Query with staleTime: 60_000 (refresh every minute)
+}
+```
+
+### Navigation Behavior
+
+Each gate count links to `/broker/projects?gate=review` (or `approve` or `export`). The projects page reads the `gate` query param and pre-filters to show only projects at that gate. This avoids a "jump to oldest" behavior that could be confusing -- instead, the broker sees all pending items for that gate.
+
+### New Backend Endpoint
+
+```
+GET /broker/gate-counts -> { review: number, approve: number, export: number }
+```
+
+This is a lightweight aggregation query. It runs a COUNT on `broker_projects` grouped by status buckets:
+- review: status IN ('analyzing', 'gaps_identified') AND approval_status = 'draft'
+- approve: status IN ('gaps_identified') AND approval_status = 'approved' (carriers matched, no solicitations sent)
+- export: status IN ('quotes_partial', 'quotes_complete')
+
+### New Hook
+
+```typescript
+// features/broker/hooks/useGateCounts.ts
+export function useGateCounts() {
+  return useQuery({
+    queryKey: ['broker', 'gate-counts'],
+    queryFn: () => api.get<GateCounts>('/broker/gate-counts'),
+    staleTime: 60_000,  // 1 minute -- not real-time, but frequent enough
+    refetchInterval: 60_000,  // auto-refresh while tab is active
+  })
+}
+```
+
+---
+
+## 4. Tab Routing with URL State
+
+### Problem
+
+The project detail page (`/broker/projects/:id`) needs tabs (Overview, Coverage, Carriers, Quotes, Compare). The active tab must be reflected in the URL so that:
+- Deep links work (gate strip links to `/broker/projects/123?tab=compare`)
+- Browser back/forward works
+- Refreshing preserves tab state
+
+### Recommended Pattern: `?tab=` Query Parameter
+
+This is the same pattern already used successfully in `PipelinePage.tsx` for URL-synced state (lines 50-192). Use `useSearchParams` from react-router-dom.
+
+### Why NOT path-based routing (`/broker/projects/:id/coverage`)
+
+- The project detail is a single page with a sidebar (right 1/3) that stays constant across tabs. Path-based routing would require either a layout route or repeated sidebar rendering.
+- The existing `BrokerProjectDetail.tsx` already has the 2/3 + 1/3 layout. Tabs are content within the 2/3 section.
+- `?tab=` is simpler and matches the existing PipelinePage URL-sync pattern.
+
+### Implementation
+
+```typescript
+// In BrokerProjectDetail.tsx
+const [searchParams, setSearchParams] = useSearchParams()
+const activeTab = (searchParams.get('tab') as TabName) ?? 'overview'
+
+const handleTabChange = (tab: TabName) => {
+  setSearchParams(prev => {
+    const next = new URLSearchParams(prev)
+    if (tab === 'overview') next.delete('tab')  // default doesn't need param
+    else next.set('tab', tab)
+    return next
+  }, { replace: true })  // replace: true so tab changes don't pollute history
+}
+```
+
+### Tab Definitions
+
+```typescript
+type TabName = 'overview' | 'coverage' | 'carriers' | 'quotes' | 'compare'
+
+const TABS: { value: TabName; label: string; gateLabel?: string }[] = [
+  { value: 'overview', label: 'Overview' },
+  { value: 'coverage', label: 'Coverage', gateLabel: 'Gate 1' },
+  { value: 'carriers', label: 'Carriers', gateLabel: 'Gate 2' },
+  { value: 'quotes', label: 'Quotes' },
+  { value: 'compare', label: 'Compare', gateLabel: 'Gate 3' },
+]
+```
+
+### Rendering with Base UI Tabs
+
+The existing `tabs.tsx` component wraps `@base-ui/react/tabs`. Use it with controlled value:
+
+```typescript
+<Tabs value={activeTab} onValueChange={handleTabChange}>
+  <TabsList variant="line">
+    {TABS.map(tab => (
+      <TabsTrigger key={tab.value} value={tab.value}>
+        {tab.label}
+        {tab.gateLabel && <Badge variant="outline" className="ml-1 text-[10px]">{tab.gateLabel}</Badge>}
+      </TabsTrigger>
+    ))}
+  </TabsList>
+  <TabsContent value="overview"><OverviewTab project={project} /></TabsContent>
+  <TabsContent value="coverage"><CoverageTab project={project} /></TabsContent>
+  <TabsContent value="carriers"><CarriersTab projectId={project.id} /></TabsContent>
+  <TabsContent value="quotes"><QuotesTab projectId={project.id} /></TabsContent>
+  <TabsContent value="compare"><CompareTab projectId={project.id} currency={project.currency} /></TabsContent>
+</Tabs>
+```
+
+### Step Indicator
+
+The step indicator sits above the tabs. It reads project status to determine which steps are complete:
+
+```typescript
+function StepIndicator({ project }: { project: BrokerProjectDetail }) {
+  const steps = [
+    { label: 'Extract', done: project.analysis_status === 'completed' },
+    { label: 'Review', done: project.approval_status === 'approved' },
+    { label: 'Solicit', done: ['soliciting','quotes_partial','quotes_complete','bound'].includes(project.status) },
+    { label: 'Compare', done: ['quotes_complete','recommended','delivered','bound'].includes(project.status) },
+    { label: 'Deliver', done: ['delivered','bound'].includes(project.status) },
+  ]
+  // Render horizontal dots + labels with grey/amber/green states
+}
+```
+
+---
+
+## 5. Excel Export Architecture
+
+### Backend Streaming vs In-Memory
+
+**Recommendation: Backend in-memory generation with streaming response.**
+
+The comparison matrix for 50 coverage lines x 10 carriers is ~500 cells. Even with formatting, the .xlsx will be < 500KB. In-memory generation with `openpyxl` is appropriate.
+
+Use a streaming response (`StreamingResponse` in FastAPI) to avoid holding the full file in memory during transfer, but the generation itself is in-memory.
 
 ```python
-# In execute_run(), after RunContext creation:
-if file_ids:
-    file_texts = await _resolve_file_texts(factory, tenant_id, file_ids)
-    # Inject into system prompt or input_text
+# Backend endpoint
+@router.get("/broker/projects/{project_id}/export-comparison")
+async def export_comparison(project_id: str, ...):
+    wb = build_comparison_workbook(project_id)  # openpyxl Workbook
+    buffer = BytesIO()
+    wb.save(buffer)
+    buffer.seek(0)
+    return StreamingResponse(
+        buffer,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f"attachment; filename=comparison-{project_id[:8]}.xlsx"}
+    )
 ```
+
+### Frontend Download Trigger
+
+```typescript
+// features/broker/hooks/useExportComparison.ts
+export function useExportComparison(projectId: string) {
+  const { mutate, isPending } = useMutation({
+    mutationFn: async () => {
+      const token = useAuthStore.getState().token
+      const res = await fetch(`/api/v1/broker/projects/${projectId}/export-comparison`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      if (!res.ok) throw new Error('Export failed')
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `comparison-${projectId.slice(0, 8)}.xlsx`
+      a.click()
+      URL.revokeObjectURL(url)
+    },
+  })
+  return { exportComparison: mutate, isExporting: isPending }
+}
+```
+
+This bypasses the normal `api.get()` helper because it needs to handle a binary blob response, not JSON.
+
+---
+
+## 6. New Backend Endpoint Wiring
+
+### Existing Pattern
+
+All broker API calls go through `features/broker/api.ts` which uses the shared `api` helper from `@/lib/api`. Each function is a thin wrapper: `api.get<ResponseType>('/broker/endpoint')`. Hooks in `features/broker/hooks/` wrap these with React Query.
+
+### New Endpoints to Wire
+
+| Endpoint | API Function | Hook | Used By |
+|----------|-------------|------|---------|
+| `GET /broker/gate-counts` | `fetchGateCounts()` | `useGateCounts()` | GateStrip |
+| `GET /broker/dashboard-tasks` | `fetchDashboardTasks()` | `useDashboardTasks()` | BrokerDashboard |
+| `GET /broker/projects/:id/export-comparison` | raw fetch (blob) | `useExportComparison()` | ComparisonView |
+| `POST /broker/projects/:id/approve` | `approveProject()` | `useApproveProject()` | CoverageTab |
+
+### Wiring Pattern (consistent with existing code)
+
+1. Add type to `features/broker/types/broker.ts`
+2. Add API function to `features/broker/api.ts`
+3. Add hook to `features/broker/hooks/`
+4. Import hook in component
+
+No new patterns needed -- follow the exact same structure as the existing 15 broker hooks.
+
+---
+
+## 7. Component Boundaries
+
+### New Components
+
+| Component | Location | Responsibility | Data Source |
+|-----------|----------|----------------|-------------|
+| `BrokerGateStrip` | `features/broker/components/GateStrip.tsx` | Persistent gate counts bar | `useGateCounts()` |
+| `ComparisonView` | `features/broker/components/comparison/ComparisonView.tsx` | Orchestrates tabs + alerts + toolbar | `useComparison()` |
+| `ComparisonMatrix` | `features/broker/components/comparison/ComparisonMatrix.tsx` | Single coverage-vs-carrier table | Props from parent |
+| `ComparisonCell` | `features/broker/components/comparison/ComparisonCell.tsx` | Two-row cell with conditional bg | Props |
+| `CriticalAlertBox` | `features/broker/components/comparison/CriticalAlertBox.tsx` | Exclusion warnings | Props |
+| `ComparisonToolbar` | `features/broker/components/comparison/ComparisonToolbar.tsx` | Export + toggles | Props + `useExportComparison()` |
+| `StepIndicator` | `features/broker/components/StepIndicator.tsx` | Horizontal progress dots | Props (project status) |
+| `OverviewTab` | `features/broker/components/tabs/OverviewTab.tsx` | Client info + docs + activity | Props (project) |
+| `CoverageTab` | `features/broker/components/tabs/CoverageTab.tsx` | Coverage table + gaps + approve | Props + mutations |
+| `CarriersTab` | `features/broker/components/tabs/CarriersTab.tsx` | Carrier matches + solicitations | Hooks |
+| `QuotesTab` | `features/broker/components/tabs/QuotesTab.tsx` | Quote tracking per carrier | Hooks |
+| `CompareTab` | `features/broker/components/tabs/CompareTab.tsx` | Wraps ComparisonView | Hooks |
+| `DashboardTaskList` | `features/broker/components/DashboardTaskList.tsx` | Prioritized action items | `useDashboardTasks()` |
+| `ProjectsTable` | `features/broker/components/ProjectsTable.tsx` | Full projects list with filters | `useBrokerProjects()` |
+
+### Modified Components
+
+| Component | Change | Risk |
+|-----------|--------|------|
+| `layout.tsx` | Add `<BrokerGateStrip />` inside `<main>` | LOW -- renders null for GTM |
+| `BrokerProjectDetail.tsx` | Rewrite from single-page to tabbed layout | MEDIUM -- existing component replaced |
+| `BrokerDashboard.tsx` | Redesign from KPI cards to task list + table | MEDIUM -- existing component replaced |
+| `ComparisonMatrix.tsx` | Move to `comparison/` subfolder, enhance | MEDIUM -- substantial enhancement |
+| `PipelinePage.tsx` | Update ag-grid theme import to shared | LOW -- import path change only |
+| `usePipelineColumns.ts` | Extract persistence to shared hook | LOW -- behavior identical |
+
+---
+
+## 8. Data Flow Diagram
+
+```
+                    +--------------------------------------------------+
+                    |                   AppShell                        |
+                    |  +-----------------------------------------------+
+                    |  | BrokerGateStrip (useGateCounts)                |
+                    |  |   Review: 3  |  Approve: 1  |  Export: 2      |
+                    |  +-----------------------------------------------+
+                    |  +-----------------------------------------------+
+                    |  | AppRoutes -> /broker/projects/:id              |
+                    |  |  +------------------------------------------+ |
+                    |  |  | BrokerProjectDetail                      | |
+                    |  |  |  +-----------+ +------------------+      | |
+                    |  |  |  | StepBar   | |  Sidebar (1/3)   |      | |
+                    |  |  |  +-----------+ |  Project Info     |      | |
+                    |  |  |  | Tab Bar   | |  Activity Log     |      | |
+                    |  |  |  | ?tab=X    | |                   |      | |
+                    |  |  |  +-----------+ |                   |      | |
+                    |  |  |  | Tab Panel | |                   |      | |
+                    |  |  |  | (2/3)     | |                   |      | |
+                    |  |  |  +-----------+ +------------------+      | |
+                    |  |  +------------------------------------------+ |
+                    |  +-----------------------------------------------+
+                    +--------------------------------------------------+
+```
+
+---
+
+## 9. Recommended Build Order
+
+Build order is driven by two constraints: (a) dependency chains and (b) GTM safety.
+
+| Order | What | Why This Order | Depends On |
+|-------|------|----------------|------------|
+| 1 | Shared grid toolkit extraction | Foundation for all grids; validates GTM does not break | Nothing |
+| 2 | Gate strip + `useGateCounts` hook | Layout-level change that touches `layout.tsx` -- do early before other changes accumulate | Backend endpoint |
+| 3 | Tab routing in `BrokerProjectDetail` | Structural change that all tab content hangs off of | Nothing |
+| 4 | Tab content: Coverage, Carriers, Quotes (repackage existing components) | Move existing components into tab structure | Step 3 |
+| 5 | Dashboard redesign (task list + table) | New data source, but self-contained | Backend endpoint |
+| 6 | Comparison matrix enhancement (sticky, two-row, tabs, toggles) | Most complex component; build last with stable foundation | Step 3 (tab routing) |
+| 7 | Excel export | Simple once comparison data is available | Step 6 + backend endpoint |
+| 8 | Projects list page | Table with filters -- uses shared grid toolkit | Step 1 |
+
+### Parallelizable Work
+
+Steps 2 + 3 can run in parallel (no dependency).
+Steps 4 + 5 can run in parallel (no dependency).
+Step 6 blocks on Step 3 but not on Steps 4 or 5.
 
 ---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Hardcoded Engine Dispatch
-**What:** Adding more `is_xyz = run.skill_name == "xyz"` branches in execute_run()
-**Why bad:** skill_executor.py lines 593-601 already have 6 hardcoded checks. Adding more makes the function unmaintainable.
-**Instead:** Use `engine_module` field from SkillDefinition. Register engine modules that auto-dispatch. The one-pager approach (LLM outputs JSON via standard _execute_with_tools) avoids engine dispatch entirely.
+### Anti-Pattern 1: Importing from `features/pipeline/` in broker code
+**What:** Broker components importing cell renderers or hooks from pipeline feature.
+**Why bad:** Creates cross-feature coupling. Changes to pipeline can break broker.
+**Instead:** Extract to `shared/grid/` or duplicate if the component is small and diverging.
 
-### Anti-Pattern 2: PII Redaction in the Executor
-**What:** Redacting PII before storing output
-**Why bad:** Destroys data the user needs. Meeting prep showing "[REDACTED]" for attendee names is useless.
-**Instead:** Store full data, redact at export/share boundary only.
+### Anti-Pattern 2: ag-grid for read-only display tables
+**What:** Using ag-grid for the comparison matrix or simple list views.
+**Why bad:** ag-grid adds bundle weight and complexity for tables that don't need editing, sorting, or column reorder. The comparison matrix needs sticky positioning that is simpler with CSS than ag-grid config.
+**Instead:** Use HTML `<table>` with CSS sticky for comparison. Use ag-grid only for interactive data grids (projects table if it needs inline editing later).
 
-### Anti-Pattern 3: Separate Content Storage for Structured Output
-**What:** Storing structured JSON in a different field or table than SkillRun.output
-**Why bad:** Breaks the existing Document -> SkillRun -> output chain. Frontend already handles JSON in the output field.
-**Instead:** Keep structured JSON as a string in SkillRun.output. The renderer and frontend both already handle JSON detection.
+### Anti-Pattern 3: Path-based tab routing for detail pages
+**What:** `/broker/projects/:id/coverage`, `/broker/projects/:id/carriers`, etc.
+**Why bad:** The sidebar (1/3 width) is shared across all tabs and contains its own data. Path routing forces either nested routes with a layout or repeated sidebar imports. It also creates unnecessary full-page transitions between tabs.
+**Instead:** `?tab=coverage` query param with `replace: true` on `setSearchParams`.
 
-### Anti-Pattern 4: Modifying SkillRun Model for File References
-**What:** Adding `file_ids` column to skill_runs table
-**Why bad:** Unnecessary schema migration. Files are input context, not run metadata.
-**Instead:** Resolve file_ids at execution time, inject text into prompt. The SkillRun.input_text already stores a summary of what was provided.
-
----
-
-## Scalability Considerations
-
-| Concern | Current (100 users) | At 10K users | At 1M users |
-|---------|---------------------|--------------|-------------|
-| Structured JSON output | String in TEXT column, fine | Consider JSONB column for querying | JSONB + separate output_data table |
-| File upload storage | Supabase Storage | Supabase Storage with CDN | S3 + CloudFront, presigned URLs |
-| PII redaction | Presidio in-process | Presidio in-process (fast) | Dedicated redaction microservice |
-| PDF generation | WeasyPrint in-process | WeasyPrint with async worker | Dedicated PDF service (Gotenberg) |
-| DOCX generation | python-docx in-process | In-process (fast, memory only) | Same, no scaling issue |
-
----
-
-## Pre-Existing One-Pager Code Assessment
-
-The one-pager implementation is **complete and production-ready** across all layers:
-
-| Layer | File | Status | Gaps |
-|-------|------|--------|------|
-| TypeScript types | `types/one-pager.ts` | Complete | None |
-| Frontend renderer | `renderers/OnePagerRenderer.tsx` | Complete, 415 lines | None |
-| SkillRenderer dispatch | `renderers/SkillRenderer.tsx` | Complete | None |
-| Backend TYPE_MAP | `output_renderer.py` line 91-92 | Complete | None |
-| Backend template | `templates/outputs/one_pager.html` | Complete, 166 lines | None |
-| DOCX export | `document_export.py` line 142-335 | Complete | None |
-| PDF export | `document_export.py` line 29-63 | Works via HTML template | Could be improved with direct structured PDF |
-
-**This is the template to copy for every new structured skill type.** The pattern is proven, handles all three rendering contexts (web, PDF, DOCX), and has proper fallback for non-JSON output.
-
----
-
-## Suggested Build Order (Dependency-Aware)
-
-```
-Phase 1: Structured JSON foundation (no new deps)
-  - Generalize the type registration pattern (utility function?)
-  - Add deal-tape or next skill type following one-pager pattern
-  - Extends: TYPE_MAP, SkillRenderer, templates, export
-  
-Phase 2: File upload for skills (builds on existing upload infra)
-  - Add file_ids to StartRunRequest
-  - File resolution in executor
-  - Frontend file picker component
-  - Requires: Phase 1 (new skills may need file input)
-  
-Phase 3: PII redaction (independent, can parallelize with Phase 2)
-  - Create pii_redactor.py service
-  - Wire into export endpoint
-  - Wire into share endpoint
-  - No executor changes needed
-  
-Phase 4: New skills using all infrastructure
-  - Each new skill: SKILL.md + type def + renderer + template + export
-  - Can use file input if needed
-  - Exports auto-redact via Phase 3
-```
+### Anti-Pattern 4: Gate strip as a per-page component
+**What:** Each broker page imports and renders `<GateStrip />`.
+**Why bad:** Unmounts/remounts on navigation causing loading flash. Data refetches on every route change. Easy to forget in a new page.
+**Instead:** Single instance in `layout.tsx` that reads feature flag and renders null for non-broker tenants.
 
 ---
 
 ## Sources
 
-All findings from direct codebase analysis:
-- `backend/src/flywheel/services/skill_executor.py` (3400+ lines) -- full execution flow
-- `backend/src/flywheel/engines/output_renderer.py` (630 lines) -- rendering pipeline
-- `backend/src/flywheel/api/skills.py` -- API layer, StartRunRequest, input validation
-- `backend/src/flywheel/api/documents.py` (849 lines) -- document CRUD + export endpoint
-- `backend/src/flywheel/services/document_export.py` (410 lines) -- PDF/DOCX generation
-- `backend/src/flywheel/db/models.py` -- SkillRun, Document, UploadedFile, SkillDefinition
-- `backend/src/flywheel/db/seed.py` -- SKILL.md parsing, frontmatter -> DB
-- `backend/src/flywheel/tools/__init__.py` -- tool registry, 12 tools registered
-- `backend/src/flywheel/tools/registry.py` -- RunContext, ToolDefinition, execute()
-- `frontend/src/features/documents/components/renderers/SkillRenderer.tsx` -- dispatch
-- `frontend/src/features/documents/components/renderers/OnePagerRenderer.tsx` -- structured renderer
-- `frontend/src/features/documents/types/one-pager.ts` -- TypeScript schema + type guard
-- `frontend/src/features/documents/components/DocumentViewer.tsx` -- viewer with export
-- `backend/src/flywheel/api/files.py` -- file upload endpoint
+- Codebase analysis: `frontend/src/features/pipeline/` (ag-grid usage, theme, hooks)
+- Codebase analysis: `frontend/src/features/broker/` (existing components, API, types)
+- Codebase analysis: `frontend/src/app/layout.tsx` (AppShell architecture)
+- Codebase analysis: `frontend/src/app/routes.tsx` (BrokerGuard, route structure)
+- Codebase analysis: `frontend/src/lib/feature-flags.ts` (tenant feature flag system)
+- Spec: `SPEC-BROKER-FRONTEND-MVP.md` (gate strip, comparison matrix, tab routing requirements)
+- Confidence: HIGH -- all recommendations based on reading actual production code

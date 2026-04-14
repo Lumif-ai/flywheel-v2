@@ -1,297 +1,215 @@
 # Domain Pitfalls
 
-**Domain:** Structured skill output, document export (PDF/DOCX), file upload, PII redaction for Flywheel V2
-**Researched:** 2026-04-10
-**Confidence:** HIGH for pre-GSD code review and WeasyPrint/DOCX issues (direct code analysis + official docs). MEDIUM for Presidio (web research verified by official docs). HIGH for structured JSON output (verified via Anthropic official docs).
+**Domain:** Broker Frontend MVP -- ag-grid extraction, comparison matrix, Excel export, tab routing, migration from HTML tables
+**Researched:** 2026-04-14
+**Confidence:** HIGH for codebase-specific pitfalls (direct code analysis). MEDIUM for CSS sticky positioning (verified across multiple sources). MEDIUM for openpyxl/FastAPI export (web research + official docs).
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause rewrites, data loss, or production outages.
+Mistakes that cause rewrites, regressions, or production outages.
 
----
+### Pitfall 1: Extracting Shared ag-grid Infrastructure Breaks Pipeline
 
-### Pitfall 1: WeasyPrint Not in Dependencies and Missing System Libraries in Docker
+**What goes wrong:** Moving the grid theme, cell renderers, and column state hook from `features/pipeline/` to shared locations (`lib/`, `components/grid/`, `hooks/`) while PipelinePage.tsx has 757 lines of deeply coupled state management. Any import path change or renamed export silently breaks the pipeline grid, which is the most-used feature in the app.
 
-**What goes wrong:** The `document_export.py` service imports WeasyPrint at runtime (line 57) but WeasyPrint is NOT listed in `backend/pyproject.toml`. The export endpoint will crash with `ImportError` in production. Even after adding the pip dependency, WeasyPrint requires system-level C libraries (Cairo, Pango, GDK-Pixbuf, libffi, gobject) that do not exist in the `python:3.12-slim` Docker image used by `backend/Dockerfile`.
+**Why it happens:** The technical spec (SPEC-BROKER-FRONTEND-TECHNICAL.md) calls for extracting 5 cell renderers and the theme from pipeline. But PipelinePage.tsx references `pipelineTheme` inline (line 34-47), `usePipelineColumns` imports 11 cell renderers from relative paths (lines 3-13), and the column state persistence key is hardcoded as `'pipeline-col-state'` (line 15). A refactor that changes any of these paths without updating every reference will break the working pipeline.
 
-**Why it happens:** WeasyPrint is a Python binding to C rendering libraries, not a pure-Python package. The `pip install weasyprint` succeeds but the library fails at import time when the system libraries are missing. The `python:3.12-slim` base image strips these out.
-
-**Consequences:**
-- PDF export returns HTTP 501 (the code catches `ImportError` and raises `RuntimeError`)
-- Docker image build succeeds but export fails at runtime -- hard to catch without integration tests
-- Adding the system deps to `python:3.12-slim` adds 150-250MB to the Docker image
-
-**Evidence in pre-GSD code:**
-- `backend/pyproject.toml` lines 6-39: WeasyPrint not listed in dependencies
-- `backend/src/flywheel/services/document_export.py` line 57: `from weasyprint import HTML as WeasyprintHTML`
-- `backend/Dockerfile` line 1: `FROM python:3.12-slim AS base` -- no `apt-get install` for system libs
+**Consequences:** Pipeline grid shows blank/white screen, no error message (ag-grid fails silently when cell renderers are undefined). Users lose access to their primary CRM view. Since pipeline is behind a feature flag that is already enabled for all tenants, this breaks production immediately.
 
 **Prevention:**
-1. Add `weasyprint>=63` to `pyproject.toml` dependencies
-2. Add system dependency installation to Dockerfile BEFORE pip install:
-   ```dockerfile
-   RUN apt-get update && apt-get install -y --no-install-recommends \
-       libpango1.0-0 libpangoft2-1.0-0 libharfbuzz-subset0 \
-       libcairo2 libgdk-pixbuf2.0-0 libgobject-2.0-0 libffi-dev \
-       && rm -rf /var/lib/apt/lists/*
+1. Extract shared infrastructure in a DEDICATED phase BEFORE building any broker grid components
+2. After extraction, verify pipeline still renders by running the app and checking `/pipeline` manually
+3. Use TypeScript strict mode -- if a cell renderer import path is wrong, TS will catch it at build time
+4. Keep pipeline-specific renderers (`ChannelsCell`, `ContactCell`, `NextStepCell`, `OutreachStatusCell`, `AiInsightCell`, `NameCell`, `ExpandToggleCell`, `FitTierBadge`, `StagePill`, `ContactStatusPill`, `DatePickerEditor`, `DateCell`, `ChannelIconsCell`) in `features/pipeline/` -- only extract the 5 generic ones listed in the spec
+5. The `usePipelineColumns` hook (168 lines) should NOT be refactored -- only extract the column state persistence pattern into `useGridColumnState(storageKey)` and have `usePipelineColumns` import and use it
+
+**Detection:** Pipeline grid shows white/empty content area. No TypeScript errors if `any` types leak through. Always smoke-test `/pipeline` after any shared infrastructure change.
+
+**Files at risk:**
+- `frontend/src/features/pipeline/components/PipelinePage.tsx` (757 lines, the most complex component)
+- `frontend/src/features/pipeline/hooks/usePipelineColumns.ts` (167 lines)
+- `frontend/src/features/pipeline/hooks/useContactColumns.ts`
+- `frontend/src/features/pipeline/components/cell-renderers/` (13 renderer files)
+
+### Pitfall 2: CoverageTable Inline Edit State Lost During ag-grid Migration
+
+**What goes wrong:** The existing `CoverageTable.tsx` (193 lines) has working inline editing using React state (`useState` for `editingId` and `editValues`). Migrating to ag-grid means replacing this with ag-grid's built-in cell editing (`editable: true`, `cellEditor`). During migration, the existing edit-save-cancel flow, the `is_manual_override` flag setting, and the `useCoverageMutation` integration can be lost or subtly broken.
+
+**Why it happens:** ag-grid's inline editing model is fundamentally different from React controlled inputs:
+- React approach (current): component owns state, explicit save/cancel buttons, mutation fires on save
+- ag-grid approach: grid owns edit state, `onCellValueChanged` fires after edit completes, no explicit save button
+The current CoverageTable sets `is_manual_override: true` on save (line 36) -- this business logic MUST survive the migration.
+
+**Consequences:** Edited coverages lose the `is_manual_override` flag, meaning the system treats manual corrections as AI-extracted data. This breaks the confidence display and could cause AI to overwrite broker corrections on re-analysis.
+
+**Prevention:**
+1. Before migrating CoverageTable, document every piece of business logic in the current component:
+   - `is_manual_override: true` set on every save (line 36)
+   - Three fields are editable: `coverage_type`, `description`, `required_limit` (lines 86-110)
+   - Number input for `required_limit` with null handling (lines 100-110)
+   - `category`, `confidence`, and `source` are read-only even in edit mode (lines 112-114)
+2. In the ag-grid version, use `onCellValueChanged` callback and ensure it includes `is_manual_override: true` in the mutation payload
+3. Write a manual test checklist: edit a coverage -> verify API call includes `is_manual_override: true`
+
+**Detection:** Check network tab after editing a coverage cell -- the PATCH request must include `is_manual_override: true`.
+
+**Files at risk:**
+- `frontend/src/features/broker/components/CoverageTable.tsx` (193 lines, working inline edit)
+- `frontend/src/features/broker/hooks/useCoverageMutation.ts`
+
+### Pitfall 3: ComparisonMatrix CSS Sticky Fails with overflow:auto Ancestor
+
+**What goes wrong:** The comparison matrix spec requires frozen first column (coverage names) + sticky header row + horizontal scroll for 5+ carriers. CSS `position: sticky` fails silently when ANY ancestor element between the sticky element and the scroll container has `overflow: hidden`, `overflow: auto`, or `overflow: scroll`. The current ComparisonMatrix.tsx wraps the table in `<div className="overflow-x-auto rounded-lg border">` (line 161) -- this creates the scroll context, but if a PARENT of this div also has overflow set (common in layout components), sticky will not work.
+
+**Why it happens:** `position: sticky` sticks relative to its nearest scrolling ancestor. If a parent layout div (e.g., the `lg:col-span-2` grid cell in BrokerProjectDetail.tsx line 62, or the `p-6 space-y-6` wrapper) has any overflow property, the sticky element becomes constrained to that container instead of the intended scroll container. The current `ComparisonMatrix` does NOT use sticky at all (it is a plain HTML table) -- the spec ADDS this requirement.
+
+**Consequences:** First column scrolls away with horizontal scroll, making the matrix unreadable when comparing 5+ carriers. Users cannot see which coverage row they are looking at. This is the #1 screen in the product per the spec.
+
+**Prevention:**
+1. Do NOT use `<table>` with `position: sticky` on `<td>`/`<th>` elements. Chrome has known bugs with sticky on table elements (works in Firefox/Safari but not reliably in Chrome).
+2. Use CSS Grid or Flexbox layout instead of `<table>` for the comparison matrix. This avoids all table-specific sticky bugs.
+3. Alternatively, use ag-grid's built-in `pinned: 'left'` for the coverage column (proven working in PipelinePage.tsx line 19-30). ag-grid handles the frozen column internally without CSS sticky.
+4. Audit ALL ancestor elements for `overflow` properties. The chain from the sticky element to the viewport must have NO intermediate `overflow: hidden/auto/scroll`.
+5. Z-index layering: sticky header cells need z-index higher than sticky first-column cells, and the top-left corner cell needs the highest z-index of all.
+
+**Detection:** Scroll horizontally in the comparison matrix with 5+ carriers. If the first column moves with the scroll, sticky is broken. Test in Chrome specifically.
+
+**Files at risk:**
+- `frontend/src/features/broker/components/ComparisonMatrix.tsx` (187 lines, currently no sticky)
+- `frontend/src/features/broker/components/BrokerProjectDetail.tsx` (parent layout with grid)
+
+### Pitfall 4: Excel Export Blocks FastAPI Event Loop
+
+**What goes wrong:** openpyxl generates the entire Excel workbook in memory before returning it. For a comparison matrix with many carriers and coverages (the spec shows 2 sheets: Insurance + Surety Bonds), the workbook is constructed synchronously. If the export endpoint is a regular async FastAPI route, it blocks the event loop during workbook generation, freezing ALL other requests.
+
+**Why it happens:** openpyxl's `Workbook.save()` is a CPU-bound synchronous operation. FastAPI's `StreamingResponse` only helps with the HTTP transfer -- the workbook must be fully built in memory before streaming starts. For a typical comparison matrix (20 coverage rows x 5 carriers x 2 sheets with formatting), this takes 50-200ms. Not huge, but it blocks every concurrent request during that time.
+
+**Consequences:** Other users experience 50-200ms latency spikes when any broker exports. On a slow server or with large matrices, this can cause timeouts for concurrent requests.
+
+**Prevention:**
+1. Use `run_in_executor` to offload openpyxl workbook generation to a thread pool:
+   ```python
+   import asyncio
+   from io import BytesIO
+   
+   async def generate_excel(data):
+       loop = asyncio.get_event_loop()
+       buffer = await loop.run_in_executor(None, _build_workbook_sync, data)
+       return buffer
    ```
-3. Consider a multi-stage build to keep image size down
-4. Alternative: use a WeasyPrint microservice (Docker sidecar) to isolate the heavy dependencies from the main API image
+2. Use `BytesIO` buffer, never write to disk on the server
+3. Set proper Content-Disposition header for the filename: `Content-Disposition: attachment; filename="comparison_{project_name}_{date}.xlsx"`
+4. Set Content-Type to `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`
+5. The backend already has openpyxl installed (confirmed in `.venv`)
 
-**Detection:** Export endpoint returns 501 or 500 in staging. CI integration test for PDF export.
+**Detection:** During load testing, export requests cause latency spikes for other endpoints. Monitor event loop blocking with `asyncio` debug mode.
 
----
-
-### Pitfall 2: LLM JSON Output is Prompt-Requested, Not Schema-Enforced
-
-**What goes wrong:** The one-pager SKILL.md (line 251-323) instructs Claude to output raw JSON as its final message: "Do not wrap in markdown code fences. Do not include any text before or after the JSON." This is a prompt-level instruction only. Claude will sometimes:
-- Wrap JSON in ```json code fences
-- Prepend conversational text ("Here's the one-pager:")
-- Produce invalid JSON (unclosed strings, trailing commas)
-- Omit optional fields that the renderer expects to exist
-
-The current parsing in both frontend (`SkillRenderer.tsx` line 41: `JSON.parse(output)`) and backend (`document_export.py` line 345-353: `json.loads(output)`) will throw on any of these failure modes.
-
-**Why it happens:** Flywheel uses a tool_use loop (`execution_gateway.py`). The final LLM response is `stop_reason: "end_turn"` with text content blocks. Text content has no schema enforcement. Anthropic now offers structured outputs (`output_config.format.type: "json_schema"`) which guarantees schema-valid JSON via constrained decoding, but this is NOT being used.
-
-**Consequences:**
-- Frontend shows "No content available" when `JSON.parse` fails silently in the catch block (`SkillRenderer.tsx` line 44)
-- Backend renders the JSON as markdown sections instead of structured document (fallback path)
-- DOCX export falls through to plain-text conversion instead of the branded one-pager builder
-- Users see broken output with no error message explaining what went wrong
-
-**Evidence in pre-GSD code:**
-- `frontend/src/features/documents/components/renderers/SkillRenderer.tsx` lines 39-48: bare `JSON.parse` with empty catch
-- `backend/src/flywheel/services/document_export.py` lines 343-353: `_try_parse_structured` only checks `startswith("{")` and `json.loads`
-- `backend/src/flywheel/engines/output_renderer.py` lines 508-514: same fragile JSON detection
-- `skills/one-pager/SKILL.md` line 254: "Do not wrap in markdown code fences" -- prompt-only enforcement
-
-**Prevention:**
-1. Use Anthropic's structured outputs API (`output_config.format.type: "json_schema"`) for skills that require JSON output. This guarantees valid JSON at the token level. GA on Claude Sonnet 4.5+, Opus 4.5+, Haiku 4.5+.
-2. If structured outputs can't be used (tool_use loop incompatibility), add robust JSON extraction: strip markdown fences, find first `{` to last `}`, retry parse
-3. Add a Pydantic model for one-pager schema on the backend for server-side validation after parsing
-4. Frontend type guard `isOnePagerData` (line 72-82 in `one-pager.ts`) only checks 5 fields -- should validate all required fields and array element shapes
-5. Always show a fallback error message, not silent failure
-
-**Detection:** LLM output doesn't start with `{`. Parse failure rate in logs. Add structured output validation metrics.
-
----
-
-### Pitfall 3: Structured Output Incompatibility with Tool_Use Loop
-
-**What goes wrong:** Flywheel's execution gateway runs skills through a multi-turn tool_use loop (context store reads, web search, etc.). Anthropic's structured outputs (`output_config.format`) apply to the FINAL response. But in a tool_use loop, the model may need to produce tool_use blocks in intermediate turns, and structured output formatting only applies when `stop_reason` is `end_turn`. If the skill prompt asks for JSON output AND the model needs to call tools, the structured output constraint may conflict with the tool calling behavior.
-
-**Why it happens:** Structured outputs and tool_use are designed to work together, but the interaction is nuanced. The `output_config` applies to the final text response. The execution_gateway collects text from `end_turn` responses (lines 396-410). The structured output constraint needs to be set from the first API call, but intermediate calls produce tool_use, not text.
-
-**Consequences:**
-- Setting `output_config` on the first call is correct (Anthropic applies it to the final turn), but the implementation needs to handle the case where the model decides to end early
-- If the schema is too restrictive, the model may be unable to express error conditions or ask clarifying questions
-
-**Prevention:**
-1. Set `output_config` on EVERY call in the loop (Anthropic ignores it on tool_use turns, applies on end_turn)
-2. Include an `error` field in the JSON schema so the model can report failures within the structured format
-3. Test with multi-turn tool_use conversations to verify JSON output is produced on the final turn
-4. Consider a two-phase approach: run the tool_use loop normally, then make a final "format as JSON" call with structured outputs
-
-**Detection:** Monitor `stop_reason` on final turn. Log cases where output is not valid JSON after structured output is requested.
-
----
-
-### Pitfall 4: PDF Export Runs Synchronously on API Thread
-
-**What goes wrong:** The export endpoint (`documents.py` line 631-706) calls `export_as_pdf()` synchronously in the FastAPI async handler. WeasyPrint's HTML-to-PDF conversion is CPU-intensive and can take 2-10 seconds for complex documents. This blocks the async event loop, degrading throughput for all concurrent requests.
-
-**Why it happens:** `export_as_pdf()` and `export_as_docx()` are synchronous functions called with `await` indirectly through the sync-to-async bridge. But WeasyPrint internally does blocking I/O and CPU-bound rendering.
-
-**Consequences:**
-- All other API requests stall while PDF is being generated
-- Timeout errors for other users during export
-- Railway/deployment health checks may fail during heavy exports
-
-**Evidence in pre-GSD code:**
-- `backend/src/flywheel/api/documents.py` lines 678-679: `content = export_as_pdf(doc.document_type, run_output, run_html)` -- synchronous call in async handler
-
-**Prevention:**
-1. Run export in a thread pool: `content = await asyncio.to_thread(export_as_pdf, ...)`
-2. Add a timeout (30s) to prevent runaway rendering
-3. For large documents, consider a background job with polling
-4. Add `Content-Length` header to the response so clients can show download progress
-
-**Detection:** Slow response times on other endpoints during export. Event loop blocking warnings in uvicorn logs.
-
----
-
-### Pitfall 5: XSS via HTML Injection in Export
-
-**What goes wrong:** The `_wrap_text_as_html` function (document_export.py lines 356-364) uses `html.escape` for plain text. But the `_wrap_fragment_as_document` function (lines 367-378) wraps an HTML fragment WITHOUT any sanitization. If `rendered_html` from the skill run contains malicious JavaScript, it will be embedded in the PDF generation pipeline. While WeasyPrint doesn't execute JS, the HTML is also served via the `/content` endpoint (documents.py line 548: `HTMLResponse(content=html)`) where it IS rendered in a browser.
-
-**Why it happens:** The rendered_html is assumed safe because it comes from the LLM, but LLM output can contain script tags, especially if the skill prompt or user input is crafted to produce them.
-
-**Evidence in pre-GSD code:**
-- `backend/src/flywheel/engines/output_renderer.py` line 49-73: `sanitize_html()` exists and is used during template rendering
-- `backend/src/flywheel/services/document_export.py` lines 367-378: `_wrap_fragment_as_document` does NOT call `sanitize_html`
-- `backend/src/flywheel/api/documents.py` line 548: serves HTML directly to browser
-
-**Prevention:**
-1. Always run `sanitize_html()` on any HTML before serving it to browsers or embedding in exports
-2. The sanitizer already exists in `output_renderer.py` -- import and use it in `document_export.py`
-3. Set `Content-Security-Policy` header on the HTML content endpoint to prevent script execution
-
-**Detection:** Security audit. Test with `<script>alert(1)</script>` in skill output.
+**Files at risk:**
+- `backend/src/flywheel/api/broker.py` (new endpoint to be added)
+- No existing Excel export endpoint exists -- this is net-new code
 
 ---
 
 ## Moderate Pitfalls
 
----
+### Pitfall 5: Gate Strip Polling Creates N+1 Query Storm
 
-### Pitfall 6: DOCX One-Pager Builder Has Hardcoded Column Assumptions
+**What goes wrong:** The persistent gate strip shows counts for 3 gates (Review, Approve, Export) on every broker page. If implemented as a React Query hook with `refetchInterval`, it fires a separate API call every N seconds from EVERY mounted broker page component. If the gate strip component is mounted in the layout (which it should be, since it persists across pages), a single polling query is fine. But if each page ALSO fetches gate counts for its own rendering, you get duplicate queries.
 
-**What goes wrong:** The `_build_one_pager_docx` function assumes `comparison_table.columns` is always exactly 2 columns (document_export.py line 254: `table = doc.add_table(rows=len(rows) + 1, cols=3)` -- hardcoded 3 cols for Metric + 2 columns). But the TypeScript type defines `columns` as a tuple `[string, string]` while the JSON schema in SKILL.md shows `"columns": ["Manual Process", "With ProductName"]` -- what if the LLM produces 3 comparison columns?
+**Why it happens:** React Query deduplicates queries by query key, but only within the same `staleTime` window. The existing `useBrokerQuotes` hook (line 19-26) already uses conditional `refetchInterval` -- returning `10_000` when quotes are extracting. Adding another polling hook for gate counts creates overlapping network traffic. Additionally, the gate strip counts require aggregation across ALL projects (not just one), so the backend query is heavier.
 
-**Prevention:**
-1. Make the table column count dynamic: `cols=len(col_names) + 1`
-2. Add server-side validation of the structured data before building the DOCX
-3. Guard against `IndexError` when accessing column data
-
-**Evidence:**
-- `backend/src/flywheel/services/document_export.py` line 254: hardcoded `cols=3`
-- `frontend/src/features/documents/types/one-pager.ts` line 32: `columns: [string, string]` -- enforces tuple of exactly 2
-
----
-
-### Pitfall 7: Font Rendering Differences Between React, WeasyPrint, and DOCX
-
-**What goes wrong:** The one-pager renders in three different contexts:
-1. **React** (OnePagerRenderer.tsx): Uses browser-installed Inter font
-2. **WeasyPrint PDF**: Uses system-installed fonts in Docker container (Inter is NOT installed in `python:3.12-slim`)
-3. **python-docx DOCX**: Uses fonts available on the recipient's machine (Inter may not be installed)
-
-The visual output will look completely different across formats.
+**Consequences:** API gets hammered with repeated count queries every 10-30 seconds per tab. Database load increases linearly with connected broker users. On mobile with spotty connections, these polling requests queue up and fire simultaneously when connectivity returns.
 
 **Prevention:**
-1. Embed Inter font in the PDF HTML as a base64 `@font-face` or install it in the Docker image
-2. For DOCX, set `run.font.name = "Calibri"` as fallback (universally available on Windows/Mac)
-3. Test all three output formats with the same data to verify visual consistency
-4. Accept that pixel-perfect consistency across formats is impossible -- aim for "professional in each"
+1. Single gate counts endpoint: `GET /broker/gate-counts` returning `{review: 3, approve: 1, export: 2}`
+2. One React Query hook with `refetchInterval: 30_000` (30 seconds is sufficient for gate counts)
+3. Use `staleTime: 25_000` to prevent refetch on component remount during page navigation
+4. Invalidate gate counts on any mutation that changes project status (e.g., approve project, send solicitation)
+5. Do NOT poll from individual page components -- only the layout-level gate strip polls
 
----
+**Detection:** Open browser DevTools Network tab. Navigate between broker pages. Count how many `/gate-counts` requests fire per minute. Should be exactly 2 (one per 30s), not 2x per page.
 
-### Pitfall 8: File Upload Security (Future Phase)
+### Pitfall 6: Tab Routing in Project Detail Loses State on Back Button
 
-**What goes wrong:** When adding file upload for skill processing:
-- Malicious PDFs can exploit PDF parsing libraries (pdfplumber is already a dependency)
-- Zip bombs or extremely large files can exhaust memory/disk
-- Uploaded files stored in temp directories may persist indefinitely
-- Multi-tenant: one tenant's uploaded file accessible to another tenant
+**What goes wrong:** The spec requires 5 tabs in project detail (Overview, Coverage, Carriers, Quotes, Compare). If tab state is stored in URL query params (e.g., `/broker/projects/:id?tab=compare`), the browser back button creates confusing navigation: clicking tabs forward (Overview -> Coverage -> Compare) then hitting back goes Compare -> Coverage -> Overview, which feels like navigating "between pages" rather than "between tabs."
 
-**Prevention:**
-1. Enforce file size limits at the reverse proxy level (nginx/Railway) AND in FastAPI
-2. Validate file type by magic bytes, not just extension
-3. Store uploads in tenant-scoped Supabase storage paths
-4. Clean up temp files in a `finally` block or use `tempfile.NamedTemporaryFile(delete=True)`
-5. Never pass user-uploaded file paths to shell commands
-6. Set timeouts on PDF parsing to prevent decompression bombs
+**Why it happens:** Each `setSearchParams` call with `replace: false` pushes a new history entry. The existing PipelinePage.tsx solves this correctly by using `{ replace: true }` (line 191) for filter changes. But a developer unfamiliar with this pattern will use the default (push) behavior.
 
----
-
-### Pitfall 9: Presidio False Positives Will Redact Business-Critical Content
-
-**What goes wrong:** Presidio's default recognizers are tuned for high recall, low precision. In a B2B sales context:
-- Company names get flagged as PERSON entities ("Baker Hughes", "Johnson Controls")
-- Product codes and SKUs get flagged as identifiers
-- Phone number formats in meeting notes get partially redacted
-- Email addresses in competitive intel get redacted when they should be kept
-- Industry statistics and financial figures get flagged as SSN or credit card patterns
-
-A 2025 study found 22.7% precision in mixed-language enterprise datasets -- for every real PII entity, 3.4 false positives.
+**Consequences:** Users get trapped in history loops. Pressing back 5 times to return to the projects list instead of once. This is a UX bug that users notice immediately.
 
 **Prevention:**
-1. Build a domain-specific allow-list: company names, product names, industry terms from context store
-2. Use custom recognizers instead of defaults -- start with EMAIL, PHONE, SSN only
-3. Set `score_threshold=0.7` minimum (default is 0.0 which catches everything)
-4. Show redacted content to the user for review BEFORE finalizing (preview mode)
-5. Store the original and redacted versions so redaction is reversible
-6. Test with real Flywheel documents (meeting prep output, company intel) to calibrate
+1. Use `replace: true` for ALL tab changes: `setSearchParams({tab: 'compare'}, { replace: true })`
+2. Alternative: store active tab in component state (not URL), and only use URL for deep-linking on initial load. Read tab from URL on mount, then ignore URL changes. This is simpler and avoids history pollution entirely.
+3. The existing broker routes (`/broker/projects/:id`) do NOT currently use query params -- the project detail renders all sections vertically (BrokerProjectDetail.tsx lines 60-101). The spec CHANGES this to tabs, which means adding URL-based tab state.
+4. Test: navigate to project detail -> click 3 different tabs -> hit browser back -> should return to projects list in ONE click
 
-**Detection:** Log redaction counts per document. Alert on documents where >20% of content is redacted (likely false positives).
+**Detection:** Browser history grows with each tab click. Back button cycles through tabs instead of going to previous page.
 
----
+### Pitfall 7: ag-grid Version Mismatch Between Pipeline and Broker
 
-### Pitfall 10: Presidio Model Download Size and Cold Start
+**What goes wrong:** The pipeline already uses ag-grid with `AllCommunityModule` and `themeQuartz` (PipelinePage.tsx lines 4-6). If the broker module imports ag-grid differently (e.g., importing individual modules for tree-shaking, or using a different ag-grid package version), you get runtime errors about duplicate grid instances or missing modules.
 
-**What goes wrong:** Presidio's NLP engine (spaCy `en_core_web_lg`) is ~560MB. First import triggers a download. In a Docker container:
-- Image size balloons by 500-600MB
-- Cold start adds 5-15 seconds for model loading
-- Railway free tier may hit memory limits
+**Why it happens:** ag-grid v33+ changed the module system significantly. The pipeline uses the old-style `AllCommunityModule` import. If a developer follows current ag-grid docs (which default to the new module system), they will write incompatible imports.
+
+**Consequences:** Runtime error: "AG Grid: no modules registered" or "AG Grid: multiple grid instances detected". Grid renders as empty div with no visible error in the UI.
 
 **Prevention:**
-1. Install the spaCy model in the Dockerfile: `RUN uv run python -m spacy download en_core_web_lg`
-2. Consider `en_core_web_sm` (~12MB) for initial implementation -- lower accuracy but much faster
-3. Lazy-load Presidio only when PII redaction is requested, not on app startup
-4. Cache the analyzer instance as a module-level singleton
+1. Broker MUST use the same ag-grid import pattern as pipeline: `import { AllCommunityModule, themeQuartz } from 'ag-grid-community'` and `import { AgGridReact } from 'ag-grid-react'`
+2. The shared grid theme extraction (SPEC section 1.1) should be the canonical import source -- both pipeline and broker import theme from `lib/grid-theme.ts`
+3. Check `package.json` for ag-grid version before writing any broker grid code. Pin the version if not already pinned.
+4. NEVER import from `@ag-grid-community/core` or `@ag-grid-community/react` -- these are the new modular packages that conflict with the existing `ag-grid-community` package
+
+**Detection:** Console errors containing "AG Grid" on any page with a grid. White/empty grid area.
+
+### Pitfall 8: Two-Row Cell Layout in ag-grid Comparison Matrix
+
+**What goes wrong:** The spec requires two-row cells (premium bold top, limit + deductible muted bottom). ag-grid cells are single-value by default. Custom cell renderers that return multi-line JSX can have height calculation issues: ag-grid measures cell height on first render, and if the content is dynamic (some cells have 2 lines, some have 1), rows end up with inconsistent heights or clipped content.
+
+**Why it happens:** ag-grid's default `rowHeight` is fixed (set to 44 in the pipeline theme, line 42). Two-row cells need more height. If you set a fixed `rowHeight` that accommodates two-row cells, single-row cells (empty/no-quote cells) have excessive whitespace. If you use `autoHeight`, ag-grid recalculates row heights on every render, causing layout thrashing with many cells.
+
+**Consequences:** Clipped cell content (premium shows but limit/deductible is hidden), or excessive whitespace in empty cells, or slow rendering with `autoHeight` on 20+ coverage rows.
+
+**Prevention:**
+1. Use a fixed `rowHeight` of ~64px for the comparison matrix grid (NOT the global theme's 44px)
+2. Override `rowHeight` at the grid instance level, not the theme level, so pipeline keeps 44px
+3. Cell renderer should always render both lines, using an em-dash for missing values (the existing `ComparisonMatrix.tsx` already does this correctly with `formatCurrency` returning "\u2014" for null)
+4. Do NOT use `autoHeight` for the comparison matrix -- fixed height is more predictable
+
+**Detection:** Visual inspection: cells look clipped at bottom, or vary in height row-to-row.
 
 ---
 
 ## Minor Pitfalls
 
----
+### Pitfall 9: localStorage Collision Between Pipeline and Broker Column State
 
-### Pitfall 11: Export Filename Sanitization is Incomplete
+**What goes wrong:** The pipeline uses `localStorage.setItem('pipeline-col-state', ...)` (usePipelineColumns.ts line 15). If the broker column state hook uses a similar key without namespacing, column state from one module could overwrite the other.
 
-**What goes wrong:** The filename sanitization in `documents.py` line 675 uses `re.sub(r"[^\w\s\-]", "", doc.title)`. This allows spaces and underscores but:
-- Unicode characters in titles may produce garbled filenames on Windows
-- Very long titles get truncated to 60 chars which may cut mid-word
-- The `Content-Disposition` header doesn't use RFC 5987 encoding for non-ASCII
+**Prevention:** The shared `useGridColumnState(storageKey)` pattern in the spec handles this correctly -- just ensure unique keys: `'broker-projects-col-state'`, `'broker-coverage-col-state'`, `'broker-comparison-col-state'`. Never use a generic key like `'col-state'`.
 
-**Prevention:**
-1. Use `filename*=UTF-8''...` encoding in Content-Disposition for non-ASCII support
-2. Truncate at word boundaries, not character count
-3. Add a fallback `filename="document.pdf"` alongside the encoded version
+### Pitfall 10: Currency Formatting Inconsistency (MXN vs USD)
 
----
+**What goes wrong:** The existing ComparisonMatrix defaults to `currency = 'MXN'` (line 111). The CoverageTable uses `'USD'` (line 139). The spec targets Mexico-based brokers. If some components format as USD and others as MXN, the numbers look wrong (MXN uses `$` prefix in Mexico, same as USD, but amounts are 20x larger).
 
-### Pitfall 12: Jinja2 Template Autoescape Strips Structured Data
+**Prevention:** Currency must come from `project.currency` consistently. The existing code already passes `currency={project.currency || 'MXN'}` to ComparisonMatrix (BrokerProjectDetail.tsx line 95). Ensure ALL new monetary formatters use the project currency, never hardcode.
 
-**What goes wrong:** The Jinja2 environment in `output_renderer.py` line 395 sets `autoescape=True`. When `structured_data` is passed to the one-pager template, any HTML entities in the structured JSON values (like `&amp;` in company names or `<` in comparison text) get double-escaped.
+### Pitfall 11: BrokerGuard Null Flash on Page Refresh
 
-**Evidence:**
-- `backend/src/flywheel/engines/output_renderer.py` line 395: `autoescape=True`
-- `backend/src/flywheel/engines/templates/outputs/one_pager.html` line 9: `{{ d.headline }}` -- autoescaped
+**What goes wrong:** The `BrokerGuard` component (routes.tsx lines 144-151) returns `null` when `activeTenant` is null (loading state). On page refresh, there is a brief flash of nothing before the tenant loads. This is intentional (prevents redirect before hydration), but if the broker layout has a persistent gate strip, the gate strip also disappears during this flash.
 
-**Prevention:** This is actually correct for XSS protection. But if structured data contains intentional HTML (like `<strong>`), use `{{ d.field | safe }}` selectively. The current template does NOT use `| safe` on structured fields, which is the safe default.
+**Prevention:** The gate strip should be inside `BrokerGuard`, not outside it. This means it disappears during the tenant loading flash, which is acceptable (sub-second). Do NOT try to render the gate strip before tenant loads -- it would fire API calls without tenant context.
 
----
+### Pitfall 12: Existing Broker Components Import Chain
 
-### Pitfall 13: OnePagerRenderer Assumes All Arrays are Non-Empty
+**What goes wrong:** The existing 17 broker components have direct imports between them (e.g., BrokerProjectDetail imports CoverageTable, ComparisonMatrix, GapAnalysis, etc.). When rewriting these components, changing the export signature of any component (e.g., renaming a prop) silently breaks all importers if TypeScript is not strict.
 
-**What goes wrong:** The React renderer (`OnePagerRenderer.tsx`) checks `.length > 0` for stats_banner (line 62), problem_columns (line 106), and outcomes (line 164). But it does NOT null-check `comparison_table` before accessing `.rows` -- if the LLM omits the comparison_table entirely, `data.comparison_table.rows.length` will throw.
-
-**Evidence:**
-- `frontend/src/features/documents/types/one-pager.ts` line 57: `comparison_table: OnePagerComparisonTable` -- NOT optional in the type
-- `frontend/src/features/documents/components/renderers/OnePagerRenderer.tsx` line 207: `data.comparison_table && data.comparison_table.rows.length > 0` -- has the null check here, but...
-- The TypeScript type says it's required, while the LLM may not always produce it
-
-**Prevention:**
-1. Make `comparison_table` optional in the TypeScript type: `comparison_table?: OnePagerComparisonTable`
-2. Also make `audit_trail`, `capability_hint`, `cta`, and `footnotes` optional since LLMs may omit them
-3. The type guard `isOnePagerData` should match what the renderer actually requires, not what the ideal schema specifies
-
----
-
-### Pitfall 14: Backend JSON Detection is Fragile
-
-**What goes wrong:** Both `_try_parse_structured` (document_export.py line 345) and the output_renderer (line 508) detect structured JSON by checking if `output.strip().startswith("{")`. This fails when:
-- The LLM outputs JSON wrapped in markdown fences: ` ```json\n{...}\n``` `
-- The LLM prepends text: "Here is the one-pager:\n{...}"
-- The output is a JSON array `[...]` instead of object
-
-**Prevention:**
-1. Add a `_extract_json` helper that strips markdown fences, finds the outermost `{...}` or `[...]`, then parses
-2. Centralize JSON detection in one function used by both renderer and export service
-3. Log extraction failures with the raw output prefix for debugging
+**Prevention:** Before starting any component rewrite, grep for all importers of that component:
+```bash
+grep -r "from.*CoverageTable\|import.*CoverageTable" frontend/src --include="*.tsx"
+```
+Update all importers in the same commit as the component change.
 
 ---
 
@@ -299,41 +217,23 @@ A 2025 study found 22.7% precision in mixed-language enterprise datasets -- for 
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| Structured JSON output | Pitfall 2, 3: LLM produces invalid JSON or structured outputs conflict with tool_use | Use Anthropic structured outputs API. Test with real multi-turn tool_use conversations. Add robust JSON extraction fallback. |
-| PDF export with WeasyPrint | Pitfall 1, 4, 7: Missing deps, blocks event loop, font differences | Add system deps to Dockerfile. Run in thread pool. Embed fonts. Budget 200MB Docker image increase. |
-| DOCX export | Pitfall 6, 7: Hardcoded columns, font mismatch | Make column count dynamic. Use Calibri fallback. Test with real data. |
-| File upload | Pitfall 8: Security, size limits, temp file cleanup, multi-tenant isolation | Validate magic bytes. Enforce size limits. Tenant-scoped storage. Temp file cleanup. |
-| PII redaction | Pitfall 9, 10: False positives destroy content, model download bloats image | Start with minimal recognizers. Domain allow-list. Preview mode. Use small spaCy model initially. |
-| Integration testing | All pitfalls | Need end-to-end tests covering: JSON parse -> render -> export for each format. Mock LLM output with known-good and known-bad JSON. |
-
----
-
-## Pre-GSD Code Issues Summary
-
-Concrete issues found in the existing code that must be fixed:
-
-| File | Line(s) | Issue | Severity |
-|------|---------|-------|----------|
-| `backend/pyproject.toml` | deps | WeasyPrint not listed as dependency | CRITICAL -- PDF export will crash |
-| `backend/Dockerfile` | 1 | No system library installation for WeasyPrint | CRITICAL -- runtime ImportError |
-| `backend/src/flywheel/services/document_export.py` | 57 | Runtime import of missing dependency | CRITICAL |
-| `backend/src/flywheel/services/document_export.py` | 367-378 | `_wrap_fragment_as_document` skips HTML sanitization | HIGH -- XSS risk |
-| `backend/src/flywheel/services/document_export.py` | 254 | Hardcoded `cols=3` in comparison table | MEDIUM |
-| `backend/src/flywheel/services/document_export.py` | 345 | Fragile JSON detection (`startswith("{")`) | MEDIUM |
-| `backend/src/flywheel/api/documents.py` | 678-679 | Sync PDF generation blocks async event loop | HIGH |
-| `frontend/src/features/documents/components/renderers/SkillRenderer.tsx` | 41-44 | Silent JSON.parse failure with empty catch | MEDIUM |
-| `frontend/src/features/documents/types/one-pager.ts` | 52-67 | Required fields that LLM may omit (comparison_table, audit_trail, etc.) | MEDIUM |
-| `skills/one-pager/SKILL.md` | 251-254 | Relies on prompt-only JSON enforcement instead of structured outputs API | HIGH |
+| Shared grid infrastructure extraction | Pitfall 1: Breaking pipeline | Extract-then-verify in isolation before broker uses it. Smoke test `/pipeline` after every file move. |
+| Comparison matrix with sticky columns | Pitfall 3: CSS sticky fails in Chrome | Use ag-grid `pinned: 'left'` OR CSS Grid layout instead of `<table>` + sticky. Test in Chrome specifically. |
+| CoverageTable migration to ag-grid | Pitfall 2: Business logic lost | Document all edit logic before rewriting. Verify `is_manual_override` survives migration. |
+| Excel export endpoint | Pitfall 4: Event loop blocking | Use `run_in_executor` for openpyxl. Return `StreamingResponse` with `BytesIO`. |
+| Gate strip implementation | Pitfall 5: Polling storm | Single endpoint, single hook, layout-level only, 30s interval. |
+| Tab routing in project detail | Pitfall 6: Back button pollution | Use `replace: true` or component-state tabs with URL read-on-mount only. |
+| Any new ag-grid usage | Pitfall 7: Version mismatch | Match pipeline's import pattern exactly. Never mix module systems. |
+| Two-row comparison cells | Pitfall 8: Height issues | Fixed 64px row height for comparison grid. No `autoHeight`. |
 
 ---
 
 ## Sources
 
-- [Anthropic Structured Outputs Documentation (official, GA)](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) -- HIGH confidence
-- [WeasyPrint Installation Docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) -- HIGH confidence
-- [WeasyPrint Docker Issues](https://github.com/Kozea/WeasyPrint/issues/2221) -- Railway-specific gobject dependency issue
-- [WeasyPrint Alpine Installation](https://github.com/Kozea/WeasyPrint/issues/699) -- system deps list
-- [Presidio PII Evaluation](https://microsoft.github.io/presidio/evaluation/) -- HIGH confidence
-- [Presidio False Positive Analysis](https://anonym.legal/blog/false-positive-tax-pii-detection-precision-2025) -- MEDIUM confidence (third-party analysis)
-- [Presidio FAQ](https://microsoft.github.io/presidio/faq/) -- HIGH confidence
-- Direct codebase analysis of all pre-GSD files listed in milestone context -- HIGH confidence
+- Direct codebase analysis of all files referenced above (HIGH confidence)
+- [CSS-Tricks: Sticky header + sticky column table](https://css-tricks.com/a-table-with-both-a-sticky-header-and-a-sticky-first-column/) (MEDIUM)
+- [Polypane: All the ways position:sticky can fail](https://polypane.app/blog/getting-stuck-all-the-ways-position-sticky-can-fail/) (MEDIUM)
+- [FastAPI Excel export patterns](https://github.com/fastapi/fastapi/issues/1277) (MEDIUM)
+- [TanStack Query polling patterns](https://javascript.plainenglish.io/tanstack-query-mastering-polling-ee11dc3625cb) (MEDIUM)
+- [AG Grid migration docs](https://www.ag-grid.com/react-data-grid/migration/) (HIGH)
+- [AG Grid module architecture](https://www.ag-grid.com/javascript-data-grid/modules/) (HIGH)

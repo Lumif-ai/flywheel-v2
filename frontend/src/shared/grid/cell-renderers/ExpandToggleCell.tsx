@@ -1,8 +1,7 @@
 import { ChevronRight, ChevronDown } from 'lucide-react'
 import type { ICellRendererParams } from 'ag-grid-community'
-import type { PipelineGridRow } from '../../types/pipeline'
 
-interface ExpandToggleCellProps extends ICellRendererParams<PipelineGridRow> {
+interface ExpandToggleCellProps extends ICellRendererParams {
   expandedIds: Set<string>
   onToggle: (id: string) => void
 }

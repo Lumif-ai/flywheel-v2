@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams, useNavigate, useLocation } from 'react-router'
 import { Inbox, ChevronLeft, ChevronRight } from 'lucide-react'
-import { AllCommunityModule, themeQuartz } from 'ag-grid-community'
+import { AllCommunityModule } from 'ag-grid-community'
 import type { CellKeyDownEvent, GridApi } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
+import { gridTheme } from '@/shared/grid/theme'
 import { usePipeline } from '../hooks/usePipeline'
 import { usePipelineColumns } from '../hooks/usePipelineColumns'
 import { useContacts } from '../hooks/useContacts'
@@ -30,21 +31,6 @@ import type {
 } from '../types/pipeline'
 
 const PAGE_SIZE_OPTIONS = [25, 50, 100]
-
-const pipelineTheme = themeQuartz.withParams({
-  backgroundColor: '#FFFFFF',
-  foregroundColor: '#121212',
-  headerBackgroundColor: '#FAFAFA',
-  headerTextColor: '#9CA3AF',
-  borderColor: '#F3F4F6',
-  accentColor: '#E94D35',
-  rowHoverColor: '#FAFAFA',
-  fontSize: 13,
-  rowHeight: 44,
-  headerHeight: 36,
-  headerFontWeight: 600,
-  fontFamily: "'Geist Variable', ui-sans-serif, system-ui, sans-serif",
-})
 
 export function PipelinePage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -612,7 +598,7 @@ export function PipelinePage() {
               <AgGridReact
                 key={mode}
                 modules={[AllCommunityModule]}
-                theme={pipelineTheme}
+                theme={gridTheme}
                 rowData={currentRowData}
                 columnDefs={currentColumnDefs}
                 onColumnResized={isContactMode ? onContactColumnStateChanged : onColumnStateChanged}

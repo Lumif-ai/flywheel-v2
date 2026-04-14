@@ -10,10 +10,10 @@ See: .planning/PROJECT.md (updated 2026-04-13)
 ## Current Position
 
 Milestone: v16.0 Briefing Intelligence Surface — IN PROGRESS
-Phase: 120-briefing-intelligence-surface (Plan 2/N complete)
-Plan: 120-02 complete — MarketPatternsSection frontend component wired
-Status: Active
-Last activity: 2026-04-13 — 120-02 complete
+Phase: 121-tenant-bootstrap-fix — COMPLETE (2026-04-14)
+Plan: 121-01 complete — Tenant bootstrap architecture fix verified (7/7 scenarios passed)
+Status: Phase complete — human-verified, all scenarios approved
+Last activity: 2026-04-14 — Phase 121 complete
 
 Progress: [##########] 100%
 
@@ -200,6 +200,12 @@ v16.0 Phase 120 Plan 02:
 - Top 5 patterns cap in loaded view for consistent card density with other briefing sections
 - Pre-existing Shield unused import in AppSidebar.tsx removed (blocked build, Rule 3 auto-fix)
 
+v16.0 Phase 121 Plan 01:
+- activeTenant omitted from TenantBootstrap useEffect deps to prevent infinite loop — effect only needs to run when fresh server data arrives
+- TenantBootstrap does NOT wrap standalone routes — settings relies on Zustand persist hydration + its own enabled:!activeTenant fetch
+- BrokerGuard returns null (not redirect) when activeTenant is null — prevents premature redirect during localStorage hydration on page refresh
+- Both VOLATILE_PREFIXES arrays updated with 'tenants' — stale tenant cache with wrong feature flags never served
+
 ### Pending Todos
 
 - Title matching false positives in _filter_unprepped (requires meeting_id on SkillRun — deferred from 66.1)
@@ -211,10 +217,19 @@ v16.0 Phase 120 Plan 02:
 - Phase 120 Plan 01 complete: market_patterns backend — PainPatternItem/MarketPatternsSection models, _build_market_patterns() section builder, narrative injection with top_pain_patterns
 - Phase 120 Plan 02 complete: MarketPatternsSection frontend — PainPattern/MarketPatternsData TS interfaces, loading/empty/loaded component, wired into BriefingPageV2 between narrative and today sections
 - Phase 120 Plan 03 complete: meeting-prep SKILL.md v4.1 — Step 0c pain landscape loading via local FlywheelClient, Section 1.95 Market Pain Patterns in HTML briefing
+- Phase 121 complete: Tenant Bootstrap Fix — Zustand persist middleware, TenantBootstrap gate component, pure queryFn, BrokerGuard, volatile tenants cache. Human-verified all 7 scenarios.
 
 ### Blockers/Concerns
 
 None active.
+
+v16.0 Phase 121 Plan 01:
+- activeTenant omitted from TenantBootstrap useEffect deps to prevent infinite loop — effect only runs when fresh server data arrives
+- TenantBootstrap does NOT wrap standalone routes — settings relies on Zustand persist hydration + its own enabled:!activeTenant fetch
+- BrokerGuard returns null (not redirect) when activeTenant is null — prevents premature redirect during localStorage hydration
+- Both VOLATILE_PREFIXES arrays updated — ensures stale tenant cache with wrong features is never served on page load or persisted to storage
+- Gate component pattern: block only when both !storeValue AND isLoading — always render if persist hydrated
+- Pure queryFn pattern: never call store setters inside queryFn; use useEffect to sync React Query data to Zustand store
 
 v16.0 Phase 120 Plan 01:
 - market_patterns uses default_factory=MarketPatternsSection (not Optional/None) — guarantees always-present field for frontend type contract
@@ -239,6 +254,6 @@ v15.0 Phase 117 Plan 03:
 
 ## Session Continuity
 
-Last session: 2026-04-13
-Stopped at: Phase 120 Plan 02 complete — MarketPatternsSection frontend component wired into BriefingPageV2 (120-02-PLAN.md)
+Last session: 2026-04-14
+Stopped at: Phase 121 complete — tenant bootstrap fix verified, all 7 scenarios human-approved
 Resume file: None

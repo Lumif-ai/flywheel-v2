@@ -1,18 +1,14 @@
-import { useCallback, useRef } from 'react'
-import type { ColDef, GridApi, ColumnState } from 'ag-grid-community'
+import type { ColDef } from 'ag-grid-community'
 import { NameCell } from '../components/cell-renderers/NameCell'
 import { ContactCell } from '../components/cell-renderers/ContactCell'
 import { StagePill } from '../components/cell-renderers/StagePill'
 import { FitTierBadge } from '../components/cell-renderers/FitTierBadge'
 import { ChannelsCell } from '../components/cell-renderers/ChannelsCell'
-import { DateCell } from '../components/cell-renderers/DateCell'
 import { AiInsightCell } from '../components/cell-renderers/AiInsightCell'
-import { DatePickerEditor } from '../components/cell-renderers/DatePickerEditor'
 import { OutreachStatusCell } from '../components/cell-renderers/OutreachStatusCell'
-import { ExpandToggleCell } from '../components/cell-renderers/ExpandToggleCell'
+import { DateCell, DatePickerEditor, ExpandToggleCell } from '@/shared/grid/cell-renderers'
+import { useColumnPersistence } from '@/shared/grid/useColumnPersistence'
 import type { PipelineListItem } from '../types/pipeline'
-
-const COLUMN_STATE_KEY = 'pipeline-col-state'
 
 const columnDefs: ColDef<PipelineListItem>[] = [
   // 0. Expand toggle — pinned left
@@ -127,36 +123,8 @@ const columnDefs: ColDef<PipelineListItem>[] = [
 ]
 
 export function usePipelineColumns() {
-  const gridApiRef = useRef<GridApi | null>(null)
-
-  const getSavedColumnState = (): ColumnState[] | null => {
-    try {
-      const raw = localStorage.getItem(COLUMN_STATE_KEY)
-      if (!raw) return null
-      return JSON.parse(raw) as ColumnState[]
-    } catch {
-      return null
-    }
-  }
-
-  /** Call from onGridReady to restore saved column widths/order/visibility */
-  const restoreColumnState = useCallback((api: GridApi) => {
-    const saved = getSavedColumnState()
-    if (saved) {
-      api.applyColumnState({ state: saved, applyOrder: true })
-    }
-  }, [])
-
-  const onColumnStateChanged = useCallback(() => {
-    const api = gridApiRef.current
-    if (!api) return
-    try {
-      const state = api.getColumnState()
-      localStorage.setItem(COLUMN_STATE_KEY, JSON.stringify(state))
-    } catch {
-      // localStorage write failure -- non-fatal
-    }
-  }, [])
+  const { restoreColumnState, onColumnStateChanged, gridApiRef } =
+    useColumnPersistence('pipeline-col-state')
 
   return {
     columnDefs,

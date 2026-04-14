@@ -1,276 +1,212 @@
-# Technology Stack: Structured Output, Export, Upload, PII Redaction
+# Technology Stack
 
-**Project:** Flywheel V2 - Milestone: Structured Skill Output + Export + Upload + PII
-**Researched:** 2026-04-10
+**Project:** Broker Frontend MVP
+**Researched:** 2026-04-14
 **Overall confidence:** HIGH
 
-## Context: What Already Exists
+## Verdict: No New Dependencies Needed
 
-These are already in `pyproject.toml` and working. DO NOT re-add or change:
-
-| Existing Dep | Version | Current Use |
-|---|---|---|
-| `anthropic` | >=0.86.0 (installed: 0.84.0) | Skill executor tool_use loop via `AsyncAnthropic` |
-| `python-docx` | >=1.2.0 | Read-only DOCX text extraction in `file_extraction.py` |
-| `pdfplumber` | >=0.11.9 | PDF text extraction in `file_extraction.py` |
-| `python-multipart` | >=0.0.22 | FastAPI `UploadFile` support (already used in `api/files.py`) |
-| `pydantic` | >=2.0 | Request/response models, settings |
-| `jinja2` | (via FastAPI) | HTML template rendering in `output_renderer.py` |
-| `beautifulsoup4` | >=4.12 | HTML sanitization in `output_renderer.py` |
-| `markdown` | >=3.10.2 | Markdown processing |
-
-**Key finding:** File upload infrastructure is already complete (`api/files.py`, `file_extraction.py`, `document_storage.py`, `UploadedFile` model). The skill executor already handles `DOCUMENT_FILE:` prefixed inputs for uploaded documents. No new upload work needed at the API layer.
+The existing stack covers every requirement for the broker frontend MVP. No new npm packages. No new Python packages. This is a pure build-out using what is already installed and proven in the codebase.
 
 ---
 
-## NEW Dependencies Required
+## Existing Stack (Confirmed Installed and Used)
 
-### 1. Anthropic SDK Upgrade (structured JSON output)
+### Core Framework (No Changes)
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| React | ^19.0.0 | UI framework | Installed, used everywhere |
+| Vite | ^6.0.0 | Build tool | Installed |
+| TypeScript | ^5.5.0 | Type safety | Installed |
+| Tailwind CSS | ^4.0.0 | Styling | Installed, all components use it |
+| react-router | ^7.13.1 | Routing + URL params | Installed, `useSearchParams` already used in PipelinePage |
 
-| Technology | Version | Purpose | Why |
-|---|---|---|---|
-| `anthropic` | **>=0.93.0** | Structured output via `output_config.format` | Current 0.84.0 predates structured outputs (GA in SDK ~0.77.0+). Need `client.messages.create(output_config=...)` and `client.messages.parse()` with Pydantic models. |
+### Data Layer (No Changes)
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| @tanstack/react-query | ^5.91.2 | Server state | Installed, all broker hooks use it |
+| zustand | ^5.0.12 | Client state | Installed, used for app state |
 
-**Integration point:** `skill_executor.py` line ~3306 (`_execute_with_tools`). The tool_use loop calls `client.messages.create()`. For structured output skills, the FINAL call (after all tools resolve, on `end_turn`) should use `output_config` to guarantee JSON schema compliance.
+### Grid (No Changes)
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| ag-grid-community | ^35.2.0 | Data grids | Installed, PipelinePage + LeadsPage use it |
+| ag-grid-react | ^35.2.0 | React wrapper | Installed |
 
-**Critical nuance:** Structured JSON output (`output_config.format`) and tool_use (`tools=`) CAN be combined in the same request. Claude will use tools normally and produce structured JSON on the final `end_turn`. This means the existing tool_use loop works -- just add `output_config` to the `messages.create()` call for skills that declare structured output.
+### UI Components (No Changes)
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| shadcn/ui | ^4.1.0 | Component primitives | 27 components installed: badge, button, dialog, tabs, tooltip, skeleton, etc. |
+| lucide-react | ^0.577.0 | Icons | Installed |
+| sonner | ^2.0.7 | Toast notifications | Installed |
+| date-fns | ^4.1.0 | Date formatting | Installed, used in DateCell renderer |
+| clsx + tailwind-merge | latest | Class merging | Installed |
 
-**How it works with Pydantic:**
+### Backend (No Changes)
+| Technology | Version | Purpose | Status |
+|------------|---------|---------|--------|
+| FastAPI | existing | API server | StreamingResponse pattern already used in documents.py and tenant.py |
+| openpyxl | system-wide | Excel generation | Installed, spec calls for .xlsx export |
+
+---
+
+## Feature-to-Stack Mapping
+
+Every broker frontend feature maps to existing dependencies:
+
+### 1. Shared ag-grid Toolkit Extraction
+**Stack:** ag-grid-community ^35.2.0 (themeQuartz), existing cell renderers
+**What exists:** `pipelineTheme` in PipelinePage.tsx (lines 34-47), 11 cell renderers in `features/pipeline/components/cell-renderers/`, column state persistence in usePipelineColumns.
+**What to do:** Extract to `lib/grid-theme.ts` and `components/grid/cell-renderers/`. Pure refactor, no new deps.
+**Confidence:** HIGH -- code is right there, just needs to move.
+
+### 2. Comparison Matrix (Custom Table)
+**Stack:** Native HTML `<table>` + Tailwind CSS `sticky` classes
+**Why NOT ag-grid:** Spec explicitly calls this out (section 2.5). Two-row cells, cross-row color analysis, carrier checkboxes in headers, sticky columns/rows -- all fight ag-grid's cell model. The existing `ComparisonMatrix.tsx` already uses a plain `<table>`. The new version extends it with `position: sticky` (already used in 7 other files in the codebase including ThreadList, BriefingPage, RelationshipTable).
+**What to do:** Build with `<table>` + Tailwind. CSS `sticky` is well-supported. No library needed.
+**Confidence:** HIGH -- standard CSS pattern already proven in this codebase.
+
+### 3. Tab Routing with URL Query Params
+**Stack:** react-router ^7.13.1 `useSearchParams`
+**What exists:** PipelinePage already uses `useSearchParams` for view state. The pattern is proven.
+**What to do:** `?tab=overview|coverage|carriers|quotes|compare` using same pattern. No new deps.
+**Confidence:** HIGH -- exact same pattern as PipelinePage.
+
+### 4. Step Indicator Component
+**Stack:** Tailwind CSS + lucide-react icons
+**What to do:** Custom component with colored dots and connecting lines. Pure CSS + existing icon library. No stepper library needed -- the spec is simple (5 fixed steps, 3 color states).
+**Confidence:** HIGH -- trivial UI component, ~50 lines.
+
+### 5. Critical Exclusion Alert UI
+**Stack:** Tailwind CSS (existing alert patterns)
+**What exists:** ComparisonMatrix.tsx already renders yellow alert boxes (lines 144-159). The new CriticalExclusionAlert is the same pattern with red styling and richer content.
+**What to do:** Build as a standalone component. Uses AlertTriangle from lucide-react (already imported in ComparisonMatrix).
+**Confidence:** HIGH -- extending existing pattern.
+
+### 6. Excel Export from Frontend
+**Stack:** Browser `fetch` + `Blob` + `URL.createObjectURL`
+**Backend:** FastAPI `StreamingResponse` (already used in documents.py line 638+ and tenant.py line 650 for file downloads)
+**What to do:** Frontend triggers POST, receives binary .xlsx, creates download link via standard browser API. Backend uses openpyxl (system-wide) to generate the formatted workbook with two sheets, color fills, and merged cells.
+**Confidence:** HIGH -- StreamingResponse download pattern already exists twice in the codebase.
+
+### 7. Dashboard Task List
+**Stack:** React components + React Query
+**What to do:** Fetch from new endpoint, render as card list. Uses existing Badge, Button from shadcn/ui.
+**Confidence:** HIGH -- standard data fetching + rendering.
+
+### 8. Gate Strip (Persistent Banner)
+**Stack:** React component + React Query with 30s polling
+**What exists:** React Query `refetchInterval` option is the standard pattern.
+**What to do:** Small component that polls gate-counts endpoint. Renders above page content via layout wrapper.
+**Confidence:** HIGH -- trivial component.
+
+### 9. Coverage Grid with Inline Editing
+**Stack:** ag-grid-community ^35.2.0 (editable cells are a community feature)
+**What exists:** ag-grid `editable: true` on column defs is a community feature. DatePickerEditor already exists in pipeline cell-renderers.
+**What to do:** Set `editable: true` on coverage_type and required_limit columns. Use `onCellValueChanged` to trigger mutation. No enterprise features needed.
+**Confidence:** HIGH -- ag-grid community supports inline editing.
+
+---
+
+## Alternatives Considered and Rejected
+
+| Feature | Considered | Why Rejected |
+|---------|-----------|--------------|
+| Comparison matrix | ag-grid-enterprise (pivot, grouping) | License cost ($900+/dev), overkill for 5-10 columns. Custom table matches spec exactly. ag-grid community doesn't support the two-row cell layout needed. |
+| Comparison matrix | @tanstack/react-table | Adds dependency for something a plain `<table>` handles. Matrix is max ~20 rows x 10 columns -- not a performance concern. |
+| Step indicator | react-step-progress-bar, @mui/stepper | External dependency for ~50 lines of Tailwind CSS. Step indicator has exactly 5 fixed steps with 3 color states. No dynamic step generation needed. |
+| Excel export | SheetJS (xlsx) client-side | Backend already has openpyxl + StreamingResponse. Server-side gives better formatting control (cell fills, borders, merged cells for two-row layout). Client-side adds 500KB+ dependency for no benefit. |
+| Excel export | FileSaver.js | Browser native `Blob` + `URL.createObjectURL` + `a.click()` does the same thing in 5 lines. No dependency needed. |
+| Tab component | @radix-ui/react-tabs standalone | shadcn/ui tabs.tsx is already installed (wraps Radix under the hood). Already in the project at `components/ui/tabs.tsx`. |
+| Virtualized comparison | @tanstack/react-virtual | Matrix is max ~20 rows x 10 columns. Virtualization adds complexity for zero performance benefit. react-virtual is installed but only used in email ThreadList for 1000+ item lists. |
+| Form library | react-hook-form, formik | Existing codebase uses controlled components + React Query mutations. Adding a form library just for broker breaks consistency. Inline ag-grid editing doesn't use form libraries anyway. |
+
+---
+
+## What NOT to Add
+
+| Package | Why Not |
+|---------|---------|
+| Any charting library | No charts in broker MVP spec |
+| Any drag-and-drop library | No DnD in broker MVP spec |
+| Any rich text editor | Solicitation emails use plain textarea (existing EmailApproval.tsx) |
+| Any PDF viewer | PDFs download via existing document endpoint |
+| Any form library | Existing controlled component pattern is consistent across codebase |
+| Any animation library | Existing tw-animate-css covers transitions |
+| ag-grid-enterprise | License cost, none of the enterprise features (row grouping, pivot, etc.) are needed. Inline editing is a community feature. |
+| Any CSS-in-JS library | Tailwind handles everything including sticky positioning |
+
+---
+
+## Installation
+
+```bash
+# Nothing to install. All dependencies are already in package.json and pyproject.toml.
+# Zero new npm packages.
+# Zero new Python packages.
+```
+
+---
+
+## Key Integration Points
+
+### ag-grid Shared Toolkit (Extract, Don't Add)
+
+The pipeline module has everything broker needs. Extract these to shared locations:
+
+| Current Location | Target Location | What |
+|-----------------|----------------|------|
+| `PipelinePage.tsx` lines 34-47 | `lib/grid-theme.ts` | `flywheelGridTheme` (rename from `pipelineTheme`) |
+| `pipeline/components/cell-renderers/DateCell.tsx` | `components/grid/cell-renderers/DateCell.tsx` | Generic date renderer (uses date-fns) |
+| `pipeline/components/cell-renderers/ExpandToggleCell.tsx` | `components/grid/cell-renderers/ExpandToggleCell.tsx` | Chevron toggle |
+| `pipeline/components/cell-renderers/DatePickerEditor.tsx` | `components/grid/cell-renderers/DatePickerEditor.tsx` | Inline date editor |
+| `usePipelineColumns.ts` column state logic | `hooks/useGridColumnState.ts` | localStorage persistence |
+
+Pipeline-specific renderers (ContactCell, ChannelsCell, NextStepCell, etc.) stay in `features/pipeline/`.
+
+### Excel Export Backend Pattern
+
+Follow the existing StreamingResponse pattern from `documents.py`:
+
 ```python
-from pydantic import BaseModel
+# Already used in backend -- same pattern for Excel export
+from fastapi.responses import StreamingResponse
+from io import BytesIO
+import openpyxl
 
-class SkillOutput(BaseModel):
-    title: str
-    sections: list[dict]
-    metadata: dict
-
-# SDK auto-converts Pydantic to JSON schema
-response = await client.messages.parse(
-    model="claude-sonnet-4-20250514",
-    max_tokens=4096,
-    output_format=SkillOutput,  # SDK translates to output_config internally
-    messages=messages,
-)
-parsed = response.parsed_output  # typed SkillOutput
+# Build workbook, write to BytesIO, return as StreamingResponse
+# Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
 ```
 
-**Schema limitations to know:**
-- No recursive schemas
-- `additionalProperties` must be `false` for objects
-- No `minimum`/`maximum`/`minLength`/`maxLength` constraints
-- `minItems` only supports 0 or 1
-- Required properties appear first in output (reordered)
+### Frontend File Download Pattern
 
-**Confidence:** HIGH -- verified from official Anthropic docs (platform.claude.com)
+Standard browser download -- no library needed:
 
----
-
-### 2. WeasyPrint (PDF generation from HTML)
-
-| Technology | Version | Purpose | Why |
-|---|---|---|---|
-| `weasyprint` | **>=68.0** | Convert rendered HTML to PDF | Best Python HTML-to-PDF library. Full CSS3 support (flexbox, grid, media queries). No browser engine needed. Uses pydyf for PDF generation (since v53). Existing Jinja2 HTML templates can be reused directly. |
-
-**System dependencies (macOS):**
-```bash
-brew install cairo pango gdk-pixbuf libffi
+```typescript
+const response = await fetch(`/api/v1/broker/projects/${id}/export-comparison`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ carrier_ids: selectedIds }),
+})
+const blob = await response.blob()
+const url = URL.createObjectURL(blob)
+const a = document.createElement('a')
+a.href = url
+a.download = `comparison-${projectName}-${date}.xlsx`
+a.click()
+URL.revokeObjectURL(url)
 ```
-
-**System dependencies (Linux/Docker):**
-```bash
-apt-get install -y libpango-1.0-0 libpangocairo-1.0-0 libcairo2 libgdk-pixbuf2.0-0 libffi-dev shared-mime-info
-```
-
-**Integration point:** New `services/export_service.py` that takes rendered HTML (already stored in `SkillRun.rendered_html`) and converts to PDF bytes via `weasyprint.HTML(string=html).write_pdf()`. The existing `output_renderer.py` templates already produce standalone HTML with embedded CSS -- these are ready for PDF conversion.
-
-**Why not alternatives:**
-- **xhtml2pdf**: Pure Python (no system deps) but limited to CSS 2.1. No flexbox/grid. Existing templates use modern CSS.
-- **pdfkit/wkhtmltopdf**: Requires headless WebKit binary. wkhtmltopdf is archived (Jan 2023), no longer maintained.
-- **reportlab**: Low-level PDF builder. Would require rewriting all templates as Python code instead of reusing HTML.
-
-**Confidence:** HIGH -- WeasyPrint 68.1 verified on PyPI, system deps verified from official docs.
-
----
-
-### 3. python-docx (write path -- already installed)
-
-| Technology | Version | Purpose | Why |
-|---|---|---|---|
-| `python-docx` | **>=1.2.0** (already in deps) | Generate DOCX from structured skill output | Already installed for read. Write path uses same library: `Document()`, `add_heading()`, `add_paragraph()`, `add_table()`. No new dependency needed. |
-
-**Integration point:** New `services/export_service.py` alongside PDF export. Takes structured JSON output (from structured output feature) and builds DOCX programmatically. Unlike PDF (which converts existing HTML), DOCX generation maps structured data to Word elements directly.
-
-**Key capabilities already available in 1.2.0:**
-- Headings (levels 1-9)
-- Paragraphs with bold/italic/underline runs
-- Tables with cell spanning and built-in styles
-- Page breaks
-- Document properties (title, author)
-- Styles (built-in Word styles like "Heading 1", "List Bullet", table styles)
-
-**Why not HTML-to-DOCX conversion:**
-- No reliable HTML-to-DOCX converter exists in Python
-- `mammoth` goes DOCX-to-HTML only (wrong direction)
-- `htmldocx` is unmaintained and produces poor output
-- Building from structured JSON gives full control over Word formatting
-
-**Confidence:** HIGH -- python-docx 1.2.0 docs verified, already in pyproject.toml.
-
----
-
-### 4. Presidio (PII redaction)
-
-| Technology | Version | Purpose | Why |
-|---|---|---|---|
-| `presidio-analyzer` | **>=2.2.362** | Detect PII entities in text | Microsoft's open-source PII detection. Supports 30+ entity types (names, emails, SSNs, phone numbers, credit cards, etc.). Pluggable recognizer architecture. |
-| `presidio-anonymizer` | **>=2.2.362** | Redact/mask/encrypt detected PII | Companion to analyzer. Supports mask, replace, encrypt, hash operators. |
-| `spacy` | **>=3.7** | NLP engine for Presidio | Required by presidio-analyzer for NER. |
-
-**spaCy model choice: `en_core_web_sm` (not `en_core_web_lg`)**
-
-Use the small model because:
-- NER accuracy difference is negligible (0.85 vs 0.86 recall on standard benchmarks)
-- `en_core_web_sm` is ~12MB vs `en_core_web_lg` at ~560MB
-- Presidio's pattern-based recognizers (regex for emails, SSNs, credit cards) do most of the heavy lifting -- spaCy NER only handles names/locations/organizations
-- For a founder-facing product processing business documents, the entity types are predictable (names, emails, phone numbers, addresses) -- not edge-case NLP
-
-**Installation:**
-```bash
-pip install presidio-analyzer presidio-anonymizer spacy
-python -m spacy download en_core_web_sm
-```
-
-**Integration point:** New `services/pii_service.py` that wraps Presidio. Called from:
-1. **Pre-LLM:** Optionally redact PII from uploaded documents before sending to Claude (privacy-preserving processing)
-2. **Post-LLM:** Redact PII from skill output before storage/display (contract review, legal docs)
-3. **Export:** Redact PII in exported PDF/DOCX on demand
-
-**Presidio usage pattern:**
-```python
-from presidio_analyzer import AnalyzerEngine
-from presidio_anonymizer import AnonymizerEngine
-
-analyzer = AnalyzerEngine()  # loads spaCy model once
-anonymizer = AnonymizerEngine()
-
-results = analyzer.analyze(text=content, language="en")
-redacted = anonymizer.anonymize(text=content, analyzer_results=results)
-```
-
-**Why Presidio over alternatives:**
-- **regex-only**: Misses names, organizations, context-dependent PII
-- **AWS Comprehend / Google DLP**: External API calls, cost per request, data leaves your infra
-- **spaCy NER alone**: No anonymization layer, no pattern recognizers for structured PII (SSN, credit card)
-- **Presidio**: Local, free, combines regex + NER, built-in anonymization operators
-
-**Confidence:** HIGH -- presidio-analyzer 2.2.362 verified on PyPI, spaCy model tradeoffs verified from spaCy docs and Presidio docs.
-
----
-
-## No New Dependencies Needed For
-
-| Feature | Why No New Dep |
-|---|---|
-| **File upload** | `python-multipart` + `UploadFile` already in place. `api/files.py` handles upload, extraction, storage. Skill executor already processes `DOCUMENT_FILE:` inputs. |
-| **Multipart upload to skill** | Frontend already sends file IDs. Backend `_execute_with_tools()` already fetches `UploadedFile.extracted_text` from DB. |
-| **HTML rendering** | `output_renderer.py` + Jinja2 templates already handle this. Structured JSON output just changes the data source (JSON dict instead of parsed markdown sections). |
-| **Frontend markdown/HTML** | `react-markdown` + `DOMPurify` already handle display. |
-
----
-
-## Recommended Stack (all additions)
-
-### pip install
-
-```bash
-# Upgrade existing
-pip install "anthropic>=0.93.0"
-
-# New: PDF generation
-pip install "weasyprint>=68.0"
-
-# New: PII redaction
-pip install "presidio-analyzer>=2.2.362" "presidio-anonymizer>=2.2.362" "spacy>=3.7"
-python -m spacy download en_core_web_sm
-```
-
-### pyproject.toml changes
-
-```toml
-dependencies = [
-    # ... existing ...
-    "anthropic>=0.93.0",          # was >=0.86.0 -- upgrade for structured outputs
-    "weasyprint>=68.0",           # NEW: HTML-to-PDF export
-    "presidio-analyzer>=2.2.362", # NEW: PII detection
-    "presidio-anonymizer>=2.2.362", # NEW: PII anonymization
-    "spacy>=3.7",                 # NEW: NLP engine for Presidio
-]
-```
-
-### System dependencies (CI/Docker)
-
-```dockerfile
-# Add to Dockerfile
-RUN apt-get update && apt-get install -y \
-    libpango-1.0-0 \
-    libpangocairo-1.0-0 \
-    libcairo2 \
-    libgdk-pixbuf2.0-0 \
-    libffi-dev \
-    shared-mime-info \
-    && rm -rf /var/lib/apt/lists/*
-
-# After pip install
-RUN python -m spacy download en_core_web_sm
-```
-
-### macOS dev setup
-
-```bash
-brew install cairo pango gdk-pixbuf libffi
-```
-
----
-
-## Alternatives Considered
-
-| Category | Recommended | Alternative | Why Not |
-|---|---|---|---|
-| PDF generation | WeasyPrint | xhtml2pdf | CSS 2.1 only, no flexbox/grid. Existing templates use modern CSS. |
-| PDF generation | WeasyPrint | pdfkit (wkhtmltopdf) | wkhtmltopdf archived Jan 2023, no longer maintained. |
-| PDF generation | WeasyPrint | reportlab | Low-level API, can't reuse HTML templates. |
-| PII detection | Presidio | regex-only | Misses names, orgs, context-dependent PII. |
-| PII detection | Presidio | AWS Comprehend | External API, per-request cost, data leaves infra. |
-| PII detection | Presidio | Custom spaCy NER | No built-in anonymization, no pattern recognizers. |
-| spaCy model | en_core_web_sm | en_core_web_lg | 50x larger (560MB vs 12MB), negligible accuracy gain for PII use case. |
-| DOCX generation | python-docx | docxtpl | Template-based, less control. python-docx already installed. |
-| Structured output | Anthropic native | instructor lib | Extra dependency. Anthropic SDK now has native `messages.parse()` with Pydantic. |
-
----
-
-## Version Compatibility Matrix
-
-| Package | Min Version | Python | Notes |
-|---|---|---|---|
-| anthropic | 0.93.0 | >=3.9 | GA structured outputs, `output_config` param |
-| weasyprint | 68.0 | >=3.10 | Requires system libs (cairo, pango) |
-| presidio-analyzer | 2.2.362 | >=3.10, <3.14 | Requires spaCy + model download |
-| presidio-anonymizer | 2.2.362 | >=3.10, <3.14 | Companion to analyzer |
-| spacy | 3.7+ | >=3.8 | NLP engine |
-| python-docx | 1.2.0 | >=3.7 | Already installed |
-
-**Project Python:** >=3.12 (per pyproject.toml). All packages compatible.
 
 ---
 
 ## Sources
 
-- [Anthropic Structured Outputs docs](https://platform.claude.com/docs/en/build-with-claude/structured-outputs) -- HIGH confidence
-- [WeasyPrint PyPI](https://pypi.org/project/weasyprint/) -- v68.1, HIGH confidence
-- [WeasyPrint installation docs](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html) -- system deps, HIGH confidence
-- [Presidio analyzer PyPI](https://pypi.org/project/presidio-analyzer/) -- v2.2.362, HIGH confidence
-- [Presidio installation docs](https://microsoft.github.io/presidio/installation/) -- HIGH confidence
-- [Presidio spaCy/Stanza docs](https://microsoft.github.io/presidio/analyzer/nlp_engines/spacy_stanza/) -- model choice, HIGH confidence
-- [spaCy models page](https://spacy.io/models) -- en_core_web_sm vs lg accuracy, MEDIUM confidence
-- [python-docx docs](https://python-docx.readthedocs.io/en/latest/user/quickstart.html) -- write API, HIGH confidence
-- [Anthropic Python SDK PyPI](https://pypi.org/project/anthropic/) -- v0.93.0 latest, HIGH confidence
+- `frontend/package.json` -- direct inspection of all installed dependencies (HIGH confidence)
+- `PipelinePage.tsx` lines 1-50 -- ag-grid theme config, useSearchParams usage, AllCommunityModule import (HIGH confidence)
+- `ComparisonMatrix.tsx` -- existing plain HTML table pattern for quote comparison (HIGH confidence)
+- `backend/src/flywheel/api/documents.py` lines 638-690 -- StreamingResponse file download pattern (HIGH confidence)
+- `backend/src/flywheel/api/tenant.py` line 650 -- additional StreamingResponse usage (HIGH confidence)
+- `features/pipeline/components/cell-renderers/` -- 11 existing cell renderers, 4 generic enough to extract (HIGH confidence)
+- `components/ui/` directory -- 27 shadcn/ui components installed including tabs.tsx (HIGH confidence)
+- 7 frontend files using CSS `sticky` positioning -- confirms pattern is established (HIGH confidence)
+- ag-grid community docs -- inline cell editing is a community (free) feature (HIGH confidence)

@@ -467,6 +467,16 @@ Plans:
 - [ ] 120-02-PLAN.md — Frontend: MarketPatternsSection component + BriefingPageV2 wiring
 - [ ] 120-03-PLAN.md — Skill: meeting-prep Step 0c + Market Context HTML section
 
+### Phase 121: Tenant Bootstrap Fix ✓
+
+**Goal:** Permanently fix broker sidebar disappearing on page refresh. Move tenant initialization from scattered UI component side-effects to a deterministic app-shell bootstrap with localStorage persistence, cache-proof hydration, and gated rendering — eliminating the recurring GTM-revert bug.
+**Depends on:** None (bug fix, independent)
+**Plans:** 1 plan
+**Status:** Complete (2026-04-14) — Verified: 7/7 must-haves passed, human-verified all scenarios
+
+Plans:
+- [x] 121-01-PLAN.md — Persist middleware, TenantBootstrap gate, queryFn cleanup, BrokerGuard, volatile tenants
+
 ---
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
