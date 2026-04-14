@@ -1,6 +1,8 @@
 import { useState, useMemo, useCallback } from 'react'
 import { BarChart3 } from 'lucide-react'
+import { toast } from 'sonner'
 import type { ComparisonMatrix } from '../../types/broker'
+import { exportComparison } from '../../api'
 import { getUniqueCarriers } from './comparison-utils'
 import { CriticalExclusionAlert } from './CriticalExclusionAlert'
 import { ComparisonToolbar } from './ComparisonToolbar'
@@ -9,9 +11,10 @@ import { ComparisonTabs } from './ComparisonTabs'
 interface ComparisonViewProps {
   data: ComparisonMatrix
   currency: string
+  projectId: string
 }
 
-export function ComparisonView({ data, currency }: ComparisonViewProps) {
+export function ComparisonView({ data, currency, projectId }: ComparisonViewProps) {
   const allCarriers = useMemo(
     () => getUniqueCarriers(data.coverages),
     [data.coverages]
@@ -39,6 +42,24 @@ export function ComparisonView({ data, currency }: ComparisonViewProps) {
     },
     []
   )
+
+  const [isExporting, setIsExporting] = useState(false)
+
+  const handleExport = useCallback(async () => {
+    setIsExporting(true)
+    try {
+      const quoteIds = data.coverages
+        .flatMap((c) => c.quotes)
+        .filter((q) => selectedCarriers.has(q.carrier_name))
+        .map((q) => q.quote_id)
+      await exportComparison(projectId, quoteIds.length > 0 ? quoteIds : undefined)
+      toast.success('Comparison exported successfully')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Export failed')
+    } finally {
+      setIsExporting(false)
+    }
+  }, [data.coverages, selectedCarriers, projectId])
 
   const filteredCoverages = useMemo(
     () =>
@@ -69,6 +90,8 @@ export function ComparisonView({ data, currency }: ComparisonViewProps) {
         onToggleDifferences={() => setShowDifferencesOnly((v) => !v)}
         highlightBest={highlightBest}
         onToggleHighlight={() => setHighlightBest((v) => !v)}
+        onExport={handleExport}
+        isExporting={isExporting}
       />
       <ComparisonTabs
         coverages={filteredCoverages}

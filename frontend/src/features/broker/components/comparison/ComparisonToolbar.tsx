@@ -1,8 +1,12 @@
+import { Download } from 'lucide-react'
+
 interface ComparisonToolbarProps {
   showDifferencesOnly: boolean
   onToggleDifferences: () => void
   highlightBest: boolean
   onToggleHighlight: () => void
+  onExport: () => void
+  isExporting: boolean
 }
 
 function Toggle({
@@ -41,6 +45,8 @@ export function ComparisonToolbar({
   onToggleDifferences,
   highlightBest,
   onToggleHighlight,
+  onExport,
+  isExporting,
 }: ComparisonToolbarProps) {
   return (
     <div className="flex items-center justify-between py-2">
@@ -56,7 +62,15 @@ export function ComparisonToolbar({
           label="Highlight best values"
         />
       </div>
-      {/* Right side reserved for export button (Plan 03) */}
+      <button
+        type="button"
+        onClick={onExport}
+        disabled={isExporting}
+        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+      >
+        <Download className="h-4 w-4" />
+        {isExporting ? 'Exporting...' : 'Export Excel'}
+      </button>
     </div>
   )
 }

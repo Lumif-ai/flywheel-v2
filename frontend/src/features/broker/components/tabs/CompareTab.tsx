@@ -42,6 +42,7 @@ export function CompareTab({ projectId }: CompareTabProps) {
     <ComparisonView
       data={data}
       currency={project?.currency || 'USD'}
+      projectId={projectId}
     />
   )
 }
