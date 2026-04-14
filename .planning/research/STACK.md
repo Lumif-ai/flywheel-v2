@@ -1,212 +1,234 @@
 # Technology Stack
 
-**Project:** Broker Frontend MVP
+**Project:** Broker Data Model Restructuring (Clients, Contacts, Context Store, Solicitation Workflow)
 **Researched:** 2026-04-14
-**Overall confidence:** HIGH
 
-## Verdict: No New Dependencies Needed
+## Recommended Stack
 
-The existing stack covers every requirement for the broker frontend MVP. No new npm packages. No new Python packages. This is a pure build-out using what is already installed and proven in the codebase.
+### No New Dependencies Required
 
----
+This milestone requires **zero new libraries**. Every capability needed is already available in the existing stack. The work is purely structural: new models, new service functions, expanded normalization logic, and PostgreSQL constraints.
 
-## Existing Stack (Confirmed Installed and Used)
+| Capability Needed | Already Available Via | Version | Notes |
+|---|---|---|---|
+| Partial unique indexes | SQLAlchemy `Index(..., unique=True, postgresql_where=text(...))` | SQLAlchemy >=2.0 | Already used 20+ times in models.py |
+| CHECK constraints | SQLAlchemy `CheckConstraint` | SQLAlchemy >=2.0 | **Import needed** -- not currently imported in models.py |
+| Normalized name dedup | `entity_normalization.py` | Custom | Exists, needs suffix list expansion |
+| Context entity creation | `entity_normalization.find_or_create_entity()` | Custom | Exists, pattern proven |
+| Enum validation | PostgreSQL CHECK + Pydantic `Literal` | Built-in | No enum library needed |
+| Contact tables | SQLAlchemy ORM mapped classes | SQLAlchemy >=2.0 | Same pattern as all existing models |
+| Solicitation drafts | New ORM model + relationship | SQLAlchemy >=2.0 | Standard FK pattern |
+| DDL migrations | Alembic >=1.14 | Alembic >=1.14 | One-statement-per-commit workaround for Supabase |
 
-### Core Framework (No Changes)
+### Core Framework (Unchanged)
+
 | Technology | Version | Purpose | Status |
-|------------|---------|---------|--------|
-| React | ^19.0.0 | UI framework | Installed, used everywhere |
-| Vite | ^6.0.0 | Build tool | Installed |
-| TypeScript | ^5.5.0 | Type safety | Installed |
-| Tailwind CSS | ^4.0.0 | Styling | Installed, all components use it |
-| react-router | ^7.13.1 | Routing + URL params | Installed, `useSearchParams` already used in PipelinePage |
+|---|---|---|---|
+| SQLAlchemy | >=2.0 (async) | ORM, model definitions | Already installed |
+| Alembic | >=1.14 | Database migrations | Already installed |
+| FastAPI | Current | API endpoints | Already installed |
+| Pydantic v2 | Current | Request/response schemas | Already installed |
+| PostgreSQL | 15+ (Supabase) | Database | Already running |
 
-### Data Layer (No Changes)
-| Technology | Version | Purpose | Status |
-|------------|---------|---------|--------|
-| @tanstack/react-query | ^5.91.2 | Server state | Installed, all broker hooks use it |
-| zustand | ^5.0.12 | Client state | Installed, used for app state |
+## What Changes in Existing Code
 
-### Grid (No Changes)
-| Technology | Version | Purpose | Status |
-|------------|---------|---------|--------|
-| ag-grid-community | ^35.2.0 | Data grids | Installed, PipelinePage + LeadsPage use it |
-| ag-grid-react | ^35.2.0 | React wrapper | Installed |
+### 1. models.py Import Addition
 
-### UI Components (No Changes)
-| Technology | Version | Purpose | Status |
-|------------|---------|---------|--------|
-| shadcn/ui | ^4.1.0 | Component primitives | 27 components installed: badge, button, dialog, tabs, tooltip, skeleton, etc. |
-| lucide-react | ^0.577.0 | Icons | Installed |
-| sonner | ^2.0.7 | Toast notifications | Installed |
-| date-fns | ^4.1.0 | Date formatting | Installed, used in DateCell renderer |
-| clsx + tailwind-merge | latest | Class merging | Installed |
+```python
+# Current import (line 18):
+from sqlalchemy import (
+    BigInteger, Boolean, Computed, Date, ForeignKey,
+    Index, Integer, LargeBinary, Numeric, Text,
+    UniqueConstraint, text,
+)
 
-### Backend (No Changes)
-| Technology | Version | Purpose | Status |
-|------------|---------|---------|--------|
-| FastAPI | existing | API server | StreamingResponse pattern already used in documents.py and tenant.py |
-| openpyxl | system-wide | Excel generation | Installed, spec calls for .xlsx export |
+# Add CheckConstraint:
+from sqlalchemy import (
+    BigInteger, Boolean, CheckConstraint, Computed, Date, ForeignKey,
+    Index, Integer, LargeBinary, Numeric, Text,
+    UniqueConstraint, text,
+)
+```
 
----
+**Confidence: HIGH** -- `CheckConstraint` is a core SQLAlchemy class, available in all 2.x versions. Not currently used anywhere in the codebase, but this is standard SQLAlchemy, not a new dependency.
 
-## Feature-to-Stack Mapping
+### 2. Entity Normalization Suffix Expansion
 
-Every broker frontend feature maps to existing dependencies:
+The existing `entity_normalization.py` regex (line 24) handles US suffixes only:
 
-### 1. Shared ag-grid Toolkit Extraction
-**Stack:** ag-grid-community ^35.2.0 (themeQuartz), existing cell renderers
-**What exists:** `pipelineTheme` in PipelinePage.tsx (lines 34-47), 11 cell renderers in `features/pipeline/components/cell-renderers/`, column state persistence in usePipelineColumns.
-**What to do:** Extract to `lib/grid-theme.ts` and `components/grid/cell-renderers/`. Pure refactor, no new deps.
-**Confidence:** HIGH -- code is right there, just needs to move.
+```python
+# Current:
+_COMPANY_SUFFIXES = re.compile(
+    r"\s*\b(corporation|company|corp|inc|llc|ltd|co)\.?\s*$",
+    re.IGNORECASE,
+)
+```
 
-### 2. Comparison Matrix (Custom Table)
-**Stack:** Native HTML `<table>` + Tailwind CSS `sticky` classes
-**Why NOT ag-grid:** Spec explicitly calls this out (section 2.5). Two-row cells, cross-row color analysis, carrier checkboxes in headers, sticky columns/rows -- all fight ag-grid's cell model. The existing `ComparisonMatrix.tsx` already uses a plain `<table>`. The new version extends it with `position: sticky` (already used in 7 other files in the codebase including ThreadList, BriefingPage, RelationshipTable).
-**What to do:** Build with `<table>` + Tailwind. CSS `sticky` is well-supported. No library needed.
-**Confidence:** HIGH -- standard CSS pattern already proven in this codebase.
+The spec requires MX/LATAM legal suffixes: `S.A. de C.V.`, `S.A.S.`, `S. de R.L.`, `GmbH`, `S.A.`. These have dots and spaces that the current word-boundary regex cannot match. The function needs a two-pass approach: first strip multi-word suffixes by exact match (longest first), then apply the existing single-word regex.
 
-### 3. Tab Routing with URL Query Params
-**Stack:** react-router ^7.13.1 `useSearchParams`
-**What exists:** PipelinePage already uses `useSearchParams` for view state. The pattern is proven.
-**What to do:** `?tab=overview|coverage|carriers|quotes|compare` using same pattern. No new deps.
-**Confidence:** HIGH -- exact same pattern as PipelinePage.
+Recommended suffix list (longest first to avoid partial matches):
 
-### 4. Step Indicator Component
-**Stack:** Tailwind CSS + lucide-react icons
-**What to do:** Custom component with colored dots and connecting lines. Pure CSS + existing icon library. No stepper library needed -- the spec is simple (5 fixed steps, 3 color states).
-**Confidence:** HIGH -- trivial UI component, ~50 lines.
+```python
+_LEGAL_SUFFIXES = [
+    "s.a.p.i. de c.v.",
+    "s. de r.l. de c.v.",
+    "s.a. de c.v.",
+    "s. de r.l.",
+    "s.a.s.",
+    "s.a.",
+    "corporation",
+    "company",
+    "corp.",
+    "corp",
+    "inc.",
+    "inc",
+    "llc",
+    "ltd.",
+    "ltd",
+    "gmbh",
+    "co.",
+    "co",
+]
+```
 
-### 5. Critical Exclusion Alert UI
-**Stack:** Tailwind CSS (existing alert patterns)
-**What exists:** ComparisonMatrix.tsx already renders yellow alert boxes (lines 144-159). The new CriticalExclusionAlert is the same pattern with red styling and richer content.
-**What to do:** Build as a standalone component. Uses AlertTriangle from lucide-react (already imported in ComparisonMatrix).
-**Confidence:** HIGH -- extending existing pattern.
+**Confidence: HIGH** -- This is pure string manipulation. No library needed. The existing `normalize_entity_name()` function signature stays the same; only the internal logic changes.
 
-### 6. Excel Export from Frontend
-**Stack:** Browser `fetch` + `Blob` + `URL.createObjectURL`
-**Backend:** FastAPI `StreamingResponse` (already used in documents.py line 638+ and tenant.py line 650 for file downloads)
-**What to do:** Frontend triggers POST, receives binary .xlsx, creates download link via standard browser API. Backend uses openpyxl (system-wide) to generate the formatted workbook with two sheets, color fills, and merged cells.
-**Confidence:** HIGH -- StreamingResponse download pattern already exists twice in the codebase.
+### 3. CheckConstraint Pattern for Enum Fields
 
-### 7. Dashboard Task List
-**Stack:** React components + React Query
-**What to do:** Fetch from new endpoint, render as card list. Uses existing Badge, Button from shadcn/ui.
-**Confidence:** HIGH -- standard data fetching + rendering.
+The codebase currently uses zero CHECK constraints. The spec requires 15 of them across tables. SQLAlchemy pattern:
 
-### 8. Gate Strip (Persistent Banner)
-**Stack:** React component + React Query with 30s polling
-**What exists:** React Query `refetchInterval` option is the standard pattern.
-**What to do:** Small component that polls gate-counts endpoint. Renders above page content via layout wrapper.
-**Confidence:** HIGH -- trivial component.
+```python
+__table_args__ = (
+    CheckConstraint(
+        "status IN ('draft', 'pending', 'approved', 'sent', 'expired')",
+        name="ck_solicitation_draft_status",
+    ),
+    # ... other constraints
+)
+```
 
-### 9. Coverage Grid with Inline Editing
-**Stack:** ag-grid-community ^35.2.0 (editable cells are a community feature)
-**What exists:** ag-grid `editable: true` on column defs is a community feature. DatePickerEditor already exists in pipeline cell-renderers.
-**What to do:** Set `editable: true` on coverage_type and required_limit columns. Use `onCellValueChanged` to trigger mutation. No enterprise features needed.
-**Confidence:** HIGH -- ag-grid community supports inline editing.
+**Confidence: HIGH** -- Standard SQLAlchemy. Verified via codebase pattern: `__table_args__` tuples already contain `Index` and `UniqueConstraint` throughout.
 
----
+### 4. Partial Unique Index Pattern
 
-## Alternatives Considered and Rejected
+Already proven in the codebase (20+ instances). The spec needs two new ones:
 
-| Feature | Considered | Why Rejected |
-|---------|-----------|--------------|
-| Comparison matrix | ag-grid-enterprise (pivot, grouping) | License cost ($900+/dev), overkill for 5-10 columns. Custom table matches spec exactly. ag-grid community doesn't support the two-row cell layout needed. |
-| Comparison matrix | @tanstack/react-table | Adds dependency for something a plain `<table>` handles. Matrix is max ~20 rows x 10 columns -- not a performance concern. |
-| Step indicator | react-step-progress-bar, @mui/stepper | External dependency for ~50 lines of Tailwind CSS. Step indicator has exactly 5 fixed steps with 3 color states. No dynamic step generation needed. |
-| Excel export | SheetJS (xlsx) client-side | Backend already has openpyxl + StreamingResponse. Server-side gives better formatting control (cell fills, borders, merged cells for two-row layout). Client-side adds 500KB+ dependency for no benefit. |
-| Excel export | FileSaver.js | Browser native `Blob` + `URL.createObjectURL` + `a.click()` does the same thing in 5 lines. No dependency needed. |
-| Tab component | @radix-ui/react-tabs standalone | shadcn/ui tabs.tsx is already installed (wraps Radix under the hood). Already in the project at `components/ui/tabs.tsx`. |
-| Virtualized comparison | @tanstack/react-virtual | Matrix is max ~20 rows x 10 columns. Virtualization adds complexity for zero performance benefit. react-virtual is installed but only used in email ThreadList for 1000+ item lists. |
-| Form library | react-hook-form, formik | Existing codebase uses controlled components + React Query mutations. Adding a form library just for broker breaks consistency. Inline ag-grid editing doesn't use form libraries anyway. |
+```python
+# One active solicitation per project+carrier
+Index(
+    "uq_solicitation_draft_active",
+    "broker_project_id", "carrier_config_id",
+    unique=True,
+    postgresql_where=text("status IN ('draft', 'pending', 'approved')"),
+),
 
----
+# One approved recommendation per project
+Index(
+    "uq_recommendation_approved",
+    "broker_project_id",
+    unique=True,
+    postgresql_where=text("status = 'approved'"),
+),
+```
+
+**Confidence: HIGH** -- Identical pattern to `idx_quote_source_dedup` (models.py line 2200) and library document dedup indexes (lines 911-921).
+
+### 5. Context Store Integration Pattern
+
+The existing `find_or_create_entity()` in `entity_normalization.py` handles the core pattern. For broker entities (clients, carriers, projects), a thin wrapper is needed in `context_store_writer.py`:
+
+```python
+async def create_context_entity(
+    session: AsyncSession,
+    tenant_id: str,
+    name: str,
+    entity_type: str,  # "company" for clients, "carrier" for carriers, "project" for projects
+) -> UUID:
+    """Eager-create a context entity. Returns entity ID. Raises on failure."""
+    entity = await find_or_create_entity(session, tenant_id, name, entity_type)
+    return entity.id
+```
+
+**Confidence: HIGH** -- `find_or_create_entity()` already uses `SELECT ... FOR UPDATE` for race condition safety and is idempotent.
+
+## Alternatives Considered
+
+| Category | Recommended | Alternative | Why Not |
+|---|---|---|---|
+| Enum validation | CHECK constraints + Pydantic Literal | Python `enum.Enum` mapped to DB | CHECK constraints enforce at DB level regardless of application path. Python enums add ORM complexity with no benefit for simple string enums |
+| Name normalization | Expanded regex in existing module | `python-nameparser` or `company-name-normalizer` | External dep for a 20-line function. MX/LATAM suffixes are not well-supported in English-centric libraries. Custom list is more controllable |
+| Contact dedup | Application-layer normalized name + UNIQUE constraint | `dedupe` library / fuzzy matching | Overkill. The spec calls for exact normalized_name dedup, not probabilistic matching. UniqueConstraint on (tenant_id, normalized_name) is sufficient |
+| Solicitation state machine | String field + ALLOWED_TRANSITIONS dict | `transitions` or `python-statemachine` library | The codebase already has an ALLOWED_TRANSITIONS pattern for broker projects/quotes. Adding a state machine library for one more entity is overhead |
+| Context entity FK | Nullable UUID column (no FK constraint) | Actual FK to context_entities table | Consistent with existing pattern -- `*_user_id` columns throughout codebase use UUID without FK constraint because Alembic cannot reference all tables through the pooler connection. Application-layer enforcement |
 
 ## What NOT to Add
 
 | Package | Why Not |
-|---------|---------|
-| Any charting library | No charts in broker MVP spec |
-| Any drag-and-drop library | No DnD in broker MVP spec |
-| Any rich text editor | Solicitation emails use plain textarea (existing EmailApproval.tsx) |
-| Any PDF viewer | PDFs download via existing document endpoint |
-| Any form library | Existing controlled component pattern is consistent across codebase |
-| Any animation library | Existing tw-animate-css covers transitions |
-| ag-grid-enterprise | License cost, none of the enterprise features (row grouping, pivot, etc.) are needed. Inline editing is a community feature. |
-| Any CSS-in-JS library | Tailwind handles everything including sticky positioning |
-
----
+|---|---|
+| Any ORM migration tool beyond Alembic | Alembic works fine, the Supabase workaround is execution-level, not tooling-level |
+| Any name normalization library | 20 lines of custom code handles MX/US suffixes better than generic libraries |
+| Any state machine library | ALLOWED_TRANSITIONS dict pattern is already established |
+| Any fuzzy matching library | Exact normalized_name dedup is the spec requirement |
+| PostgreSQL enum types (CREATE TYPE) | String columns with CHECK constraints are simpler to migrate and modify |
 
 ## Installation
 
 ```bash
-# Nothing to install. All dependencies are already in package.json and pyproject.toml.
-# Zero new npm packages.
+# Nothing to install. All dependencies are already in pyproject.toml.
 # Zero new Python packages.
+# Zero new npm packages.
 ```
 
----
+## Migration Execution Notes (Supabase-Specific)
 
-## Key Integration Points
-
-### ag-grid Shared Toolkit (Extract, Don't Add)
-
-The pipeline module has everything broker needs. Extract these to shared locations:
-
-| Current Location | Target Location | What |
-|-----------------|----------------|------|
-| `PipelinePage.tsx` lines 34-47 | `lib/grid-theme.ts` | `flywheelGridTheme` (rename from `pipelineTheme`) |
-| `pipeline/components/cell-renderers/DateCell.tsx` | `components/grid/cell-renderers/DateCell.tsx` | Generic date renderer (uses date-fns) |
-| `pipeline/components/cell-renderers/ExpandToggleCell.tsx` | `components/grid/cell-renderers/ExpandToggleCell.tsx` | Chevron toggle |
-| `pipeline/components/cell-renderers/DatePickerEditor.tsx` | `components/grid/cell-renderers/DatePickerEditor.tsx` | Inline date editor |
-| `usePipelineColumns.ts` column state logic | `hooks/useGridColumnState.ts` | localStorage persistence |
-
-Pipeline-specific renderers (ContactCell, ChannelsCell, NextStepCell, etc.) stay in `features/pipeline/`.
-
-### Excel Export Backend Pattern
-
-Follow the existing StreamingResponse pattern from `documents.py`:
+Per established project convention (CLAUDE.md, MEMORY.md), Supabase PgBouncer silently rolls back multi-statement DDL. Each DDL statement must be a separate commit:
 
 ```python
-# Already used in backend -- same pattern for Excel export
-from fastapi.responses import StreamingResponse
-from io import BytesIO
-import openpyxl
+# Each CREATE TABLE, CREATE INDEX, ALTER TABLE, ADD CONSTRAINT is its own commit:
+async with factory() as session:
+    await session.execute(text("CREATE TABLE broker_clients (...)"))
+    await session.commit()
 
-# Build workbook, write to BytesIO, return as StreamingResponse
-# Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet
+async with factory() as session:
+    await session.execute(text("CREATE INDEX idx_broker_client_tenant ON broker_clients (tenant_id)"))
+    await session.commit()
+
+# After all statements: alembic stamp <revision>
 ```
 
-### Frontend File Download Pattern
+This affects how the 6 new tables + RLS policies + indexes + CHECK constraints are deployed. Expect 40-50 individual DDL statements across the two migration phases.
 
-Standard browser download -- no library needed:
+## Key Implementation Details
 
-```typescript
-const response = await fetch(`/api/v1/broker/projects/${id}/export-comparison`, {
-  method: 'POST',
-  headers: { 'Content-Type': 'application/json' },
-  body: JSON.stringify({ carrier_ids: selectedIds }),
-})
-const blob = await response.blob()
-const url = URL.createObjectURL(blob)
-const a = document.createElement('a')
-a.href = url
-a.download = `comparison-${projectName}-${date}.xlsx`
-a.click()
-URL.revokeObjectURL(url)
-```
+### CheckConstraint Naming Convention
 
----
+Follow the existing naming pattern (`uq_` for unique, `idx_` for index). Use `ck_` prefix:
+
+- `ck_broker_client_country` -- validates country code values
+- `ck_solicitation_draft_status` -- validates solicitation status enum
+- `ck_broker_recommendation_status` -- validates recommendation status enum
+- `ck_carrier_quote_status` -- validates quote status enum (adding to existing table)
+- `ck_broker_activity_type` -- validates activity type enum
+
+### Context Entity Failure Handling
+
+The spec says: "If context store fails, fail client creation (surface error)." The existing `find_or_create_entity` calls `session.flush()` (not `session.commit()`), so it participates in the caller's transaction. If it raises, the entire transaction rolls back including the client INSERT. This is the correct pattern -- no change needed to transaction handling.
+
+### Relationship Back-Population
+
+New relationships follow the existing pattern:
+- `cascade="all, delete-orphan"` for owned children (contacts, solicitation drafts, recommendations)
+- `back_populates=` on both sides
+- No `lazy=` specified (SQLAlchemy 2.0 defaults to `lazy="select"`, consistent with rest of codebase)
+
+### FK Constraints on context_entity_id
+
+Per MEMORY.md: "Alembic cannot reference profiles table in FK constraints." The same limitation applies broadly -- use plain UUID columns for `context_entity_id` on broker_clients, carrier_configs, and broker_projects. Application-layer enforcement via the `create_context_entity` wrapper guarantees the entity exists.
 
 ## Sources
 
-- `frontend/package.json` -- direct inspection of all installed dependencies (HIGH confidence)
-- `PipelinePage.tsx` lines 1-50 -- ag-grid theme config, useSearchParams usage, AllCommunityModule import (HIGH confidence)
-- `ComparisonMatrix.tsx` -- existing plain HTML table pattern for quote comparison (HIGH confidence)
-- `backend/src/flywheel/api/documents.py` lines 638-690 -- StreamingResponse file download pattern (HIGH confidence)
-- `backend/src/flywheel/api/tenant.py` line 650 -- additional StreamingResponse usage (HIGH confidence)
-- `features/pipeline/components/cell-renderers/` -- 11 existing cell renderers, 4 generic enough to extract (HIGH confidence)
-- `components/ui/` directory -- 27 shadcn/ui components installed including tabs.tsx (HIGH confidence)
-- 7 frontend files using CSS `sticky` positioning -- confirms pattern is established (HIGH confidence)
-- ag-grid community docs -- inline cell editing is a community (free) feature (HIGH confidence)
+- Codebase: `backend/src/flywheel/db/models.py` lines 18-33 (imports), 550-565 (ContextEntity model), 1951-2380 (broker models) -- HIGH confidence
+- Codebase: `backend/src/flywheel/services/entity_normalization.py` (existing normalization logic, find_or_create_entity) -- HIGH confidence
+- Codebase: `backend/pyproject.toml` (dependency versions: `sqlalchemy[asyncio]>=2.0`, `alembic>=1.14`) -- HIGH confidence
+- Codebase: `SPEC-BROKER-DATA-MODEL.md` (full spec for this milestone, suffix list, CHECK constraints, partial unique indexes) -- HIGH confidence
+- Project memory: Supabase DDL workaround, FK constraint limitations (MEMORY.md, CLAUDE.md) -- HIGH confidence

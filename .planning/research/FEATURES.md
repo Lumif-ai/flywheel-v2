@@ -1,157 +1,186 @@
-# Feature Landscape — Broker Frontend MVP
+# Feature Landscape — Broker Data Model: Clients, Contacts & Intelligence
 
-**Domain:** Insurance broker comparison tools, dashboard task management, project workflow visualization
+**Domain:** Insurance broker client/contact management, solicitation approval workflows, CRM-style intelligence bridging
 **Researched:** 2026-04-14
-**Context:** Subsequent milestone building frontend UI on existing complete backend (28 endpoints, 6 tables, 7 AI engines, 17 working components)
+**Context:** Subsequent milestone adding client/contact entities, structural extractions, context store intelligence, and solicitation workflow to existing broker module (6 tables, 29 endpoints, 37 components already built)
 
 ## Table Stakes
 
-Features users expect from any broker placement tool. Missing = broker goes back to Excel.
+Features that any commercial insurance broker tool must have at this maturity level. Missing = broker cannot manage real client relationships through the system.
 
-| Feature | Why Expected | Complexity | Existing Code | Notes |
-|---------|--------------|------------|---------------|-------|
-| Side-by-side quote comparison matrix | Every broker compares quotes in a spreadsheet. Rows = coverage lines, columns = carriers. This is the universal mental model. Without it, the tool has no value proposition. | Med | `ComparisonMatrix.tsx` exists with basic HTML table, `QuoteCell` renderer, color-coded cells, critical exclusion badges. Backend `quote_comparator` engine returns structured comparison data. | Current implementation is functional but lacks: frozen columns, two-row cell layout, insurance/surety tabs, horizontal scroll for 5+ carriers. Needs rebuild with sticky headers and proper cell structure. |
-| Coverage gap and exclusion visibility | Brokers carry E&O liability. Missing an exclusion that conflicts with a contract requirement is a career-ending mistake. Red flags must be unmissable. | Low | `GapAnalysis.tsx` exists with red/yellow/green color mapping. `ComparisonMatrix.tsx` has critical exclusion badges. Backend `gap_detector` engine produces gap data. | Existing gap analysis works. New requirement: critical exclusion alerts box ABOVE the matrix with contract-clause-vs-quote citations. This is the single most important safety feature. |
-| Excel export of comparison | Brokers send comparison to clients as Excel. Not PDF, not email — .xlsx with two sheets (Insurance + Surety), formatted cells, color coding. This is the deliverable. | Med | No Excel export exists. ag-grid Enterprise (which has built-in Excel export) is NOT installed — only Community edition. Backend has no Excel endpoint. | Must use backend-generated xlsx (xlsxwriter or openpyxl — both available system-wide). Cannot rely on ag-grid Enterprise export. Backend endpoint returns formatted .xlsx binary. |
-| Task list ordered by urgency | Broker opens app 2x/day. Needs to know: what requires my attention, in what order? Not KPI cards (current state) — action items. "Review this extraction", "Approve these solicitations", "Export this comparison". | Med | `BrokerDashboard.tsx` exists with KPI cards + basic project table. No task list component. No dashboard aggregation endpoint for gate counts + tasks. | Complete redesign of dashboard. Replace KPI cards with urgency-ordered task list. Each task: project name, what happened, days waiting, one action button. Backend needs aggregation endpoint. |
-| Project status tracking | With 10-50 active projects, broker needs to see where each one stands at a glance. Status must be scannable without clicking into each project. | Low | `ProjectTable.tsx` exists as HTML table. `StatusBadge.tsx` exists with status colors. | Current table works but is basic HTML. Needs: sort, filter by status chips, search by name/client. ag-grid adoption gives this for free. |
-| Carrier selection with match ranking | Broker needs to see which carriers are best-matched for each project's coverage needs, ranked by overlap. Manually figuring this out across 10+ carriers is the old way. | Low | `CarrierSelection.tsx` exists. Backend `carrier_matching` engine ranks by coverage overlap. | Existing component works. Needs refinement: show routing method (portal vs email), pre-select top matches. |
-| Solicitation email review and approval | Broker must review AI-drafted solicitation emails before they go out. Professional reputation is at stake. But they should NOT write from scratch. | Low | `SolicitationPanel.tsx` and `EmailApproval.tsx` exist. Backend `solicitation_drafter` engine generates carrier-specific emails. | Existing components work. Gate 2 pattern (review + approve) is functional. Polish: edit mode toggle for email body, "Send All" button. |
-| Insurance vs Surety separation | Construction projects always require BOTH insurance policies AND surety bonds (fianzas). These are fundamentally different products quoted by different carriers. Mixing them in one table is confusing. | Med | Current `ComparisonMatrix.tsx` has no tab separation. Backend data includes `category` field on coverages. | Must implement tabbed comparison: "Insurance (N quotes)" and "Surety Bonds (N quotes)". Filter data by category. Excel export produces two sheets. This is domain-critical for Mexico construction. |
+| Feature | Why Expected | Complexity | Dependencies | Notes |
+|---------|--------------|------------|--------------|-------|
+| Client entity with dedup | Every AMS (Applied Epic, HawkSoft, AMS360) groups projects by client. Without a client entity, the broker cannot answer "how many projects does Alaya have?" or "who is my contact at Tracsa?" The current system has projects floating in isolation — no client grouping. | Med | New `broker_clients` table, normalized_name logic, client CRUD endpoints, client list page | Normalized name dedup with legal suffix stripping (S.A. de C.V., Inc., LLC) is essential for Mexico market. RFC/EIN tax_id is mandatory on Mexican insurance policies per SAT requirements. |
+| Client contacts with roles | Brokers communicate with different people at a client company for different purposes: the CFO approves coverage decisions, the project manager handles technical questions, the billing contact processes invoices. One email per client is inadequate. | Low | New `broker_client_contacts` table, contact CRUD endpoints, role enum (primary, billing, technical, legal, executive) | Role constraints prevent misrouted communications. The `is_primary` flag ensures automated emails go to the right person. Unique constraint on (client_id, email) prevents duplicate contacts. |
+| Carrier contacts with roles | Currently carriers have a single `email_address` string. In practice, a broker sends solicitations to the submissions desk, negotiates with the underwriter, and manages the relationship through an account manager. Different people, different purposes. | Low | New `carrier_contacts` table, migrate existing `email_address` to contact row, role enum (submissions, account_manager, underwriter, claims, billing) | Critical for solicitation routing — sending a solicitation to the claims email is a waste of everyone's time. Dropping `carrier_configs.email_address` (no production data) eliminates dual source of truth. |
+| Client-project link | Projects must be attributable to a client for portfolio views, renewal tracking, and cross-project analysis. "Show me all Alaya projects" is a basic query that cannot work without this FK. | Low | `client_id` FK on `broker_projects` (nullable), join in project list/detail endpoints | Nullable by design: don't block project creation. Application-layer gate: `client_id` required before status transitions past `analyzing`. This matches real workflow — broker creates project from contract email, links client later. |
+| Solicitation approval workflow (separate approve from send) | The current system combines approve and send into one action. Insurance communications have professional and potentially legal weight. A broker must be able to approve a draft (confirming content), then decide WHEN to send (coordinating across carriers for timing). | Med | New `solicitation_drafts` table extracted from CarrierQuote columns, approval status tracking, `approved_by_user_id` + `approved_at` audit trail | Regulatory requirement: insurance solicitations are business communications that may need compliance review. Separation of approve/send also enables batch operations — approve 5 drafts, then send all at once. |
+| Recommendation as proper entity | Currently recommendation_subject, recommendation_body, recommendation_status live as columns on BrokerProject. This means: no version history, no audit trail on who approved what, no ability to revise and resend. In a regulated domain, this is unacceptable. | Med | New `broker_recommendations` table, 1:N from project, partial unique index (one approved at a time), extract existing columns | If a client disputes a recommendation, the broker needs version history showing what was sent, when, by whom, and what changed between versions. This is E&O (errors and omissions) liability protection. |
+| Project email thread tracking | Currently `email_thread_ids` is a TEXT[] array column on BrokerProject. Arrays cannot be queried efficiently, cannot carry metadata (direction, timestamp), and cannot be joined. | Low | New `broker_project_emails` table replacing TEXT[] column, thread_id + direction + received_at per row | Proper entity enables "show all emails for this project" queries, inbound/outbound filtering, and timeline reconstruction. Foundation for future email intelligence features. |
+| Audit columns on all tables | Missing `created_by_user_id` and `updated_by_user_id` on existing tables (broker_projects, carrier_quotes, project_coverages, carrier_configs, submission_documents). In a regulated insurance domain, "who did what when" is not optional. | Low | ALTER TABLE additions across 5 existing tables, populate from session context on all write operations | Applied Epic, AMS360, and every enterprise AMS tracks user attribution on every record. Without this, no compliance audit trail. |
+| Status lifecycle: binding phase | Current status enum jumps from `recommended` to `delivered` to `bound`. Insurance placement requires an active binding phase where the broker confirms coverage, negotiates final terms, and executes the binder. This is a distinct workflow state. | Low | Add `binding` status to CHECK constraint, update frontend status displays and gate logic | BindHQ, Applied Epic, and ExpertInsured all model binding as an explicit workflow step. Without it, the system cannot distinguish "we sent the recommendation" from "we are actively placing coverage" from "coverage is bound." |
 
 ## Differentiators
 
-Features that separate this from "just another spreadsheet" and make a broker choose this tool.
+Features that separate this from standard AMS/CRM tools and create the switching cost moat.
 
-| Feature | Value Proposition | Complexity | Existing Code | Notes |
-|---------|-------------------|------------|---------------|-------|
-| Two-row cell layout in comparison matrix | Premium bold on top, limit + deductible muted below. Packs 3 data points into one cell without clutter. Excel comparison spreadsheets do this — the tool should match. No broker tool does this as elegantly in a web UI. | Med | Current `QuoteCell` component shows premium, deductible, and limit as separate stacked lines. Close but not the spec'd layout (premium top, "Limit: $1M . Ded: $10K" combined bottom). | Implement as spec'd: top row `text-sm font-semibold` premium, bottom row `text-xs text-muted-foreground` combined limit + deductible. Min 140px column width. |
-| "Show Differences Only" toggle | Default ON. Hides rows where all carriers are within 15% on premium AND all limits meet requirements AND no exclusion differences. Broker sees ONLY the rows requiring judgment. Cuts noise by 40-60% on typical 15-coverage projects. | Med | Not implemented. Backend comparison data includes all required fields to compute differences. | Frontend computation: for each row, check premium variance, limit adequacy, exclusion matches. Show "N matching rows hidden — Show all" link. This is Tufte-inspired: remove everything that doesn't inform a decision. |
-| Critical exclusion alert box with citations | Above the matrix: "Zurich EXCLUDES vibration damage — Contract clause 9.1 REQUIRES this coverage (Quote page 12, Exclusion 4.2 vs Contract 9.1)". Cross-references quote text against contract text. No other broker tool does AI-powered exclusion-to-contract-clause mapping. | Low | Backend `gap_detector` and `quote_comparator` produce critical exclusion data with `critical_exclusion_detail`. Alert box is new UI, data exists. | High-impact, low-effort feature. Render as prominent warning box above matrix tabs. Each alert: carrier name + what's excluded + contract clause reference + source citations. |
-| "Highlight Best Values" toggle | Off by default. When ON: green text on lowest premium per row, blue text on highest limit per row. Tufte principle: safety colors (red/amber) always visible; competitive colors (green/blue) opt-in. Broker focuses on gaps first, pricing second. | Low | Current `QuoteCell` has `is_best_price` and `is_best_coverage` badges. | Refactor from badges to text color styling. Add toggle control. When off, no green/blue — only red/amber safety colors. |
-| Persistent gate strip | Visible on every broker page: `Review: 3 | Approve: 1 | Export: 2`. Clickable counts navigate to oldest pending project. Eliminates dashboard round-trips. Broker always knows their queue depth. | Low | Not implemented. No gate count endpoint. | New component rendered in broker layout wrapper. Backend endpoint returns counts per gate. Updates on navigation (React Query cache). This is the primary awareness mechanism. |
-| Horizontal step indicator on project detail | Shows: Overview > Coverage > Carriers > Quotes > Compare with status dots (grey/amber/green). At a glance: where is this project in its lifecycle? Replaces the current vertical scroll-through-everything layout. | Med | `BrokerProjectDetail.tsx` currently renders all sections vertically with status-based conditional visibility. No tabs, no step indicator. | Redesign to tabbed layout with step indicator above tabs. Each step maps to a tab. Status dot computed from project data (e.g., Coverage tab green when coverages extracted AND approved). |
-| Carrier selection checkboxes in matrix headers | Sticky checkboxes in column headers let broker select which carriers to include in Excel export. Deselect a carrier = column disappears from export. Useful when 1 of 5 carriers is clearly non-competitive. | Low | Not implemented. | Add checkbox to each carrier column header. Maintain selection state. Pass to Excel export. Sticky positioning during horizontal scroll. |
-| Total premium row | Sticky at bottom during vertical scroll. Sums all coverage premiums per carrier. The bottom-line number brokers and clients care about most. | Low | Not implemented. Backend comparison data could include totals. | Compute on frontend from cell data. Sticky positioning. Bold formatting. Include in Excel export. |
+| Feature | Value Proposition | Complexity | Dependencies | Notes |
+|---------|-------------------|------------|--------------|-------|
+| Context store intelligence bridge | Every broker entity (client, carrier, project) links to the context store via `context_entity_id`. Meeting notes, email signals, and relationship context automatically surface where they matter. No major AMS does this — they store policy data but not relationship intelligence. | High | Context store entity creation (eager), `context_entity_id` on broker_clients, carrier_configs, broker_projects, bidirectional data flow | This is the moat mechanism. A broker who uses the system for 18 months has accumulated intelligence that makes every AI-drafted solicitation, recommendation, and carrier match more accurate. Competitors cannot replicate accumulated context. McKinsey confirms: "MGAs that combine strong relationships with data ownership and advanced AI use will differentiate themselves most sharply." |
+| AI-powered solicitation personalization from context | When drafting a solicitation for a carrier, the system reads the carrier's context entity to pull: past response times, preferred submission formats, underwriter preferences from past meetings, and relationship notes. The draft is customized to the specific carrier relationship, not generic. | Med | Context store intelligence bridge (above), solicitation_drafter engine enhancement, carrier context entity populated with signals | No broker tool personalizes solicitations based on accumulated carrier relationship intelligence. Applied Epic sends templated emails. This sends relationship-aware emails. "Based on your previous feedback, we've included the seismic risk assessment upfront." |
+| Client intelligence surfacing | Client detail page shows not just contact info and projects, but AI-surfaced insights: "In last meeting, client mentioned expanding to Monterrey — consider regional carrier options" or "Client prefers lowest deductible over lowest premium based on 3 conversations." | Med | Context store intelligence bridge, client detail page with intelligence panel, context entity query on page load | Standard AMS shows policy data. This shows relationship intelligence. The broker walks into a client meeting already knowing what was discussed last time, what the client cares about, and what opportunities exist. |
+| Carrier response pattern tracking | Over time, the system learns which carriers respond fastest, which ones offer competitive rates for construction projects, and which underwriters are responsive. This intelligence feeds carrier matching and selection. | Med | Context store signals accumulated from solicitation/quote lifecycle, carrier matching engine enhancement | "Carrier X responded in 2 days on the last 3 solicitations. Carrier Y averages 14 days." This data-driven carrier selection replaces the broker's mental Rolodex. GenasysTech confirms: "Speed-to-quote becomes a competitive moat" — the system helps brokers route to fast-responding carriers. |
+| Normalized name dedup with legal suffix stripping | Mexican legal entities have structured suffixes: S.A. de C.V., S.A.S. de C.V., S.A.P.I., S. de R.L. de C.V. Simple lowercase comparison fails. Aggressive normalization strips these suffixes from a configurable list, preventing "Alaya Construcciones" and "Alaya Construcciones S.A. de C.V." from creating duplicate client records. | Low | Configurable suffix list in code/config, normalization function applied at insert/update, unique constraint on (tenant_id, normalized_name) | No US-focused AMS handles Mexican legal entity suffixes. This is a genuine competitive advantage in the Mexico construction insurance market. Must be extensible for US expansion (Inc., LLC, Corp., L.P.). |
+| Solicitation draft versioning with audit trail | Multiple drafts per project+carrier, with revision history preserved. Partial unique index ensures only one active draft at a time. Every sent draft is immutable. If a carrier claims they never received a solicitation, the broker has timestamped evidence. | Low | `solicitation_drafts` table with status enum, partial unique index on (project_id, carrier_id) WHERE status IN ('draft', 'pending', 'approved') | Insurance communications retention is a regulatory expectation. Applied Epic stores sent emails but not draft history. This system preserves the full revision chain — valuable for E&O defense. |
 
 ## Anti-Features
 
-Features to explicitly NOT build. Each was considered and rejected with rationale.
+Features to explicitly NOT build in this milestone.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Kanban board for project pipeline | Brokers manage 10-50 projects. Kanban is visual sugar for 5-10 items. At 30+ projects, a sortable/filterable table is 3x faster to scan. The spec explicitly calls this out. | ag-grid table with status filter chips. Sort by days-in-stage to surface stuck projects. |
-| In-browser PDF viewer for quotes | Scope explosion. PDF.js is complex, and brokers already have PDF viewers. The value is in the EXTRACTED data, not viewing the raw PDF. | Show extracted data in structured UI. Link to original PDF for download if broker wants to verify. |
-| Real-time quote arrival notifications | Push notifications require WebSocket infrastructure, service workers, notification permissions. Overkill when broker checks 2x/day. | Gate strip counts update on page navigation. Task list on dashboard shows new arrivals. Polling on dashboard page (30s interval) is sufficient. |
-| Head-to-head comparison mode | Comparing exactly 2 carriers side-by-side sounds useful but fragments the UX. The matrix already IS the comparison tool. | Matrix with checkbox selection. Deselect all but 2 carriers = head-to-head. No separate mode needed. |
-| Commission tracking | Different product, different data model, different regulatory requirements (Mexico CNSF). Not in the placement workflow. | Defer to a future module. Placement workflow ends at "Export comparison to client". |
-| Drag-and-drop row reordering in matrix | Coverage rows have a logical domain ordering (General Liability before Professional Liability). Custom ordering adds state complexity for minimal value. | Fixed ordering: match contract clause order. Group by insurance vs surety. |
-| Proposal builder / branded report | Broker exports Excel, adds their own cover letter, sends via their own email. Building a proposal template engine is a separate product. | Clean Excel export. Professional formatting. Two sheets. Broker handles the last mile. |
-| Mobile-responsive comparison matrix | The comparison matrix with 5+ carrier columns cannot work on a phone. Broker's workflow is desktop/laptop. Mobile optimization is wasted effort. | Desktop-first. Responsive down to tablet (landscape). Below that, degrade gracefully with a message. |
-| Analytics / reporting dashboard | Win rates, average placement time, carrier performance — all valuable but NOT part of the placement workflow. Mixing analytics with operations creates a cluttered dashboard. | Defer to analytics module. Dashboard stays operational: "what needs my attention now?" |
-| TCOR (Total Cost of Risk) calculation | Complex actuarial concept requiring loss history, retention analysis, risk transfer costs. Entire InsurTech companies are built around TCOR. | Simple total premium row. TCOR is a Phase 3+ differentiator if there's demand. |
+| Unified contact table (polymorphic) | Structurally identical tables (client contacts and carrier contacts) tempt DRY refactoring into one table with a `type` discriminator. This is wrong: FK constraints cannot enforce correct parentage, runtime type checks replace compile-time guarantees, and the role enums are different (client: primary/billing/technical/legal/executive vs carrier: submissions/account_manager/underwriter/claims/billing). | Keep separate tables. The FK IS the type system. Document merge trigger: revisit if a 3rd stakeholder type appears. |
+| Contact sync with external CRM | Tempting to sync broker contacts with Salesforce, HubSpot, or the GTM pipeline. Broker clients are insured parties, not sales prospects. Different domain, different lifecycle, different data sensitivity. Cross-module coupling creates maintenance burden for zero user value at this stage. | Context store is the intelligence bridge — not direct CRM integration. If a contact exists in GTM AND broker, the context store links them by company domain/name without tight coupling. |
+| Policy management / AMS features | The product boundary is clear: placement workflow tool, NOT an agency management system. No policy issuance, no commission tracking, no renewal management, no certificate issuance. Once bound, the broker enters the policy into their existing AMS. | Status lifecycle ends at `bound`. Post-binding features are a separate product decision. |
+| Real-time contact lookup / enrichment | Auto-filling contact details from LinkedIn, Clearbit, or similar enrichment APIs adds complexity, external dependencies, and potential PII compliance issues (especially in Mexico with LFPDPPP regulations). | Manual contact entry. Broker knows their contacts. Context store accumulates intelligence about contacts over time through natural usage (emails, meetings). |
+| Multi-tenant contact sharing | Some contacts (especially at large carriers like Zurich or Chubb) might be shared across tenants. Building a shared contact directory adds massive complexity around data isolation, permission models, and conflict resolution. | Each tenant has their own contact records. If two tenants have the same carrier contact, they each maintain their own copy. Tenant isolation is sacrosanct. |
+| Client portal / self-service | Letting clients log in to see their projects, approve recommendations, or upload documents is a separate product. The current system is broker-facing only. | Broker sends deliverables via email (Excel export, recommendation email). Client interaction is through the broker, not through the system. |
+| Contact import from CSV/Excel | Bulk import is a onboarding convenience feature that adds edge cases (duplicate handling, validation, error reporting). Not needed when starting with zero data and the broker creates clients as projects arrive. | Manual creation via UI. Broker creates ~10-20 clients over the first month. A create form is sufficient. |
 
 ## Feature Dependencies
 
 ```
-Gate Strip (new component)
-  <- Dashboard aggregation endpoint (new backend)
-  <- Gate count computation (project status + approval_status + quote counts)
+Context Store Intelligence Bridge
+  <- Context store entity type for "insured company" (may need creation)
+  <- Context store entity type for "insurance carrier" (may need creation)
+  <- Context store entity type for "insurance project" (may need creation)
+  <- Eager entity creation at BrokerClient/CarrierConfig/BrokerProject creation
+  <- Failure handling: fail client creation if context entity creation fails
+  <- Background reconciliation job for healing NULL context_entity_ids
 
-Dashboard Task List (new component)
-  <- Dashboard aggregation endpoint (same as above)
-  <- Task priority logic (urgency scoring: days waiting + gate type)
+Client Entity
+  <- broker_clients table (DDL)
+  <- Normalized name function (legal suffix stripping)
+  <- Client CRUD endpoints (list, create, get, update)
+  <- Client list page (ag-grid)
+  <- Client detail page (profile + contacts + projects)
+  <- Sidebar navigation item
 
-Tabbed Project Detail (redesign)
-  <- Step indicator component (new)
-  <- Tab state management (URL param or local state)
-  <- Existing components refactored into tab content:
-     Coverage tab: CoverageTable + GapAnalysis (exist)
-     Carriers tab: CarrierSelection + SolicitationPanel (exist)
-     Quotes tab: QuoteTracking (exists)
-     Compare tab: ComparisonMatrix (needs rebuild)
+Client Contacts
+  <- broker_client_contacts table (DDL)
+  <- Contact CRUD endpoints (nested under client)
+  <- Client detail page contacts section
+  <- Client entity (parent FK)
 
-Comparison Matrix Rebuild
-  <- Insurance/Surety tab separation (filter by category)
-  <- Two-row cell renderer (new component)
-  <- Critical exclusion alert box (new component)
-  <- "Show Differences Only" toggle (new logic)
-  <- "Highlight Best Values" toggle (refactor existing badges)
-  <- Carrier selection checkboxes (new in headers)
-  <- Frozen first column + sticky headers (CSS position: sticky)
-  <- Total premium row (compute + sticky)
+Carrier Contacts
+  <- carrier_contacts table (DDL)
+  <- Migrate email_address to contact row
+  <- Drop email_address from carrier_configs
+  <- Contact CRUD endpoints (nested under carrier)
+  <- Carrier detail/expand with contacts section
+  <- Update solicitation drafter to use carrier contact email
 
-Excel Export
-  <- Backend .xlsx generation endpoint (new — use openpyxl)
-  <- Two-sheet format (Insurance + Surety)
-  <- Carrier selection state (which columns to include)
-  <- Formatted cells matching matrix layout
-  <- Critical exclusion summary section below matrix
+Client-Project Link
+  <- client_id FK on broker_projects (DDL)
+  <- Update project create endpoint (accept optional client_id)
+  <- Update project list endpoint (include client_name via join)
+  <- Client select/create widget in CreateProjectDialog
+  <- Client entity (must exist first)
 
-ag-grid Adoption for Broker Tables
-  <- Project pipeline table (replace HTML ProjectTable)
-  <- Reuse pipeline ag-grid patterns (theme, cell renderers, column defs)
-  <- Status filter chips (custom filter component)
-  <- Sort by days-in-stage
-  NOTE: ag-grid Community only. No Enterprise features (Excel export, etc.)
+Solicitation Drafts (Proper Entity)
+  <- solicitation_drafts table (DDL)
+  <- Extract draft_subject/body/status from carrier_quotes
+  <- Drop old columns from carrier_quotes
+  <- Update draft-solicitations endpoint to write new table
+  <- Update approve-send endpoint to read new table
+  <- Solicitation list endpoint per project
+
+Recommendations (Proper Entity)
+  <- broker_recommendations table (DDL)
+  <- Extract recommendation_* from broker_projects
+  <- Drop old columns from broker_projects
+  <- Update send-recommendation endpoint to use new table
+  <- Recommendation list endpoint per project
+  <- Approval workflow (approve_by_user_id, approved_at)
+
+Project Email Tracking
+  <- broker_project_emails table (DDL)
+  <- Migrate email_thread_ids array data (if any exists)
+  <- Drop email_thread_ids column from broker_projects
+  <- Email list endpoint per project
+
+Audit Columns
+  <- ALTER TABLE additions across 5 existing tables
+  <- Update all write operations to set created_by/updated_by from session
+  <- No frontend changes (backend-only)
+
+Binding Status
+  <- Update CHECK constraint on broker_projects.status
+  <- Update frontend StatusBadge component
+  <- Update gate logic / step indicator
 ```
 
 ## MVP Recommendation
 
 Prioritize (in dependency order):
 
-1. **Gate strip + dashboard aggregation endpoint** — This is the broker's primary awareness mechanism. Without it, they have to navigate to dashboard to know what needs attention. Backend endpoint returns gate counts + task list. Frontend renders persistent strip in broker layout. Task list replaces KPI cards on dashboard. Unblocks everything else because it defines the urgency model.
+1. **Database schema changes (all 6 new tables + 5 table modifications)** — Foundation for everything else. Single Alembic migration (executed statement-by-statement via Supabase SQL Editor per established workaround). No data to migrate = clean execution. Includes CHECK constraints, audit columns, and binding status.
 
-2. **Tabbed project detail with step indicator** — The current vertical scroll layout doesn't scale to 5 workflow stages. Tab redesign reorganizes existing components (which all work) into a navigable structure. No new backend work. Unblocks the comparison matrix rebuild because Compare becomes its own focused tab.
+2. **Client entity + contacts** — The highest-visibility gap. Broker needs to see and manage clients before anything else makes sense. Client CRUD, contact CRUD, client list page, client detail page. Links projects to clients via nullable FK.
 
-3. **Comparison matrix rebuild** — The core deliverable. Insurance/surety tabs, two-row cells, frozen columns, critical exclusion alerts, difference-only toggle. This is Gate 3 — the moment the broker produces the deliverable they send to their client. Must feel professional and information-dense without clutter.
+3. **Carrier contacts + email_address migration** — Enables role-based solicitation routing. Update solicitation drafter to use carrier contacts (submissions role) instead of the old email_address column. Drop the old column.
 
-4. **Excel export** — Backend-generated .xlsx with openpyxl. Two sheets, formatted cells, color coding, exclusion summary. This is the ACTUAL output the client receives. Without it, the comparison matrix is view-only and the broker still builds the spreadsheet manually.
+4. **Solicitation drafts + recommendations as proper entities** — Structural extractions that enable approval workflows and version history. Update existing endpoints to read/write new tables. Drop old columns.
 
-5. **ag-grid adoption for broker tables** — Replace HTML `ProjectTable` with ag-grid using existing pipeline patterns (theme, custom cell renderers). Gives sort, filter, search for free. Consistent with GTM pipeline UX.
+5. **Context store intelligence bridge** — The differentiator. Eager entity creation on client/carrier/project. This can be implemented incrementally: first just create entities and link them (low effort), then build intelligence surfacing in the UI (higher effort, can be phased).
+
+6. **Project email tracking entity** — Lowest priority table stakes item. Replace TEXT[] with proper table. Minimal frontend impact.
 
 Defer:
-- **Carrier roster management improvements**: Existing `CarrierSettings.tsx` is adequate for MVP. Polish later.
-- **"Link to Project" modal for unlinked emails**: Edge case for automated email processing. Build when email sync is live.
-- **Client profile section on Overview tab**: Nice to have. Project info sidebar already shows key metadata.
-- **Empty states**: Important for onboarding polish but not blocking core workflow. Add in final polish pass.
+- **AI-powered solicitation personalization from context**: Requires accumulated context data. Build the bridge first, personalization second.
+- **Carrier response pattern tracking**: Requires historical solicitation/quote data. Instrument first, surface patterns later.
+- **Client intelligence panel on detail page**: Requires context entities to have accumulated signals. Ship the entity creation, let signals accumulate, build the panel in a subsequent phase.
 
 ## Domain-Specific Insights
 
-### What makes a great broker tool vs adequate
+### What the insurance broker CRM landscape looks like
 
-Research into Applied Epic, HawkSoft, AMS360, BrokerEdge, and Mexican broker platforms (SEKURA, Howden, Surexs) reveals these patterns:
+The market is bifurcated: on one side, full AMS platforms (Applied Epic, AMS360, HawkSoft) that manage the entire agency lifecycle but have weak placement workflow tooling. On the other side, modern placement tools (BindHQ, BrokerEdge, ExpertInsured) that handle submission-to-bind but lack CRM-depth client intelligence.
 
-**Great tools adapt to the broker's existing workflow.** They don't force a new process — they accelerate the one the broker already follows. The 3-gate model (review extractions, approve solicitations, export comparison) maps exactly to the broker's existing decision points but removes all the mechanical work between them.
+No tool in either category bridges accumulated relationship intelligence (from meetings, emails, conversations) into the placement workflow. Applied Epic knows your policy data but not that the client mentioned earthquake concerns in last week's meeting. BindHQ automates submissions but doesn't personalize them based on carrier relationship history.
 
-**Great tools surface risk, not just data.** The critical exclusion alert box with contract-clause citations is the most differentiated feature. No major AMS (Applied Epic, HawkSoft, AMS360) does AI-powered exclusion-to-contract-clause mapping. They show quote data; they don't cross-reference it against contract requirements. This is where E&O liability lives.
+The context store intelligence bridge is genuinely novel. It occupies the gap between "AMS that stores data" and "AI tool that processes documents." It creates an intelligence layer where every interaction makes the next placement smarter.
 
-**Great tools respect information density.** Insurance brokers are power users who process dense tabular data daily. They don't want wizard-style UX with one field per page. They want the comparison matrix — all data visible, differences highlighted, noise removed. The "Show Differences Only" toggle (Tufte-inspired data reduction) is the right UX for this user.
+### Mexico construction specifics relevant to this milestone
 
-**Adequate tools are just prettier Excel.** If the tool shows the same data as a spreadsheet but takes more clicks to navigate, brokers go back to Excel. The differentiator is: (a) the data was GENERATED automatically (no manual entry), (b) the analysis was DONE automatically (gap detection, exclusion flagging), (c) the spreadsheet was BUILT automatically (Excel export). The broker adds professional judgment at 3 gates. Everything else happened without them.
+- **RFC (Registro Federal de Contribuyentes)** is mandatory on all Mexican insurance policies and business transactions. The `tax_id` field on `broker_clients` directly maps to this requirement. SAT requires exact RFC + legal name + postal code match for CFDI (electronic invoice) validation. Storing both `name` (display) and `legal_name` (for policies/invoices) is domain-correct.
 
-### Mexico construction insurance specifics
+- **Legal entity suffixes** (S.A. de C.V., S.A.S. de C.V., S.A.P.I. de C.V., S. de R.L. de C.V.) are not just formatting — they indicate the legal structure of the company. The normalized_name function must strip these for dedup purposes but preserve them in `legal_name`.
 
-- Construction projects require BOTH insurance (seguros) and surety bonds (fianzas). Always separate tracks.
-- Major Mexican carriers: Chubb, Zurich, Mapfre, GNP, Qualitas, AXA for insurance. Afianzadora Insurgentes, Fianzas Monterrey for surety.
-- Surety bonds have different data fields: bond amount, rate, term — not premium/limit/deductible like insurance.
-- The comparison matrix MUST handle both data shapes in separate tabs. The Excel export MUST have two sheets.
-- Howden Mexico specifically offers "customized bonding management systems" — confirms that broker-specific tooling for fianzas is a real market need.
+- **Carrier contact structures in Mexico** differ from US: Mexican carriers often have regional offices with different submission contacts per state/region. The carrier_contacts model (multiple contacts per carrier with roles) handles this correctly.
+
+### Solicitation workflow in regulated insurance
+
+Industry-standard workflow at mature brokerages:
+1. Draft solicitation (AI-generated or manual)
+2. Internal review (compliance or senior broker reviews content)
+3. Approve (confirms content is accurate and professional)
+4. Schedule/send (may coordinate timing across multiple carriers)
+
+The current system combines steps 2-4 into one "approve and send" action. The new solicitation_drafts entity with separate `approved` and `sent` statuses correctly models the real workflow. This is not overengineering — it is how BrokerEdge, Applied Epic, and BindHQ all handle outbound communications.
 
 ## Sources
 
-- Spec: `SPEC-BROKER-FRONTEND-MVP.md` in project root (approved v2, post board review)
-- Existing components: 17 broker components in `frontend/src/features/broker/components/`
-- ag-grid patterns: `frontend/src/features/pipeline/components/PipelinePage.tsx` (Community edition, Quartz theme)
-- [Insurance UX Design Trends 2025](https://www.g-co.agency/insights/insurance-ux-design-trends-industry-analysis) — personalization, data-driven dashboards
-- [BrokerEdge — Insurance Broker Software](https://www.damcogroup.com/insurance/brokeredge-broker-management-software) — task management, workflow automation
-- [AMS Comparison 2026: Epic vs HawkSoft vs AMS360](https://www.quotesweep.com/blog/ams-comparison-2026) — feature comparison of major broker management systems
-- [AI Agents for Insurance Policy Comparison](https://datagrid.com/blog/ai-agents-automate-insurance-policy-comparison-document-control-managers) — AI-powered gap analysis patterns
-- [Coverage Gap Analysis with AI for Brokers](https://www.datagrid.com/blog/ai-agents-automate-coverage-gap-analysis) — exclusion detection patterns
-- [Insurance Comparison Table Examples](https://ninjatables.com/insurance-comparison-table/) — side-by-side layout patterns
-- [Stepper UI Design Patterns](https://medium.com/@david.pham_1649/beyond-the-progress-bar-the-art-of-stepper-ui-design-cfa270a8e862) — horizontal vs vertical, enterprise dashboard patterns
-- [Howden Mexico Surety Solutions](https://www.howdengroup.com/mx-es/world-class-surety-insurance-solutions) — Mexico construction fianza market
-- [AG Grid Cell Components](https://www.ag-grid.com/react-data-grid/component-cell-renderer/) — custom cell renderer patterns
-- [AG Grid Excel Export](https://www.ag-grid.com/react-data-grid/excel-export/) — Enterprise-only feature (NOT available in Community)
-- [Step-by-Step Insurance Procurement Checklist](https://insurancecurator.com/step-by-step-procurement-checklist-from-coverage-needs-analysis-to-final-policy-bind/) — commercial placement workflow
-- [Brokerage Workflow Management](https://www.expertinsured.com/key-features/workflow-and-task-management/brokerage-workflow) — intake to bind workflow
+- [Best Insurance Broker CRM Software 2025](https://agencymate.com/insights/insurance-broker-crm/) — Feature comparison of top broker CRM platforms
+- [Best Insurance Broker Management Systems 2025](https://stratoflow.com/insurance-broker-management-system/) — Core feature expectations for broker management
+- [Brokerage Workflow Management](https://www.expertinsured.com/key-features/workflow-and-task-management/brokerage-workflow) — Intake through bind workflow stages
+- [BindHQ - AMS & Operations Platform](https://www.bindhq.com/) — Submission to binding automation, carrier connectivity
+- [BrokerEdge - Insurance Broker Software](https://www.damcogroup.com/insurance/brokeredge-broker-management-software) — Task management, workflow automation, contact management
+- [AI Insurance Distribution: How Brokers Will Win in 2026](https://www.genasystech.com/ai-insurance-distribution-brokers-2026/) — Speed-to-quote moat, carrier relationships
+- [AI-driven transformation in commercial insurance](https://www.deloitte.com/us/en/Industries/financial-services/articles/commercial-insurance-industry-ai-driven-transformation.html) — Data ownership as competitive advantage
+- [McKinsey: AI in Insurance](https://www.mckinsey.com/industries/financial-services/our-insights/ai-in-insurance-understanding-the-implications-for-investors) — Data ownership, AI differentiation
+- [Mexico RFC Number Guide](https://www.signzy.com/blogs/mexico-rfc-for-business-owners) — RFC structure, SAT validation requirements
+- [Salesforce Financial Services for Insurance Brokerages](https://www.salesforce.com/financial-services/insurance-brokerage-management-software/) — Enterprise CRM features for brokerages
+- [Insurance Workflow Software Guide](https://www.herondata.io/blog/insurance-workflow-software) — Workflow automation patterns
+- PROPOSAL-BROKER-DATA-MODEL.md — Internal schema proposal (board-reviewed, all questions resolved)
+- CONCEPT-BRIEF-BROKER-DATA-MODEL.md — Advisory board analysis (14 advisors, 4 rounds)

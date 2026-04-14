@@ -1,582 +1,486 @@
-# Architecture Patterns: Broker Frontend MVP
+# Architecture Patterns
 
-**Domain:** Insurance broker workflow management (on existing React + Vite + Tailwind v4 app)
+**Domain:** Broker Data Model v2 -- Clients, Contacts & Structural Fixes
 **Researched:** 2026-04-14
-**Confidence:** HIGH (all recommendations derived from reading the actual codebase)
+**Confidence:** HIGH (all recommendations derived from reading actual codebase + spec)
 
 ---
 
-## 1. Shared Module Toolkit Extraction
+## Recommended Architecture
 
-### Problem
+### System Overview
 
-ag-grid infrastructure is currently embedded in `features/pipeline/`: the theme config, 13 cell renderers, column state persistence hooks, and grid-related utilities. The broker module needs grids (projects table, carriers table) but must not import from `features/pipeline/` -- that creates a coupling where broker depends on GTM code.
-
-### Recommended Architecture
-
-Create `src/shared/grid/` as the extraction target. This is a new top-level directory alongside `src/lib/` and `src/components/`.
+The milestone restructures the broker module's data layer (6 new tables, 6 modified tables) and splits responsibilities that were previously inlined on existing models (draft fields on CarrierQuote, recommendation columns on BrokerProject) into proper first-class tables. The backend introduces two new service classes and modifies three existing engines. The frontend adds two new pages and modifies four components.
 
 ```
-src/
-  shared/
-    grid/
-      theme.ts                    # pipelineTheme extracted + renamed to flywheelGridTheme
-      hooks/
-        useColumnPersistence.ts   # generic version of usePipelineColumns' persist logic
-      cell-renderers/
-        DateCell.tsx              # generic -- used by both pipeline and broker
-        StatusPill.tsx            # generic pill renderer (parameterized colors)
-        ExpandToggleCell.tsx      # generic expand/collapse
-        CurrencyCell.tsx          # NEW -- broker needs currency formatting
-      index.ts                   # barrel export
-```
-
-### Extraction Order (safe sequence)
-
-This order ensures GTM never breaks at any intermediate step:
-
-**Step 1: Copy theme to shared, re-export from pipeline.**
-- Copy `pipelineTheme` from `PipelinePage.tsx` lines 34-47 into `src/shared/grid/theme.ts` as `flywheelGridTheme`.
-- In `PipelinePage.tsx`, replace the inline theme with `import { flywheelGridTheme } from '@/shared/grid/theme'`.
-- GTM works identically. Zero behavior change.
-
-**Step 2: Extract generic cell renderers.**
-- Copy `DateCell.tsx`, `ExpandToggleCell.tsx` to `src/shared/grid/cell-renderers/`.
-- These two are fully generic (no pipeline-specific types in their interfaces).
-- Update pipeline imports to point to `@/shared/grid/cell-renderers/DateCell`.
-- Remove originals from pipeline.
-- `StatusPill.tsx` is NEW -- a parameterized version that accepts `colorMap` prop, unlike `StagePill.tsx` which hardcodes pipeline stages.
-
-**Step 3: Extract column persistence hook.**
-- The pattern in `usePipelineColumns.ts` (lines 132-159) is: read from localStorage, apply on grid ready, save on column change.
-- Extract to `useColumnPersistence(storageKey: string)` that returns `{ restoreColumnState, onColumnStateChanged, gridApiRef }`.
-- `usePipelineColumns` becomes a thin wrapper: calls `useColumnPersistence('pipeline-col-state')` + defines pipeline-specific `columnDefs`.
-
-**Step 4: Broker uses shared.**
-- Broker grids import from `@/shared/grid/` directly.
-- Broker defines its own column defs in `features/broker/hooks/useProjectColumns.ts`.
-
-### What stays in pipeline (do NOT extract)
-
-These are pipeline-domain-specific and should NOT move to shared:
-- `NameCell.tsx` (renders company name + domain icon -- GTM concept)
-- `ContactCell.tsx` (renders contact avatar + name -- GTM concept)
-- `StagePill.tsx` (hardcoded pipeline stages)
-- `FitTierBadge.tsx` (hardcoded fit tiers)
-- `ChannelsCell.tsx`, `ChannelIconsCell.tsx` (GTM channel concept)
-- `AiInsightCell.tsx` (pipeline AI summary)
-- `OutreachStatusCell.tsx` (GTM outreach concept)
-- `ContactStatusPill.tsx` (GTM contact statuses)
-- `DatePickerEditor.tsx` (inline editing -- broker doesn't need inline grid editing in MVP)
-
-### GTM Non-Breakage Contract
-
-The extraction is safe because:
-1. **Copy-first**: shared versions are copies, not moves. Pipeline imports update after verification.
-2. **No interface changes**: `flywheelGridTheme` is identical to `pipelineTheme` (same params object).
-3. **Barrel exports**: `@/shared/grid` barrel means pipeline can switch imports in one line per file.
-4. **Feature flag isolation**: broker code is gated by `useFeatureFlag('broker')` and `BrokerGuard`. Even if shared code has a bug, GTM-only tenants never render broker components.
-
----
-
-## 2. Comparison Matrix Architecture
-
-### Why NOT ag-grid for the Comparison Matrix
-
-The spec requires:
-- Two-row cells (premium top, limit+deductible bottom)
-- Sticky first column (coverage names) during horizontal scroll
-- Sticky header row during vertical scroll
-- Sticky total premium row at bottom
-- Conditional cell backgrounds (red/amber/green/blue)
-- Carrier selection checkboxes in column headers
-- "Show differences only" toggle that hides rows
-- Insurance/surety tabs with different column counts
-
-ag-grid CAN do all of this, but the cost is high:
-- Two-row cells require custom `cellRenderer` with forced row height -- already done in the existing `ComparisonMatrix.tsx` but as a plain table.
-- Sticky rows/columns in ag-grid require Enterprise license (`pinnedBottomRowData` is Community, but combined with sticky headers and custom cell backgrounds creates complexity).
-- The matrix is read-only (no editing, no sorting, no column reorder) -- ag-grid's value-add is in interactive grids.
-- The existing `ComparisonMatrix.tsx` (188 lines) already renders the correct structure as a plain HTML table.
-
-**Recommendation: Enhance the existing HTML table approach.** Use CSS `position: sticky` for frozen column/row behavior. This is simpler, lighter, and matches the spec better.
-
-### Component Architecture
-
-```
-features/broker/components/comparison/
-  ComparisonView.tsx          # Orchestrator: tabs + alerts + export button + toggles
-  ComparisonMatrix.tsx        # Single matrix (receives coverages + carriers for one tab)
-  ComparisonCell.tsx          # Two-row cell with conditional styling
-  CriticalAlertBox.tsx        # Alert box above tabs
-  ComparisonToolbar.tsx       # Export button + highlight toggle + differences toggle
-  useComparisonState.ts       # Toggle state, carrier selection, filtered rows
-```
-
-### Sticky Column/Row Implementation
-
-```css
-/* First column sticky */
-.comparison-matrix td:first-child,
-.comparison-matrix th:first-child {
-  position: sticky;
-  left: 0;
-  z-index: 2;
-  background: inherit; /* prevent transparency on scroll */
-}
-
-/* Header row sticky */
-.comparison-matrix thead th {
-  position: sticky;
-  top: 0;
-  z-index: 3; /* above sticky column */
-}
-
-/* Corner cell (first-col + header) needs highest z-index */
-.comparison-matrix thead th:first-child {
-  z-index: 4;
-}
-
-/* Total premium row sticky at bottom */
-.comparison-matrix tfoot td {
-  position: sticky;
-  bottom: 0;
-  z-index: 2;
-}
-```
-
-The matrix container needs `overflow: auto; max-height: calc(100dvh - 280px);` to enable both scrolls.
-
-### Two-Row Cell Component
-
-```typescript
-interface ComparisonCellProps {
-  premium: number | null
-  limit: number | null
-  deductible: number | null
-  status: 'normal' | 'excluded' | 'insufficient' | 'best_price' | 'best_coverage' | 'critical'
-  highlightBest: boolean  // controlled by toggle
-  currency: string
-}
-
-function ComparisonCell({ premium, limit, deductible, status, highlightBest, currency }: ComparisonCellProps) {
-  // Status drives background color (always visible)
-  // highlightBest drives text color (only when toggle is on)
-  const bg = {
-    normal: 'bg-white',
-    excluded: 'bg-red-50',
-    insufficient: 'bg-amber-50',
-    critical: 'bg-red-50 border-l-4 border-red-500',
-    best_price: highlightBest ? 'bg-white' : 'bg-white',  // text color, not bg
-    best_coverage: highlightBest ? 'bg-white' : 'bg-white',
-  }[status]
-
-  if (status === 'excluded') {
-    return <td className={bg}><span className="text-red-600 font-bold text-sm">EXCLUDED</span></td>
-  }
-
-  return (
-    <td className={`px-3 py-2 min-w-[140px] ${bg}`}>
-      <div className="text-sm font-semibold">{formatCurrency(premium, currency)}</div>
-      <div className="text-xs text-muted-foreground">
-        Limit: {formatCurrency(limit, currency)} . Ded: {formatCurrency(deductible, currency)}
-      </div>
-    </td>
-  )
-}
-```
-
-### Data Flow
-
-The existing `useComparison(projectId)` hook (in `useBrokerQuotes.ts`) already fetches `/broker/projects/:id/comparison` and returns `ComparisonMatrix` type with `coverages[]` containing `quotes[]` per coverage. The data structure already supports the matrix layout.
-
-For the insurance/surety split: filter `coverages` by `category` field. The backend already populates `category` as `'insurance'` or `'surety'` on each `ComparisonCoverage`.
-
----
-
-## 3. Persistent Gate Strip
-
-### Problem
-
-The gate strip ("Review: 3 | Approve: 1 | Export: 2") must appear on EVERY broker route, above the main content. It needs its own data fetch (gate counts from a dashboard endpoint) and must not re-mount or flicker on route transitions.
-
-### Recommended Pattern: Layout-Level Component
-
-Place the gate strip in the layout layer, not in individual pages. The app already has a layout architecture:
-
-```
-AppLayout
-  -> AppShell
-       -> AppSidebar (persistent)
-       -> SidebarInset
-            -> main
-                 -> GateStrip (NEW -- persistent for broker)
-                 -> AppRoutes (page content)
-       -> AuthenticatedAlerts (persistent)
-```
-
-### Implementation
-
-**Option A (Recommended): Conditional wrapper inside AppShell.**
-
-In `layout.tsx`, add the gate strip inside the `SidebarInset > main` block, gated on the broker feature flag:
-
-```typescript
-// In AppShell's desktop return:
-<SidebarInset>
-  <main className="flex-1 overflow-auto">
-    <BrokerGateStrip />  {/* renders null if not broker tenant */}
-    <AppRoutes />
-  </main>
-</SidebarInset>
-```
-
-`BrokerGateStrip` internally checks `useFeatureFlag('broker')` and returns `null` for GTM tenants. This means:
-- Zero impact on GTM (component renders nothing).
-- No route-level coordination needed.
-- Single data fetch shared across all broker pages.
-
-**Option B (Rejected): Per-page import.** Each broker page would import `<GateStrip />`. This causes:
-- Repeated code in 4+ pages.
-- Component unmounts/remounts on navigation (flash of loading).
-- Data refetch on every route change.
-
-### GateStrip Component
-
-```
-features/broker/components/GateStrip.tsx
-```
-
-```typescript
-function BrokerGateStrip() {
-  const brokerEnabled = useFeatureFlag('broker')
-  if (!brokerEnabled) return null
-
-  const { data: gateCounts } = useGateCounts()  // NEW hook
-  // Renders: Review: N | Approve: N | Export: N
-  // Each count is a link to /broker/projects?gate=review (filtered)
-  // Uses React Query with staleTime: 60_000 (refresh every minute)
-}
-```
-
-### Navigation Behavior
-
-Each gate count links to `/broker/projects?gate=review` (or `approve` or `export`). The projects page reads the `gate` query param and pre-filters to show only projects at that gate. This avoids a "jump to oldest" behavior that could be confusing -- instead, the broker sees all pending items for that gate.
-
-### New Backend Endpoint
-
-```
-GET /broker/gate-counts -> { review: number, approve: number, export: number }
-```
-
-This is a lightweight aggregation query. It runs a COUNT on `broker_projects` grouped by status buckets:
-- review: status IN ('analyzing', 'gaps_identified') AND approval_status = 'draft'
-- approve: status IN ('gaps_identified') AND approval_status = 'approved' (carriers matched, no solicitations sent)
-- export: status IN ('quotes_partial', 'quotes_complete')
-
-### New Hook
-
-```typescript
-// features/broker/hooks/useGateCounts.ts
-export function useGateCounts() {
-  return useQuery({
-    queryKey: ['broker', 'gate-counts'],
-    queryFn: () => api.get<GateCounts>('/broker/gate-counts'),
-    staleTime: 60_000,  // 1 minute -- not real-time, but frequent enough
-    refetchInterval: 60_000,  // auto-refresh while tab is active
-  })
-}
+                    +------------------+
+                    | Frontend (React) |
+                    +--------+---------+
+                             |
+                    +--------v---------+
+                    |  FastAPI Router   |
+                    |  broker.py       |
+                    +--------+---------+
+                             |
+              +--------------+--------------+
+              |              |              |
+   +----------v--+  +--------v-------+  +--v-----------+
+   | broker_client|  |broker_contact  |  | Existing     |
+   | _service.py  |  |_service.py     |  | broker.py    |
+   +----------+--+  +--------+-------+  | (inline svc) |
+              |              |           +--+-----------+
+              |              |              |
+   +----------v--------------v--------------v----------+
+   |                 context_store_writer.py            |
+   |         (+ new create_context_entity())           |
+   +----------+----------------------------------------+
+              |
+   +----------v-----------+
+   |    SQLAlchemy Models  |
+   |    models.py          |
+   |  (6 new + 5 modified) |
+   +----------+------------+
+              |
+   +----------v-----------+
+   |  PostgreSQL/Supabase  |
+   |  (PgBouncer + RLS)    |
+   +-----------------------+
 ```
 
 ---
 
-## 4. Tab Routing with URL State
+## Component Boundaries
 
-### Problem
-
-The project detail page (`/broker/projects/:id`) needs tabs (Overview, Coverage, Carriers, Quotes, Compare). The active tab must be reflected in the URL so that:
-- Deep links work (gate strip links to `/broker/projects/123?tab=compare`)
-- Browser back/forward works
-- Refreshing preserves tab state
-
-### Recommended Pattern: `?tab=` Query Parameter
-
-This is the same pattern already used successfully in `PipelinePage.tsx` for URL-synced state (lines 50-192). Use `useSearchParams` from react-router-dom.
-
-### Why NOT path-based routing (`/broker/projects/:id/coverage`)
-
-- The project detail is a single page with a sidebar (right 1/3) that stays constant across tabs. Path-based routing would require either a layout route or repeated sidebar rendering.
-- The existing `BrokerProjectDetail.tsx` already has the 2/3 + 1/3 layout. Tabs are content within the 2/3 section.
-- `?tab=` is simpler and matches the existing PipelinePage URL-sync pattern.
-
-### Implementation
-
-```typescript
-// In BrokerProjectDetail.tsx
-const [searchParams, setSearchParams] = useSearchParams()
-const activeTab = (searchParams.get('tab') as TabName) ?? 'overview'
-
-const handleTabChange = (tab: TabName) => {
-  setSearchParams(prev => {
-    const next = new URLSearchParams(prev)
-    if (tab === 'overview') next.delete('tab')  // default doesn't need param
-    else next.set('tab', tab)
-    return next
-  }, { replace: true })  // replace: true so tab changes don't pollute history
-}
-```
-
-### Tab Definitions
-
-```typescript
-type TabName = 'overview' | 'coverage' | 'carriers' | 'quotes' | 'compare'
-
-const TABS: { value: TabName; label: string; gateLabel?: string }[] = [
-  { value: 'overview', label: 'Overview' },
-  { value: 'coverage', label: 'Coverage', gateLabel: 'Gate 1' },
-  { value: 'carriers', label: 'Carriers', gateLabel: 'Gate 2' },
-  { value: 'quotes', label: 'Quotes' },
-  { value: 'compare', label: 'Compare', gateLabel: 'Gate 3' },
-]
-```
-
-### Rendering with Base UI Tabs
-
-The existing `tabs.tsx` component wraps `@base-ui/react/tabs`. Use it with controlled value:
-
-```typescript
-<Tabs value={activeTab} onValueChange={handleTabChange}>
-  <TabsList variant="line">
-    {TABS.map(tab => (
-      <TabsTrigger key={tab.value} value={tab.value}>
-        {tab.label}
-        {tab.gateLabel && <Badge variant="outline" className="ml-1 text-[10px]">{tab.gateLabel}</Badge>}
-      </TabsTrigger>
-    ))}
-  </TabsList>
-  <TabsContent value="overview"><OverviewTab project={project} /></TabsContent>
-  <TabsContent value="coverage"><CoverageTab project={project} /></TabsContent>
-  <TabsContent value="carriers"><CarriersTab projectId={project.id} /></TabsContent>
-  <TabsContent value="quotes"><QuotesTab projectId={project.id} /></TabsContent>
-  <TabsContent value="compare"><CompareTab projectId={project.id} currency={project.currency} /></TabsContent>
-</Tabs>
-```
-
-### Step Indicator
-
-The step indicator sits above the tabs. It reads project status to determine which steps are complete:
-
-```typescript
-function StepIndicator({ project }: { project: BrokerProjectDetail }) {
-  const steps = [
-    { label: 'Extract', done: project.analysis_status === 'completed' },
-    { label: 'Review', done: project.approval_status === 'approved' },
-    { label: 'Solicit', done: ['soliciting','quotes_partial','quotes_complete','bound'].includes(project.status) },
-    { label: 'Compare', done: ['quotes_complete','recommended','delivered','bound'].includes(project.status) },
-    { label: 'Deliver', done: ['delivered','bound'].includes(project.status) },
-  ]
-  // Render horizontal dots + labels with grey/amber/green states
-}
-```
+| Component | Responsibility | Communicates With |
+|-----------|---------------|-------------------|
+| `broker.py` (router) | HTTP request handling, Pydantic validation, response serialization | Services, Models, Engines |
+| `broker_client_service.py` (NEW) | Client CRUD, name normalization, dedup, context entity linking | context_store_writer, Models |
+| `broker_contact_service.py` (NEW) | Contact CRUD for both client contacts and carrier contacts, soft limits | Models |
+| `context_store_writer.py` (MODIFIED) | Context entity creation (new) + existing entry writing | ContextEntity model |
+| `solicitation_drafter.py` (engine) | AI email generation (pure function, no DB writes) | Anthropic API only |
+| `recommendation_drafter.py` (engine) | AI recommendation generation (pure function, no DB writes) | Anthropic API only |
+| `models.py` | ORM definitions for all 12 affected tables | PostgreSQL |
+| `broker_data_model_migration.py` (NEW script) | DDL execution with PgBouncer workaround | PostgreSQL directly |
 
 ---
 
-## 5. Excel Export Architecture
+## Data Flow
 
-### Backend Streaming vs In-Memory
+### 1. Client Creation Flow (New)
 
-**Recommendation: Backend in-memory generation with streaming response.**
+```
+POST /broker/clients
+  -> broker.py validates input (BrokerClientCreate schema)
+  -> broker_client_service.normalize_name(name)
+  -> broker_client_service.create_client():
+       1. Check uniqueness (tenant_id, normalized_name)
+       2. create_context_entity(db, tenant_id, name, 'broker_client')  -- NEW
+       3. If entity creation fails -> raise, no client created
+       4. Insert BrokerClient(context_entity_id=entity.id)
+       5. Return client (caller commits)
+  -> broker.py commits and returns response
+```
 
-The comparison matrix for 50 coverage lines x 10 carriers is ~500 cells. Even with formatting, the .xlsx will be < 500KB. In-memory generation with `openpyxl` is appropriate.
+**Critical design decision:** Context entity creation is synchronous and within the same transaction. If `create_context_entity()` fails, the entire client creation rolls back. This is the correct choice for data integrity -- an orphaned client without a context entity would break intelligence linking.
 
-Use a streaming response (`StreamingResponse` in FastAPI) to avoid holding the full file in memory during transfer, but the generation itself is in-memory.
+### 2. Solicitation Workflow (Restructured)
+
+**BEFORE (current -- broker.py:1571-1744):**
+```
+draft-solicitations -> creates CarrierQuote(status='pending', draft_subject=..., draft_body=...)
+                       Also creates submission_documents linked to the quote
+approve-send        -> reads CarrierQuote.draft_*, sends email, sets status='solicited'
+                       Calls _check_all_solicited() which queries CarrierQuote rows
+mark-received       -> updates existing CarrierQuote with quote data
+```
+
+**AFTER (new):**
+```
+draft-solicitations -> creates SolicitationDraft(status='draft', subject=..., body=...)
+                       NO CarrierQuote created yet
+                       Looks up carrier_contacts(role='submissions') for sent_to_email
+                       submission_documents still linked to SolicitationDraft
+approve-send        -> reads SolicitationDraft, sends email, sets status='sent'
+                       Still NO CarrierQuote
+mark-received       -> creates NEW CarrierQuote + links to SolicitationDraft via carrier_quote_id
+```
+
+**What this changes (5 specific code impacts):**
+
+1. **`_check_all_solicited()` (broker.py:1525-1563):** Currently counts CarrierQuote rows where `status='solicited'`. Must change to count SolicitationDraft rows where `status='sent'`. The logic stays the same (if all sent, transition project to `soliciting`).
+
+2. **Portal submission flow (broker.py:1697-1720):** Currently creates a CarrierQuote for portal track too. Must create a SolicitationDraft with `submission_method='portal'` instead. The `build_submission_package()` call links documents to the draft.
+
+3. **`approve-send` route (broker.py:1798-1869):** Route changes from `/broker/quotes/{id}/approve-send` to `/broker/solicitations/{id}/approve-send`. Reads from SolicitationDraft instead of CarrierQuote. No longer sets CarrierQuote.status because no CarrierQuote exists yet.
+
+4. **`_carrier_to_dict()` (broker.py:248-268):** Remove `email_address` field. Frontend carrier objects no longer have inline email.
+
+5. **Carrier email lookup:** Replace `carrier_config.email_address` with a query to `carrier_contacts` table:
+```python
+contact_result = await db.execute(
+    select(CarrierContact).where(
+        CarrierContact.carrier_config_id == carrier_id,
+        CarrierContact.role == 'submissions',
+    ).order_by(CarrierContact.is_primary.desc()).limit(1)
+)
+contact = contact_result.scalar_one_or_none()
+if not contact or not contact.email:
+    skipped.append({"carrier_name": ..., "reason": "No submissions contact with email"})
+    continue
+```
+
+### 3. Recommendation Flow (Restructured)
+
+**BEFORE (broker.py:2652-2900):**
+```
+draft-recommendation      -> sets BrokerProject.recommendation_subject/body/status
+approve-send-recommendation -> reads project.recommendation_*, sends, saves Document
+```
+
+**AFTER:**
+```
+draft-recommendation      -> creates BrokerRecommendation(status='draft')
+approve-send-recommendation -> reads BrokerRecommendation, sends, saves Document, sets status='sent'
+```
+
+Multiple recommendations are allowed (audit trail). Partial unique index on `status='approved'` ensures only one is approved at a time.
+
+**Important preservation:** The `approve-send-recommendation` endpoint (broker.py:2864-2877) creates a `Document` record in the library with metadata. This behavior MUST be preserved in the new implementation.
+
+### 4. Context Store Entity Creation (New Function)
+
+The existing `context_store_writer.py` provides `write_contact()`, `write_insight()`, etc. -- all write `ContextEntry` rows (the detail/evidence layer). None create `ContextEntity` rows (the entity/identity layer). These are different tables:
+
+- `context_entities`: Unique entities (companies, people, projects) identified by `(tenant_id, name, entity_type)`
+- `context_entries`: Individual evidence items (emails, meetings) linked to entities via `context_entity_entries` junction table
+
+The new `create_context_entity()` function operates on the entity layer:
 
 ```python
-# Backend endpoint
-@router.get("/broker/projects/{project_id}/export-comparison")
-async def export_comparison(project_id: str, ...):
-    wb = build_comparison_workbook(project_id)  # openpyxl Workbook
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
-    return StreamingResponse(
-        buffer,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f"attachment; filename=comparison-{project_id[:8]}.xlsx"}
+async def create_context_entity(
+    db: AsyncSession, tenant_id: UUID, name: str, entity_type: str,
+    aliases: list[str] | None = None,
+) -> ContextEntity:
+    """Upsert a ContextEntity row. Returns existing if name+type match."""
+    stmt = pg_insert(ContextEntity).values(
+        tenant_id=tenant_id,
+        name=name,
+        entity_type=entity_type,
+        aliases=aliases or [],
+    )
+    stmt = stmt.on_conflict_do_update(
+        constraint="uq_entity_tenant_name_type",
+        set_={
+            "mention_count": ContextEntity.mention_count + 1,
+            "last_seen_at": text("now()"),
+        },
+    )
+    stmt = stmt.returning(ContextEntity)
+    result = await db.execute(stmt)
+    return result.scalar_one()
+```
+
+This follows the same upsert pattern as the existing `_write_entry()` function (dedup by natural key, increment on match).
+
+---
+
+## Patterns to Follow
+
+### Pattern 1: Service Layer for New Entity Domains
+
+**What:** New entity domains (clients, contacts) get dedicated service classes instead of inline logic in the router.
+**Why:** broker.py is already 2900 lines with 29 endpoints. Adding client CRUD inline would push it past 3500 lines. Service classes are testable without HTTP context.
+**Where:** `backend/src/flywheel/services/broker_client_service.py` and `broker_contact_service.py`
+
+```python
+class BrokerClientService:
+    def __init__(self, db: AsyncSession, tenant_id: UUID):
+        self.db = db
+        self.tenant_id = tenant_id
+
+    async def create_client(self, data: BrokerClientCreate, user_id: UUID) -> BrokerClient:
+        normalized = self.normalize_name(data.name)
+        existing = await self.db.execute(
+            select(BrokerClient).where(
+                BrokerClient.tenant_id == self.tenant_id,
+                BrokerClient.normalized_name == normalized,
+            )
+        )
+        if existing.scalar_one_or_none():
+            raise HTTPException(409, f"Client '{data.name}' already exists")
+
+        entity = await create_context_entity(
+            self.db, self.tenant_id, data.name, 'broker_client'
+        )
+        client = BrokerClient(
+            tenant_id=self.tenant_id,
+            name=data.name,
+            normalized_name=normalized,
+            context_entity_id=entity.id,
+            created_by_user_id=user_id,
+            # ... other fields from data
+        )
+        self.db.add(client)
+        await self.db.flush()
+        return client
+```
+
+### Pattern 2: Partial Unique Indexes in SQLAlchemy
+
+**What:** Two tables need partial unique indexes (one active solicitation per project+carrier, one approved recommendation per project).
+**How:** Use `Index()` with `postgresql_where` in `__table_args__`.
+
+```python
+class SolicitationDraft(Base):
+    __tablename__ = "solicitation_drafts"
+    __table_args__ = (
+        Index(
+            "uq_solicitation_draft_active",
+            "broker_project_id", "carrier_config_id",
+            unique=True,
+            postgresql_where=text("status IN ('draft', 'pending', 'approved')"),
+        ),
+        Index("idx_solicitation_draft_project", "broker_project_id"),
+        Index("idx_solicitation_draft_carrier", "carrier_config_id"),
     )
 ```
 
-### Frontend Download Trigger
+**Important:** The partial unique index is declared in the model for documentation, but the actual DDL is executed via the migration script (PgBouncer workaround). SQLAlchemy will not auto-create these indexes.
 
-```typescript
-// features/broker/hooks/useExportComparison.ts
-export function useExportComparison(projectId: string) {
-  const { mutate, isPending } = useMutation({
-    mutationFn: async () => {
-      const token = useAuthStore.getState().token
-      const res = await fetch(`/api/v1/broker/projects/${projectId}/export-comparison`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-      if (!res.ok) throw new Error('Export failed')
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `comparison-${projectId.slice(0, 8)}.xlsx`
-      a.click()
-      URL.revokeObjectURL(url)
-    },
-  })
-  return { exportComparison: mutate, isExporting: isPending }
-}
+### Pattern 3: Mapped Column Style Consistency
+
+**What:** Use the existing `Mapped[]` / `mapped_column()` syntax (SQLAlchemy 2.0 style) for new models.
+**Why:** All existing broker models (CarrierConfig, BrokerProject, CarrierQuote at models.py:1951-2342) use this pattern. The spec shows old-style `Column()` syntax -- convert to match codebase.
+
+```python
+# WRONG (spec shows this):
+id = Column(UUID(as_uuid=True), primary_key=True, default=uuid4)
+name = Column(Text, nullable=False)
+
+# RIGHT (match codebase pattern at models.py:1962-2007):
+id: Mapped[UUID] = mapped_column(primary_key=True, server_default=text("gen_random_uuid()"))
+name: Mapped[str] = mapped_column(Text, nullable=False)
 ```
 
-This bypasses the normal `api.get()` helper because it needs to handle a binary blob response, not JSON.
+### Pattern 4: Router Organization -- Keep Single File
 
----
+**What:** Despite 17 new endpoints, keep broker.py as a single router file.
+**Why:**
+1. The codebase uses single-file routers everywhere (accounts.py, pipeline.py, context.py)
+2. All endpoints share `require_module("broker")`, `ALLOWED_TRANSITIONS`, helper functions
+3. With service classes extracting business logic, router methods are thin wrappers
+4. Net growth is modest (~200 lines) because solicitation/recommendation endpoints are restructured, not added
 
-## 6. New Backend Endpoint Wiring
-
-### Existing Pattern
-
-All broker API calls go through `features/broker/api.ts` which uses the shared `api` helper from `@/lib/api`. Each function is a thin wrapper: `api.get<ResponseType>('/broker/endpoint')`. Hooks in `features/broker/hooks/` wrap these with React Query.
-
-### New Endpoints to Wire
-
-| Endpoint | API Function | Hook | Used By |
-|----------|-------------|------|---------|
-| `GET /broker/gate-counts` | `fetchGateCounts()` | `useGateCounts()` | GateStrip |
-| `GET /broker/dashboard-tasks` | `fetchDashboardTasks()` | `useDashboardTasks()` | BrokerDashboard |
-| `GET /broker/projects/:id/export-comparison` | raw fetch (blob) | `useExportComparison()` | ComparisonView |
-| `POST /broker/projects/:id/approve` | `approveProject()` | `useApproveProject()` | CoverageTab |
-
-### Wiring Pattern (consistent with existing code)
-
-1. Add type to `features/broker/types/broker.ts`
-2. Add API function to `features/broker/api.ts`
-3. Add hook to `features/broker/hooks/`
-4. Import hook in component
-
-No new patterns needed -- follow the exact same structure as the existing 15 broker hooks.
-
----
-
-## 7. Component Boundaries
-
-### New Components
-
-| Component | Location | Responsibility | Data Source |
-|-----------|----------|----------------|-------------|
-| `BrokerGateStrip` | `features/broker/components/GateStrip.tsx` | Persistent gate counts bar | `useGateCounts()` |
-| `ComparisonView` | `features/broker/components/comparison/ComparisonView.tsx` | Orchestrates tabs + alerts + toolbar | `useComparison()` |
-| `ComparisonMatrix` | `features/broker/components/comparison/ComparisonMatrix.tsx` | Single coverage-vs-carrier table | Props from parent |
-| `ComparisonCell` | `features/broker/components/comparison/ComparisonCell.tsx` | Two-row cell with conditional bg | Props |
-| `CriticalAlertBox` | `features/broker/components/comparison/CriticalAlertBox.tsx` | Exclusion warnings | Props |
-| `ComparisonToolbar` | `features/broker/components/comparison/ComparisonToolbar.tsx` | Export + toggles | Props + `useExportComparison()` |
-| `StepIndicator` | `features/broker/components/StepIndicator.tsx` | Horizontal progress dots | Props (project status) |
-| `OverviewTab` | `features/broker/components/tabs/OverviewTab.tsx` | Client info + docs + activity | Props (project) |
-| `CoverageTab` | `features/broker/components/tabs/CoverageTab.tsx` | Coverage table + gaps + approve | Props + mutations |
-| `CarriersTab` | `features/broker/components/tabs/CarriersTab.tsx` | Carrier matches + solicitations | Hooks |
-| `QuotesTab` | `features/broker/components/tabs/QuotesTab.tsx` | Quote tracking per carrier | Hooks |
-| `CompareTab` | `features/broker/components/tabs/CompareTab.tsx` | Wraps ComparisonView | Hooks |
-| `DashboardTaskList` | `features/broker/components/DashboardTaskList.tsx` | Prioritized action items | `useDashboardTasks()` |
-| `ProjectsTable` | `features/broker/components/ProjectsTable.tsx` | Full projects list with filters | `useBrokerProjects()` |
-
-### Modified Components
-
-| Component | Change | Risk |
-|-----------|--------|------|
-| `layout.tsx` | Add `<BrokerGateStrip />` inside `<main>` | LOW -- renders null for GTM |
-| `BrokerProjectDetail.tsx` | Rewrite from single-page to tabbed layout | MEDIUM -- existing component replaced |
-| `BrokerDashboard.tsx` | Redesign from KPI cards to task list + table | MEDIUM -- existing component replaced |
-| `ComparisonMatrix.tsx` | Move to `comparison/` subfolder, enhance | MEDIUM -- substantial enhancement |
-| `PipelinePage.tsx` | Update ag-grid theme import to shared | LOW -- import path change only |
-| `usePipelineColumns.ts` | Extract persistence to shared hook | LOW -- behavior identical |
-
----
-
-## 8. Data Flow Diagram
-
+**Organization within the file:**
 ```
-                    +--------------------------------------------------+
-                    |                   AppShell                        |
-                    |  +-----------------------------------------------+
-                    |  | BrokerGateStrip (useGateCounts)                |
-                    |  |   Review: 3  |  Approve: 1  |  Export: 2      |
-                    |  +-----------------------------------------------+
-                    |  +-----------------------------------------------+
-                    |  | AppRoutes -> /broker/projects/:id              |
-                    |  |  +------------------------------------------+ |
-                    |  |  | BrokerProjectDetail                      | |
-                    |  |  |  +-----------+ +------------------+      | |
-                    |  |  |  | StepBar   | |  Sidebar (1/3)   |      | |
-                    |  |  |  +-----------+ |  Project Info     |      | |
-                    |  |  |  | Tab Bar   | |  Activity Log     |      | |
-                    |  |  |  | ?tab=X    | |                   |      | |
-                    |  |  |  +-----------+ |                   |      | |
-                    |  |  |  | Tab Panel | |                   |      | |
-                    |  |  |  | (2/3)     | |                   |      | |
-                    |  |  |  +-----------+ +------------------+      | |
-                    |  |  +------------------------------------------+ |
-                    |  +-----------------------------------------------+
-                    +--------------------------------------------------+
+# broker.py structure (post-change):
+# 1. Imports + Pydantic schemas + transitions + helpers (~300 lines)
+# 2. Projects endpoints (~800 lines)
+# 3. Clients endpoints (NEW, ~300 lines -- thin service wrappers)
+# 4. Carriers + carrier contacts endpoints (~400 lines)
+# 5. Solicitations endpoints (RESTRUCTURED, ~300 lines)
+# 6. Quotes endpoints (~500 lines)
+# 7. Comparison + export endpoints (~300 lines)
+# 8. Recommendations endpoints (RESTRUCTURED, ~200 lines)
+# Total: ~3100 lines
 ```
 
----
+### Pattern 5: Name Normalization (Application Layer)
 
-## 9. Recommended Build Order
+**What:** `normalized_name` is computed in Python, not a database generated column.
+**Why:** The normalization rules are business logic (strip legal suffixes like `S.A. de C.V.`, `S.A.S.`, `GmbH`) that will evolve. Application-layer is easier to test and change.
 
-Build order is driven by two constraints: (a) dependency chains and (b) GTM safety.
+```python
+_LEGAL_SUFFIXES = [
+    "s.a. de c.v.", "s.a.s.", "s. de r.l.", "inc.", "llc",
+    "ltd.", "corp.", "gmbh", "s.a.", "co.",
+]
 
-| Order | What | Why This Order | Depends On |
-|-------|------|----------------|------------|
-| 1 | Shared grid toolkit extraction | Foundation for all grids; validates GTM does not break | Nothing |
-| 2 | Gate strip + `useGateCounts` hook | Layout-level change that touches `layout.tsx` -- do early before other changes accumulate | Backend endpoint |
-| 3 | Tab routing in `BrokerProjectDetail` | Structural change that all tab content hangs off of | Nothing |
-| 4 | Tab content: Coverage, Carriers, Quotes (repackage existing components) | Move existing components into tab structure | Step 3 |
-| 5 | Dashboard redesign (task list + table) | New data source, but self-contained | Backend endpoint |
-| 6 | Comparison matrix enhancement (sticky, two-row, tabs, toggles) | Most complex component; build last with stable foundation | Step 3 (tab routing) |
-| 7 | Excel export | Simple once comparison data is available | Step 6 + backend endpoint |
-| 8 | Projects list page | Table with filters -- uses shared grid toolkit | Step 1 |
-
-### Parallelizable Work
-
-Steps 2 + 3 can run in parallel (no dependency).
-Steps 4 + 5 can run in parallel (no dependency).
-Step 6 blocks on Step 3 but not on Steps 4 or 5.
+def normalize_name(name: str) -> str:
+    result = name.lower().strip()
+    for suffix in _LEGAL_SUFFIXES:
+        if result.endswith(suffix):
+            result = result[:-len(suffix)].strip()
+    result = result.rstrip(".,")
+    return " ".join(result.split())  # collapse multiple spaces
+```
 
 ---
 
 ## Anti-Patterns to Avoid
 
-### Anti-Pattern 1: Importing from `features/pipeline/` in broker code
-**What:** Broker components importing cell renderers or hooks from pipeline feature.
-**Why bad:** Creates cross-feature coupling. Changes to pipeline can break broker.
-**Instead:** Extract to `shared/grid/` or duplicate if the component is small and diverging.
+### Anti-Pattern 1: Creating CarrierQuote at Solicitation Time
 
-### Anti-Pattern 2: ag-grid for read-only display tables
-**What:** Using ag-grid for the comparison matrix or simple list views.
-**Why bad:** ag-grid adds bundle weight and complexity for tables that don't need editing, sorting, or column reorder. The comparison matrix needs sticky positioning that is simpler with CSS than ag-grid config.
-**Instead:** Use HTML `<table>` with CSS sticky for comparison. Use ag-grid only for interactive data grids (projects table if it needs inline editing later).
+**What:** The current pattern (broker.py:1651-1662) creates a `CarrierQuote` row when drafting a solicitation, before any quote exists.
+**Why bad:** Conflates "we asked for a quote" with "a quote exists." CarrierQuote rows represent actual received quotes with premium/deductible/terms data. Creating them early pollutes the quotes table with placeholder rows that have null premium, null limit, etc.
+**Instead:** Create SolicitationDraft rows at solicitation time. Create CarrierQuote rows only when a quote is received.
 
-### Anti-Pattern 3: Path-based tab routing for detail pages
-**What:** `/broker/projects/:id/coverage`, `/broker/projects/:id/carriers`, etc.
-**Why bad:** The sidebar (1/3 width) is shared across all tabs and contains its own data. Path routing forces either nested routes with a layout or repeated sidebar imports. It also creates unnecessary full-page transitions between tabs.
-**Instead:** `?tab=coverage` query param with `replace: true` on `setSearchParams`.
+### Anti-Pattern 2: Storing Draft Content on Parent Entity
 
-### Anti-Pattern 4: Gate strip as a per-page component
-**What:** Each broker page imports and renders `<GateStrip />`.
-**Why bad:** Unmounts/remounts on navigation causing loading flash. Data refetches on every route change. Easy to forget in a new page.
-**Instead:** Single instance in `layout.tsx` that reads feature flag and renders null for non-broker tenants.
+**What:** Recommendation draft fields (5 columns) on BrokerProject; solicitation draft fields (3 columns) on CarrierQuote.
+**Why bad:** No revision history, only one draft at a time, PII cleanup conflicts with audit requirements (broker.py:1845 clears draft_body after send, but regulated domain needs audit trail).
+**Instead:** Dedicated tables (broker_recommendations, solicitation_drafts) with their own lifecycle.
+
+### Anti-Pattern 3: Lazy Context Entity Creation (Background Task)
+
+**What:** Creating context entities asynchronously after client/carrier creation.
+**Why bad:** If the background task fails, the client exists without a context entity. The `context_entity_id` column would be NULL, breaking intelligence queries. No retry mechanism exists in the current codebase.
+**Instead:** Synchronous creation within the same transaction. If it fails, the client creation fails with a clear error.
+
+### Anti-Pattern 4: Splitting broker.py into Sub-Routers Prematurely
+
+**What:** Creating `broker_clients.py`, `broker_solicitations.py` sub-router files.
+**Why bad in this codebase:** All endpoints share `require_module("broker")`, `ALLOWED_TRANSITIONS`, and helper functions. Splitting creates import complexity. The service layer already extracts business logic. Net growth is only ~200 lines.
+**When to reconsider:** If broker.py exceeds 4000 lines in a future milestone, split into sub-routers with a shared `broker_common.py` for transitions, helpers, and schemas.
+
+---
+
+## Integration Points: New vs Modified
+
+### New Components
+
+| Component | Type | Depends On |
+|-----------|------|-----------|
+| `broker_clients` table | Schema | tenants, context_entities |
+| `broker_client_contacts` table | Schema | broker_clients |
+| `carrier_contacts` table | Schema | carrier_configs |
+| `broker_recommendations` table | Schema | broker_projects |
+| `solicitation_drafts` table | Schema | broker_projects, carrier_configs, carrier_quotes (nullable FK) |
+| `broker_project_emails` table | Schema | broker_projects |
+| 6 new SQLAlchemy model classes | Model | Corresponding tables |
+| `broker_client_service.py` | Service | Models, context_store_writer |
+| `broker_contact_service.py` | Service | Models |
+| `create_context_entity()` function | Function | ContextEntity model (models.py:550-588) |
+| 9 client endpoints | Router | broker_client_service |
+| 4 carrier contact endpoints | Router | broker_contact_service |
+| 2 recommendation endpoints | Router | Models |
+| 2 solicitation endpoints | Router | Models |
+
+### Modified Components
+
+| Component | What Changes | Risk Level |
+|-----------|-------------|------------|
+| `BrokerProject` model (models.py:2026) | +4 columns, -7 columns, +4 relationships | HIGH -- touches most endpoints |
+| `CarrierConfig` model (models.py:1951) | +3 columns, -2 columns, +1 relationship | MEDIUM -- carrier CRUD + solicitation |
+| `CarrierQuote` model (models.py:2192) | +2 columns, -6 columns | HIGH -- comparison, tracking |
+| `ProjectCoverage` model (models.py:2119) | +3 columns | LOW -- additive only |
+| `SubmissionDocument` model (models.py:2304) | +2 columns | LOW -- additive only |
+| `ALLOWED_TRANSITIONS` (broker.py:150) | Add `binding` state between `delivered` and `bound` | MEDIUM -- state machine |
+| `draft-solicitations` (broker.py:1571) | Write SolicitationDraft, not CarrierQuote | HIGH -- core workflow |
+| `approve-send` (broker.py:1798) | Route change + operate on SolicitationDraft | HIGH -- core workflow |
+| `_check_all_solicited()` (broker.py:1525) | Query SolicitationDraft not CarrierQuote | HIGH -- automated transition |
+| `draft-recommendation` (broker.py:2652) | Write BrokerRecommendation, not project columns | MEDIUM |
+| `approve-send-recommendation` (broker.py:2809) | Read BrokerRecommendation, preserve Document creation | MEDIUM |
+| `_carrier_to_dict()` (broker.py:248) | Remove email_address field | LOW |
+| `_project_to_dict()` (broker.py:181) | Remove recommendation_* fields, add client_name | LOW |
+| `context_store_writer.py` | Add create_context_entity() | LOW -- additive |
+
+---
+
+## Recommended Build Order
+
+### Phase 1: Schema -- New Tables (6 tables + RLS)
+
+**Rationale:** Zero app dependency. Tables can exist without any code referencing them.
+
+**Internal order:**
+1. `broker_clients` (FK to tenants only)
+2. `broker_client_contacts` (FK to broker_clients)
+3. `carrier_contacts` (FK to carrier_configs -- already exists)
+4. `solicitation_drafts` (FK to broker_projects, carrier_configs, carrier_quotes)
+5. `broker_recommendations` (FK to broker_projects)
+6. `broker_project_emails` (FK to broker_projects)
+7. RLS policies for all 6 tables (standard tenant isolation pattern)
+
+**Execution:** Single `broker_data_model_migration.py` script. Each CREATE TABLE and each RLS statement as its own `await session.execute() + await session.commit()` (PgBouncer workaround). Then `alembic stamp 059`.
+
+### Phase 2: Schema -- Modifications (6 tables altered)
+
+**Rationale:** Must happen after Phase 1 (references new tables). Must happen before Phase 3 (models must match schema).
+
+**Internal order (critical):**
+1. ADD columns to all 6 tables (broker_projects, carrier_quotes, project_coverages, carrier_configs, submission_documents, broker_activities)
+2. ADD CHECK constraints
+3. **Run carrier email seed script** (copies carrier_configs.email_address to carrier_contacts rows)
+4. DROP columns (email_address, pipeline_entry_id, recommendation_*, draft_*, is_best_*)
+5. DROP indexes (idx_broker_project_pipeline)
+
+**The seed script MUST run between steps 2 and 4.** If email_address is dropped before seeding, data is lost.
+
+### Phase 3: Backend -- Models, Services & Endpoints (Single Atomic Release)
+
+**Rationale:** Column drops in Phase 2 mean the existing model code will crash on any column that was removed. Models, services, and endpoints must deploy together.
+
+**Build order within phase:**
+
+1. **Models** (foundation -- everything depends on these):
+   - Add 6 new model classes (BrokerClient, BrokerClientContact, CarrierContact, BrokerRecommendation, SolicitationDraft, BrokerProjectEmail)
+   - Modify 5 existing models (remove dropped columns, add new columns and relationships)
+   - Use `Mapped[]` / `mapped_column()` syntax consistently
+
+2. **create_context_entity()** in context_store_writer.py:
+   - Upsert semantics with `pg_insert().on_conflict_do_update()`
+   - Returns the entity (existing or new) -- caller links via context_entity_id
+
+3. **Services** (business logic, testable independently):
+   - `broker_client_service.py`: normalize_name, create_client (with context entity), update, list, get, get_projects
+   - `broker_contact_service.py`: add/update/delete for both client contacts and carrier contacts, soft limits (20 per client, 10 per carrier)
+
+4. **New endpoints** (thin router wrappers around services):
+   - 9 client endpoints (CRUD + contacts + projects)
+   - 4 carrier contact endpoints (CRUD)
+   - 2 recommendation endpoints (list, create)
+   - 2 solicitation endpoints (list, approve)
+
+5. **Modified endpoints -- solicitation restructure** (highest risk):
+   - Rewrite `draft-solicitations` to create SolicitationDraft rows
+   - Rewrite `approve-send` to operate on SolicitationDraft
+   - Rewrite `_check_all_solicited()` to query SolicitationDraft
+   - Update carrier email lookup to use carrier_contacts table
+
+6. **Modified endpoints -- recommendation restructure:**
+   - Rewrite `draft-recommendation` to create BrokerRecommendation
+   - Rewrite `PUT recommendation-draft` to update BrokerRecommendation
+   - Rewrite `approve-send-recommendation` to read from BrokerRecommendation (preserve Document creation)
+
+7. **Cleanup** (remove dead references):
+   - Remove `email_address` from CreateCarrierBody, UpdateCarrierBody, `_carrier_to_dict()`
+   - Remove `recommendation_*` from `_project_to_dict()`
+   - Remove `pipeline_entry_id` references
+   - Remove `draft_*`, `is_best_*` from CarrierQuote serialization
+   - Update ALLOWED_TRANSITIONS: add `binding` state, update transitions
+
+8. **Integration test:** Full workflow end-to-end
+
+### Phase 4: Frontend -- Clients & Contacts
+
+**Rationale:** Pure frontend, independently deployable after Phase 3.
+
+**Build order:**
+1. Types (`broker.ts` -- 4 new interfaces + modify BrokerProject)
+2. API functions (`api.ts` -- 14 new functions)
+3. Clients page + CreateClientDialog
+4. Client detail page with contacts section
+5. Sidebar navigation (add Clients link between Dashboard and Projects)
+6. CreateProjectDialog (add client_id dropdown)
+7. CarrierForm (add contacts section)
+
+---
+
+## Scalability Considerations
+
+| Concern | Current State | Mitigation |
+|---------|--------------|------------|
+| broker.py file size (2900 -> ~3100 lines) | Manageable with section headers | Service layer keeps methods thin |
+| models.py file size (2397 -> ~2700 lines) | Acceptable | All broker models are grouped together |
+| Context entity upsert contention | Low volume | GIN index on aliases already exists (models.py:557) |
+| Carrier contact lookup per solicitation | Single query per carrier | Composite index on (carrier_config_id, role) covers this |
+| Partial unique indexes | PostgreSQL native | No application-layer enforcement needed |
 
 ---
 
 ## Sources
 
-- Codebase analysis: `frontend/src/features/pipeline/` (ag-grid usage, theme, hooks)
-- Codebase analysis: `frontend/src/features/broker/` (existing components, API, types)
-- Codebase analysis: `frontend/src/app/layout.tsx` (AppShell architecture)
-- Codebase analysis: `frontend/src/app/routes.tsx` (BrokerGuard, route structure)
-- Codebase analysis: `frontend/src/lib/feature-flags.ts` (tenant feature flag system)
-- Spec: `SPEC-BROKER-FRONTEND-MVP.md` (gate strip, comparison matrix, tab routing requirements)
-- Confidence: HIGH -- all recommendations based on reading actual production code
+- **Codebase inspection** (HIGH confidence): broker.py (2900 lines, 29 endpoints), context_store_writer.py (373 lines, 5 public functions), models.py (2397 lines, ContextEntity at line 550, broker models at lines 1951-2397), solicitation_drafter.py (169 lines), recommendation_drafter.py
+- **SPEC-BROKER-DATA-MODEL.md** (HIGH confidence): Full spec with 10 sections + review log, all SQL DDL, model definitions, endpoint tables, and risk mitigations
+- **Existing patterns** (HIGH confidence): PgBouncer DDL workaround, context_store_writer dedup pattern, Mapped[] model syntax, router organization
