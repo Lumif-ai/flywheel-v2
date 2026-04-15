@@ -11,9 +11,9 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v19.0 Broker Redesign
 Phase: 136 of 139 (High Impact Frontend)
-Plan: 1 of 5 in current phase
-Status: Plan 136-01 complete — dashboard KPI cards + pipeline enhancements
-Last activity: 2026-04-15 -- Completed 136-01 broker dashboard MetricCards + pipeline grid
+Plan: 2 of 5 in current phase
+Status: Plan 136-02 complete — GapCoverageGrid ag-grid + urgency banner
+Last activity: 2026-04-15 -- Completed 136-02 GapCoverageGrid with fullWidthRow section headers and row coloring
 
 Progress: [████░░░░░░] 39% (9/23 plans)
 
@@ -77,6 +77,10 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 136-01]: filterAttention state managed in BrokerDashboard (not grid) — passes computed status string to useBrokerProjects, keeps ProjectPipelineGrid a dumb display component
 - [Phase 136-01]: Days Since Update uses valueGetter computing from updated_at — no new DB column needed
 - [Phase 136-01]: MetricCard accent=true adds 3px coral left border; Needs Attention badge resets offset to 0 on toggle
+- [Phase 136-02]: GridRow union type with isSectionHeader() guard for mixed ProjectCoverage + SectionHeaderRow data in ag-grid
+- [Phase 136-02]: GapAmountCell uses gap_amount ?? required_limit for missing; gap_amount ?? (required_limit - current_limit) for insufficient
+- [Phase 136-02]: ClauseLink color changed from blue to coral (#E94D35) to match brand accent
+- [Phase 136-02]: domLayout=normal (not autoHeight) — autoHeight causes re-render storms with getRowStyle
 
 ### Pending Todos
 
@@ -91,5 +95,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 136-01-PLAN.md (dashboard KPI cards, pipeline grid enhancements)
+Stopped at: Completed 136-02-PLAN.md (GapCoverageGrid + urgency banner)
 Resume file: None
