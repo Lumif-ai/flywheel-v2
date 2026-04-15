@@ -1163,6 +1163,11 @@ async def _run_analysis(project_id: UUID, tenant_id: UUID):
 # ---------------------------------------------------------------------------
 
 
+def _normalize_coverage_key(name: str) -> str:
+    """Normalize coverage type string for comparison: lowercase with underscores."""
+    return name.lower().strip().replace(" ", "_").replace("-", "_")
+
+
 def _compute_carrier_matches(
     carriers: list,
     project_coverage_types: list[str],
@@ -1171,6 +1176,9 @@ def _compute_carrier_matches(
     """Rank carriers by coverage_type intersection with project needs."""
     if not project_coverage_types:
         return []
+
+    # Build normalized lookup: normalized_key -> original_name
+    project_norm = {_normalize_coverage_key(ct): ct for ct in project_coverage_types}
 
     matches: list[dict] = []
     for carrier in carriers:
@@ -1184,10 +1192,15 @@ def _compute_carrier_matches(
             if carrier.max_project_value is not None and contract_value > float(carrier.max_project_value):
                 continue
 
-        matched = set(carrier_coverages) & set(project_coverage_types)
-        if not matched:
+        # Normalize carrier coverages for comparison
+        carrier_norm = {_normalize_coverage_key(cc): cc for cc in carrier_coverages}
+
+        matched_keys = set(carrier_norm.keys()) & set(project_norm.keys())
+        if not matched_keys:
             continue
 
+        # Map back to original project coverage names for response
+        matched = {project_norm[k] for k in matched_keys}
         unmatched = set(project_coverage_types) - matched
         match_score = len(matched) / len(project_coverage_types)
 

@@ -192,17 +192,55 @@ def _normalize_coverage_type(name: str) -> str:
     return name.lower().strip().replace("_", " ").replace("-", " ")
 
 
+def _normalize_compact(name: str) -> str:
+    """Compact normalization: lowercase, remove all separators for loose matching."""
+    return name.lower().strip().replace("_", "").replace("-", "").replace(" ", "")
+
+
 def _match_coverage(
     coverage_type: str, project_coverages: list[dict]
 ) -> dict | None:
     """Find matching ProjectCoverage by fuzzy coverage_type comparison.
 
+    Tries exact normalized match first, then compact match (ignoring all
+    separators), then partial/contains match as fallback.
+
     Returns the first matching coverage dict, or None if no match.
     """
     normalized = _normalize_coverage_type(coverage_type)
+    compact = _normalize_compact(coverage_type)
+
+    # Pass 1: exact normalized match (spaces normalized)
     for pc in project_coverages:
         if _normalize_coverage_type(pc.get("coverage_type", "")) == normalized:
             return pc
+
+    # Pass 2: compact match (all separators removed)
+    for pc in project_coverages:
+        if _normalize_compact(pc.get("coverage_type", "")) == compact:
+            logger.debug(
+                "Coverage matched via compact normalization: '%s' -> '%s'",
+                coverage_type, pc.get("coverage_type", ""),
+            )
+            return pc
+
+    # Pass 3: partial/contains match (one string contains the other)
+    for pc in project_coverages:
+        pc_compact = _normalize_compact(pc.get("coverage_type", ""))
+        if not pc_compact:
+            continue
+        if compact in pc_compact or pc_compact in compact:
+            logger.debug(
+                "Coverage matched via partial match: '%s' -> '%s'",
+                coverage_type, pc.get("coverage_type", ""),
+            )
+            return pc
+
+    logger.warning(
+        "No coverage match found for extracted type '%s' among project coverages: %s",
+        coverage_type,
+        [pc.get("coverage_type", "") for pc in project_coverages],
+    )
     return None
 
 

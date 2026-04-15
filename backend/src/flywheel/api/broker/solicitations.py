@@ -125,23 +125,31 @@ async def list_solicitation_drafts(
     project_id: UUID,
     user: TokenPayload = Depends(require_module("broker")),
     db: AsyncSession = Depends(get_tenant_db),
-) -> dict[str, Any]:
-    """List all solicitation drafts for a project."""
+) -> list[dict[str, Any]]:
+    """List all solicitation drafts for a project.
+
+    Returns a flat array (not wrapped in {"items": [...]}).
+    """
     result = await db.execute(
-        select(SolicitationDraft).where(
+        select(SolicitationDraft, CarrierConfig.carrier_name)
+        .outerjoin(CarrierConfig, SolicitationDraft.carrier_config_id == CarrierConfig.id)
+        .where(
             SolicitationDraft.broker_project_id == project_id,
             SolicitationDraft.tenant_id == user.tenant_id,
         ).order_by(SolicitationDraft.created_at.desc())
     )
-    drafts = result.scalars().all()
-    return {"items": [_solicitation_draft_to_dict(d) for d in drafts]}
+    rows = result.all()
+    return [_solicitation_draft_to_dict(row[0], carrier_name=row[1]) for row in rows]
 
 
-def _solicitation_draft_to_dict(d: SolicitationDraft) -> dict[str, Any]:
+def _solicitation_draft_to_dict(
+    d: SolicitationDraft, carrier_name: str | None = None
+) -> dict[str, Any]:
     return {
         "id": str(d.id),
         "broker_project_id": str(d.broker_project_id),
         "carrier_config_id": str(d.carrier_config_id),
+        "carrier_name": carrier_name,
         "carrier_quote_id": str(d.carrier_quote_id) if d.carrier_quote_id else None,
         "subject": d.subject,
         "body": d.body,
@@ -463,6 +471,14 @@ async def approve_send_solicitation(
     draft.approved_at = draft.approved_at or now
     draft.updated_at = now
     # NOTE: draft.body is intentionally NOT cleared (WRK-08 PII retention)
+
+    # Transition project status to soliciting if still at gaps_identified
+    project_result = await db.execute(
+        select(BrokerProject).where(BrokerProject.id == draft.broker_project_id)
+    )
+    project = project_result.scalar_one_or_none()
+    if project and project.status == "gaps_identified":
+        project.status = "soliciting"
 
     activity = BrokerActivity(
         tenant_id=user.tenant_id,
