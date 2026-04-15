@@ -144,9 +144,14 @@ function CarrierCellRenderer(props: ICellRendererParams) {
   )
 }
 
+// ---- Helpers ----
+function humanizeCoverageType(raw: string): string {
+  return raw.replace(/_/g, ' ')
+}
+
 // ---- Row type discriminators ----
 type SectionHeaderRow = { _type: 'section-header'; label: string; coverage_type: string }
-type CoverageRow = { _type: 'coverage'; coverage_type: string; _section?: string; [carrierName: string]: unknown }
+type CoverageRow = { _type: 'coverage'; coverage_type: string; _displayName?: string; _section?: string; [carrierName: string]: unknown }
 type GridRow = SectionHeaderRow | CoverageRow
 
 function isFullWidthRowFn(params: IsFullWidthRowParams<GridRow>): boolean {
@@ -215,7 +220,7 @@ function PdfPrintView({
         <tbody>
           {coverages.map((cov) => (
             <tr key={cov.coverage_id} className="border-b border-gray-100">
-              <td className="px-4 py-3 text-gray-700 font-medium">{cov.coverage_type}</td>
+              <td className="px-4 py-3 text-gray-700 font-medium capitalize">{humanizeCoverageType(cov.coverage_type)}</td>
               {carriers.map((c) => {
                 const q = cov.quotes.find((q) => q.carrier_name === c)
                 return (
@@ -297,12 +302,17 @@ export function ComparisonGrid({
 
   const colDefs = useMemo<ColDef<GridRow>[]>(() => {
     const coverageCol: ColDef<GridRow> = {
-      field: 'coverage_type',
       headerName: 'Coverage',
       pinned: 'left' as const,
       width: 180,
       sortable: false,
       resizable: true,
+      valueGetter: (p) => {
+        if (!p.data || p.data._type === 'section-header') return p.data?.coverage_type ?? ''
+        const row = p.data as CoverageRow
+        return row._displayName ?? humanizeCoverageType(row.coverage_type)
+      },
+      cellStyle: { textTransform: 'capitalize' as const },
     }
 
     const carrierCols: ColDef<GridRow>[] = carriers.map((carrierName) => ({
@@ -343,6 +353,7 @@ export function ComparisonGrid({
         const row: CoverageRow = {
           _type: 'coverage',
           coverage_type: cov.coverage_type,
+          _displayName: humanizeCoverageType(cov.coverage_type),
           _section: label,
         }
         for (const carrierName of carriers) {
@@ -362,6 +373,7 @@ export function ComparisonGrid({
         const row: CoverageRow = {
           _type: 'coverage',
           coverage_type: cov.coverage_type,
+          _displayName: humanizeCoverageType(cov.coverage_type),
         }
         for (const carrierName of carriers) {
           row[carrierName] = cov.quotes.find((q) => q.carrier_name === carrierName)

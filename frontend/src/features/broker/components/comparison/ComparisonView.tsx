@@ -1,5 +1,5 @@
 import { useState, useMemo, useCallback } from 'react'
-import { BarChart3, Info, Sparkles } from 'lucide-react'
+import { BarChart3, Info, Sparkles, FileBarChart } from 'lucide-react'
 import { toast } from 'sonner'
 import type { ComparisonMatrix } from '../../types/broker'
 import { exportComparison } from '../../api'
@@ -90,14 +90,23 @@ export function ComparisonView({ data, currency, projectId }: ComparisonViewProp
   const insightText = useMemo(() => deriveInsightText(data), [data])
 
   if (data.coverages.length === 0) {
+    const hasQuotes = data.total_carriers > 0
     return (
       <div className="flex flex-col items-center justify-center py-16 text-center">
-        <BarChart3 className="h-10 w-10 text-muted-foreground mb-3" />
-        <h3 className="text-lg font-medium">No quotes to compare yet</h3>
+        <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
+          {hasQuotes ? (
+            <FileBarChart className="h-5 w-5 text-muted-foreground" />
+          ) : (
+            <BarChart3 className="h-5 w-5 text-muted-foreground" />
+          )}
+        </div>
+        <h3 className="text-lg font-medium">
+          {hasQuotes ? 'Quotes not linked to coverages' : 'No quotes to compare yet'}
+        </h3>
         <p className="text-sm text-muted-foreground mt-1 max-w-md">
-          Upload carrier quote PDFs in the Quotes tab and extract them.
-          Once at least two carriers have extracted quotes, the comparison matrix will appear here
-          with color-coded coverage analysis.
+          {hasQuotes
+            ? 'Quotes exist but aren\'t linked to coverage records. Try re-extracting quotes from the Quotes tab.'
+            : 'Upload carrier quote PDFs in the Quotes tab and extract them. Once at least two carriers have extracted quotes, the comparison matrix will appear here.'}
         </p>
       </div>
     )

@@ -1,12 +1,11 @@
 import { useMemo, useState } from 'react'
-import { Link } from 'react-router'
 import { AgGridReact } from 'ag-grid-react'
 import { AllCommunityModule } from 'ag-grid-community'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Mail, Globe } from 'lucide-react'
+import { Mail, Globe, FileSearch } from 'lucide-react'
 import { gridTheme, GRID_SHADOW, GRID_BORDER_RADIUS } from '@/shared/grid/theme'
 import { CarrierCell } from '@/shared/grid/cell-renderers/CarrierCell'
 import { useCarrierMatches } from '../hooks/useCarrierMatches'
@@ -154,15 +153,25 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
   }
 
   if (!data || data.matches.length === 0) {
+    const hasCoverages = data && data.project_coverage_count > 0
     return (
-      <div className="rounded-xl border border-dashed p-8 text-center space-y-2">
-        <p className="text-muted-foreground">
-          No carriers configured. Go to{' '}
-          <Link to="/broker/carriers" className="text-blue-600 hover:underline">
-            Carriers
-          </Link>{' '}
-          to add your first carrier.
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-12 h-12 rounded-full bg-muted/50 flex items-center justify-center mb-3">
+          <FileSearch className="h-5 w-5 text-muted-foreground" />
+        </div>
+        <h3 className="text-lg font-medium mb-1">
+          {hasCoverages ? 'No carrier matches' : 'No coverage requirements found'}
+        </h3>
+        <p className="text-sm text-muted-foreground max-w-md">
+          {hasCoverages
+            ? 'No carriers match this project\'s coverage types. Check carrier configurations.'
+            : 'Run contract analysis first to identify coverage requirements, then match carriers.'}
         </p>
+        {!hasCoverages && (
+          <p className="text-sm text-muted-foreground mt-2">
+            Go to the <span className="font-medium text-foreground">Analysis</span> tab to get started.
+          </p>
+        )}
       </div>
     )
   }

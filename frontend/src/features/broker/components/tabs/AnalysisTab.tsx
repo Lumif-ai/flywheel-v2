@@ -15,12 +15,9 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
   const isRunning = analysisStatus === 'running'
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" style={{ minHeight: '600px' }}>
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-[calc(100vh-200px)]">
       {/* Left: Document viewer */}
       <div className="rounded-xl border overflow-hidden flex flex-col">
-        <div className="px-4 py-3 border-b bg-muted/30">
-          <h3 className="text-sm font-semibold">Contract Documents</h3>
-        </div>
         <div className="flex-1 overflow-y-auto">
           {isRunning ? (
             <div className="p-4 space-y-3">

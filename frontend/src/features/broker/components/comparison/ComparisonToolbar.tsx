@@ -27,9 +27,8 @@ function Toggle({
         role="switch"
         aria-checked={checked}
         onClick={onToggle}
-        className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors ${
-          checked ? 'bg-blue-600' : 'bg-gray-200'
-        }`}
+        className="relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full transition-colors"
+        style={{ backgroundColor: checked ? '#E94D35' : '#E5E7EB' }}
       >
         <span
           className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow-sm ring-0 transition-transform ${

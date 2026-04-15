@@ -141,8 +141,12 @@ export function GapCoverageGrid({ coverages }: GapCoverageGridProps) {
         headerName: 'Coverage',
         flex: 2,
         minWidth: 160,
-        valueGetter: (p) =>
-          p.data && isSectionHeader(p.data) ? '' : (p.data as ProjectCoverage)?.coverage_type ?? '',
+        valueGetter: (p) => {
+          if (p.data && isSectionHeader(p.data)) return ''
+          const cov = p.data as ProjectCoverage
+          return cov?.display_name ?? cov?.coverage_type?.replace(/_/g, ' ') ?? ''
+        },
+        cellStyle: { textTransform: 'capitalize' as const },
       },
       {
         field: 'required_limit' as keyof GridRow,

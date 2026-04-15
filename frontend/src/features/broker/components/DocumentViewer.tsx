@@ -71,15 +71,15 @@ function ContractPaper({
   return (
     <div
       className="rounded-lg bg-white shadow-[0_1px_8px_rgba(0,0,0,0.08)] overflow-hidden"
-      style={{ fontFamily: "'Georgia', 'Times New Roman', serif" }}
+      style={{ fontFamily: 'Inter, system-ui, sans-serif' }}
     >
       {/* Paper header bar */}
       <div
         className="px-6 py-3 border-b"
         style={{ background: bgTint }}
       >
-        <p className="text-xs font-semibold uppercase tracking-widest" style={{ color: borderColor, fontFamily: 'Inter, system-ui, sans-serif' }}>
-          {highlightColor === 'coral' ? 'Contract Excerpts' : 'Bond Requirement Excerpts'}
+        <p className="text-xs font-semibold" style={{ color: borderColor }}>
+          {highlightColor === 'coral' ? 'Relevant Clauses' : 'Bond Requirements'}
         </p>
       </div>
 
@@ -88,13 +88,9 @@ function ContractPaper({
           <div key={clause} data-clause={clause}>
             {/* Clause header */}
             <div
-              className="flex items-center gap-2 mb-3 pb-2"
-              style={{ borderBottom: `2px solid ${borderColor}` }}
+              className="flex items-center gap-2 mb-3 pb-2 border-b border-gray-200"
             >
-              <span
-                className="text-sm font-bold uppercase tracking-wide"
-                style={{ color: borderColor, fontFamily: 'Inter, system-ui, sans-serif' }}
-              >
+              <span className="text-sm font-medium text-gray-700">
                 {clause}
               </span>
             </div>
@@ -112,8 +108,8 @@ function ContractPaper({
                 >
                   {cov.display_name && (
                     <p
-                      className="text-xs font-semibold mb-1 uppercase tracking-wide"
-                      style={{ color: borderColor, fontFamily: 'Inter, system-ui, sans-serif' }}
+                      className="text-xs font-medium mb-1"
+                      style={{ color: borderColor }}
                     >
                       {cov.display_name}
                     </p>
@@ -122,7 +118,7 @@ function ContractPaper({
                     {cov.source_excerpt}
                   </p>
                   {cov.source_section && (
-                    <p className="text-xs text-muted-foreground mt-2" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+                    <p className="text-xs text-muted-foreground mt-2">
                       Section {cov.source_section}
                       {cov.source_page != null && <> &middot; Page {cov.source_page}</>}
                     </p>
@@ -135,7 +131,7 @@ function ContractPaper({
       </div>
 
       {/* Paper footer */}
-      <div className="px-6 py-3 border-t bg-[#FAFAFA] text-xs text-muted-foreground" style={{ fontFamily: 'Inter, system-ui, sans-serif' }}>
+      <div className="px-6 py-3 border-t bg-[#FAFAFA] text-xs text-muted-foreground">
         {coverages.length} excerpt{coverages.length !== 1 ? 's' : ''} extracted
       </div>
     </div>
