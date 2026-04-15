@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Milestone: v19.0 Broker Redesign
-Phase: 134 of 139 (Skills Infrastructure)
-Plan: 3 of 3 in current phase
-Status: Plan 134-03 complete
-Last activity: 2026-04-15 -- Completed 134-03 broker hooks and settings.json registration
+Phase: 135 of 139 (AI Skills)
+Plan: 1 of 4 in current phase
+Status: Plan 135-01 complete
+Last activity: 2026-04-15 -- Completed 135-01 api_client extensions + parse-contract, parse-policies, gap-analysis step skills
 
-Progress: [█░░░░░░░░░] 22% (5/23 plans)
+Progress: [██░░░░░░░░] 26% (6/23 plans)
 
 ## Performance Metrics
 
@@ -60,6 +60,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 134-03]: Stop hook outputs additionalContext only when BROKER_PIPELINE_MODE=1 still active; does not block stopping
 - [Phase 134-03]: PostToolUse hooks detect writes by regex on tool_input command string (lightweight, no extra API calls)
 - [Phase 134-03]: settings.json hook registration uses Python atomic read-modify-write preserving all 9 existing hooks
+- [Phase 135-01]: upload_file() re-reads FLYWHEEL_API_TOKEN at call time (not module-level) so tests can set env var after import
+- [Phase 135-01]: upload_file() skips _headers() to avoid Content-Type override — httpx sets multipart boundary automatically
+- [Phase 135-01]: parse-policies uses inline Claude reading of pdfplumber output rather than API call
 
 ### Pending Todos
 
@@ -74,5 +77,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 134-03-PLAN.md (broker hooks -- 5 hook files + settings.json registrations)
+Stopped at: Completed 135-01-PLAN.md (api_client extensions + 3 step skills in ~/.claude/skills/broker/steps/)
 Resume file: None
