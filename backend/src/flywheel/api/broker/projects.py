@@ -139,7 +139,10 @@ def _project_to_dict(p: BrokerProject) -> dict[str, Any]:
     }
 
 
-def _coverage_to_dict(c: ProjectCoverage) -> dict[str, Any]:
+def _coverage_to_dict(
+    c: ProjectCoverage,
+    critical_findings: list | None = None,
+) -> dict[str, Any]:
     """Serialize a ProjectCoverage to a JSON-friendly dict."""
     return {
         "id": str(c.id),
@@ -155,12 +158,24 @@ def _coverage_to_dict(c: ProjectCoverage) -> dict[str, Any]:
         "contract_clause": c.contract_clause,
         "current_limit": float(c.current_limit) if c.current_limit is not None else None,
         "current_carrier": c.current_carrier,
+        "current_policy_number": c.current_policy_number,
+        "current_expiry": c.current_expiry.isoformat() if c.current_expiry else None,
         "gap_status": c.gap_status,
         "gap_amount": float(c.gap_amount) if c.gap_amount is not None else None,
         "gap_notes": c.gap_notes,
         "source": c.source,
+        "source_excerpt": c.source_excerpt,
+        "source_page": c.source_page,
+        "source_section": c.source_section,
         "confidence": c.confidence,
         "is_manual_override": c.is_manual_override,
+        "ai_critical_finding": bool(
+            critical_findings
+            and any(
+                cf.get("coverage_type") == c.coverage_type
+                for cf in critical_findings
+            )
+        ),
         "created_at": c.created_at.isoformat() if c.created_at else None,
     }
 
@@ -327,10 +342,28 @@ async def dashboard_stats(
         )
     ).scalars().all()
 
+    # Total premium: sum of best (lowest) quote premium per active project
+    min_premium_sq = (
+        select(
+            CarrierQuote.broker_project_id,
+            func.min(CarrierQuote.premium).label("best_premium"),
+        )
+        .where(
+            CarrierQuote.premium.isnot(None),
+            CarrierQuote.status.in_(["extracted", "selected"]),
+        )
+        .group_by(CarrierQuote.broker_project_id)
+        .subquery()
+    )
+    total_premium_result = (
+        await db.execute(select(func.sum(min_premium_sq.c.best_premium)))
+    ).scalar() or 0
+
     return {
         "total_projects": total,
         "projects_by_status": projects_by_status,
         "projects_needing_action": needs_action,
+        "total_premium": float(total_premium_result),
         "recent_projects": [_project_to_dict(p) for p in recent],
     }
 
@@ -598,7 +631,10 @@ async def get_project(
     activities = activities_result.scalars().all()
 
     project_dict = _project_to_dict(project)
-    project_dict["coverages"] = [_coverage_to_dict(c) for c in coverages]
+    cf = getattr(project, "critical_findings", None)
+    project_dict["coverages"] = [
+        _coverage_to_dict(c, critical_findings=cf) for c in coverages
+    ]
     project_dict["activities"] = [_activity_to_dict(a) for a in activities]
 
     return project_dict
@@ -1504,3 +1540,88 @@ async def update_coverage(
     await db.refresh(coverage)
 
     return _coverage_to_dict(coverage)
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/projects/{project_id}/coverages  (batch create)
+# ---------------------------------------------------------------------------
+
+
+@projects_router.post("/projects/{project_id}/coverages")
+async def batch_create_coverages(
+    project_id: UUID,
+    body: dict,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Create multiple coverages for a project in a single request.
+
+    Expects body: {"coverages": [{...}, {...}, ...]}
+    """
+    # Validate project exists and belongs to tenant
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    coverage_items = body.get("coverages")
+    if not coverage_items or not isinstance(coverage_items, list):
+        raise HTTPException(
+            status_code=400,
+            detail="Request body must contain a 'coverages' array",
+        )
+
+    created: list[ProjectCoverage] = []
+    for item in coverage_items:
+        cov = ProjectCoverage(
+            id=uuid4(),
+            tenant_id=user.tenant_id,
+            broker_project_id=project_id,
+            coverage_type=item.get("coverage_type", "unknown"),
+            category=item.get("category"),
+            display_name=item.get("display_name"),
+            required_limit=item.get("required_limit"),
+            required_deductible=item.get("required_deductible"),
+            required_terms=item.get("required_terms"),
+            contract_clause=item.get("contract_clause"),
+            current_limit=item.get("current_limit"),
+            current_carrier=item.get("current_carrier"),
+            current_policy_number=item.get("current_policy_number"),
+            current_expiry=item.get("current_expiry"),
+            gap_status=item.get("gap_status"),
+            gap_amount=item.get("gap_amount"),
+            gap_notes=item.get("gap_notes"),
+            source=item.get("source", "manual"),
+            source_excerpt=item.get("source_excerpt"),
+            source_page=item.get("source_page"),
+            source_section=item.get("source_section"),
+            confidence=item.get("confidence"),
+        )
+        db.add(cov)
+        created.append(cov)
+
+    await db.flush()
+
+    activity = BrokerActivity(
+        tenant_id=user.tenant_id,
+        broker_project_id=project_id,
+        activity_type="coverages_created",
+        actor_type="system",
+        description=f"Batch created {len(created)} coverages",
+    )
+    db.add(activity)
+    await db.commit()
+
+    for cov in created:
+        await db.refresh(cov)
+
+    return {
+        "items": [_coverage_to_dict(c) for c in created],
+        "created": len(created),
+    }
