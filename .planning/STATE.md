@@ -48,6 +48,7 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - Comparison matrix needs 1-day prototype gate before full build
 - Type removal must be ordered: add new types BEFORE removing old
 - Every component must match visual spec from day one
+- [Phase 133]: Used transitional type cast pattern (QuoteWithLegacyDraft) for safe field removal during migration
 
 ### Pending Todos
 
@@ -62,5 +63,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 133-01-PLAN.md (backend coverage serializer + new endpoints)
+Stopped at: Completed 133-02-PLAN.md (frontend type alignment + API path fixes)
 Resume file: None
