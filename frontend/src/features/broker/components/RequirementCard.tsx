@@ -3,6 +3,13 @@ import type { ProjectCoverage } from '../types/broker'
 interface RequirementCardProps {
   coverage: ProjectCoverage
   style?: React.CSSProperties
+  onClauseClick?: (clause: string) => void
+}
+
+const SOURCE_STYLE: Record<string, string> = {
+  ai: 'bg-violet-100 text-violet-700',
+  manual: 'bg-blue-100 text-blue-700',
+  contract: 'bg-amber-100 text-amber-700',
 }
 
 const CONFIDENCE_PCT: Record<string, number> = {
@@ -18,7 +25,7 @@ const GAP_STATUS_STYLE: Record<string, string> = {
   unknown: 'bg-muted text-muted-foreground',
 }
 
-export function RequirementCard({ coverage, style }: RequirementCardProps) {
+export function RequirementCard({ coverage, style, onClauseClick }: RequirementCardProps) {
   const confidencePct = CONFIDENCE_PCT[coverage.confidence?.toLowerCase()] ?? 60
   const gapStyle = GAP_STATUS_STYLE[coverage.gap_status] ?? GAP_STATUS_STYLE.unknown
 
@@ -47,6 +54,11 @@ export function RequirementCard({ coverage, style }: RequirementCardProps) {
           </span>
         </div>
         <div className="flex items-center gap-1.5 flex-shrink-0">
+          {coverage.source && (
+            <span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${SOURCE_STYLE[coverage.source] ?? 'bg-muted text-muted-foreground'}`}>
+              {coverage.source}
+            </span>
+          )}
           {coverage.ai_critical_finding && (
             <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
               Critical
@@ -80,11 +92,15 @@ export function RequirementCard({ coverage, style }: RequirementCardProps) {
         </div>
       )}
 
-      {/* Contract clause */}
+      {/* Contract clause — clickable to scroll to excerpt in DocumentViewer */}
       {coverage.contract_clause && (
-        <p className="text-xs text-muted-foreground border-t pt-2 leading-relaxed line-clamp-2">
+        <button
+          type="button"
+          className="w-full text-left text-xs text-[#E94D35] hover:text-[#d4432e] border-t pt-2 leading-relaxed line-clamp-2 cursor-pointer transition-colors"
+          onClick={() => onClauseClick?.(coverage.contract_clause!)}
+        >
           {coverage.contract_clause}
-        </p>
+        </button>
       )}
     </div>
   )
