@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables -- the founder's daily operating system
-**Current focus:** v19.0 Broker Redesign -- Phase 133 Foundation
+**Current focus:** v19.0 Broker Redesign -- Phase 134 Skills Infrastructure
 
 ## Current Position
 
 Milestone: v19.0 Broker Redesign
-Phase: 133 of 139 (Foundation)
+Phase: 134 of 139 (Skills Infrastructure)
 Plan: 3 of 3 in current phase
-Status: Phase 133 complete
-Last activity: 2026-04-15 -- Completed 133-03 shared grid components
+Status: Plan 134-03 complete
+Last activity: 2026-04-15 -- Completed 134-03 broker hooks and settings.json registration
 
-Progress: [█░░░░░░░░░] 17% (4/23 plans)
+Progress: [█░░░░░░░░░] 22% (5/23 plans)
 
 ## Performance Metrics
 
@@ -49,6 +49,17 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - Type removal must be ordered: add new types BEFORE removing old
 - Every component must match visual spec from day one
 - [Phase 133]: Used transitional type cast pattern (QuoteWithLegacyDraft) for safe field removal during migration
+- [Phase 134-01]: FLYWHEEL_API_TOKEN is broker's session JWT (not service key); documented token acquisition steps in SKILL.md
+- [Phase 134-01]: /broker:analyze-gaps and /broker:compare-quotes are STUB entries (Phase 135); marked NOT YET IMPLEMENTED in dispatch table
+- [Phase 134-01]: api_client.py validates FLYWHEEL_API_TOKEN at _headers() call time (module-level read, RuntimeError on empty)
+- [Phase 134-02]: safe_fill/safe_select use per-field try/except — one broken selector cannot abort the entire fill run
+- [Phase 134-02]: mapfre.yaml selectors are PLACEHOLDER_* until live portal DevTools calibration
+- [Phase 134-02]: fill_portal() never calls page.click() on submit/confirm — broker always submits manually
+- [Phase 134-02]: New carrier pattern = {carrier}.py + {carrier}.yaml in portals/ directory
+- [Phase 134-03]: broker_auth_helper.py uses underscore filename for Python importability; hooks use hyphens per Claude hook convention
+- [Phase 134-03]: Stop hook outputs additionalContext only when BROKER_PIPELINE_MODE=1 still active; does not block stopping
+- [Phase 134-03]: PostToolUse hooks detect writes by regex on tool_input command string (lightweight, no extra API calls)
+- [Phase 134-03]: settings.json hook registration uses Python atomic read-modify-write preserving all 9 existing hooks
 
 ### Pending Todos
 
@@ -63,5 +74,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 133-02-PLAN.md (frontend type alignment + API path fixes)
+Stopped at: Completed 134-02-PLAN.md (portal automation layer — base.py, mapfre.py, mapfre.yaml)
 Resume file: None
