@@ -1,9 +1,14 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
+import { AgGridReact } from 'ag-grid-react'
+import { AllCommunityModule } from 'ag-grid-community'
+import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Building2, Mail, Globe, Clock } from 'lucide-react'
+import { Mail, Globe } from 'lucide-react'
+import { gridTheme, GRID_SHADOW, GRID_BORDER_RADIUS } from '@/shared/grid/theme'
+import { CarrierCell } from '@/shared/grid/cell-renderers/CarrierCell'
 import { useCarrierMatches } from '../hooks/useCarrierMatches'
 import { useDraftSolicitations } from '../hooks/useSolicitations'
 import type { CarrierMatch } from '../types/broker'
@@ -12,109 +17,66 @@ interface CarrierSelectionProps {
   projectId: string
 }
 
-function MatchScoreBar({ score }: { score: number }) {
-  const pct = Math.round(score * 100)
+type SectionHeaderRow = { _type: 'section-header'; label: string }
+type GridRow = CarrierMatch | SectionHeaderRow
+
+function isSectionHeader(row: GridRow): row is SectionHeaderRow {
+  return (row as SectionHeaderRow)._type === 'section-header'
+}
+
+function SectionHeaderRenderer(props: ICellRendererParams) {
+  const row = props.data as SectionHeaderRow
   return (
-    <div className="flex items-center gap-2">
-      <div className="h-2 flex-1 rounded-full bg-muted overflow-hidden">
-        <div
-          className="h-full rounded-full bg-blue-500 transition-all"
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="text-xs font-medium text-muted-foreground w-8">{pct}%</span>
+    <div className="px-3 py-1 flex items-center h-full">
+      <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
+        {row?.label}
+      </span>
     </div>
   )
 }
 
-function CarrierCard({
-  carrier,
-  selected,
-  onToggle,
-}: {
-  carrier: CarrierMatch
-  selected: boolean
-  onToggle: () => void
-}) {
+function MethodCell(props: ICellRendererParams) {
+  const row = props.data as GridRow
+  if (!row || isSectionHeader(row)) return null
+  const method = (row as CarrierMatch).submission_method
   return (
-    <div
-      className={`rounded-xl border p-4 space-y-3 transition-colors ${
-        selected ? 'border-blue-300 bg-blue-50/50' : ''
-      }`}
-    >
-      <div className="flex items-start justify-between">
-        <div className="flex items-center gap-3">
-          <input
-            type="checkbox"
-            checked={selected}
-            onChange={onToggle}
-            className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-          />
-          <div>
-            <p className="font-medium">{carrier.carrier_name}</p>
-            <div className="flex items-center gap-2 mt-0.5">
-              <Badge variant="outline" className="text-xs gap-1">
-                {carrier.submission_method === 'portal' ? (
-                  <><Globe className="h-3 w-3" /> Portal</>
-                ) : (
-                  <><Mail className="h-3 w-3" /> Email</>
-                )}
-              </Badge>
-              {carrier.avg_response_days != null && (
-                <span className="flex items-center gap-1 text-xs text-muted-foreground">
-                  <Clock className="h-3 w-3" />
-                  {carrier.avg_response_days}d avg
-                </span>
-              )}
-            </div>
-          </div>
-        </div>
-        <Building2 className="h-5 w-5 text-muted-foreground" />
-      </div>
-
-      <MatchScoreBar score={carrier.match_score} />
-
-      <div className="flex flex-wrap gap-1.5">
-        {carrier.matched_coverages.map((c) => (
-          <Badge key={c} variant="outline" className="bg-green-50 text-green-700 border-0 text-xs">
-            {c}
-          </Badge>
-        ))}
-        {carrier.unmatched_coverages.map((c) => (
-          <Badge key={c} variant="outline" className="bg-gray-50 text-gray-500 border-0 text-xs">
-            {c}
-          </Badge>
-        ))}
-      </div>
+    <div className="flex items-center h-full">
+      <Badge variant="outline" className="text-xs gap-1">
+        {method === 'portal' ? (
+          <><Globe className="h-3 w-3" /> Portal</>
+        ) : (
+          <><Mail className="h-3 w-3" /> Email</>
+        )}
+      </Badge>
     </div>
   )
 }
 
-function CarrierSection({
-  title,
-  matches,
-  selectedIds,
-  onToggle,
-}: {
-  title: string
-  matches: CarrierMatch[]
-  selectedIds: Set<string>
-  onToggle: (id: string) => void
-}) {
-  if (matches.length === 0) return null
+function RoutingRuleCell(props: ICellRendererParams) {
+  const row = props.data as GridRow
+  if (!row || isSectionHeader(row)) return null
+  const carrier = row as CarrierMatch
+  const matched = carrier.matched_coverages?.length > 0
   return (
-    <div className="space-y-3">
-      <h4 className="text-sm font-medium text-muted-foreground">{title}</h4>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {matches.map((m) => (
-          <CarrierCard
-            key={m.carrier_config_id}
-            carrier={m}
-            selected={selectedIds.has(m.carrier_config_id)}
-            onToggle={() => onToggle(m.carrier_config_id)}
-          />
-        ))}
-      </div>
+    <div className="flex items-center h-full">
+      {matched ? (
+        <span className="text-xs font-medium" style={{ color: '#15803D' }}>&#10003; Matched</span>
+      ) : (
+        <span className="text-xs text-muted-foreground">&mdash;</span>
+      )}
+    </div>
+  )
+}
+
+function AvgResponseCell(props: ICellRendererParams) {
+  const row = props.data as GridRow
+  if (!row || isSectionHeader(row)) return null
+  const value = (row as CarrierMatch).avg_response_days
+  return (
+    <div className="flex items-center h-full">
+      <span className="text-sm text-muted-foreground">
+        {value != null ? `${value}d` : '—'}
+      </span>
     </div>
   )
 }
@@ -125,22 +87,66 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
   const draftMutation = useDraftSolicitations(projectId)
   const [skipped, setSkipped] = useState<Array<{ carrier: string; reason: string }>>([])
 
-  function toggleCarrier(id: string) {
-    setSelectedIds((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-  }
+  const rowData = useMemo<GridRow[]>(() => {
+    if (!data) return []
+    const insuranceMatches = data.matches.filter((m) => m.carrier_type === 'insurance')
+    const suretyMatches = data.matches.filter((m) => m.carrier_type === 'surety')
+    const rows: GridRow[] = []
+    if (insuranceMatches.length > 0) {
+      rows.push({ _type: 'section-header', label: 'Insurance Carriers' })
+      rows.push(...insuranceMatches)
+    }
+    if (suretyMatches.length > 0) {
+      rows.push({ _type: 'section-header', label: 'Surety Carriers' })
+      rows.push(...suretyMatches)
+    }
+    return rows
+  }, [data])
+
+  const columnDefs = useMemo<ColDef<GridRow>[]>(
+    () => [
+      {
+        checkboxSelection: (params) => !isSectionHeader(params.data as GridRow),
+        headerCheckboxSelection: true,
+        width: 40,
+        resizable: false,
+        sortable: false,
+        suppressHeaderMenuButton: true,
+      },
+      {
+        field: 'carrier_name' as keyof GridRow,
+        headerName: 'Carrier',
+        flex: 2,
+        cellRenderer: CarrierCell,
+      },
+      {
+        field: 'submission_method' as keyof GridRow,
+        headerName: 'Method',
+        width: 120,
+        cellRenderer: MethodCell,
+      },
+      {
+        headerName: 'Routing Rule',
+        width: 140,
+        cellRenderer: RoutingRuleCell,
+      },
+      {
+        field: 'avg_response_days' as keyof GridRow,
+        headerName: 'Avg Response',
+        width: 120,
+        cellRenderer: AvgResponseCell,
+      },
+    ],
+    [],
+  )
 
   if (isLoading) {
     return (
       <div className="space-y-3">
         <Skeleton className="h-5 w-40" />
-        <div className="grid gap-3 sm:grid-cols-2">
+        <div className="space-y-2">
           {Array.from({ length: 4 }).map((_, i) => (
-            <Skeleton key={i} className="h-36 w-full rounded-xl" />
+            <Skeleton key={i} className="h-[52px] w-full rounded-xl" />
           ))}
         </div>
       </div>
@@ -161,25 +167,42 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
     )
   }
 
-  const insuranceMatches = data.matches.filter((m) => m.carrier_type === 'insurance')
-  const suretyMatches = data.matches.filter((m) => m.carrier_type === 'surety')
-
   return (
     <div className="space-y-4">
       <h3 className="text-lg font-medium">Carrier Matches</h3>
 
-      <CarrierSection
-        title="Insurance Carriers"
-        matches={insuranceMatches}
-        selectedIds={selectedIds}
-        onToggle={toggleCarrier}
-      />
-      <CarrierSection
-        title="Surety Carriers"
-        matches={suretyMatches}
-        selectedIds={selectedIds}
-        onToggle={toggleCarrier}
-      />
+      <div
+        style={{
+          borderRadius: GRID_BORDER_RADIUS,
+          boxShadow: GRID_SHADOW,
+          overflow: 'hidden',
+        }}
+      >
+        <AgGridReact<GridRow>
+          modules={[AllCommunityModule]}
+          theme={gridTheme}
+          rowData={rowData}
+          columnDefs={columnDefs}
+          domLayout="autoHeight"
+          rowSelection="multiple"
+          suppressRowClickSelection
+          suppressMovableColumns
+          defaultColDef={{ resizable: true, sortable: false }}
+          isFullWidthRow={(params) =>
+            (params.rowNode.data as SectionHeaderRow | undefined)?._type === 'section-header'
+          }
+          fullWidthCellRenderer={SectionHeaderRenderer}
+          getRowHeight={(params) =>
+            isSectionHeader(params.data as GridRow) ? 32 : 52
+          }
+          onSelectionChanged={(event) => {
+            const selected = event.api.getSelectedRows().filter(
+              (r: GridRow) => !isSectionHeader(r),
+            )
+            setSelectedIds(new Set((selected as CarrierMatch[]).map((r) => r.carrier_config_id)))
+          }}
+        />
+      </div>
 
       {skipped.length > 0 && (
         <div className="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
