@@ -25,7 +25,7 @@ export function ClauseLink(props: ICellRendererParams) {
       <span
         title={text}
         onClick={handleClick}
-        style={{ color: '#3B82F6', cursor: 'pointer' }}
+        style={{ color: '#E94D35', cursor: 'pointer' }}
       >
         {truncated}
       </span>
