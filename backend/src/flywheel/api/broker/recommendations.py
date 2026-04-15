@@ -189,6 +189,43 @@ async def draft_recommendation(
 
 
 # ---------------------------------------------------------------------------
+# GET /broker/projects/{project_id}/recommendations
+# ---------------------------------------------------------------------------
+
+
+@recommendations_router.get("/projects/{project_id}/recommendations")
+async def list_project_recommendations(
+    project_id: UUID,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """List recommendations for a project. Returns at most one active recommendation in practice."""
+    result = await db.execute(
+        select(BrokerRecommendation)
+        .where(
+            BrokerRecommendation.broker_project_id == project_id,
+            BrokerRecommendation.tenant_id == user.tenant_id,
+        )
+        .order_by(BrokerRecommendation.created_at.desc())
+    )
+    recs = result.scalars().all()
+    return {
+        "items": [
+            {
+                "id": str(r.id),
+                "subject": r.subject,
+                "body_html": r.body,
+                "recipient_email": r.recipient_email,
+                "status": r.status,
+                "sent_at": r.sent_at.isoformat() if r.sent_at else None,
+                "created_at": r.created_at.isoformat(),
+            }
+            for r in recs
+        ]
+    }
+
+
+# ---------------------------------------------------------------------------
 # PUT /broker/recommendations/{recommendation_id}  -- edit draft
 # ---------------------------------------------------------------------------
 

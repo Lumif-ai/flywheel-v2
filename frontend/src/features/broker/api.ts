@@ -7,6 +7,7 @@ import type {
   BrokerProject,
   BrokerProjectDetail,
   BrokerProjectListResponse,
+  BrokerRecommendation,
   CarrierConfig,
   CarrierContact,
   CarrierMatchResponse,
@@ -180,6 +181,10 @@ export function editRecommendation(
 
 export function sendRecommendation(recommendationId: string): Promise<{ status: string; sent_at: string; document_id: string }> {
   return api.post<{ status: string; sent_at: string; document_id: string }>(`/broker/recommendations/${recommendationId}/approve-send`)
+}
+
+export function fetchProjectRecommendations(projectId: string): Promise<{ items: BrokerRecommendation[] }> {
+  return api.get<{ items: BrokerRecommendation[] }>(`/broker/projects/${projectId}/recommendations`)
 }
 
 export function approveProject(projectId: string): Promise<BrokerProjectDetail> {

@@ -1,18 +1,19 @@
-import { useState } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { CheckCircle, Mail, Send, AlertTriangle } from 'lucide-react'
-import { useDraftRecommendation, useEditRecommendation, useSendRecommendation } from '../hooks/useDelivery'
+import { useProjectRecommendation, useDraftRecommendation, useEditRecommendation, useSendRecommendation } from '../hooks/useDelivery'
+import { useBrokerQuotes } from '../hooks/useBrokerQuotes'
 import type { BrokerProjectDetail } from '../types/broker'
 
 interface DeliveryPanelProps {
   project: BrokerProjectDetail
 }
 
-// TODO(phase-138): Refactor DeliveryPanel to use BrokerRecommendation from /broker/recommendations/
-// Stale fields (recommendation_subject, recommendation_body, etc.) removed from BrokerProject type.
-// This component now uses local state only; full redesign deferred to Phase 138.
+function formatCurrency(val: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val)
+}
 
 export function DeliveryPanel({ project }: DeliveryPanelProps) {
   const [recipientEmail, setRecipientEmail] = useState('')
@@ -20,15 +21,71 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
   const [body, setBody] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
 
+  const { data: recommendation, isLoading: recLoading } = useProjectRecommendation(project.id)
+  const { data: quotes } = useBrokerQuotes(project.id)
   const draftMutation = useDraftRecommendation(project.id)
   const editMutation = useEditRecommendation(project.id)
   const sendMutation = useSendRecommendation(project.id)
 
-  // TODO(phase-138): Load recommendation status from /broker/recommendations/ endpoint
-  const status: 'pending' | 'sent' | null = null
+  // Sync local state when recommendation loads
+  useEffect(() => {
+    if (recommendation) {
+      setRecipientEmail(recommendation.recipient_email ?? '')
+      setSubject(recommendation.subject)
+      setBody(recommendation.body_html)
+    }
+  }, [recommendation?.id])
 
-  // Check if any quotes are recommended
-  const hasRecommendedQuotes = project.coverages.length > 0 // Quotes are on the project, not coverages directly
+  // DELV-02: Premium breakdown computed from useBrokerQuotes
+  const premiumBreakdown = useMemo(() => {
+    const extracted = (quotes ?? []).filter(q => q.status === 'extracted' && q.premium != null)
+    const insurancePremium = extracted
+      .filter(q => q.carrier_type === 'insurance')
+      .reduce((sum, q) => sum + (q.premium ?? 0), 0)
+    const suretyPremium = extracted
+      .filter(q => q.carrier_type === 'surety')
+      .reduce((sum, q) => sum + (q.premium ?? 0), 0)
+    const totalPremium = insurancePremium + suretyPremium
+    return { insurancePremium, suretyPremium, totalPremium, hasData: totalPremium > 0 }
+  }, [quotes])
+
+  const status = recommendation?.status ?? null
+
+  // --- LOADING STATE ---
+  if (recLoading) {
+    return (
+      <div className="rounded-xl border p-5 space-y-3 animate-pulse">
+        <div className="h-4 bg-muted rounded w-1/2" />
+        <div className="h-4 bg-muted rounded w-3/4" />
+        <div className="h-4 bg-muted rounded w-2/3" />
+      </div>
+    )
+  }
+
+  // --- PREMIUM BREAKDOWN CARD ---
+  const PremiumBreakdownCard = premiumBreakdown.hasData ? (
+    <div className="rounded-lg border bg-muted/30 p-4 space-y-2">
+      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Package Summary</p>
+      <div className="space-y-1">
+        {premiumBreakdown.insurancePremium > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Insurance</span>
+            <span className="font-medium">{formatCurrency(premiumBreakdown.insurancePremium)}</span>
+          </div>
+        )}
+        {premiumBreakdown.suretyPremium > 0 && (
+          <div className="flex justify-between text-sm">
+            <span className="text-muted-foreground">Surety</span>
+            <span className="font-medium">{formatCurrency(premiumBreakdown.suretyPremium)}</span>
+          </div>
+        )}
+        <div className="flex justify-between text-sm border-t pt-1 mt-1">
+          <span className="font-semibold">Total Premium</span>
+          <span className="font-bold text-emerald-700">{formatCurrency(premiumBreakdown.totalPremium)}</span>
+        </div>
+      </div>
+    </div>
+  ) : null
 
   // --- SENT STATE ---
   if (status === 'sent') {
@@ -43,16 +100,22 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
             Sent
           </Badge>
         </div>
-        {/* TODO(phase-138): Display recommendation details from BrokerRecommendation entity */}
         <div className="text-sm space-y-1 text-muted-foreground">
-          <p>Recommendation has been delivered to the client.</p>
+          {recommendation?.subject && <p className="font-medium text-foreground">{recommendation.subject}</p>}
+          {recommendation?.sent_at && (
+            <p>Sent {new Date(recommendation.sent_at).toLocaleString()}</p>
+          )}
+          {recommendation?.recipient_email && (
+            <p>To: {recommendation.recipient_email}</p>
+          )}
         </div>
+        {PremiumBreakdownCard}
       </div>
     )
   }
 
-  // --- DRAFT PENDING STATE ---
-  if (status === 'pending') {
+  // --- DRAFT / APPROVED STATE (edit + send form) ---
+  if (status === 'draft' || status === 'approved') {
     return (
       <div className="rounded-xl border p-5 space-y-4">
         <div className="flex items-center justify-between">
@@ -62,6 +125,8 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
           </div>
           <Badge variant="outline" className="text-xs">Draft</Badge>
         </div>
+
+        {PremiumBreakdownCard}
 
         <div className="space-y-3">
           <div>
@@ -100,10 +165,9 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
         <div className="flex gap-2">
           <Button
             variant="outline"
-            // TODO(phase-138): Get recommendationId from BrokerRecommendation entity
             onClick={() =>
               editMutation.mutate({
-                recommendationId: project.id,
+                recommendationId: recommendation!.id,
                 data: {
                   subject,
                   body,
@@ -132,8 +196,7 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
               <Button
                 size="sm"
                 onClick={() => {
-                  // TODO(phase-138): Use actual recommendationId
-                  sendMutation.mutate(project.id)
+                  sendMutation.mutate(recommendation!.id)
                   setShowConfirm(false)
                 }}
                 disabled={sendMutation.isPending}
@@ -154,7 +217,7 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
     )
   }
 
-  // --- NO DRAFT STATE ---
+  // --- NO DRAFT STATE (generate form) ---
   return (
     <div className="rounded-xl border p-5 space-y-4">
       <div className="flex items-center gap-2">
@@ -162,10 +225,12 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
         <h3 className="font-medium">Client Recommendation</h3>
       </div>
 
-      {!hasRecommendedQuotes && (
+      {PremiumBreakdownCard}
+
+      {!premiumBreakdown.hasData && (
         <div className="flex items-center gap-2 text-sm text-amber-600 bg-amber-50 rounded-lg p-3">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span>No quotes marked as recommended yet. Mark at least one quote as recommended before generating.</span>
+          <span>No extracted quotes with premiums yet. Extract at least one quote before generating a recommendation.</span>
         </div>
       )}
 

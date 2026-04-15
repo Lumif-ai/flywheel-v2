@@ -100,6 +100,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 137-03]: WORKFLOW_STEPS edited as array literal directly (not .push()) to preserve as const typing
 - [Phase 138-workflow-frontend-b]: domLayout=autoHeight for CarrierSelection (short table, not full-page)
 - [Phase 138-workflow-frontend-b]: Routing Rule indicator is presence check on matched_coverages.length (not match_score which is removed per CARR-02)
+- [Phase 138-02]: EmailApproval shows all drafts from useSolicitationDrafts; no portal/email split (that split is SolicitationPanel's job via carrierMethodMap)
+- [Phase 138-02]: SolicitationPanel splits drafts by carrierMethodMap from useCarrierMatches to count email vs portal
+- [Phase 138-02]: useApproveSend invalidates solicitation-drafts queryKey alongside project-quotes and broker-project
 - [Phase 138-03]: expandedQuoteId state lifted to QuoteTracking parent — allows single expansion at a time; per-row state would allow multi-expand
 - [Phase 138-03]: allExtracted uses received+extracted statuses (not extracted-only) per QUOT-05 spec semantics
 
@@ -116,5 +119,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 138-03-PLAN.md (QuoteTracking redesigned — QUOT-01 through QUOT-05 satisfied)
+Stopped at: Completed 138-02-PLAN.md (EmailApproval + SolicitationPanel SolicitationDraft migration — EMAIL-01 through EMAIL-04 satisfied)
 Resume file: None

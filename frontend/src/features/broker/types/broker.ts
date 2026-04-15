@@ -243,6 +243,7 @@ export interface SolicitationDraft {
   sent_at: string | null
   created_at: string
   updated_at: string
+  metadata_?: Record<string, unknown> | null
 }
 
 export interface SolicitationDraftResponse {
@@ -409,4 +410,14 @@ export interface UpdateContactPayload {
   phone?: string | null
   role?: string | null
   is_primary?: boolean | null
+}
+
+export interface BrokerRecommendation {
+  id: string
+  subject: string
+  body_html: string
+  recipient_email: string | null
+  status: 'draft' | 'approved' | 'sent' | 'failed'
+  sent_at: string | null
+  created_at: string
 }
