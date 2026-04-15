@@ -8,14 +8,9 @@ interface RequirementCardProps {
 
 const SOURCE_STYLE: Record<string, string> = {
   ai: 'bg-violet-100 text-violet-700',
+  ai_extraction: 'bg-violet-100 text-violet-700',
   manual: 'bg-blue-100 text-blue-700',
   contract: 'bg-amber-100 text-amber-700',
-}
-
-const CONFIDENCE_PCT: Record<string, number> = {
-  high: 90,
-  medium: 60,
-  low: 30,
 }
 
 const GAP_STATUS_STYLE: Record<string, string> = {
@@ -25,8 +20,12 @@ const GAP_STATUS_STYLE: Record<string, string> = {
   unknown: 'bg-muted text-muted-foreground',
 }
 
+const CATEGORY_STYLE: Record<string, string> = {
+  insurance: 'bg-[rgba(233,77,53,0.1)] text-[#E94D35]',
+  surety: 'bg-blue-100 text-blue-700',
+}
+
 export function RequirementCard({ coverage, style, onClauseClick }: RequirementCardProps) {
-  const confidencePct = CONFIDENCE_PCT[coverage.confidence?.toLowerCase()] ?? 60
   const gapStyle = GAP_STATUS_STYLE[coverage.gap_status] ?? GAP_STATUS_STYLE.unknown
 
   const formattedLimit =
@@ -40,66 +39,56 @@ export function RequirementCard({ coverage, style, onClauseClick }: RequirementC
 
   return (
     <div
-      className="rounded-xl border p-4 space-y-3 animate-fade-slide-up bg-card"
+      className="rounded-xl border p-4 space-y-3 animate-fade-slide-up bg-card hover:shadow-sm transition-shadow"
       style={style}
     >
-      {/* Header row */}
+      {/* Header: coverage name + status badge */}
       <div className="flex items-start justify-between gap-2">
-        <div className="space-y-0.5 min-w-0">
-          <p className="text-sm font-semibold truncate">
-            {coverage.display_name ?? coverage.coverage_type}
-          </p>
-          <span className="inline-block text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground capitalize">
-            {coverage.category}
-          </span>
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          {coverage.source && (
-            <span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${SOURCE_STYLE[coverage.source] ?? 'bg-muted text-muted-foreground'}`}>
-              {coverage.source}
-            </span>
-          )}
-          {coverage.ai_critical_finding && (
-            <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-medium">
-              Critical
-            </span>
-          )}
-          <span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${gapStyle}`}>
-            {coverage.gap_status}
-          </span>
-        </div>
+        <h4 className="text-sm font-semibold text-foreground leading-snug">
+          {coverage.display_name ?? coverage.coverage_type}
+        </h4>
+        <span className={`text-xs px-2.5 py-0.5 rounded-full capitalize font-semibold flex-shrink-0 ${gapStyle}`}>
+          {coverage.gap_status}
+        </span>
       </div>
 
-      {/* Confidence bar */}
-      <div>
-        <div className="flex items-center justify-between mb-1">
-          <span className="text-xs text-muted-foreground">Confidence</span>
-          <span className="text-xs text-muted-foreground capitalize">{coverage.confidence}</span>
-        </div>
-        <div className="h-1.5 w-full rounded-full bg-gray-100 overflow-hidden">
-          <div
-            className="h-full rounded-full bg-[#E94D35] transition-all"
-            style={{ width: `${confidencePct}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Required limit */}
+      {/* Required limit — large and bold */}
       {formattedLimit && (
-        <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Required Limit</span>
-          <span className="font-medium">{formattedLimit}</span>
-        </div>
+        <p className="text-xl font-bold text-foreground tracking-tight">
+          {formattedLimit}
+          <span className="text-xs font-normal text-muted-foreground ml-1.5">required limit</span>
+        </p>
       )}
 
-      {/* Contract clause — clickable to scroll to excerpt in DocumentViewer */}
+      {/* Badges row: source + category + critical */}
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {coverage.source && (
+          <span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${SOURCE_STYLE[coverage.source] ?? 'bg-muted text-muted-foreground'}`}>
+            {coverage.source.replace(/_/g, ' ')}
+          </span>
+        )}
+        <span className={`text-xs px-2 py-0.5 rounded-full capitalize font-medium ${CATEGORY_STYLE[coverage.category] ?? 'bg-muted text-muted-foreground'}`}>
+          {coverage.category}
+        </span>
+        {coverage.ai_critical_finding && (
+          <span className="text-xs px-2 py-0.5 rounded-full bg-red-100 text-red-700 font-semibold">
+            Critical Finding
+          </span>
+        )}
+      </div>
+
+      {/* Contract clause — clickable coral link */}
       {coverage.contract_clause && (
         <button
           type="button"
-          className="w-full text-left text-xs text-[#E94D35] hover:text-[#d4432e] border-t pt-2 leading-relaxed line-clamp-2 cursor-pointer transition-colors"
+          className="w-full text-left text-xs text-[#E94D35] hover:text-[#d4432e] font-medium border-t pt-2.5 leading-relaxed cursor-pointer transition-colors flex items-center gap-1"
           onClick={() => onClauseClick?.(coverage.contract_clause!)}
         >
-          {coverage.contract_clause}
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          <span className="line-clamp-2">{coverage.contract_clause}</span>
         </button>
       )}
     </div>

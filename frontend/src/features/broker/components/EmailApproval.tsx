@@ -6,21 +6,46 @@ import { Mail, CheckCircle, Edit3, Send, Sparkles } from 'lucide-react'
 import { useApproveSend, useEditDraft } from '../hooks/useSolicitations'
 import { useSolicitationDrafts } from '../hooks/useSolicitationDrafts'
 import { useCarrierMatches } from '../hooks/useCarrierMatches'
-import type { SolicitationDraft } from '../types/broker'
+import type { SolicitationDraft, SolicitationDocument } from '../types/broker'
 import { CarrierBadge } from './CarrierBadge'
+import { useBrokerQuotes } from '../hooks/useBrokerQuotes'
 
 interface EmailApprovalProps {
   projectId: string
+}
+
+/** File type icon chip for attachments */
+function AttachmentChip({ doc }: { doc: SolicitationDocument }) {
+  const ext = doc.display_name?.split('.').pop()?.toLowerCase() ?? ''
+  const isPdf = ext === 'pdf'
+  const isSpreadsheet = ['xls', 'xlsx', 'csv'].includes(ext)
+
+  const bgColor = isPdf ? '#EA4335' : isSpreadsheet ? '#16a34a' : '#6B7280'
+  const label = isPdf ? 'PDF' : isSpreadsheet ? ext.toUpperCase() : 'DOC'
+
+  return (
+    <div className="flex items-center gap-1.5 px-2 py-1 rounded border border-gray-200 text-xs bg-white">
+      <div
+        className="flex items-center justify-center rounded-sm flex-shrink-0"
+        style={{ width: 14, height: 14, backgroundColor: bgColor }}
+      >
+        <span style={{ color: 'white', fontSize: 6, fontWeight: 700 }}>{label}</span>
+      </div>
+      <span className="text-gray-700 truncate max-w-[180px]">{doc.display_name}</span>
+    </div>
+  )
 }
 
 function DraftCard({
   draft,
   emailAddress,
   projectId,
+  attachments,
 }: {
   draft: SolicitationDraft
   emailAddress: string | undefined
   projectId: string
+  attachments: SolicitationDocument[]
 }) {
   const [editing, setEditing] = useState(false)
   const [subject, setSubject] = useState(draft.subject || '')
@@ -34,6 +59,8 @@ function DraftCard({
       { onSuccess: () => setEditing(false) }
     )
   }
+
+  const plainBody = draft.body.replace(/<[^>]*>/g, '')
 
   if (draft.status === 'sent') {
     return (
@@ -56,17 +83,20 @@ function DraftCard({
 
   return (
     <div className="rounded-xl border p-4 space-y-3">
+      {/* Header: carrier badge + type badge + status */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Mail className="h-4 w-4 text-blue-500" />
           <CarrierBadge name={draft.carrier_name} />
+          <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">
+            Via Email
+          </span>
         </div>
-        <Badge variant="outline" className="text-xs">
+        <Badge variant="outline" className="text-xs capitalize">
           {draft.status || 'pending'}
         </Badge>
       </div>
 
-      <p className="text-xs text-muted-foreground">To: {emailAddress ?? '—'}</p>
+      <p className="text-xs text-muted-foreground">To: {emailAddress ?? '---'}</p>
 
       {editing ? (
         <div className="space-y-2">
@@ -94,11 +124,27 @@ function DraftCard({
         </div>
       ) : (
         <div className="space-y-2">
-          <p className="text-sm font-medium">{draft.subject}</p>
-          <p className="text-sm text-muted-foreground line-clamp-3">
-            {draft.body.replace(/<[^>]*>/g, '').slice(0, 300)}
-          </p>
-          <div className="flex gap-2">
+          {/* Email preview — styled like the demo */}
+          <div className="border rounded-lg p-4 text-sm leading-relaxed bg-[#FAFAFA]" style={{ maxHeight: 280, overflow: 'auto' }}>
+            <div className="mb-1 text-xs">
+              <span className="font-medium text-foreground">Subject:</span>{' '}
+              <span className="text-muted-foreground">{draft.subject}</span>
+            </div>
+            <div className="border-t pt-2 mt-2 whitespace-pre-line text-sm text-[#374151]">
+              {plainBody}
+            </div>
+          </div>
+
+          {/* Attachments section */}
+          {attachments.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {attachments.map((doc) => (
+                <AttachmentChip key={doc.file_id} doc={doc} />
+              ))}
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
               <Edit3 className="h-3 w-3 mr-1" />
               Edit
@@ -126,6 +172,7 @@ function DraftCard({
 export function EmailApproval({ projectId }: EmailApprovalProps) {
   const { data: drafts, isLoading } = useSolicitationDrafts(projectId)
   const { data: matchData } = useCarrierMatches(projectId)
+  const { data: quotes } = useBrokerQuotes(projectId)
 
   const emailByCarrierName = useMemo(() => {
     const map: Record<string, string> = {}
@@ -134,6 +181,17 @@ export function EmailApproval({ projectId }: EmailApprovalProps) {
     })
     return map
   }, [matchData])
+
+  // Build a map of carrier_name -> documents from quotes
+  const docsByCarrierName = useMemo(() => {
+    const map: Record<string, SolicitationDocument[]> = {}
+    ;(quotes ?? []).forEach((q) => {
+      if (q.documents && q.documents.length > 0) {
+        map[q.carrier_name] = q.documents.filter((d) => d.included)
+      }
+    })
+    return map
+  }, [quotes])
 
   if (isLoading) {
     return (
@@ -174,6 +232,7 @@ export function EmailApproval({ projectId }: EmailApprovalProps) {
             draft={draft}
             emailAddress={emailByCarrierName[draft.carrier_name]}
             projectId={projectId}
+            attachments={docsByCarrierName[draft.carrier_name] ?? []}
           />
         ))}
       </div>
