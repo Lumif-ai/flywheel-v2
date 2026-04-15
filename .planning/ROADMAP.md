@@ -267,9 +267,9 @@
 
 - [x] **Phase 133: Foundation** - Fix API mismatches, update types, add shared components, backend endpoints
 - [x] **Phase 134: Skills Infrastructure** - Skill directory, shared helpers, portal automation, hooks
-- [ ] **Phase 135: AI Skills** - 2 pipeline commands + 9 step skills for full placement workflow
-- [ ] **Phase 136: High-Impact Frontend** - Dashboard KPIs, gap analysis redesign, comparison matrix
-- [ ] **Phase 137: Workflow Frontend A** - Client profile redesign, document analysis tab
+- [x] **Phase 135: AI Skills** - 2 pipeline commands + 9 step skills for full placement workflow
+- [x] **Phase 136: High-Impact Frontend** - Dashboard KPIs, gap analysis redesign, comparison matrix
+- [x] **Phase 137: Workflow Frontend A** - Client profile redesign, document analysis tab
 - [ ] **Phase 138: Workflow Frontend B** - Carrier selection, email approval, quote tracking, portal, delivery
 - [ ] **Phase 139: Polish** - CSS animations, stagger effects, shimmer states, visual consistency
 
@@ -285,7 +285,7 @@
   3. AG Grid tables across the broker module show coral row hover, no header column separators, and three-layer Airbnb shadow on the grid wrapper
   4. CurrencyCell, ClauseLink, CarrierCell, ToggleCell, and DaysCell renderers are importable from the shared module and render correctly in isolation
   5. POST /broker/projects/{id}/coverages accepts an array and creates multiple coverages atomically; GET /broker/dashboard-stats returns total_premium; all 50 existing broker endpoints pass regression
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [ ] 133-01: API path fixes + backend endpoints (batch coverage, dashboard total_premium, regression verification)
@@ -302,7 +302,7 @@ Plans:
   3. /broker:fill-portal can launch a Playwright browser, navigate to Mapfre portal, fill fields from mapfre.yaml field map, take a screenshot, and wait for human confirmation -- without ever handling credentials
   4. After a coverage write, the post-coverage-write hook automatically calls POST /analyze-gaps; after a quote write, the post-quote-write hook automatically triggers comparison ranking -- both using pipeline-mode sentinels to prevent redundant calls during pipeline execution
   5. Hooks read FLYWHEEL_API_URL and FLYWHEEL_API_TOKEN from environment and exit silently if missing (no crashes in non-broker contexts)
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [ ] 134-01: Skill directory structure + router SKILL.md + api_client.py + field_validator.py
@@ -337,13 +337,13 @@ Plans:
   3. Comparison matrix renders carrier quotes in ag-grid with ComparisonCellRenderer (two-row: premium + limit/deductible), expandable coverage groups via manual fullWidthRow pattern (AG Grid Community compatible), total premium pinned at bottom, and recommended carrier column with coral border + "RECOMMENDED" badge
   4. Critical exclusion alert card (red) appears when has_critical_exclusion is true; AI Insight card (coral) shows recommendation narrative; partial comparison banner shows when ComparisonMatrix.partial is true
   5. Interactive/PDF toggle switches between ag-grid view and print-friendly preview; urgency banner shows when project start_date is within 30 days
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
-- [ ] 136-01: Dashboard KPIs (4 MetricCards) + pipeline table enhancements (coral border, premium, days, filter badge)
-- [ ] 136-02: Coverage tab redesign (gap amounts, current limits, clause links, status coloring, fullWidthRow section headers, urgency banner)
-- [ ] 136-03: Comparison matrix prototype gate (1-day spike to validate fullWidthRow + ComparisonCellRenderer approach)
-- [ ] 136-04: Comparison matrix full build (expandable groups, critical alerts, AI insight, partial banner, recommended badge, total row, interactive/PDF toggle)
+- [ ] 136-01-PLAN.md — Dashboard KPIs (4 MetricCards) + pipeline grid enhancements (coral row border, premium, days, filter badge)
+- [ ] 136-02-PLAN.md — Coverage tab ag-grid redesign (gap amounts, current limits, ClauseLink, row coloring, fullWidthRow section headers, urgency banner)
+- [ ] 136-03-PLAN.md — Comparison matrix prototype gate (ag-grid spike + ComparisonQuoteCell type fix + human decision checkpoint)
+- [ ] 136-04-PLAN.md — Comparison matrix full build (expandable groups, critical alerts, AI insight card, partial banner, recommended badge, pinned totals, interactive/PDF toggle)
 
 ### Phase 137: Workflow Frontend A
 **Goal**: The client profile has a professional 2-column layout with document upload, and a new Analysis tab shows extracted requirements alongside document viewers with highlighted clauses -- the broker can see exactly what Claude Code found in the contract
@@ -355,7 +355,7 @@ Plans:
   3. A new "Analysis" tab exists between Overview and Coverage (6 tabs total) with split-pane layout: document viewer on the left (MSA Contract and Surety Requirements sub-tabs with highlighted clauses) and extracted requirements on the right
   4. Requirements cards show coverage_type, required_limit, contract_clause (clickable), confidence bar, source badge, and AI Critical Finding badge -- cards appear with 60ms stagger animation after analysis completes
   5. Shimmer loading state displays while analysis_status === 'running' with 10s polling; StepIndicator shows 6 steps with correct status mapping for the Analysis step
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [ ] 137-01: Client profile Overview tab redesign (2-column layout, upload zone, file cards, RunInClaudeCodeButton)
@@ -372,7 +372,7 @@ Plans:
   3. Quote tracking shows "X of Y received" (green) and "Z pending" (orange pulse) summary badges; each quote row has premium, type badge, and received timing; rows expand to show detail panel (premium breakdown, deductibles, endorsements, exclusions); single "Extract & Compare Quotes" RunInClaudeCodeButton replaces separate Extract button; completion card appears when all quotes received
   4. Portal submission shows RunInClaudeCodeButton with data preview table per carrier; after automation, screenshot displayed with Confirm/Retry buttons
   5. Recommendation delivery uses correct API paths (PUT /recommendations/{id}, POST /recommendations/{id}/approve-send); package summary shows insurance + surety + total premium breakdown
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [ ] 138-01: Carrier selection redesign (table layout, toggles, no match_score, section headers)
@@ -389,7 +389,7 @@ Plans:
   2. Analysis tab requirement cards animate in with staggered fadeUp (60ms delay per card)
   3. Loading shimmer states appear on the Analysis tab while analysis is running and on any component awaiting data
   4. Carrier logo initials (colored circles with letters) render consistently across dashboard pipeline table, carrier selection, email approval, quote tracking, and comparison matrix
-**Plans**: 3 plans
+**Plans**: 4 plans
 
 Plans:
 - [ ] 139-01: CSS animation definitions + analysis tab animations + shimmer states
