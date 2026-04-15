@@ -1,6 +1,7 @@
 import { ShimmerSkeleton } from '@/components/ui/skeleton'
 import { useAnalysisPolling } from '../../hooks/useAnalysisPolling'
 import { DocumentViewer } from '../DocumentViewer'
+import { RequirementsPanel } from '../RequirementsPanel'
 import type { BrokerProjectDetail } from '../../types/broker'
 
 interface AnalysisTabProps {
@@ -12,7 +13,6 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
   const analysisStatus = data?.analysis_status ?? project.analysis_status
   const coverages = data?.coverages ?? project.coverages ?? []
   const isRunning = analysisStatus === 'running'
-  const isFailed = analysisStatus === 'failed'
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" style={{ minHeight: '600px' }}>
@@ -34,29 +34,13 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
         </div>
       </div>
 
-      {/* Right: Requirements panel (shell — filled in 137-03) */}
+      {/* Right: Requirements panel */}
       <div className="rounded-xl border overflow-hidden flex flex-col">
         <div className="px-4 py-3 border-b bg-muted/30">
           <h3 className="text-sm font-semibold">Requirements</h3>
         </div>
         <div className="flex-1 overflow-y-auto p-4">
-          {isRunning ? (
-            <div className="space-y-3">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <ShimmerSkeleton key={i} className="h-24 w-full rounded-xl" />
-              ))}
-            </div>
-          ) : isFailed ? (
-            <div className="flex flex-col items-center py-12 text-muted-foreground">
-              <p className="text-sm text-destructive">Analysis failed. Re-run to try again.</p>
-            </div>
-          ) : coverages.length === 0 ? (
-            <div className="flex flex-col items-center py-12 text-muted-foreground">
-              <p className="text-sm">No requirements extracted yet. Upload documents and run analysis.</p>
-            </div>
-          ) : (
-            <p className="text-sm text-muted-foreground">Requirements panel coming in next plan.</p>
-          )}
+          <RequirementsPanel coverages={coverages} analysisStatus={analysisStatus} />
         </div>
       </div>
     </div>

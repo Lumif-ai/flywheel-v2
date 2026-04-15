@@ -10,10 +10,10 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Milestone: v19.0 Broker Redesign
-Phase: 136 of 139 (High Impact Frontend)
-Plan: 4 of 5 in current phase
-Status: Plan 136-04 complete — full comparison matrix (COMP-01–COMP-08): recommended badge, expandable groups, AI Insight, critical alert, partial banner, PDF toggle
-Last activity: 2026-04-15 -- Completed 136-04 comparison matrix full build; all COMP requirements satisfied
+Phase: 137 of 139 (Workflow Frontend A)
+Plan: 2 of 4 in current phase
+Status: Plan 137-02 complete — Analysis tab with full-width split-pane, DocumentViewer (MSA/Surety sub-tabs, coral/blue highlights), ShimmerSkeleton polling (10s when running)
+Last activity: 2026-04-15 -- Completed 137-01: 2-column OverviewTab, DocumentUploadZone (drag-drop + typed file cards + RunInClaudeCodeButton), expanded MIME types to 9 types (c9d6f0e)
 
 Progress: [█████░░░░░] 48% (11/23 plans)
 
@@ -88,6 +88,13 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 136-04]: CarrierCellRenderer unified renderer — checks props.node.rowPinned==='bottom'; pinnedBottomRowCellRenderer prop not in ag-grid-react API
 - [Phase 136-04]: PDF mode uses static PdfPrintView (plain HTML table) — simpler than ag-grid print CSS, consistent recommended-carrier styling
 - [Phase 136-04]: AI Insight card hidden when no is_recommended data available — avoids "Insufficient data" noise for older quotes
+- [Phase 137-01]: useDocumentUpload is thin useMutation wrapper; cache invalidation uses broker-project queryKey
+- [Phase 137-01]: DocumentEntry interface defined locally (both OverviewTab + DocumentUploadZone) — small, no need to centralize yet
+- [Phase 137-01]: Drop zone uses native drag events (no react-dropzone) — sufficient for requirements
+- [Phase 137-01]: broker_legacy.py kept in sync with projects.py MIME set (same 9 types)
+- [Phase 137-02]: useAnalysisPolling shares queryKey ['broker-project', id] with useBrokerProject — TanStack deduplicates; no double network calls
+- [Phase 137-02]: Full-width bypass uses activeTab conditional rendering (not CSS col-span-3) — sidebar simply not rendered for Analysis tab
+- [Phase 137-02]: AnalysisTab is presentation-only; polling logic fully encapsulated in useAnalysisPolling hook
 
 ### Pending Todos
 
@@ -102,5 +109,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 136-04-PLAN.md (full comparison matrix — all COMP-01 through COMP-08 satisfied)
+Stopped at: Completed 137-02-PLAN.md (Analysis tab shell — ANAL-01 through ANAL-07 satisfied)
 Resume file: None

@@ -8,6 +8,7 @@ interface StepIndicatorProps {
 
 const WORKFLOW_STEPS = [
   { key: 'overview', label: 'Overview', tab: 'overview' },
+  { key: 'analysis', label: 'Analysis', tab: 'analysis' },
   { key: 'coverage', label: 'Coverage', tab: 'coverage' },
   { key: 'carriers', label: 'Carriers', tab: 'carriers' },
   { key: 'quotes', label: 'Quotes', tab: 'quotes' },
@@ -42,6 +43,11 @@ function getStepState(
   switch (stepKey) {
     case 'overview':
       return 'green'
+
+    case 'analysis':
+      if (isAtLeast(projectStatus, 'gaps_identified')) return 'green'
+      if (projectStatus === 'analyzing' || analysisStatus === 'running') return 'amber'
+      return 'grey'
 
     case 'coverage':
       if (isAtLeast(projectStatus, 'gaps_identified')) return 'green'
