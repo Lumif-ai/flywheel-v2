@@ -21,7 +21,7 @@ export function CoverageTab({ projectId }: CoverageTabProps) {
   const daysUntilStart = project?.start_date
     ? Math.ceil((new Date(project.start_date).getTime() - Date.now()) / 86_400_000)
     : null
-  const showUrgencyBanner = daysUntilStart !== null && daysUntilStart <= 30
+  const showUrgencyBanner = daysUntilStart !== null && daysUntilStart <= 30 && daysUntilStart >= -7
 
   if (isLoading) {
     return (

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -30,6 +30,19 @@ function getDisplayStatus(quote: CarrierQuote): QuoteDisplayStatus {
     if (daysSinceSolicited > 7) return 'needs_follow_up'
   }
   return quote.status as QuoteDisplayStatus
+}
+
+/** Determine the aggregate status for a group of quotes from the same carrier */
+function getGroupStatus(quotes: CarrierQuote[]): QuoteDisplayStatus {
+  const statuses = quotes.map(getDisplayStatus)
+  // Priority: needs_follow_up > extracting > solicited > pending > received > extracted
+  if (statuses.includes('needs_follow_up')) return 'needs_follow_up'
+  if (statuses.includes('extracting')) return 'extracting'
+  if (statuses.includes('solicited')) return 'solicited'
+  if (statuses.includes('pending')) return 'pending'
+  if (statuses.includes('received')) return 'received'
+  if (statuses.includes('extracted')) return 'extracted'
+  return 'pending'
 }
 
 function statusBadgeVariant(status: QuoteDisplayStatus): string {
@@ -147,12 +160,164 @@ function DocumentChip({ doc }: { doc: SolicitationDocument }) {
   )
 }
 
+/** Sub-row for individual coverage line items within a carrier group */
+function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor }: {
+  quote: CarrierQuote
+  projectId: string
+  showManualFor: string | null
+  setShowManualFor: (id: string | null) => void
+}) {
+  const displayStatus = getDisplayStatus(quote)
+  const markReceivedMutation = useMarkReceived(projectId)
+
+  return (
+    <>
+      <tr className="bg-muted/5 border-t border-dashed">
+        {/* Coverage type or quote ID */}
+        <td className="pl-12 pr-4 py-2">
+          <span className="text-xs text-muted-foreground">
+            {quote.coverage_id ? `Coverage Line` : 'Quote'}
+          </span>
+        </td>
+
+        {/* Status */}
+        <td className="px-4 py-2">
+          <Badge className={`text-xs ${statusBadgeVariant(displayStatus)}`}>
+            {displayStatus === 'extracting' && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+            {statusLabel(displayStatus)}
+          </Badge>
+        </td>
+
+        {/* Premium */}
+        <td className="px-4 py-2" colSpan={2}>
+          <div className="flex items-center gap-3">
+            {['extracted', 'received'].includes(displayStatus) && quote.premium != null ? (
+              <span className="text-sm font-medium">{formatCurrency(quote.premium)}</span>
+            ) : (
+              <span className="text-sm text-muted-foreground">---</span>
+            )}
+
+            {/* Inline details */}
+            {quote.deductible != null && (
+              <span className="text-xs text-muted-foreground">
+                Ded: {formatCurrency(quote.deductible)}
+              </span>
+            )}
+            {quote.limit_amount != null && (
+              <span className="text-xs text-muted-foreground">
+                Limit: {formatCurrency(quote.limit_amount)}
+              </span>
+            )}
+          </div>
+        </td>
+
+        {/* Actions */}
+        <td className="px-4 py-2">
+          <div className="flex items-center gap-2">
+            {(displayStatus === 'solicited' || displayStatus === 'needs_follow_up') && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-xs"
+                onClick={(e) => { e.stopPropagation(); markReceivedMutation.mutate(quote.id) }}
+                disabled={markReceivedMutation.isPending}
+              >
+                Mark Received
+              </Button>
+            )}
+            {displayStatus === 'received' && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-6 text-xs"
+                onClick={(e) => { e.stopPropagation(); setShowManualFor(showManualFor === quote.id ? null : quote.id) }}
+              >
+                Enter Manually
+              </Button>
+            )}
+            {displayStatus === 'extracted' && (
+              <span className="text-xs text-emerald-600 flex items-center gap-1">
+                <CheckCircle className="h-3 w-3" />
+              </span>
+            )}
+          </div>
+        </td>
+      </tr>
+
+      {/* Documents row */}
+      {quote.documents.length > 0 && (
+        <tr className="bg-muted/5">
+          <td colSpan={5} className="pl-12 pr-4 py-1.5">
+            <div className="flex gap-2 flex-wrap">
+              {quote.documents.map((doc) => (
+                <DocumentChip key={doc.file_id} doc={doc} />
+              ))}
+            </div>
+          </td>
+        </tr>
+      )}
+
+      {/* Manual entry form */}
+      {showManualFor === quote.id && (
+        <ManualEntryForm
+          quoteId={quote.id}
+          projectId={projectId}
+          onClose={() => setShowManualFor(null)}
+        />
+      )}
+    </>
+  )
+}
+
+interface CarrierGroup {
+  key: string
+  carrierName: string
+  carrierType: string
+  quotes: CarrierQuote[]
+  totalPremium: number | null
+  groupStatus: QuoteDisplayStatus
+  latestDate: string | null
+}
+
 export function QuoteTracking({ projectId }: QuoteTrackingProps) {
   const { data: quotes, isLoading } = useBrokerQuotes(projectId)
   const followupsMutation = useDraftFollowups(projectId)
-  const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null)
+  const [expandedCarrier, setExpandedCarrier] = useState<string | null>(null)
   const [showManualFor, setShowManualFor] = useState<string | null>(null)
-  const markReceivedMutation = useMarkReceived(projectId)
+
+  // Group quotes by carrier
+  const carrierGroups = useMemo<CarrierGroup[]>(() => {
+    if (!quotes) return []
+    const map = new Map<string, CarrierQuote[]>()
+    for (const q of quotes) {
+      const key = q.carrier_config_id || q.carrier_name
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(q)
+    }
+    return Array.from(map.entries()).map(([key, groupQuotes]) => {
+      const first = groupQuotes[0]
+      const premiums = groupQuotes.filter(q => q.premium != null).map(q => q.premium!)
+      const totalPremium = premiums.length > 0 ? premiums.reduce((a, b) => a + b, 0) : null
+
+      // Find the latest date (received or solicited)
+      const dates = groupQuotes
+        .map(q => q.received_at || q.solicited_at)
+        .filter(Boolean) as string[]
+      const latestDate = dates.length > 0
+        ? dates.sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0]
+        : null
+
+      return {
+        key,
+        carrierName: first.carrier_name,
+        carrierType: first.carrier_type,
+        quotes: groupQuotes,
+        totalPremium,
+        groupStatus: getGroupStatus(groupQuotes),
+        latestDate,
+      }
+    })
+  }, [quotes])
 
   if (isLoading) {
     return (
@@ -166,8 +331,13 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
 
   if (!quotes || quotes.length === 0) return null
 
-  const received = quotes.filter(q => ['received', 'extracting', 'extracted'].includes(q.status)).length
-  const pending = quotes.filter(q => ['solicited', 'pending'].includes(q.status)).length
+  // Count unique carriers by status
+  const receivedCarriers = carrierGroups.filter(g =>
+    ['received', 'extracting', 'extracted'].includes(g.groupStatus)
+  ).length
+  const pendingCarriers = carrierGroups.filter(g =>
+    ['solicited', 'pending', 'needs_follow_up'].includes(g.groupStatus)
+  ).length
   const hasReceived = quotes.some(q => q.status === 'received')
   const allExtracted = quotes.length > 0 && quotes.every(q => ['extracted', 'received'].includes(q.status))
   const hasSolicited = quotes.some((q) => q.status === 'solicited')
@@ -178,12 +348,12 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
       <div className="flex items-center gap-2 flex-wrap">
         <h3 className="text-lg font-medium">Quote Tracking</h3>
         <span className="inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 px-2.5 py-0.5 text-xs font-medium">
-          {received} of {quotes.length} received
+          {receivedCarriers} of {carrierGroups.length} carriers received
         </span>
-        {pending > 0 && (
+        {pendingCarriers > 0 && (
           <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-xs font-medium">
             <span className="animate-pulse inline-block w-1.5 h-1.5 rounded-full bg-orange-500" />
-            {pending} pending
+            {pendingCarriers} pending
           </span>
         )}
       </div>
@@ -206,64 +376,69 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Carrier</th>
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Type</th>
               <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Status</th>
-              <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Premium</th>
-              <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Received</th>
+              <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Total Premium</th>
+              <th className="text-left text-xs font-medium text-muted-foreground px-4 py-3">Latest Activity</th>
             </tr>
           </thead>
           <tbody>
-            {quotes.map((quote) => {
-              const displayStatus = getDisplayStatus(quote)
-              const isExpanded = expandedQuoteId === quote.id
+            {carrierGroups.map((group) => {
+              const isExpanded = expandedCarrier === group.key
 
               return (
                 <>
+                  {/* Carrier summary row */}
                   <tr
-                    key={quote.id}
+                    key={group.key}
                     className={`border-t hover:bg-muted/20 transition-colors cursor-pointer ${isExpanded ? 'bg-muted/10' : ''}`}
-                    onClick={() => setExpandedQuoteId(id => id === quote.id ? null : quote.id)}
+                    onClick={() => setExpandedCarrier(k => k === group.key ? null : group.key)}
                   >
                     {/* Carrier with logo */}
                     <td className="px-4 py-3">
-                      <CarrierBadge name={quote.carrier_name} className="font-medium text-sm" />
+                      <div className="flex items-center gap-2">
+                        <CarrierBadge name={group.carrierName} className="font-medium text-sm" />
+                        {group.quotes.length > 1 && (
+                          <span className="text-xs text-muted-foreground bg-muted rounded-full px-1.5 py-0.5">
+                            {group.quotes.length} lines
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Type badge */}
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
-                        quote.carrier_type === 'insurance'
+                        group.carrierType === 'insurance'
                           ? 'bg-[rgba(233,77,53,0.1)] text-[#E94D35]'
                           : 'bg-blue-100 text-blue-700'
                       }`}>
-                        {quote.carrier_type === 'insurance' ? 'Insurance' : 'Surety'}
+                        {group.carrierType === 'insurance' ? 'Insurance' : 'Surety'}
                       </span>
                     </td>
 
                     {/* Status badge */}
                     <td className="px-4 py-3">
-                      <Badge className={`text-xs ${statusBadgeVariant(displayStatus)}`}>
-                        {displayStatus === 'extracting' && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
-                        {statusLabel(displayStatus)}
+                      <Badge className={`text-xs ${statusBadgeVariant(group.groupStatus)}`}>
+                        {group.groupStatus === 'extracting' && <Loader2 className="h-3 w-3 animate-spin mr-1" />}
+                        {statusLabel(group.groupStatus)}
                       </Badge>
                     </td>
 
-                    {/* Premium */}
+                    {/* Total Premium */}
                     <td className="px-4 py-3">
-                      {['extracted', 'received'].includes(displayStatus) && quote.premium != null ? (
-                        <span className="text-sm font-bold">{formatCurrency(quote.premium)}</span>
+                      {group.totalPremium != null ? (
+                        <span className="text-sm font-bold">{formatCurrency(group.totalPremium)}</span>
                       ) : (
                         <span className="text-sm text-muted-foreground">---</span>
                       )}
                     </td>
 
-                    {/* Received timing */}
+                    {/* Latest activity */}
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       <div className="flex items-center gap-2">
                         <span>
-                          {quote.received_at
-                            ? format(new Date(quote.received_at), 'MMM d')
-                            : quote.solicited_at
-                              ? `Solicited ${format(new Date(quote.solicited_at), 'MMM d')}`
-                              : '---'
+                          {group.latestDate
+                            ? format(new Date(group.latestDate), 'MMM d')
+                            : '---'
                           }
                         </span>
                         {isExpanded ? (
@@ -275,89 +450,16 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
                     </td>
                   </tr>
 
-                  {/* Expanded detail row */}
-                  {isExpanded && (
-                    <tr key={`${quote.id}-detail`} className="bg-muted/5">
-                      <td colSpan={5} className="px-4 py-3">
-                        <div className="grid grid-cols-2 gap-4">
-                          {/* Left: quote details */}
-                          <div className="space-y-2 text-xs text-muted-foreground">
-                            {quote.deductible != null && (
-                              <div className="flex justify-between">
-                                <span>Deductible</span>
-                                <span className="font-medium text-foreground">{formatCurrency(quote.deductible)}</span>
-                              </div>
-                            )}
-                            {quote.limit_amount != null && (
-                              <div className="flex justify-between">
-                                <span>Limit</span>
-                                <span className="font-medium text-foreground">{formatCurrency(quote.limit_amount)}</span>
-                              </div>
-                            )}
-                            {quote.exclusions.length > 0 && (
-                              <div>
-                                <span>Exclusions: </span>
-                                <span className="font-medium text-foreground">{quote.exclusions.join(', ')}</span>
-                              </div>
-                            )}
-
-                            {/* Actions */}
-                            <div className="flex items-center gap-2 pt-2">
-                              {(displayStatus === 'solicited' || displayStatus === 'needs_follow_up') && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => { e.stopPropagation(); markReceivedMutation.mutate(quote.id) }}
-                                  disabled={markReceivedMutation.isPending}
-                                >
-                                  Mark as Received
-                                </Button>
-                              )}
-                              {displayStatus === 'received' && (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={(e) => { e.stopPropagation(); setShowManualFor(showManualFor === quote.id ? null : quote.id) }}
-                                >
-                                  Enter Manually
-                                </Button>
-                              )}
-                              {displayStatus === 'extracted' && (
-                                <span className="text-xs text-emerald-600 flex items-center gap-1">
-                                  <CheckCircle className="h-3 w-3" />
-                                  View in comparison
-                                </span>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Right: documents */}
-                          <div>
-                            {quote.documents.length > 0 ? (
-                              <div className="space-y-1.5">
-                                <p className="text-xs font-medium text-muted-foreground mb-2">Documents</p>
-                                {quote.documents.map((doc) => (
-                                  <DocumentChip key={doc.file_id} doc={doc} />
-                                ))}
-                              </div>
-                            ) : (
-                              <p className="text-xs text-muted-foreground italic">No documents attached</p>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-
-                  {/* Manual entry form row */}
-                  {showManualFor === quote.id && (
-                    <ManualEntryForm
-                      key={`${quote.id}-manual`}
-                      quoteId={quote.id}
+                  {/* Expanded: individual quote line items */}
+                  {isExpanded && group.quotes.map((quote) => (
+                    <QuoteLineItem
+                      key={quote.id}
+                      quote={quote}
                       projectId={projectId}
-                      onClose={() => setShowManualFor(null)}
+                      showManualFor={showManualFor}
+                      setShowManualFor={setShowManualFor}
                     />
-                  )}
+                  ))}
                 </>
               )
             })}

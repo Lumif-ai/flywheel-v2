@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router'
+import { Briefcase, AlertCircle, DollarSign, FileCheck } from 'lucide-react'
 import { useBrokerProjects } from '../hooks/useBrokerProjects'
 import { useDashboardStats } from '../hooks/useDashboardStats'
 import { TaskList } from './TaskList'
@@ -63,19 +64,23 @@ export function BrokerDashboard() {
         <MetricCard
           label="Total Projects"
           value={stats?.total_projects ?? 0}
+          icon={<Briefcase className="h-4 w-4" />}
         />
         <MetricCard
           label="Needs Attention"
           value={needsAttentionCount}
           accent={needsAttentionCount > 0}
+          icon={<AlertCircle className="h-4 w-4" />}
         />
         <MetricCard
           label="Total Premium"
           value={formatPremium(totalPremium)}
+          icon={<DollarSign className="h-4 w-4" />}
         />
         <MetricCard
           label="Quotes Complete"
           value={quotesComplete}
+          icon={<FileCheck className="h-4 w-4" />}
         />
       </div>
 
