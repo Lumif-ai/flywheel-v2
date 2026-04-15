@@ -79,10 +79,13 @@ function getStepState(
   }
 }
 
-const DOT_COLORS: Record<StepState, string> = {
-  grey: 'bg-gray-300',
-  amber: 'bg-amber-400',
-  green: 'bg-green-500',
+/** Checkmark icon for completed steps */
+function CheckIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="3" strokeLinecap="round">
+      <polyline points="20 6 9 17 4 12" />
+    </svg>
+  )
 }
 
 export function StepIndicator({
@@ -96,33 +99,84 @@ export function StepIndicator({
   }))
 
   return (
-    <div className="flex items-center w-full">
-      {steps.map((step, index) => (
-        <div key={step.key} className="flex items-center flex-1 last:flex-none">
-          {/* Step button */}
-          <button
-            type="button"
-            className="flex flex-col items-center gap-1 cursor-pointer group"
-            onClick={() => onStepClick(step.tab)}
-          >
-            <div
-              className={`w-3 h-3 rounded-full transition-colors ${DOT_COLORS[step.state]} group-hover:ring-2 group-hover:ring-offset-2 group-hover:ring-gray-300`}
-            />
-            <span className="text-xs text-muted-foreground group-hover:text-foreground transition-colors">
-              {step.label}
-            </span>
-          </button>
+    <div className="flex items-start w-full px-2 py-3">
+      {steps.map((step, index) => {
+        const isCompleted = step.state === 'green'
+        const isCurrent = step.state === 'amber'
 
-          {/* Connecting line */}
-          {index < steps.length - 1 && (
-            <div
-              className={`h-0.5 flex-1 mx-2 mt-[-1rem] ${
-                steps[index + 1].state !== 'grey' ? 'bg-green-300' : 'bg-gray-200'
-              }`}
-            />
-          )}
-        </div>
-      ))}
+        return (
+          <div key={step.key} className="flex items-start flex-1 last:flex-none">
+            {/* Step dot + label */}
+            <button
+              type="button"
+              className="flex flex-col items-center gap-1.5 cursor-pointer group min-w-[60px]"
+              onClick={() => onStepClick(step.tab)}
+            >
+              {/* Circle */}
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all group-hover:ring-2 group-hover:ring-offset-2 group-hover:ring-gray-300"
+                style={{
+                  backgroundColor: isCompleted
+                    ? '#16a34a'
+                    : isCurrent
+                      ? '#E94D35'
+                      : '#E5E7EB',
+                }}
+              >
+                {isCompleted ? (
+                  <CheckIcon />
+                ) : isCurrent ? (
+                  <div className="w-3 h-3 rounded-full bg-white" />
+                ) : (
+                  <span className="text-[12px] text-[#9CA3AF] font-medium">
+                    {index + 1}
+                  </span>
+                )}
+              </div>
+
+              {/* Label */}
+              <span
+                className="text-[12px] font-medium transition-colors group-hover:text-[#121212]"
+                style={{
+                  color: isCompleted
+                    ? '#374151'
+                    : isCurrent
+                      ? '#E94D35'
+                      : '#9CA3AF',
+                }}
+              >
+                {step.label}
+              </span>
+
+              {/* Status text */}
+              <span
+                className="text-[10px]"
+                style={{
+                  color: isCompleted
+                    ? '#16a34a'
+                    : isCurrent
+                      ? '#E94D35'
+                      : '#9CA3AF',
+                }}
+              >
+                {isCompleted ? 'Complete' : isCurrent ? 'In progress' : 'Pending'}
+              </span>
+            </button>
+
+            {/* Connecting line */}
+            {index < steps.length - 1 && (
+              <div
+                className="h-[2px] flex-1 mx-1 mt-4 rounded-full"
+                style={{
+                  backgroundColor: steps[index + 1].state !== 'grey'
+                    ? '#86efac'
+                    : '#E5E7EB',
+                }}
+              />
+            )}
+          </div>
+        )
+      })}
     </div>
   )
 }

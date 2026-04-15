@@ -6,7 +6,6 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
 import { useBrokerProject } from '../hooks/useBrokerProject'
 import { ProjectHeader } from './ProjectHeader'
 import { StepIndicator } from './StepIndicator'
-import { ProjectSidebar } from './ProjectSidebar'
 import { OverviewTab } from './tabs/OverviewTab'
 import { AnalysisTab } from './tabs/AnalysisTab'
 import { CoverageTab } from './tabs/CoverageTab'
@@ -78,35 +77,24 @@ export function BrokerProjectDetail() {
           ))}
         </TabsList>
         <div className="mt-6">
-          {activeTab === 'analysis' ? (
-            // Full-width: no sidebar for analysis split-pane
-            <TabsContent value="analysis">
-              <AnalysisTab project={project} />
-            </TabsContent>
-          ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-              <div className="lg:col-span-2">
-                <TabsContent value="overview">
-                  <OverviewTab project={project} />
-                </TabsContent>
-                <TabsContent value="coverage">
-                  <CoverageTab projectId={project.id} />
-                </TabsContent>
-                <TabsContent value="carriers">
-                  <CarriersTab projectId={project.id} />
-                </TabsContent>
-                <TabsContent value="quotes">
-                  <QuotesTab projectId={project.id} />
-                </TabsContent>
-                <TabsContent value="compare">
-                  <CompareTab projectId={project.id} />
-                </TabsContent>
-              </div>
-              <div>
-                <ProjectSidebar project={project} />
-              </div>
-            </div>
-          )}
+          <TabsContent value="overview">
+            <OverviewTab project={project} />
+          </TabsContent>
+          <TabsContent value="analysis">
+            <AnalysisTab project={project} />
+          </TabsContent>
+          <TabsContent value="coverage">
+            <CoverageTab projectId={project.id} />
+          </TabsContent>
+          <TabsContent value="carriers">
+            <CarriersTab projectId={project.id} />
+          </TabsContent>
+          <TabsContent value="quotes">
+            <QuotesTab projectId={project.id} />
+          </TabsContent>
+          <TabsContent value="compare">
+            <CompareTab projectId={project.id} />
+          </TabsContent>
         </div>
       </Tabs>
     </div>
@@ -138,17 +126,11 @@ function DetailSkeleton() {
           <Skeleton key={i} className="h-5 w-16" />
         ))}
       </div>
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        <div className="lg:col-span-2 space-y-3">
-          <Skeleton className="h-5 w-40" />
-          {Array.from({ length: 5 }).map((_, i) => (
-            <Skeleton key={i} className="h-12 w-full rounded-lg" />
-          ))}
-        </div>
-        <div className="space-y-4">
-          <Skeleton className="h-48 w-full rounded-xl" />
-          <Skeleton className="h-64 w-full rounded-xl" />
-        </div>
+      <div className="space-y-3">
+        <Skeleton className="h-5 w-40" />
+        {Array.from({ length: 5 }).map((_, i) => (
+          <Skeleton key={i} className="h-12 w-full rounded-lg" />
+        ))}
       </div>
     </div>
   )
