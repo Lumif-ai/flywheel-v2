@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v19.0 Broker Redesign
 Phase: 135 of 139 (AI Skills)
-Plan: 1 of 4 in current phase
-Status: Plan 135-01 complete
-Last activity: 2026-04-15 -- Completed 135-01 api_client extensions + parse-contract, parse-policies, gap-analysis step skills
+Plan: 4 of 4 in current phase
+Status: Plan 135-04 complete — Phase 135 DONE
+Last activity: 2026-04-15 -- Completed 135-04 pipeline skills + router v1.1 update
 
-Progress: [██░░░░░░░░] 26% (6/23 plans)
+Progress: [███░░░░░░░] 35% (8/23 plans)
 
 ## Performance Metrics
 
@@ -63,6 +63,17 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 135-01]: upload_file() re-reads FLYWHEEL_API_TOKEN at call time (not module-level) so tests can set env var after import
 - [Phase 135-01]: upload_file() skips _headers() to avoid Content-Type override — httpx sets multipart boundary automatically
 - [Phase 135-01]: parse-policies uses inline Claude reading of pdfplumber output rather than API call
+- [Phase 135-02]: fill-portal.md is a thin wrapper delegating all Playwright automation to portals/mapfre.py; no Playwright code duplicated
+- [Phase 135-02]: draft-emails.md validates each carrier_config_id as UUID before calling the endpoint; rejects names with actionable error
+- [Phase 135-02]: select-carriers.md prints email_carrier_config_ids in copy-paste format for handoff to /broker:draft-emails
+- [Phase 135-03]: extract-quote does NOT create CarrierQuote rows — maps PDF to existing row only
+- [Phase 135-03]: critical_exclusions explicitly surfaced in extract-quote output (cross-references MSA contract via quote_extractor.py)
+- [Phase 135-03]: draft-recommendation pre-checks /comparison before confirming and posting — warns broker if data incomplete
+- [Phase 135-03]: recipient_email normalized — blank input becomes None (backend accepts null)
+- [Phase 135-04]: Pipeline files reference step skills via prompt references (not copy-paste) — single source of truth
+- [Phase 135-04]: process-project deactivates BROKER_PIPELINE_MODE before draft-emails so audit hooks fire on email writes
+- [Phase 135-04]: compare-quotes runs inline GET /comparison (not a separate step skill) — read-only synthesis
+- [Phase 135-04]: /broker:analyze-gaps alias kept in router for backward compat with Phase 134 stub
 
 ### Pending Todos
 
@@ -77,5 +88,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 135-01-PLAN.md (api_client extensions + 3 step skills in ~/.claude/skills/broker/steps/)
+Stopped at: Completed 135-04-PLAN.md (pipeline skills + router v1.1 — Phase 135 complete)
 Resume file: None
