@@ -6,18 +6,22 @@ import { Clock, CheckCircle, AlertTriangle, Mail, FileText, Loader2, ChevronDown
 import { format, differenceInDays } from 'date-fns'
 import {
   useBrokerQuotes,
-  useExtractQuote,
   useMarkReceived,
   useManualQuoteEntry,
   useDraftFollowups,
 } from '../hooks/useBrokerQuotes'
 import type { CarrierQuote, ManualQuotePayload } from '../types/broker'
+import { RunInClaudeCodeButton } from './shared/RunInClaudeCodeButton'
 
 interface QuoteTrackingProps {
   projectId: string
 }
 
 type QuoteDisplayStatus = 'pending' | 'solicited' | 'received' | 'extracting' | 'extracted' | 'needs_follow_up'
+
+function formatCurrency(val: number): string {
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val)
+}
 
 function getDisplayStatus(quote: CarrierQuote): QuoteDisplayStatus {
   if (quote.status === 'solicited' && quote.solicited_at) {
@@ -133,35 +137,66 @@ function ManualEntryForm({ quoteId, projectId, onClose }: { quoteId: string; pro
   )
 }
 
-function QuoteRow({ quote, projectId }: { quote: CarrierQuote; projectId: string }) {
+interface QuoteRowProps {
+  quote: CarrierQuote
+  projectId: string
+  isExpanded: boolean
+  onToggleExpand: () => void
+}
+
+function QuoteRow({ quote, projectId, isExpanded, onToggleExpand }: QuoteRowProps) {
   const [showManual, setShowManual] = useState(false)
-  const extractMutation = useExtractQuote(projectId)
   const markReceivedMutation = useMarkReceived(projectId)
   const displayStatus = getDisplayStatus(quote)
 
   return (
     <div className="border rounded-lg p-3 space-y-2">
+      {/* Row header */}
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
           <StatusIcon status={displayStatus} />
           <span className="font-medium text-sm">{quote.carrier_name}</span>
+          {/* QUOT-02: carrier_type badge */}
+          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
+            quote.carrier_type === 'insurance'
+              ? 'bg-blue-100 text-blue-700'
+              : 'bg-purple-100 text-purple-700'
+          }`}>
+            {quote.carrier_type === 'insurance' ? 'Insurance' : 'Surety'}
+          </span>
           <Badge className={`text-xs ${statusBadgeVariant(displayStatus)}`}>
             {statusLabel(displayStatus)}
           </Badge>
+          {/* QUOT-02: premium when extracted */}
+          {displayStatus === 'extracted' && quote.premium != null && (
+            <span className="text-sm font-semibold text-emerald-700">
+              {new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(quote.premium)}
+            </span>
+          )}
         </div>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          {quote.solicited_at && (
-            <span>Solicited {format(new Date(quote.solicited_at), 'MMM d')}</span>
-          )}
-          {quote.received_at && (
-            <span>Received {format(new Date(quote.received_at), 'MMM d')}</span>
-          )}
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
+            {quote.solicited_at && (
+              <span>Solicited {format(new Date(quote.solicited_at), 'MMM d')}</span>
+            )}
+            {quote.received_at && (
+              <span>Received {format(new Date(quote.received_at), 'MMM d')}</span>
+            )}
+          </div>
+          {/* QUOT-03: expand/collapse chevron */}
+          <button
+            onClick={onToggleExpand}
+            className="p-0.5 rounded hover:bg-gray-100 text-muted-foreground"
+            aria-label={isExpanded ? 'Collapse details' : 'Expand details'}
+          >
+            {isExpanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+          </button>
         </div>
       </div>
 
       {/* Actions based on status */}
       <div className="flex items-center gap-2">
-        {displayStatus === 'solicited' || displayStatus === 'needs_follow_up' ? (
+        {(displayStatus === 'solicited' || displayStatus === 'needs_follow_up') ? (
           <Button
             size="sm"
             variant="outline"
@@ -173,23 +208,14 @@ function QuoteRow({ quote, projectId }: { quote: CarrierQuote; projectId: string
         ) : null}
 
         {displayStatus === 'received' && (
-          <>
-            <Button
-              size="sm"
-              onClick={() => extractMutation.mutate({ quoteId: quote.id })}
-              disabled={extractMutation.isPending}
-            >
-              Extract Quote
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => setShowManual(!showManual)}
-            >
-              {showManual ? <ChevronUp className="h-3 w-3 mr-1" /> : <ChevronDown className="h-3 w-3 mr-1" />}
-              Enter Manually
-            </Button>
-          </>
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => setShowManual(!showManual)}
+          >
+            {showManual ? <ChevronUp className="h-3 w-3 mr-1" /> : <ChevronDown className="h-3 w-3 mr-1" />}
+            Enter Manually
+          </Button>
         )}
 
         {displayStatus === 'extracting' && (
@@ -210,6 +236,36 @@ function QuoteRow({ quote, projectId }: { quote: CarrierQuote; projectId: string
       {showManual && (
         <ManualEntryForm quoteId={quote.id} projectId={projectId} onClose={() => setShowManual(false)} />
       )}
+
+      {/* QUOT-03: Expandable detail panel */}
+      {isExpanded && (
+        <div className="mt-2 pt-2 border-t space-y-1.5 text-xs text-muted-foreground">
+          {quote.deductible != null && (
+            <div className="flex justify-between">
+              <span>Deductible</span>
+              <span className="font-medium text-foreground">{formatCurrency(quote.deductible)}</span>
+            </div>
+          )}
+          {quote.limit_amount != null && (
+            <div className="flex justify-between">
+              <span>Limit</span>
+              <span className="font-medium text-foreground">{formatCurrency(quote.limit_amount)}</span>
+            </div>
+          )}
+          {quote.exclusions.length > 0 && (
+            <div>
+              <span>Exclusions: </span>
+              <span className="font-medium text-foreground">{quote.exclusions.join(', ')}</span>
+            </div>
+          )}
+          {quote.documents.length > 0 && (
+            <div>
+              <span>Source: </span>
+              <span className="font-medium text-foreground">{quote.documents[0]?.display_name ?? '—'}</span>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -217,6 +273,7 @@ function QuoteRow({ quote, projectId }: { quote: CarrierQuote; projectId: string
 export function QuoteTracking({ projectId }: QuoteTrackingProps) {
   const { data: quotes, isLoading } = useBrokerQuotes(projectId)
   const followupsMutation = useDraftFollowups(projectId)
+  const [expandedQuoteId, setExpandedQuoteId] = useState<string | null>(null)
 
   if (isLoading) {
     return (
@@ -230,13 +287,68 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
 
   if (!quotes || quotes.length === 0) return null
 
+  // QUOT-01: Summary badge counts
+  const received = quotes.filter(q => ['received', 'extracting', 'extracted'].includes(q.status)).length
+  const pending = quotes.filter(q => ['solicited', 'pending'].includes(q.status)).length
+
+  // QUOT-04: Show single RunInClaudeCodeButton when any quote is in 'received' status
+  const hasReceived = quotes.some(q => q.status === 'received')
+
+  // QUOT-05: Completion card when all quotes are extracted/received
+  const allExtracted = quotes.length > 0 && quotes.every(q => ['extracted', 'received'].includes(q.status))
+
   const hasSolicited = quotes.some((q) => q.status === 'solicited')
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      {/* Header with QUOT-01 summary badges */}
+      <div className="flex items-center gap-2 flex-wrap">
         <h3 className="text-lg font-medium">Quote Tracking</h3>
-        {hasSolicited && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-green-100 text-green-700 px-2.5 py-0.5 text-xs font-medium">
+          {received} of {quotes.length} received
+        </span>
+        {pending > 0 && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-orange-100 text-orange-700 px-2.5 py-0.5 text-xs font-medium">
+            <span className="animate-pulse inline-block w-1.5 h-1.5 rounded-full bg-orange-500" />
+            {pending} pending
+          </span>
+        )}
+      </div>
+
+      {/* QUOT-04: Single RunInClaudeCodeButton */}
+      {hasReceived && (
+        <RunInClaudeCodeButton
+          command={`claude "Extract quotes for project ${projectId}"`}
+          label="Extract & Compare Quotes"
+          variant="prominent"
+          description="Runs Claude Code to extract premium data from quote documents"
+        />
+      )}
+
+      {/* Quote rows */}
+      <div className="space-y-2">
+        {quotes.map((quote) => (
+          <QuoteRow
+            key={quote.id}
+            quote={quote}
+            projectId={projectId}
+            isExpanded={expandedQuoteId === quote.id}
+            onToggleExpand={() => setExpandedQuoteId(id => id === quote.id ? null : quote.id)}
+          />
+        ))}
+      </div>
+
+      {/* QUOT-05: Completion card (replaces Draft Follow-ups when all extracted) */}
+      {allExtracted ? (
+        <div className="rounded-lg bg-green-50 border border-green-200 p-4 flex items-center gap-3 text-green-700">
+          <CheckCircle className="h-5 w-5 shrink-0" />
+          <div>
+            <p className="text-sm font-medium">All quotes received</p>
+            <p className="text-xs text-green-600">View the comparison matrix to finalize your recommendation.</p>
+          </div>
+        </div>
+      ) : (
+        hasSolicited && (
           <Button
             size="sm"
             variant="outline"
@@ -246,14 +358,8 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
             <Mail className="h-4 w-4 mr-1" />
             Draft Follow-ups
           </Button>
-        )}
-      </div>
-
-      <div className="space-y-2">
-        {quotes.map((quote) => (
-          <QuoteRow key={quote.id} quote={quote} projectId={projectId} />
-        ))}
-      </div>
+        )
+      )}
     </div>
   )
 }
