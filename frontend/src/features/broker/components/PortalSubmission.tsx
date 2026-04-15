@@ -4,17 +4,24 @@ import { CheckCircle, Globe, Terminal } from 'lucide-react'
 import { useProjectQuotes, useConfirmPortal } from '../hooks/useSolicitations'
 import type { CarrierQuote } from '../types/broker'
 
+// TODO(phase-138): Migrate to SolicitationDraft data
+type QuoteWithLegacyDraft = CarrierQuote & {
+  draft_subject?: string | null
+  draft_status?: string | null
+}
+
 interface PortalSubmissionProps {
   projectId: string
 }
 
 function PortalCard({
-  quote,
+  quote: rawQuote,
   projectId,
 }: {
   quote: CarrierQuote
   projectId: string
 }) {
+  const quote = rawQuote as QuoteWithLegacyDraft
   const confirmPortal = useConfirmPortal(projectId)
 
   if (quote.draft_status === 'confirmed') {
@@ -102,12 +109,12 @@ export function PortalSubmission({ projectId }: PortalSubmissionProps) {
   const { data: quotes } = useProjectQuotes(projectId)
 
   const portalQuotes = (quotes || []).filter(
-    (q) => q.draft_subject == null && q.carrier_type === 'insurance' && q.carrier_config_id != null
+    (q) => (q as QuoteWithLegacyDraft).draft_subject == null && q.carrier_type === 'insurance' && q.carrier_config_id != null
   )
 
   if (portalQuotes.length === 0) return null
 
-  const confirmedCount = portalQuotes.filter((q) => q.draft_status === 'confirmed').length
+  const confirmedCount = portalQuotes.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'confirmed').length
 
   return (
     <div className="space-y-4">

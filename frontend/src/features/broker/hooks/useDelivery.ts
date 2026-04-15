@@ -17,8 +17,8 @@ export function useDraftRecommendation(projectId: string) {
 export function useEditRecommendation(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: (data: { subject?: string; body?: string; recipient_email?: string }) =>
-      editRecommendation(projectId, data),
+    mutationFn: ({ recommendationId, data }: { recommendationId: string; data: { subject?: string; body?: string; recipient_email?: string } }) =>
+      editRecommendation(recommendationId, data),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
     },
@@ -29,7 +29,7 @@ export function useEditRecommendation(projectId: string) {
 export function useSendRecommendation(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: () => sendRecommendation(projectId),
+    mutationFn: (recommendationId: string) => sendRecommendation(recommendationId),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
       toast.success('Recommendation sent')

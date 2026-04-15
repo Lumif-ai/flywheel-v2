@@ -23,6 +23,8 @@ import type {
   GateCounts,
   ManualQuotePayload,
   RecommendationDraftResponse,
+  SolicitationDraft,
+  SolicitationDraftResponse,
   UpdateCarrierPayload,
   UpdateContactPayload,
 } from './types/broker'
@@ -93,12 +95,16 @@ export function draftSolicitations(projectId: string, carrierConfigIds: string[]
   return api.post<DraftSolicitationsResponse>(`/broker/projects/${projectId}/draft-solicitations`, { carrier_config_ids: carrierConfigIds })
 }
 
-export function editSolicitationDraft(quoteId: string, payload: { draft_subject?: string; draft_body?: string }): Promise<CarrierQuote> {
-  return api.put<CarrierQuote>(`/broker/quotes/${quoteId}/draft`, payload)
+export function editSolicitationDraft(draftId: string, payload: { subject?: string; body?: string }): Promise<SolicitationDraftResponse> {
+  return api.put<SolicitationDraftResponse>(`/broker/solicitation-drafts/${draftId}`, payload)
 }
 
-export function approveSendSolicitation(quoteId: string): Promise<CarrierQuote> {
-  return api.post<CarrierQuote>(`/broker/quotes/${quoteId}/approve-send`)
+export function approveSendSolicitation(draftId: string): Promise<SolicitationDraftResponse> {
+  return api.post<SolicitationDraftResponse>(`/broker/solicitation-drafts/${draftId}/approve-send`)
+}
+
+export function fetchSolicitationDrafts(projectId: string): Promise<SolicitationDraft[]> {
+  return api.get<SolicitationDraft[]>(`/broker/projects/${projectId}/solicitation-drafts`)
 }
 
 export function confirmPortalSubmission(quoteId: string): Promise<CarrierQuote> {
@@ -160,14 +166,14 @@ export function draftRecommendation(projectId: string, recipientEmail?: string):
 }
 
 export function editRecommendation(
-  projectId: string,
+  recommendationId: string,
   data: { subject?: string; body?: string; recipient_email?: string }
 ): Promise<RecommendationDraftResponse> {
-  return api.put<RecommendationDraftResponse>(`/broker/projects/${projectId}/recommendation-draft`, data)
+  return api.put<RecommendationDraftResponse>(`/broker/recommendations/${recommendationId}`, data)
 }
 
-export function sendRecommendation(projectId: string): Promise<{ status: string; sent_at: string; document_id: string }> {
-  return api.post<{ status: string; sent_at: string; document_id: string }>(`/broker/projects/${projectId}/approve-send-recommendation`)
+export function sendRecommendation(recommendationId: string): Promise<{ status: string; sent_at: string; document_id: string }> {
+  return api.post<{ status: string; sent_at: string; document_id: string }>(`/broker/recommendations/${recommendationId}/approve-send`)
 }
 
 export function approveProject(projectId: string): Promise<BrokerProjectDetail> {

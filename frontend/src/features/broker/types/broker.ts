@@ -30,11 +30,6 @@ export interface BrokerProject {
   source_ref: string | null
   notes: string | null
   metadata: Record<string, unknown> | null
-  recommendation_subject: string | null
-  recommendation_body: string | null
-  recommendation_status: 'pending' | 'sent' | null
-  recommendation_sent_at: string | null
-  recommendation_recipient: string | null
   created_at: string
   updated_at: string
 }
@@ -52,6 +47,19 @@ export interface ProjectCoverage {
   is_manual_override: boolean
   source: string
   language: string | null
+  display_name: string | null
+  required_deductible: number | null
+  required_terms: string | null
+  contract_clause: string | null
+  current_carrier: string | null
+  gap_amount: number | null
+  gap_notes: string | null
+  source_excerpt: string | null
+  source_page: number | null
+  source_section: string | null
+  current_policy_number: string | null
+  current_expiry: string | null
+  ai_critical_finding: boolean
 }
 
 export interface BrokerActivity {
@@ -202,15 +210,9 @@ export interface CarrierQuote {
   exclusions: string[]
   conditions: string[]
   endorsements: string[]
-  is_best_price: boolean
-  is_best_coverage: boolean
-  is_recommended: boolean
   has_critical_exclusion: boolean
   critical_exclusion_detail: string | null
   status: string // "pending" | "solicited" | "received" | "extracting" | "extracted" | "selected" | "rejected"
-  draft_subject: string | null
-  draft_body: string | null
-  draft_status: string | null // null | "pending" | "sent" | "review" | "confirmed"
   solicited_at: string | null
   received_at: string | null
   confidence: string | null
@@ -221,6 +223,28 @@ export interface CarrierQuote {
   documents: SolicitationDocument[]
 }
 
+export interface SolicitationDraft {
+  id: string
+  broker_project_id: string
+  carrier_quote_id: string
+  carrier_name: string
+  subject: string
+  body: string
+  status: 'draft' | 'review' | 'approved' | 'sent'
+  sent_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface SolicitationDraftResponse {
+  id: string
+  subject: string
+  body: string
+  status: string
+  carrier_name: string
+  sent_at: string | null
+}
+
 export interface ComparisonQuoteCell {
   quote_id: string
   carrier_name: string
@@ -229,9 +253,6 @@ export interface ComparisonQuoteCell {
   deductible: number | null
   limit_amount: number | null
   coinsurance: number | null
-  is_best_price: boolean
-  is_best_coverage: boolean
-  is_recommended: boolean
   has_critical_exclusion: boolean
   critical_exclusion_detail: string | null
   exclusions: string[]

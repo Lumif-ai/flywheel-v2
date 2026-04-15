@@ -10,18 +10,22 @@ interface DeliveryPanelProps {
   project: BrokerProjectDetail
 }
 
+// TODO(phase-138): Refactor DeliveryPanel to use BrokerRecommendation from /broker/recommendations/
+// Stale fields (recommendation_subject, recommendation_body, etc.) removed from BrokerProject type.
+// This component now uses local state only; full redesign deferred to Phase 138.
+
 export function DeliveryPanel({ project }: DeliveryPanelProps) {
-  const [recipientEmail, setRecipientEmail] = useState(project.recommendation_recipient || '')
-  const [subject, setSubject] = useState(project.recommendation_subject || '')
-  const [body, setBody] = useState(project.recommendation_body || '')
+  const [recipientEmail, setRecipientEmail] = useState('')
+  const [subject, setSubject] = useState('')
+  const [body, setBody] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
 
   const draftMutation = useDraftRecommendation(project.id)
   const editMutation = useEditRecommendation(project.id)
   const sendMutation = useSendRecommendation(project.id)
 
-  // Sync local state when project data updates
-  const status = project.recommendation_status
+  // TODO(phase-138): Load recommendation status from /broker/recommendations/ endpoint
+  const status: 'pending' | 'sent' | null = null
 
   // Check if any quotes are recommended
   const hasRecommendedQuotes = project.coverages.length > 0 // Quotes are on the project, not coverages directly
@@ -39,21 +43,9 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
             Sent
           </Badge>
         </div>
+        {/* TODO(phase-138): Display recommendation details from BrokerRecommendation entity */}
         <div className="text-sm space-y-1 text-muted-foreground">
-          <p>
-            <span className="font-medium text-foreground">To:</span>{' '}
-            {project.recommendation_recipient}
-          </p>
-          <p>
-            <span className="font-medium text-foreground">Subject:</span>{' '}
-            {project.recommendation_subject}
-          </p>
-          {project.recommendation_sent_at && (
-            <p>
-              <span className="font-medium text-foreground">Sent:</span>{' '}
-              {new Date(project.recommendation_sent_at).toLocaleString()}
-            </p>
-          )}
+          <p>Recommendation has been delivered to the client.</p>
         </div>
       </div>
     )
@@ -108,11 +100,15 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
         <div className="flex gap-2">
           <Button
             variant="outline"
+            // TODO(phase-138): Get recommendationId from BrokerRecommendation entity
             onClick={() =>
               editMutation.mutate({
-                subject,
-                body,
-                recipient_email: recipientEmail,
+                recommendationId: project.id,
+                data: {
+                  subject,
+                  body,
+                  recipient_email: recipientEmail,
+                },
               })
             }
             disabled={editMutation.isPending}
@@ -136,7 +132,8 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
               <Button
                 size="sm"
                 onClick={() => {
-                  sendMutation.mutate()
+                  // TODO(phase-138): Use actual recommendationId
+                  sendMutation.mutate(project.id)
                   setShowConfirm(false)
                 }}
                 disabled={sendMutation.isPending}

@@ -3,6 +3,13 @@ import { EmailApproval } from './EmailApproval'
 import { PortalSubmission } from './PortalSubmission'
 import { CheckCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
+import type { CarrierQuote } from '../types/broker'
+
+// TODO(phase-138): Migrate to SolicitationDraft data
+type QuoteWithLegacyDraft = CarrierQuote & {
+  draft_subject?: string | null
+  draft_status?: string | null
+}
 
 interface SolicitationPanelProps {
   projectId: string
@@ -22,15 +29,15 @@ export function SolicitationPanel({ projectId }: SolicitationPanelProps) {
 
   if (!quotes || quotes.length === 0) return null
 
-  const emailQuotes = quotes.filter((q) => q.draft_subject != null)
+  const emailQuotes = quotes.filter((q) => (q as QuoteWithLegacyDraft).draft_subject != null)
   const portalQuotes = quotes.filter(
-    (q) => q.draft_subject == null && q.carrier_config_id != null
+    (q) => (q as QuoteWithLegacyDraft).draft_subject == null && q.carrier_config_id != null
   )
 
   const totalCarriers = emailQuotes.length + portalQuotes.length
   const solicitedCount =
-    emailQuotes.filter((q) => q.draft_status === 'sent').length +
-    portalQuotes.filter((q) => q.draft_status === 'confirmed').length
+    emailQuotes.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'sent').length +
+    portalQuotes.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'confirmed').length
 
   const allDone = totalCarriers > 0 && solicitedCount === totalCarriers
 

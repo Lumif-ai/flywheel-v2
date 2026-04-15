@@ -46,8 +46,8 @@ export function useApproveSend(projectId: string) {
 export function useEditDraft(projectId: string) {
   const qc = useQueryClient()
   return useMutation({
-    mutationFn: ({ quoteId, payload }: { quoteId: string; payload: { draft_subject?: string; draft_body?: string } }) =>
-      editSolicitationDraft(quoteId, payload),
+    mutationFn: ({ draftId, payload }: { draftId: string; payload: { subject?: string; body?: string } }) =>
+      editSolicitationDraft(draftId, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
     },

@@ -7,17 +7,27 @@ import { useProjectQuotes } from '../hooks/useSolicitations'
 import { useApproveSend, useEditDraft } from '../hooks/useSolicitations'
 import type { CarrierQuote } from '../types/broker'
 
+// TODO(phase-138): Migrate to SolicitationDraft data instead of reading draft fields from CarrierQuote
+// During transition, backend still sends draft_subject/draft_body/draft_status on quote objects.
+// Access via metadata_ to avoid TS errors after field removal from type.
+type QuoteWithLegacyDraft = CarrierQuote & {
+  draft_subject?: string | null
+  draft_body?: string | null
+  draft_status?: string | null
+}
+
 interface EmailApprovalProps {
   projectId: string
 }
 
 function DraftCard({
-  quote,
+  quote: rawQuote,
   projectId,
 }: {
   quote: CarrierQuote
   projectId: string
 }) {
+  const quote = rawQuote as QuoteWithLegacyDraft
   const [editing, setEditing] = useState(false)
   const [subject, setSubject] = useState(quote.draft_subject || '')
   const [body, setBody] = useState(quote.draft_body || '')
@@ -26,7 +36,7 @@ function DraftCard({
 
   function handleSave() {
     editDraft.mutate(
-      { quoteId: quote.id, payload: { draft_subject: subject, draft_body: body } },
+      { draftId: quote.id, payload: { subject, body } },
       { onSuccess: () => setEditing(false) }
     )
   }
@@ -126,8 +136,9 @@ export function EmailApproval({ projectId }: EmailApprovalProps) {
     )
   }
 
-  const emailDrafts = (quotes || []).filter((q) => q.draft_subject != null)
-  const sentCount = emailDrafts.filter((q) => q.draft_status === 'sent').length
+  // TODO(phase-138): Use SolicitationDraft data instead of legacy quote fields
+  const emailDrafts = (quotes || []).filter((q) => (q as QuoteWithLegacyDraft).draft_subject != null)
+  const sentCount = emailDrafts.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'sent').length
 
   if (emailDrafts.length === 0) return null
 

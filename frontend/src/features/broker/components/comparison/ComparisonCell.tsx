@@ -46,8 +46,9 @@ export function ComparisonCell({
   // Insufficient limit
   const insufficient = isInsufficientLimit(cell.limit_amount, requiredLimit)
 
+  // TODO(phase-138): Compute best-price from comparison data
   // Best price highlight
-  const isBest = highlightBest && cell.is_best_price
+  const isBest = highlightBest && (cell as ComparisonQuoteCell & { is_best_price?: boolean }).is_best_price
 
   return (
     <td
