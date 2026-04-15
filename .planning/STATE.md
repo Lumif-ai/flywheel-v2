@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v19.0 Broker Redesign
 Phase: 138 of 139 (Workflow Frontend B)
-Plan: 3 of 4 in current phase
-Status: Plan 138-03 complete — QuoteTracking redesigned with QUOT-01 through QUOT-05 (received/pending badges, carrier_type badge+premium, expandable rows, single RunInClaudeCodeButton, completion card)
-Last activity: 2026-04-15 -- Completed 138-03: QuoteTracking redesigned, QUOT-01 through QUOT-05 satisfied (3380eda)
+Plan: 4 of 4 in current phase
+Status: Plan 138-04 complete — GET recommendations endpoint, DeliveryPanel with live status + premium breakdown, PortalSubmission migrated to SolicitationDraft with RunInClaudeCodeButton (PORT-01, PORT-02, DELV-01, DELV-02)
+Last activity: 2026-04-15 -- Completed 138-04: recommendations endpoint, DeliveryPanel live status + premium breakdown, PortalSubmission SolicitationDraft migration (0625b69)
 
-Progress: [███████░░░] 61% (14/23 plans)
+Progress: [███████░░░] 65% (15/23 plans)
 
 ## Performance Metrics
 
@@ -105,6 +105,10 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 138-02]: useApproveSend invalidates solicitation-drafts queryKey alongside project-quotes and broker-project
 - [Phase 138-03]: expandedQuoteId state lifted to QuoteTracking parent — allows single expansion at a time; per-row state would allow multi-expand
 - [Phase 138-03]: allExtracted uses received+extracted statuses (not extracted-only) per QUOT-05 spec semantics
+- [Phase 138-04]: useProjectRecommendation uses select: (data) => data.items[0] ?? null — exposes single recommendation, hides pagination from callers
+- [Phase 138-04]: Premium breakdown computed client-side from useBrokerQuotes extracted quotes — no new backend aggregation endpoint needed
+- [Phase 138-04]: PortalSubmission joins SolicitationDraft + CarrierMatch in frontend via portalUrlMap (carrier_name key) — no backend join needed
+- [Phase 138-04]: metadata_? added as optional typed field to SolicitationDraft for screenshot_url type-safe access in portal review state
 
 ### Pending Todos
 
@@ -119,5 +123,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 138-02-PLAN.md (EmailApproval + SolicitationPanel SolicitationDraft migration — EMAIL-01 through EMAIL-04 satisfied)
+Stopped at: Completed 138-04-PLAN.md (GET recommendations endpoint, DeliveryPanel live status + premium breakdown, PortalSubmission SolicitationDraft migration — PORT-01, PORT-02, DELV-01, DELV-02 satisfied)
 Resume file: None

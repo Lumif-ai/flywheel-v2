@@ -1,14 +1,5 @@
 import type { ICellRendererParams } from 'ag-grid-community'
-
-const PALETTE = ['#E94D35', '#3B82F6', '#22C55E', '#F97316', '#A855F7', '#14B8A6', '#6366F1']
-
-function hashCode(str: string): number {
-  let hash = 0
-  for (let i = 0; i < str.length; i++) {
-    hash = str.charCodeAt(i) + ((hash << 5) - hash)
-  }
-  return Math.abs(hash)
-}
+import { getCarrierColor, getInitials } from '@/features/broker/utils/carrierColorUtils'
 
 export function CarrierCell(props: ICellRendererParams) {
   const { value } = props
@@ -22,19 +13,28 @@ export function CarrierCell(props: ICellRendererParams) {
   }
 
   const name = String(value)
-  const dotColor = PALETTE[hashCode(name) % PALETTE.length]
+  const bg = getCarrierColor(name)
 
   return (
     <div className="flex items-center h-full" style={{ gap: '8px' }}>
       <span
         style={{
-          width: '8px',
-          height: '8px',
+          width: '28px',
+          height: '28px',
           borderRadius: '9999px',
-          backgroundColor: dotColor,
+          backgroundColor: bg,
+          color: 'white',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: '10px',
+          fontWeight: 600,
           flexShrink: 0,
+          letterSpacing: '0.02em',
         }}
-      />
+      >
+        {getInitials(name)}
+      </span>
       <span>{name}</span>
     </div>
   )
