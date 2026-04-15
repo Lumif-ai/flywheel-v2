@@ -1,4 +1,4 @@
-import { Download } from 'lucide-react'
+import { Download, Monitor, FileText } from 'lucide-react'
 
 interface ComparisonToolbarProps {
   showDifferencesOnly: boolean
@@ -7,6 +7,8 @@ interface ComparisonToolbarProps {
   onToggleHighlight: () => void
   onExport: () => void
   isExporting: boolean
+  viewMode: 'interactive' | 'pdf'
+  onViewModeChange: (mode: 'interactive' | 'pdf') => void
 }
 
 function Toggle({
@@ -40,6 +42,43 @@ function Toggle({
   )
 }
 
+function ViewModeToggle({
+  viewMode,
+  onViewModeChange,
+}: {
+  viewMode: 'interactive' | 'pdf'
+  onViewModeChange: (mode: 'interactive' | 'pdf') => void
+}) {
+  return (
+    <div className="flex items-center rounded-lg border border-gray-200 overflow-hidden">
+      <button
+        type="button"
+        onClick={() => onViewModeChange('interactive')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
+          viewMode === 'interactive'
+            ? 'bg-gray-900 text-white'
+            : 'bg-white text-gray-600 hover:bg-gray-50'
+        }`}
+      >
+        <Monitor className="h-3.5 w-3.5" />
+        Interactive
+      </button>
+      <button
+        type="button"
+        onClick={() => onViewModeChange('pdf')}
+        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium transition-colors ${
+          viewMode === 'pdf'
+            ? 'bg-gray-900 text-white'
+            : 'bg-white text-gray-600 hover:bg-gray-50'
+        }`}
+      >
+        <FileText className="h-3.5 w-3.5" />
+        PDF
+      </button>
+    </div>
+  )
+}
+
 export function ComparisonToolbar({
   showDifferencesOnly,
   onToggleDifferences,
@@ -47,6 +86,8 @@ export function ComparisonToolbar({
   onToggleHighlight,
   onExport,
   isExporting,
+  viewMode,
+  onViewModeChange,
 }: ComparisonToolbarProps) {
   return (
     <div className="flex items-center justify-between py-2">
@@ -62,15 +103,30 @@ export function ComparisonToolbar({
           label="Highlight best values"
         />
       </div>
-      <button
-        type="button"
-        onClick={onExport}
-        disabled={isExporting}
-        className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-      >
-        <Download className="h-4 w-4" />
-        {isExporting ? 'Exporting...' : 'Export Excel'}
-      </button>
+      <div className="flex items-center gap-3">
+        <ViewModeToggle viewMode={viewMode} onViewModeChange={onViewModeChange} />
+        {viewMode === 'interactive' && (
+          <button
+            type="button"
+            onClick={onExport}
+            disabled={isExporting}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            <Download className="h-4 w-4" />
+            {isExporting ? 'Exporting...' : 'Export Excel'}
+          </button>
+        )}
+        {viewMode === 'pdf' && (
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="inline-flex items-center gap-2 px-4 py-2 bg-gray-700 text-white text-sm font-medium rounded-lg hover:bg-gray-800 transition-colors"
+          >
+            <FileText className="h-4 w-4" />
+            Print
+          </button>
+        )}
+      </div>
     </div>
   )
 }

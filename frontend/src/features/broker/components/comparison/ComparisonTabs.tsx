@@ -15,15 +15,17 @@ interface ComparisonTabsProps {
   onToggleCarrier: (name: string) => void
   showDifferencesOnly: boolean
   highlightBest: boolean
+  viewMode?: 'interactive' | 'pdf'
 }
 
 export function ComparisonTabs({
   coverages,
   currency,
   selectedCarriers,
-  onToggleCarrier,
+  onToggleCarrier: _onToggleCarrier,
   showDifferencesOnly,
   highlightBest,
+  viewMode = 'interactive',
 }: ComparisonTabsProps) {
   const insuranceCoverages = useMemo(() => {
     const insurance = coverages.filter((c) =>
@@ -75,6 +77,7 @@ export function ComparisonTabs({
           currency={currency}
           selectedCarriers={selectedCarriers}
           highlightBest={highlightBest}
+          viewMode={viewMode}
         />
       </TabsContent>
 
@@ -85,6 +88,7 @@ export function ComparisonTabs({
             currency={currency}
             selectedCarriers={selectedCarriers}
             highlightBest={highlightBest}
+            viewMode={viewMode}
           />
         </TabsContent>
       )}

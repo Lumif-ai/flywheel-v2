@@ -16,6 +16,7 @@ import type {
   CreateCarrierPayload,
   CreateClientContactPayload,
   CreateClientPayload,
+  CreateProjectPayload,
   DashboardStats,
   DashboardTasksResponse,
   DraftSolicitationsResponse,
