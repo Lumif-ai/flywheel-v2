@@ -6,6 +6,7 @@ import { ChevronRight, ChevronDown } from 'lucide-react'
 import { gridTheme } from '@/shared/grid/theme'
 import type { ComparisonCoverage, ComparisonQuoteCell } from '../../types/broker'
 import { INSURANCE_CATEGORIES, SURETY_CATEGORIES } from './comparison-utils'
+import { CarrierLogoByName } from '../carrier-logos'
 
 interface ComparisonGridProps {
   coverages: ComparisonCoverage[]
@@ -15,17 +16,18 @@ interface ComparisonGridProps {
   viewMode?: 'interactive' | 'pdf'
 }
 
-// ---- Carrier header with optional Recommended badge ----
+// ---- Carrier header with logo + optional Recommended badge ----
 function CarrierHeaderWithBadge(props: IHeaderParams & { isRecommended?: boolean }) {
   return (
     <div className="flex items-center gap-2 h-full">
+      <CarrierLogoByName name={props.displayName ?? ''} size={22} />
       <span>{props.displayName}</span>
       {props.isRecommended && (
         <span
           className="text-xs font-medium px-2 py-0.5 rounded-full shrink-0"
           style={{ background: '#E94D35', color: 'white' }}
         >
-          Recommended
+          AI Pick
         </span>
       )}
     </div>
@@ -104,17 +106,40 @@ function CarrierCellRenderer(props: ICellRendererParams) {
   const isCritical = cell.has_critical_exclusion
   const isRec = cell.is_recommended
 
+  // Color-coded cell backgrounds based on coverage status
+  let cellBg = ''
+  let cellBorder = ''
+  if (isCritical) {
+    cellBg = 'rgba(239,68,68,0.08)'
+    cellBorder = '2px solid rgba(239,68,68,0.6)'
+  } else if (cell.exclusions && cell.exclusions.length > 0) {
+    cellBg = 'rgba(245,158,11,0.08)'
+  } else if (isRec || cell.is_best_price) {
+    cellBg = 'rgba(34,197,94,0.08)'
+  } else if (cell.premium != null) {
+    // Has data, meets/covered — subtle green
+    cellBg = 'rgba(34,197,94,0.04)'
+  }
+
   return (
     <div
-      className={`h-full flex flex-col justify-center px-1 ${
-        isCritical ? 'bg-red-50' : isRec ? 'bg-green-50' : ''
-      }`}
+      className={`h-full flex flex-col justify-center px-1 ${isCritical ? 'animate-pulse-soft' : ''}`}
+      style={{
+        background: cellBg,
+        border: cellBorder || undefined,
+        borderRadius: cellBorder ? '4px' : undefined,
+      }}
     >
       <div className="font-medium text-sm">{fmt(cell.premium)}</div>
       <div className="text-xs text-muted-foreground">
         {cell.limit_amount != null ? fmt(cell.limit_amount) : ''}
         {cell.deductible != null ? ` / Ded: ${fmt(cell.deductible)}` : ''}
       </div>
+      {isCritical && cell.critical_exclusion_detail && (
+        <div className="text-xs text-red-600 truncate" title={cell.critical_exclusion_detail}>
+          {cell.critical_exclusion_detail}
+        </div>
+      )}
     </div>
   )
 }
@@ -172,13 +197,14 @@ function PdfPrintView({
                 style={c === recommendedCarrier ? { borderLeft: '3px solid #E94D35' } : undefined}
               >
                 <div className="flex items-center gap-2">
+                  <CarrierLogoByName name={c} size={20} />
                   {c}
                   {c === recommendedCarrier && (
                     <span
                       className="text-xs font-medium px-2 py-0.5 rounded-full"
                       style={{ background: '#E94D35', color: 'white' }}
                     >
-                      Recommended
+                      AI Pick
                     </span>
                   )}
                 </div>

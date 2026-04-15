@@ -12,6 +12,7 @@ import { CoverageTab } from './tabs/CoverageTab'
 import { CarriersTab } from './tabs/CarriersTab'
 import { QuotesTab } from './tabs/QuotesTab'
 import { CompareTab } from './tabs/CompareTab'
+import { DeliveryTab } from './tabs/DeliveryTab'
 
 const TAB_CONFIG = [
   { key: 'overview', label: 'Overview' },
@@ -20,6 +21,7 @@ const TAB_CONFIG = [
   { key: 'carriers', label: 'Carriers' },
   { key: 'quotes', label: 'Quotes' },
   { key: 'compare', label: 'Compare' },
+  { key: 'delivery', label: 'Delivery' },
 ] as const
 
 type TabKey = (typeof TAB_CONFIG)[number]['key']
@@ -95,6 +97,9 @@ export function BrokerProjectDetail() {
           <TabsContent value="compare">
             <CompareTab projectId={project.id} />
           </TabsContent>
+          <TabsContent value="delivery">
+            <DeliveryTab projectId={project.id} />
+          </TabsContent>
         </div>
       </Tabs>
     </div>
@@ -113,7 +118,7 @@ function DetailSkeleton() {
       </div>
       {/* Step indicator skeleton */}
       <div className="flex items-center gap-4">
-        {Array.from({ length: 6 }).map((_, i) => (
+        {Array.from({ length: 7 }).map((_, i) => (
           <div key={i} className="flex flex-col items-center gap-1">
             <Skeleton className="h-3 w-3 rounded-full" />
             <Skeleton className="h-3 w-12" />
@@ -122,7 +127,7 @@ function DetailSkeleton() {
       </div>
       {/* Tab bar skeleton */}
       <div className="flex gap-4 border-b pb-2">
-        {Array.from({ length: 6 }).map((_, i) => (
+        {Array.from({ length: 7 }).map((_, i) => (
           <Skeleton key={i} className="h-5 w-16" />
         ))}
       </div>

@@ -94,8 +94,10 @@ export function ComparisonView({ data, currency, projectId }: ComparisonViewProp
       <div className="flex flex-col items-center justify-center py-16 text-center">
         <BarChart3 className="h-10 w-10 text-muted-foreground mb-3" />
         <h3 className="text-lg font-medium">No quotes to compare yet</h3>
-        <p className="text-sm text-muted-foreground mt-1">
-          Add carriers and upload quotes to see the comparison matrix.
+        <p className="text-sm text-muted-foreground mt-1 max-w-md">
+          Upload carrier quote PDFs in the Quotes tab and extract them.
+          Once at least two carriers have extracted quotes, the comparison matrix will appear here
+          with color-coded coverage analysis.
         </p>
       </div>
     )

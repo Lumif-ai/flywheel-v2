@@ -13,6 +13,7 @@ const WORKFLOW_STEPS = [
   { key: 'carriers', label: 'Carriers', tab: 'carriers' },
   { key: 'quotes', label: 'Quotes', tab: 'quotes' },
   { key: 'compare', label: 'Compare', tab: 'compare' },
+  { key: 'delivery', label: 'Delivery', tab: 'delivery' },
 ] as const
 
 type StepState = 'grey' | 'amber' | 'green'
@@ -72,6 +73,11 @@ function getStepState(
       )
         return 'green'
       if (projectStatus === 'quotes_complete') return 'amber'
+      return 'grey'
+
+    case 'delivery':
+      if (projectStatus === 'delivered' || projectStatus === 'bound') return 'green'
+      if (projectStatus === 'recommended') return 'amber'
       return 'grey'
 
     default:
