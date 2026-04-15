@@ -3,6 +3,7 @@ import { FileSearch, CheckCircle, Download, Clock, CheckCircle2 } from 'lucide-r
 import { Button } from '@/components/ui/button'
 import { useDashboardTasks } from '../hooks/useDashboardTasks'
 import type { DashboardTask } from '../types/broker'
+import { CarrierBadge } from './CarrierBadge'
 
 const TASK_CONFIG: Record<
   DashboardTask['type'],
@@ -79,14 +80,14 @@ export function TaskList() {
                 <div className="min-w-0">
                   <p className="text-sm text-foreground truncate">{task.message}</p>
                   {task.type === 'followup' && task.carrier_name && (
-                    <p className="text-xs text-muted-foreground mt-0.5">
-                      {task.carrier_name}
+                    <div className="text-xs text-muted-foreground mt-0.5 flex items-center gap-1">
+                      <CarrierBadge name={task.carrier_name} size={20} />
                       {task.days_overdue != null && task.days_overdue > 0 && (
                         <span className="ml-1 text-amber-600">
                           ({task.days_overdue}d overdue)
                         </span>
                       )}
-                    </p>
+                    </div>
                   )}
                 </div>
               </div>

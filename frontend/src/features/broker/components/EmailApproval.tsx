@@ -7,6 +7,7 @@ import { useApproveSend, useEditDraft } from '../hooks/useSolicitations'
 import { useSolicitationDrafts } from '../hooks/useSolicitationDrafts'
 import { useCarrierMatches } from '../hooks/useCarrierMatches'
 import type { SolicitationDraft } from '../types/broker'
+import { CarrierBadge } from './CarrierBadge'
 
 interface EmailApprovalProps {
   projectId: string
@@ -40,7 +41,7 @@ function DraftCard({
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-green-600" />
-            <span className="font-medium">{draft.carrier_name}</span>
+            <CarrierBadge name={draft.carrier_name} />
           </div>
           <Badge variant="outline" className="bg-green-50 text-green-700 border-0 text-xs">
             Sent
@@ -58,7 +59,7 @@ function DraftCard({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Mail className="h-4 w-4 text-blue-500" />
-          <span className="font-medium">{draft.carrier_name}</span>
+          <CarrierBadge name={draft.carrier_name} />
         </div>
         <Badge variant="outline" className="text-xs">
           {draft.status || 'pending'}

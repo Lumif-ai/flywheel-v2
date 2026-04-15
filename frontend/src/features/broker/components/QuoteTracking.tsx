@@ -12,6 +12,7 @@ import {
 } from '../hooks/useBrokerQuotes'
 import type { CarrierQuote, ManualQuotePayload } from '../types/broker'
 import { RunInClaudeCodeButton } from './shared/RunInClaudeCodeButton'
+import { CarrierBadge } from './CarrierBadge'
 
 interface QuoteTrackingProps {
   projectId: string
@@ -155,7 +156,7 @@ function QuoteRow({ quote, projectId, isExpanded, onToggleExpand }: QuoteRowProp
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2 flex-wrap">
           <StatusIcon status={displayStatus} />
-          <span className="font-medium text-sm">{quote.carrier_name}</span>
+          <CarrierBadge name={quote.carrier_name} className="font-medium text-sm" />
           {/* QUOT-02: carrier_type badge */}
           <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${
             quote.carrier_type === 'insurance'

@@ -1,3 +1,5 @@
+import { CarrierBadge } from '../CarrierBadge'
+
 interface CarrierColumnHeaderProps {
   carrier: { name: string; carrier_config_id: string | null }
   checked: boolean
@@ -21,9 +23,9 @@ export function CarrierColumnHeader({
           onChange={() => onToggle(carrier.name)}
           className="h-4 w-4 rounded border-gray-300 accent-blue-600"
         />
-        <span className="text-sm font-medium truncate max-w-[140px]" title={carrier.name}>
-          {carrier.name}
-        </span>
+        <div title={carrier.name}>
+          <CarrierBadge name={carrier.name} size={22} className="text-sm font-medium" />
+        </div>
       </div>
     </th>
   )

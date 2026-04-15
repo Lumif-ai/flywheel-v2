@@ -3,6 +3,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { AlertTriangle } from 'lucide-react'
 import { useComparison } from '../hooks/useBrokerQuotes'
 import type { ComparisonQuoteCell, ComparisonCoverage } from '../types/broker'
+import { CarrierBadge } from './CarrierBadge'
 
 interface ComparisonMatrixProps {
   projectId: string
@@ -164,8 +165,8 @@ export function ComparisonMatrix({ projectId, currency = 'MXN' }: ComparisonMatr
             <tr className="bg-gray-50 border-b">
               <th className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase">Coverage</th>
               {carriers.map((name) => (
-                <th key={name} className="px-3 py-2 text-xs font-medium text-muted-foreground uppercase">
-                  {name}
+                <th key={name} className="px-3 py-2 text-xs font-medium text-muted-foreground">
+                  <CarrierBadge name={name} size={20} />
                 </th>
               ))}
             </tr>

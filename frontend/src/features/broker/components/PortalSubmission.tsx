@@ -6,6 +6,7 @@ import { useCarrierMatches } from '../hooks/useCarrierMatches'
 import { useConfirmPortal } from '../hooks/useSolicitations'
 import { RunInClaudeCodeButton } from './shared/RunInClaudeCodeButton'
 import type { SolicitationDraft } from '../types/broker'
+import { CarrierBadge } from './CarrierBadge'
 
 interface PortalSubmissionProps {
   projectId: string
@@ -28,7 +29,7 @@ function PortalCard({ draft, portalUrl, carrierConfigId, projectId, onConfirm, i
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-green-600" />
-            <span className="font-medium">{draft.carrier_name}</span>
+            <CarrierBadge name={draft.carrier_name} size={20} />
           </div>
           <Badge variant="outline" className="bg-green-50 text-green-700 border-0 text-xs">
             Confirmed
@@ -49,7 +50,7 @@ function PortalCard({ draft, portalUrl, carrierConfigId, projectId, onConfirm, i
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Globe className="h-4 w-4 text-purple-500" />
-            <span className="font-medium">{draft.carrier_name}</span>
+            <CarrierBadge name={draft.carrier_name} size={20} />
           </div>
           <Badge variant="outline" className="text-xs">Review</Badge>
         </div>
@@ -86,7 +87,7 @@ function PortalCard({ draft, portalUrl, carrierConfigId, projectId, onConfirm, i
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
-          <span className="font-medium">{draft.carrier_name}</span>
+          <CarrierBadge name={draft.carrier_name} size={20} />
           {portalUrl && (
             <a
               href={portalUrl}

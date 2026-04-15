@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Milestone: v19.0 Broker Redesign
-Phase: 138 of 139 (Workflow Frontend B)
-Plan: 4 of 4 in current phase
-Status: Plan 138-04 complete — GET recommendations endpoint, DeliveryPanel with live status + premium breakdown, PortalSubmission migrated to SolicitationDraft with RunInClaudeCodeButton (PORT-01, PORT-02, DELV-01, DELV-02)
-Last activity: 2026-04-15 -- Completed 138-04: recommendations endpoint, DeliveryPanel live status + premium breakdown, PortalSubmission SolicitationDraft migration (0625b69)
+Phase: 139 of 139 (Polish)
+Plan: 1 of 2 in current phase
+Status: Plan 139-01 complete — 4 CSS animation keyframes added, CarrierCell upgraded to 28px initials circle, carrierColorUtils extracted
+Last activity: 2026-04-15 -- Completed 139-01: CSS animations + CarrierCell initials circle + carrierColorUtils extraction (0a709bc)
 
-Progress: [███████░░░] 65% (15/23 plans)
+Progress: [████████░░] 70% (16/23 plans)
 
 ## Performance Metrics
 
@@ -109,6 +109,7 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 138-04]: Premium breakdown computed client-side from useBrokerQuotes extracted quotes — no new backend aggregation endpoint needed
 - [Phase 138-04]: PortalSubmission joins SolicitationDraft + CarrierMatch in frontend via portalUrlMap (carrier_name key) — no backend join needed
 - [Phase 138-04]: metadata_? added as optional typed field to SolicitationDraft for screenshot_url type-safe access in portal review state
+- [Phase 139-01]: carrierColorUtils.ts is single source of truth for carrier color mapping — CarrierBadge (plan 02) imports from same file
 
 ### Pending Todos
 
@@ -123,5 +124,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 138-04-PLAN.md (GET recommendations endpoint, DeliveryPanel live status + premium breakdown, PortalSubmission SolicitationDraft migration — PORT-01, PORT-02, DELV-01, DELV-02 satisfied)
+Stopped at: Completed 139-01-PLAN.md (4 CSS animation keyframes, CarrierCell 28px initials circle, carrierColorUtils.ts extraction)
 Resume file: None
