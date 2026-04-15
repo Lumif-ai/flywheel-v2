@@ -248,3 +248,20 @@ export function updateCarrierContact(carrierId: string, contactId: string, paylo
 export function deleteCarrierContact(carrierId: string, contactId: string): Promise<void> {
   return api.delete(`/broker/carriers/${carrierId}/contacts/${contactId}`)
 }
+
+export async function uploadProjectDocuments(
+  projectId: string,
+  files: File[]
+): Promise<{ documents: unknown[]; total: number }> {
+  const token = useAuthStore.getState().token
+  const formData = new FormData()
+  files.forEach((f) => formData.append('files', f))
+  const res = await fetch(`/api/v1/broker/projects/${projectId}/documents`, {
+    method: 'POST',
+    headers: token ? { Authorization: `Bearer ${token}` } : {},
+    // DO NOT set Content-Type — browser sets multipart/form-data boundary automatically
+    body: formData,
+  })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}

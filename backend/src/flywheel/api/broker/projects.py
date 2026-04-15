@@ -64,7 +64,17 @@ projects_router = APIRouter(tags=["broker"])
 
 # Max file size for document upload (25 MB)
 _MAX_DOC_SIZE = 25 * 1024 * 1024
-_ALLOWED_DOC_TYPES = {"application/pdf", "image/png", "image/jpeg"}
+_ALLOWED_DOC_TYPES = {
+    "application/pdf",
+    "image/png",
+    "image/jpeg",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "text/csv",
+}
 _UPLOADS_BUCKET = "uploads"
 _NEEDS_ACTION_STATUSES = ("new_request", "analysis_failed", "gaps_identified")
 
