@@ -22,20 +22,19 @@ export function ProjectHeader({ project }: ProjectHeaderProps) {
 
   return (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2">
         <Button
           variant="ghost"
           size="icon"
+          className="h-8 w-8"
           onClick={() => navigate('/broker/projects')}
         >
           <ArrowLeft className="h-4 w-4" />
         </Button>
-        <div>
-          <h1 className="text-2xl font-semibold">{project.name}</h1>
-          <p className="text-sm text-muted-foreground">
-            {project.project_type || 'General'}
-          </p>
-        </div>
+        <h1 className="text-lg font-semibold leading-none">{project.name}</h1>
+        <span className="text-sm text-muted-foreground">
+          {project.project_type || 'General'}
+        </span>
         <StatusBadge status={project.status} />
       </div>
       <div className="flex items-center gap-3">
