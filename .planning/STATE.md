@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Milestone: v19.0 Broker Redesign
-Phase: 135 of 139 (AI Skills)
-Plan: 4 of 4 in current phase
-Status: Plan 135-04 complete — Phase 135 DONE
-Last activity: 2026-04-15 -- Completed 135-04 pipeline skills + router v1.1 update
+Phase: 136 of 139 (High Impact Frontend)
+Plan: 1 of 5 in current phase
+Status: Plan 136-01 complete — dashboard KPI cards + pipeline enhancements
+Last activity: 2026-04-15 -- Completed 136-01 broker dashboard MetricCards + pipeline grid
 
-Progress: [███░░░░░░░] 35% (8/23 plans)
+Progress: [████░░░░░░] 39% (9/23 plans)
 
 ## Performance Metrics
 
@@ -74,6 +74,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 135-04]: process-project deactivates BROKER_PIPELINE_MODE before draft-emails so audit hooks fire on email writes
 - [Phase 135-04]: compare-quotes runs inline GET /comparison (not a separate step skill) — read-only synthesis
 - [Phase 135-04]: /broker:analyze-gaps alias kept in router for backward compat with Phase 134 stub
+- [Phase 136-01]: filterAttention state managed in BrokerDashboard (not grid) — passes computed status string to useBrokerProjects, keeps ProjectPipelineGrid a dumb display component
+- [Phase 136-01]: Days Since Update uses valueGetter computing from updated_at — no new DB column needed
+- [Phase 136-01]: MetricCard accent=true adds 3px coral left border; Needs Attention badge resets offset to 0 on toggle
 
 ### Pending Todos
 
@@ -88,5 +91,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 135-04-PLAN.md (pipeline skills + router v1.1 — Phase 135 complete)
+Stopped at: Completed 136-01-PLAN.md (dashboard KPI cards, pipeline grid enhancements)
 Resume file: None
