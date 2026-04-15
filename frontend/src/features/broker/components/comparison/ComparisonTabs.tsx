@@ -74,8 +74,6 @@ export function ComparisonTabs({
           coverages={insuranceCoverages}
           currency={currency}
           selectedCarriers={selectedCarriers}
-          onToggleCarrier={onToggleCarrier}
-          showDifferencesOnly={showDifferencesOnly}
           highlightBest={highlightBest}
         />
       </TabsContent>
@@ -86,8 +84,6 @@ export function ComparisonTabs({
             coverages={suretyCoverages}
             currency={currency}
             selectedCarriers={selectedCarriers}
-            onToggleCarrier={onToggleCarrier}
-            showDifferencesOnly={showDifferencesOnly}
             highlightBest={highlightBest}
           />
         </TabsContent>

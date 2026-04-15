@@ -4,14 +4,6 @@ import { AlertTriangle } from 'lucide-react'
 import { useComparison } from '../hooks/useBrokerQuotes'
 import type { ComparisonQuoteCell, ComparisonCoverage } from '../types/broker'
 
-// TODO(phase-138): Compute is_best_price/is_best_coverage/is_recommended from comparison data
-// During transition, backend still sends these fields on quote cells.
-type CellWithLegacyFlags = ComparisonQuoteCell & {
-  is_best_price?: boolean
-  is_best_coverage?: boolean
-  is_recommended?: boolean
-}
-
 interface ComparisonMatrixProps {
   projectId: string
   currency?: string
@@ -27,17 +19,16 @@ function formatCurrency(value: number | null, currency: string): string {
 }
 
 function getCellStyles(cell: ComparisonQuoteCell, requiredLimit: number | null): string {
-  const c = cell as CellWithLegacyFlags
   if (cell.has_critical_exclusion) {
     return 'bg-red-50 border-l-4 border-red-500'
   }
-  if (c.is_recommended) {
+  if (cell.is_recommended) {
     return 'bg-green-50 border-l-4 border-green-500'
   }
-  if (c.is_best_price) {
+  if (cell.is_best_price) {
     return 'bg-green-50'
   }
-  if (c.is_best_coverage) {
+  if (cell.is_best_coverage) {
     return 'bg-blue-50'
   }
   if (requiredLimit && cell.limit_amount && cell.limit_amount < requiredLimit) {
@@ -70,13 +61,13 @@ function QuoteCell({ cell, requiredLimit, currency }: { cell: ComparisonQuoteCel
             </span>
           </div>
         )}
-        {(cell as CellWithLegacyFlags).is_recommended && (
+        {cell.is_recommended && (
           <Badge className="text-xs bg-green-100 text-green-700">Recommended</Badge>
         )}
-        {(cell as CellWithLegacyFlags).is_best_price && !(cell as CellWithLegacyFlags).is_recommended && (
+        {cell.is_best_price && !cell.is_recommended && (
           <Badge className="text-xs bg-green-100 text-green-700">Best Price</Badge>
         )}
-        {(cell as CellWithLegacyFlags).is_best_coverage && !(cell as CellWithLegacyFlags).is_recommended && (
+        {cell.is_best_coverage && !cell.is_recommended && (
           <Badge className="text-xs bg-blue-100 text-blue-700">Best Coverage</Badge>
         )}
         {insufficientLimit && (
