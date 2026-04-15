@@ -35,8 +35,8 @@ export function TenantBootstrap({ children }: { children: React.ReactNode }) {
     setTenants(data)
 
     if (!activeTenant) {
-      // No persisted tenant — bootstrap from first in list
-      setActiveTenant(data[0])
+      // Prefer the tenant marked active in the DB, fall back to first
+      setActiveTenant(data.find((t) => t.is_active) ?? data[0])
     } else {
       // Refresh active tenant with latest server data (features/plan may have changed)
       const fresh = data.find((t) => t.id === activeTenant.id)

@@ -69,6 +69,7 @@ export interface Tenant {
   plan: string
   member_limit: number
   features?: Record<string, boolean>
+  is_active?: boolean
 }
 
 export interface User {

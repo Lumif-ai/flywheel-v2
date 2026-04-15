@@ -123,6 +123,7 @@ class TenantListItem(BaseModel):
     plan: str
     member_limit: int
     features: dict = {}
+    is_active: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -141,13 +142,13 @@ async def list_tenants(
     id, name, slug, plan, member_limit.
     """
     result = await db.execute(
-        select(Tenant, UserTenant.role)
+        select(Tenant, UserTenant.role, UserTenant.active)
         .join(UserTenant, UserTenant.tenant_id == Tenant.id)
         .where(UserTenant.user_id == user.sub)
         .where(Tenant.deleted_at.is_(None))
     )
     items = []
-    for tenant, role in result.all():
+    for tenant, role, active in result.all():
         settings = tenant.settings or {}
         features = settings.get("features", {})
         # Derive module-based feature flags
@@ -162,6 +163,7 @@ async def list_tenants(
                 plan=settings.get("plan", "free"),
                 member_limit=settings.get("member_limit", DEFAULT_MEMBER_LIMIT),
                 features=features,
+                is_active=bool(active),
             )
         )
     return items
