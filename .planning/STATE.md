@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v19.0 Broker Redesign
 Phase: 137 of 139 (Workflow Frontend A)
-Plan: 2 of 4 in current phase
-Status: Plan 137-02 complete — Analysis tab with full-width split-pane, DocumentViewer (MSA/Surety sub-tabs, coral/blue highlights), ShimmerSkeleton polling (10s when running)
-Last activity: 2026-04-15 -- Completed 137-01: 2-column OverviewTab, DocumentUploadZone (drag-drop + typed file cards + RunInClaudeCodeButton), expanded MIME types to 9 types (c9d6f0e)
+Plan: 3 of 4 in current phase
+Status: Plan 137-03 complete — RequirementsPanel (stagger cards, ANAL-04 fields, shimmer states), 6-step StepIndicator with Analysis amber/green state machine
+Last activity: 2026-04-15 -- Completed 137-03: RequirementsPanel with 60ms stagger cards, 6-step StepIndicator with Analysis state machine (3659e93)
 
-Progress: [█████░░░░░] 48% (11/23 plans)
+Progress: [██████░░░░] 52% (12/23 plans)
 
 ## Performance Metrics
 
@@ -95,6 +95,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 137-02]: useAnalysisPolling shares queryKey ['broker-project', id] with useBrokerProject — TanStack deduplicates; no double network calls
 - [Phase 137-02]: Full-width bypass uses activeTab conditional rendering (not CSS col-span-3) — sidebar simply not rendered for Analysis tab
 - [Phase 137-02]: AnalysisTab is presentation-only; polling logic fully encapsulated in useAnalysisPolling hook
+- [Phase 137-03]: RequirementsPanel owns all state rendering (running/failed/empty/populated); AnalysisTab right pane is a thin wrapper
+- [Phase 137-03]: 60ms stagger applied via inline animationDelay (not staggerDelay() util which uses 50ms) — spec-mandated value
+- [Phase 137-03]: WORKFLOW_STEPS edited as array literal directly (not .push()) to preserve as const typing
 
 ### Pending Todos
 
@@ -109,5 +112,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 137-02-PLAN.md (Analysis tab shell — ANAL-01 through ANAL-07 satisfied)
+Stopped at: Completed 137-03-PLAN.md (RequirementsPanel wired, StepIndicator 6 steps — ANAL-04 through ANAL-07 satisfied)
 Resume file: None
