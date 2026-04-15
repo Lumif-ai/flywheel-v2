@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v19.0 Broker Redesign
 Phase: 136 of 139 (High Impact Frontend)
-Plan: 3 of 5 in current phase
-Status: Plan 136-03 complete — ag-grid comparison matrix spike, CellWithLegacyFlags removed
-Last activity: 2026-04-15 -- Completed 136-03 comparison matrix spike; checkpoint auto-resolved: approved: ag-grid
+Plan: 4 of 5 in current phase
+Status: Plan 136-04 complete — full comparison matrix (COMP-01–COMP-08): recommended badge, expandable groups, AI Insight, critical alert, partial banner, PDF toggle
+Last activity: 2026-04-15 -- Completed 136-04 comparison matrix full build; all COMP requirements satisfied
 
-Progress: [████░░░░░░] 43% (10/23 plans)
+Progress: [█████░░░░░] 48% (11/23 plans)
 
 ## Performance Metrics
 
@@ -85,6 +85,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 136-03]: ComparisonGrid interface narrowed — removed onToggleCarrier/showDifferencesOnly (HTML-table-specific props); ag-grid renders its own rows
 - [Phase 136-03]: context={{ currency }} on AgGridReact propagates currency to inline cell renderers without colDef prop drilling
 - [Phase 136-03]: CellWithLegacyFlags workaround removed — ComparisonQuoteCell flags are now proper typed optional fields
+- [Phase 136-04]: CarrierCellRenderer unified renderer — checks props.node.rowPinned==='bottom'; pinnedBottomRowCellRenderer prop not in ag-grid-react API
+- [Phase 136-04]: PDF mode uses static PdfPrintView (plain HTML table) — simpler than ag-grid print CSS, consistent recommended-carrier styling
+- [Phase 136-04]: AI Insight card hidden when no is_recommended data available — avoids "Insufficient data" noise for older quotes
 
 ### Pending Todos
 
@@ -99,5 +102,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 136-03-PLAN.md (ag-grid comparison matrix spike — checkpoint auto-resolved as ag-grid)
+Stopped at: Completed 136-04-PLAN.md (full comparison matrix — all COMP-01 through COMP-08 satisfied)
 Resume file: None
