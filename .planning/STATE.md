@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 ## Current Position
 
 Milestone: v19.0 Broker Redesign
-Phase: 137 of 139 (Workflow Frontend A)
+Phase: 138 of 139 (Workflow Frontend B)
 Plan: 3 of 4 in current phase
-Status: Plan 137-03 complete — RequirementsPanel (stagger cards, ANAL-04 fields, shimmer states), 6-step StepIndicator with Analysis amber/green state machine
-Last activity: 2026-04-15 -- Completed 137-03: RequirementsPanel with 60ms stagger cards, 6-step StepIndicator with Analysis state machine (3659e93)
+Status: Plan 138-03 complete — QuoteTracking redesigned with QUOT-01 through QUOT-05 (received/pending badges, carrier_type badge+premium, expandable rows, single RunInClaudeCodeButton, completion card)
+Last activity: 2026-04-15 -- Completed 138-03: QuoteTracking redesigned, QUOT-01 through QUOT-05 satisfied (3380eda)
 
-Progress: [██████░░░░] 52% (12/23 plans)
+Progress: [███████░░░] 61% (14/23 plans)
 
 ## Performance Metrics
 
@@ -98,6 +98,10 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 137-03]: RequirementsPanel owns all state rendering (running/failed/empty/populated); AnalysisTab right pane is a thin wrapper
 - [Phase 137-03]: 60ms stagger applied via inline animationDelay (not staggerDelay() util which uses 50ms) — spec-mandated value
 - [Phase 137-03]: WORKFLOW_STEPS edited as array literal directly (not .push()) to preserve as const typing
+- [Phase 138-workflow-frontend-b]: domLayout=autoHeight for CarrierSelection (short table, not full-page)
+- [Phase 138-workflow-frontend-b]: Routing Rule indicator is presence check on matched_coverages.length (not match_score which is removed per CARR-02)
+- [Phase 138-03]: expandedQuoteId state lifted to QuoteTracking parent — allows single expansion at a time; per-row state would allow multi-expand
+- [Phase 138-03]: allExtracted uses received+extracted statuses (not extracted-only) per QUOT-05 spec semantics
 
 ### Pending Todos
 
@@ -112,5 +116,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 137-03-PLAN.md (RequirementsPanel wired, StepIndicator 6 steps — ANAL-04 through ANAL-07 satisfied)
+Stopped at: Completed 138-03-PLAN.md (QuoteTracking redesigned — QUOT-01 through QUOT-05 satisfied)
 Resume file: None
