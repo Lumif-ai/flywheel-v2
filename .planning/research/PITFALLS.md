@@ -1,246 +1,315 @@
 # Domain Pitfalls
 
-**Domain:** Broker Module Milestone 2 -- Client/contact entities, context store integration, solicitation workflow restructuring, schema migration (6 new tables, 6 modified, 15 columns dropped)
-**Researched:** 2026-04-14
-**Confidence:** HIGH for codebase-specific pitfalls (direct code analysis of broker.py, models.py, gmail_sync.py, solicitation_drafter.py). HIGH for PgBouncer DDL behavior (proven pattern from broker_migration.py). MEDIUM for PostgreSQL CHECK constraint behavior with existing data (verified against PostgreSQL docs).
+**Domain:** Insurance broker frontend redesign + Claude Code skills + hook automation + portal automation
+**Researched:** 2026-04-15
+**Confidence:** HIGH (based on direct codebase analysis of 63 broker files, three spec documents, existing implementation patterns)
 
 ---
 
 ## Critical Pitfalls
 
-Mistakes that cause data loss, silent failures, or require rollbacks.
+Mistakes that cause rewrites or major issues.
 
-### Pitfall 1: PgBouncer Silently Rolls Back Multi-Statement DDL Migrations
+### Pitfall 1: Spec Drift Between Three Documents
 
-**What goes wrong:** Supabase's PgBouncer pooler silently rolls back multi-statement DDL within a single transaction. Alembic wraps all `upgrade()` statements in one transaction. The `alembic_version` row updates successfully (it is the last statement), but all CREATE TABLE / ALTER TABLE / DROP COLUMN statements are rolled back. The migration appears to succeed -- `alembic current` shows the new revision -- but the actual schema is unchanged.
+**What goes wrong:** The redesign spec (SPEC-BROKER-REDESIGN.md) overrides parts of both parent specs (SPEC-BROKER-MVP.md, SPEC-BROKER-FRONTEND-TECHNICAL.md) but not all. Developers consult the wrong spec and build the wrong thing. Example already visible: the redesign spec section 4.9 overrides the comparison matrix from custom `<table>` to ag-grid, contradicting SPEC-BROKER-FRONTEND-TECHNICAL.md section 2.5 which explicitly argues against ag-grid for comparison. Another: redesign adds a 6th tab ("Analysis") changing the step indicator from 5 to 6 steps, but does not repeat the full step indicator spec.
 
-**Why it happens:** PgBouncer in transaction pooling mode assigns connections per-transaction. Multi-statement DDL within a single transaction can exceed PgBouncer's capabilities, causing silent rollback of DDL while allowing the version table update.
+**Why it happens:** Three specs with partial override relationships. The redesign says "this spec is additive" but then overrides 6+ decisions: comparison table technology, carrier selection layout, overview tab layout, step indicator count, API paths, type definitions.
 
-**Consequences:** Application crashes with `UndefinedTable` or `UndefinedColumn` errors at runtime. Since `alembic_version` says the migration ran, running `alembic upgrade head` again does nothing. The developer thinks the migration succeeded. Production data operations fail.
-
-**Prevention:**
-1. Use the established `broker_migration.py` pattern: each DDL statement runs as its own committed transaction via `async with factory() as session: await session.execute(text(...)); await session.commit()`
-2. After all statements succeed, run `alembic stamp <revision>` to sync alembic state
-3. Order statements in FK dependency order: parent tables first, then child tables, then indexes, then constraints
-4. For this milestone, the order must be: `broker_clients` -> `client_contacts` -> `carrier_contacts` -> `solicitation_drafts` -> `context_links` -> `broker_intel` -> ALTER existing tables -> DROP columns -> CREATE indexes
-5. NEVER use Alembic's `upgrade()` directly for DDL changes on Supabase
-
-**Detection:** After running migration, verify with direct SQL: `SELECT column_name FROM information_schema.columns WHERE table_name = 'broker_clients'`. If empty, the migration was silently rolled back.
-
-**Phase:** Must be addressed in the very first phase (schema migration). Every subsequent phase depends on schema being correct.
-
-### Pitfall 2: Dropping carrier_configs.email_address Before Seeding carrier_contacts
-
-**What goes wrong:** The spec calls for moving `email_address` from `carrier_configs` to a new `carrier_contacts` table. If the column is dropped before seeding data into `carrier_contacts`, all carrier email addresses are permanently lost. There are currently 12+ references to `carrier_configs.email_address` across backend (broker.py: 8 refs, gmail_sync.py: 4 refs) and frontend (CarrierForm.tsx: 4 refs, BrokerCarriersPage.tsx: 1 ref, broker.ts types: 4 refs).
-
-**Why it happens:** A developer writes the migration as: create `carrier_contacts` table, drop `email_address` column. This is logically correct but operationally catastrophic -- the seed step is forgotten or fails silently.
-
-**Consequences:** Every carrier loses their email address. Solicitation drafting breaks (`carrier.email_address` returns None). Gmail sync carrier matching breaks (gmail_sync.py line 1130: `CarrierConfig.email_address.isnot(None)` returns no rows). No way to recover without database backup.
+**Consequences:** Components built to wrong spec, discovered during review, rewritten. This is exactly the pattern that produced the v15.0 frontend the user called "terrible."
 
 **Prevention:**
-1. Migration must be THREE separate committed transactions in strict order:
-   - Transaction 1: CREATE `carrier_contacts` table
-   - Transaction 2: INSERT INTO `carrier_contacts` (SELECT from `carrier_configs` WHERE `email_address` IS NOT NULL) -- seed step
-   - Transaction 3: ALTER TABLE `carrier_configs` DROP COLUMN `email_address`
-2. Between Transaction 2 and 3, verify seed count: `SELECT COUNT(*) FROM carrier_contacts` must equal `SELECT COUNT(*) FROM carrier_configs WHERE email_address IS NOT NULL`
-3. Never drop the column in the same phase as creating the table. Create + seed in phase 1, drop in a later phase after all code references are updated.
+1. Before each phase, explicitly list which spec section governs each component being built
+2. When a redesign section says "Updates to SPEC-BROKER-FRONTEND-TECHNICAL.md section X," the redesign is authoritative for that section
+3. Each phase plan must quote the exact spec section being implemented, not paraphrase
+4. Build a reconciliation table in Wave 0 listing every conflict and which spec wins
 
-**Detection:** After migration, run `SELECT COUNT(*) FROM carrier_contacts WHERE contact_type = 'submission_email'`. If 0 but carriers had email addresses, the seed was skipped.
+**Detection:** Component looks different from the demo reference beats in Appendix A. Developer references "the spec" without specifying which one.
 
-**Phase:** Schema migration phase. The seed step must be verified BEFORE the drop step executes.
+**Phase:** Wave 0 (Foundation). Create a reconciliation table before any code is written.
 
-### Pitfall 3: Solicitation Workflow Restructure Breaks CarrierQuote Assumptions
+---
 
-**What goes wrong:** Currently, `draft_solicitations` (broker.py line 1571-1710) creates a `CarrierQuote` row immediately when drafting. The restructure moves quote creation to quote receipt, creating `SolicitationDraft` rows instead during drafting. Any code that assumes "a CarrierQuote exists after solicitation" will break.
+### Pitfall 2: Removing Stale Types Before Building Replacements
 
-**Why it happens:** The current code creates `CarrierQuote` at line 1651-1660 with `status="pending"` and `draft_status="pending"`. Multiple downstream systems depend on this:
-- Task generation (broker.py line 314-316): queries `CarrierQuote.draft_status == "pending"` to generate review tasks
-- Follow-up detection (broker.py line 474-490): queries `CarrierQuote.draft_status == "sent"` and `CarrierQuote.solicited_at` to find overdue solicitations
-- Project status auto-transition (broker.py line 1526-1562): counts CarrierQuotes to determine if all carriers are solicited
-- Send endpoint (broker.py line 1815-1868): looks up `CarrierQuote` by ID to send the email
-- Portal confirm endpoint (broker.py line 1920-1984): updates `CarrierQuote.draft_status` to track portal submission
+**What goes wrong:** The redesign spec says to delete 5 fields from `BrokerProject` (recommendation_*) and 6 fields from `CarrierQuote` (is_best_price, is_best_coverage, is_recommended, draft_subject, draft_body, draft_status). These fields are actively used in existing components. Verified in codebase:
+- `ComparisonView.tsx` and `ComparisonGrid.tsx` use `is_best_price/is_best_coverage/is_recommended` via `ComparisonQuoteCell` type (which already has them correctly)
+- `DeliveryPanel.tsx` reads `recommendation_*` fields from `BrokerProject`
+- `CarrierQuote` type in `broker.ts` lines 205-221 has all 6 fields being removed
+- `EmailApproval.tsx` uses `draft_subject/draft_body` from `CarrierQuote`
 
-**Consequences:** After restructure, the task generation query returns 0 results (no pending CarrierQuotes exist during drafting phase). Follow-up detection stops working. Project status never auto-transitions to "soliciting" because the count logic references CarrierQuotes that do not exist yet.
+**Why it happens:** The redesign correctly identifies that these fields are on the wrong type (they belong on `ComparisonQuoteCell`, `BrokerRecommendation`, and `SolicitationDraft` respectively). But the spec does not account for the strict ordering needed: you must build the replacement data paths before removing the old ones.
 
-**Prevention:**
-1. Map every query that touches `CarrierQuote.draft_status` or `CarrierQuote.solicited_at` -- there are at least 15 references in broker.py
-2. These queries must be rewritten to query `SolicitationDraft` for draft-phase data and `CarrierQuote` for quote-phase data
-3. The project status auto-transition logic (line 1526-1562) must count `SolicitationDraft` rows for "all solicited" checks, not `CarrierQuote` rows
-4. The send endpoint must update `SolicitationDraft.status` (not `CarrierQuote.draft_status`)
-5. Build a compatibility mapping before writing any code:
-   - `CarrierQuote.draft_status = "pending"` -> `SolicitationDraft.status = "pending"`
-   - `CarrierQuote.draft_status = "sent"` -> `SolicitationDraft.status = "sent"`
-   - `CarrierQuote.solicited_at` -> `SolicitationDraft.sent_at`
-   - `CarrierQuote.draft_subject/draft_body` -> `SolicitationDraft.draft_subject/draft_body`
-
-**Detection:** After restructure, create a project, draft solicitations, check the tasks endpoint. If no "review draft" tasks appear, the query was not updated.
-
-**Phase:** Solicitation restructure phase. Must update ALL 15+ CarrierQuote.draft_status references simultaneously. Cannot be done incrementally.
-
-### Pitfall 4: CHECK Constraints Fail on Tables with Existing Data
-
-**What goes wrong:** Adding a CHECK constraint (e.g., `CHECK (analysis_status IN ('pending', 'in_progress', 'completed', 'failed'))`) to `broker_projects` fails if ANY existing row has a value not in the allowed list. The ALTER TABLE statement throws an error and the entire migration transaction rolls back.
-
-**Why it happens:** The codebase uses `analysis_status = "completed"` (contract_analyzer.py line 326), but a CHECK constraint might use `'complete'` (without the 'd'). If any existing row has a value like `'error'`, `'analyzing'`, or any other value not in the CHECK list, the constraint cannot be added.
-
-**Consequences:** Migration fails entirely. On Supabase with PgBouncer, this is especially dangerous because the failure may be silent (see Pitfall 1). The developer sees no error, stamps the migration, and the constraint does not exist.
+**Consequences:** Deleting `draft_subject/draft_body` from `CarrierQuote` without first building `useSolicitationDrafts()` and updating `EmailApproval.tsx` breaks email approval. TypeScript will catch these at compile time, but the fix requires building entire new API integrations.
 
 **Prevention:**
-1. Before adding any CHECK constraint, query existing values: `SELECT DISTINCT analysis_status FROM broker_projects`
-2. Build the CHECK constraint to include ALL existing values, even deprecated ones
-3. For `analysis_status`, verify the actual values in code: `contract_analyzer.py` sets `"completed"` (not `"complete"`). The CHECK must include `'completed'`
-4. Add CHECK constraints as NOT VALID first, then VALIDATE separately:
-   ```sql
-   ALTER TABLE broker_projects ADD CONSTRAINT chk_analysis_status
-     CHECK (analysis_status IN ('pending', 'in_progress', 'completed', 'failed'))
-     NOT VALID;
-   ALTER TABLE broker_projects VALIDATE CONSTRAINT chk_analysis_status;
-   ```
-   The NOT VALID approach adds the constraint for new rows without scanning existing data. The separate VALIDATE step checks existing rows and can be retried.
-5. On Supabase, each of these must be a separate committed transaction (see Pitfall 1)
+1. Run `grep -rn "recommendation_subject\|recommendation_body\|draft_subject\|draft_body\|is_best_price" frontend/src/features/broker/` before removing any field
+2. Strict ordering: add `SolicitationDraft` type + `useSolicitationDrafts` hook FIRST, update `EmailApproval.tsx` to use it, THEN remove stale fields
+3. For `ComparisonQuoteCell`: the fields `is_best_price/is_best_coverage/is_recommended` are already on this type correctly (broker.ts lines 230-232), so removing them from `CarrierQuote` is safe IF no component reads them from `CarrierQuote` directly
+4. Phase order: add new types -> update consumers -> remove old types. Never invert this.
 
-**Detection:** Run the ALTER TABLE manually in Supabase SQL Editor first. If it fails with "check constraint violated", query the offending values before fixing.
+**Detection:** TypeScript build failures after type changes. Components rendering `undefined` values.
 
-**Phase:** Schema migration phase. Validate existing data BEFORE writing migration scripts.
+**Phase:** Wave 0 must be sequenced: add new types/hooks first, update consuming components second, remove old types last.
 
-### Pitfall 5: Context Store Entity Creation Failure Breaks Client/Carrier Creation
+---
 
-**What goes wrong:** The spec requires creating a `ContextEntity` row when a `BrokerClient` or `CarrierConfig` is created, plus a `context_link` row to connect them. If the `ContextEntity` INSERT fails (e.g., duplicate name+type violates `uq_entity_tenant_name_type`), the entire transaction should roll back -- but if the rollback is not handled, you get orphaned broker records with no context entity, or orphaned context entities with no broker record.
+### Pitfall 3: ag-Grid Comparison Matrix Complexity Underestimated
 
-**Why it happens:** `ContextEntity` has a unique constraint on `(tenant_id, name, entity_type)` (models.py line 553-556). Creating a client named "Acme Corp" as entity_type="company" works the first time. But if "Acme Corp" already exists in context_entities (from email extraction, meeting processing, or manual entry), the INSERT fails with `UniqueViolation`. The broker client creation endpoint must handle this as an upsert-or-link, not a create.
+**What goes wrong:** The redesign spec (section 4.9) overrides the parent spec's custom `<table>` decision and mandates ag-grid for the comparison matrix. This sounds like a consistency win, but the comparison matrix has 7 requirements that each need custom ag-grid work:
+1. Two-row cells (premium + limit/deductible) -> custom `ComparisonCellRenderer` with `rowHeight: 64`
+2. Expandable coverage groups -> `groupRowRenderer` with `groupDefaultExpanded: 1`
+3. Total premium row -> `pinnedBottomRowData`
+4. Per-cell color coding based on cross-row analysis -> `cellStyle` function with cross-data lookup
+5. Carrier show/hide via column toggling -> `columnApi.setColumnVisible()`
+6. "Show differences only" row filtering -> external filter + hidden row count display
+7. "PDF Preview" toggle -> entirely separate non-ag-grid render path
 
-**Consequences:** Three failure modes:
-1. Client created, context entity fails -> client exists but has no context intelligence (silent data gap)
-2. Context entity created, client fails -> orphaned entity in context store
-3. Both succeed but context_link fails -> both records exist but are disconnected
+**Why it happens:** Each feature is individually straightforward in ag-grid docs, but their interaction is not. What happens when `pinnedBottomRowData` needs to update after group rows collapse? When `setColumnVisible` hides a carrier, does the pinned bottom row's total update? When "Show differences only" hides rows, do group headers with 0 visible children auto-hide?
+
+**Consequences:** 2-3x longer implementation than estimated. `ComparisonCellRenderer` becomes the most complex renderer in the codebase. Edge case bugs surface during demo.
 
 **Prevention:**
-1. Use INSERT ... ON CONFLICT (tenant_id, name, entity_type) DO UPDATE SET last_seen_at = now(), mention_count = mention_count + 1 for the context entity
-2. Wrap client + entity + link creation in a single database transaction with explicit savepoints
-3. If the context entity already exists, reuse its ID for the context_link -- do NOT create a duplicate
-4. The lookup should normalize names before matching: "Acme Corp" == "ACME CORP" == "Acme Corporation" (see Pitfall 8 for normalization details)
-5. Test the scenario: create a client whose name already exists as a context entity from email extraction
+1. Build a throwaway prototype with 3 carriers and 5 coverages testing: group expand/collapse + pinned bottom + column visibility + external filter. If it takes more than 1 day, pivot to custom `<table>` from parent spec.
+2. The "PDF Preview" toggle is a completely separate component regardless -- do not try to make ag-grid render a print-friendly view
+3. Test the existing `ComparisonView.tsx` component (107 lines, currently working with custom grid) before replacing it
 
-**Detection:** After creating a client, query `context_entities` for a matching row. If none exists, the entity creation silently failed. Query `context_links` for the broker_client_id -- if no row, the link was not created.
+**Detection:** Comparison matrix phase taking more than 2 days. Bugs where totals do not update after group collapse.
 
-**Phase:** Client/contact entity creation phase. The upsert pattern must be designed before any creation endpoint is written.
+**Phase:** Wave 2 (task 26). Highest-risk frontend task. Prototype-first approach mandatory.
+
+---
+
+### Pitfall 4: Hook Scripts Matching Too Broadly During Pipeline Runs
+
+**What goes wrong:** The `post-coverage-write.py` hook fires on `PostToolUse` for any Bash command matching `PATCH /broker/coverages/` or `POST /broker/projects/{id}/coverages`. During a `process-project` pipeline, coverages are written multiple times:
+- Step 2: parse-contract for insurance coverages (6+ writes)
+- Step 3: parse-contract for surety coverages (3+ writes)  
+- Step 4: parse-policies updates current limits (6+ writes)
+
+Each write triggers `POST /analyze-gaps`, meaning gap analysis runs 15+ times during one pipeline execution, each overwriting previous results.
+
+**Why it happens:** Hooks operate at the tool-use level with no concept of workflow state. The hook cannot distinguish "single manual coverage edit" from "bulk writes during a pipeline run."
+
+**Consequences:** Unnecessary API calls (15x gap analysis for one project), potential race conditions if writes and analysis calls overlap, misleading intermediate results shown to user, and wasted backend compute.
+
+**Prevention:**
+1. Pipeline-mode sentinel: when `process-project` starts, create `~/.claude/skills/broker/.pipeline-active-{project_id}`. Hook scripts check for this file and skip if present. Pipeline skill runs gap analysis once at the end.
+2. Alternatively, debounce in the hook script: if gap analysis was called within the last 30 seconds for the same project, skip.
+3. The `post-quote-write.py` hook has the same issue: comparison will re-run for each quote extracted during `compare-quotes`.
+
+**Detection:** Console output showing "Auto-running gap analysis..." more than once per pipeline run. Backend logs showing repeated `analyze-gaps` calls within seconds.
+
+**Phase:** Wave 1 (tasks 14-15). Hook scripts must be designed with pipeline awareness from day one.
+
+---
+
+### Pitfall 5: Recreating the "Generic CRUD Look"
+
+**What goes wrong:** The previous implementation was called "terrible" and "looks like shit." Specific complaints: generic CRUD layout, no visual drama, no AI moments, default ag-grid theme, generic gray badges, no dollar amounts in gap analysis, no critical exclusion alerts. The redesign spec addresses all of these, but implementation pressure leads to building the data-correct version first and "adding polish later." The polish never arrives.
+
+**Why it happens:** It is natural to build structure before style. But this redesign was motivated by visual quality. The previous implementation had correct data and correct structure -- it failed on visual execution. Building "functional first, pretty later" reproduces the exact failure.
+
+**Consequences:** Another round of "this looks like the old version." User loses confidence. Third rewrite.
+
+**Prevention:**
+1. Every component must be built with its visual spec from day one -- three-layer Airbnb shadow, coral accents, semantic status colors, and card borders are the spec, not polish
+2. Build one component to full visual spec (MetricCard is a good candidate: small, self-contained, spec is explicit) and get approval before proceeding
+3. Each PR must include a screenshot comparison against the demo reference beat (Appendix A in redesign spec)
+4. Explicit "What NOT to Do" checklist from the user must be verified for every component:
+   - NOT default ag-grid theme -> verify `flywheelGridTheme` applied
+   - NOT generic gray badges -> verify semantic `BROKER_STATUS_COLORS` used
+   - NOT truncated email body -> verify `white-space: pre-wrap` on full content
+   - NOT ActivityTimeline on every tab -> verify only on Overview sidebar
+   - NOT match_score bars -> verify ToggleCell on carrier selection
+   - NOT raw JSON/technical IDs -> verify formatted output
+   - NOT purple/blue gradients -> verify coral-only accent
+   - NOT flat borderless cards -> verify `border + shadow` on every card
+   - NOT missing empty states -> verify contextual empty state per section
+   - NOT browser default scrollbars -> verify styled scrollbars
+
+**Detection:** Component does not visually match its demo reference beat. Any item from the "What NOT to Do" list present in the build.
+
+**Phase:** Every wave. Cross-cutting concern that must be enforced in every PR review.
+
+---
+
+### Pitfall 6: Playwright Portal Scripts Breaking on DOM Changes
+
+**What goes wrong:** The `fill-portal` skill uses Playwright scripts with exact DOM selectors for Mapfre, GNP, and Chubb portals. Carrier portals update their UIs without notice. A CSS class rename, form field ID change, or new modal/captcha breaks the script silently -- Playwright clicks the wrong element or throws a timeout.
+
+**Why it happens:** Third-party web UIs are not under our control. Mexican carrier portals often use legacy form frameworks with generated class names. No SLA on DOM stability.
+
+**Consequences:** Portal automation fails during a client demo. User fills form manually. Trust in automation erodes.
+
+**Prevention:**
+1. Use data attributes and ARIA labels as primary selectors, CSS classes as fallback
+2. Each carrier script must have a `LAST_VERIFIED` date and a `verify()` function that checks portal structure
+3. Add `--dry-run` mode: navigates and screenshots without filling fields
+4. `pre-portal-validate.py` hook should run `verify()` before allowing fill
+5. Build Mapfre ONLY first. GNP and Chubb scripts only after Mapfre is proven stable 2+ weeks
+6. Every script action must be wrapped in try/except with screenshot-on-failure
+
+**Detection:** Playwright timeouts on selectors. Screenshots showing unexpected modals or layout changes.
+
+**Phase:** Wave 1 (task 13). Only Mapfre initially. Other carriers deferred.
 
 ---
 
 ## Moderate Pitfalls
 
-### Pitfall 6: 15 Column Drops Create Ghost References Across Full Stack
+### Pitfall 7: CSS Animations Causing Jank on Data-Heavy Pages
 
-**What goes wrong:** Dropping 15 columns from existing tables means every code reference to those columns must be found and removed/redirected. Missing even one reference causes runtime errors (`AttributeError` in Python, `undefined` in TypeScript). The columns span at least two layers: backend (SQLAlchemy model attributes, API serializers, query filters) and frontend (TypeScript types, component props, form fields, grid column definitions).
-
-**Why it happens:** Columns like `carrier_configs.email_address` are referenced in 6 backend files and 4 frontend files (see research above). Other columns being dropped (e.g., `recommendation_subject`, `recommendation_body`, `recommendation_status`, `recommendation_sent_at`, `recommendation_recipient` from `broker_projects`) are referenced in broker.py (15+ lines) and frontend DeliveryPanel.tsx (8+ lines) and broker.ts types (5 fields).
+**What goes wrong:** The redesign spec calls for 6 CSS animations: `fadeUp` (requirement cards), `stagger` (60ms delays across 8+ cards), `shimmer` (loading gradient), `pulse` (pending badge), `greenFlash` (completion), `highlightSweep` (new rows). Applied alongside ag-grid tables with 20+ rows, these can trigger layout reflow and frame drops.
 
 **Prevention:**
-1. Before writing any migration, run a full-codebase grep for EVERY column being dropped:
-   ```bash
-   grep -rn "email_address\|recommendation_subject\|recommendation_body\|recommendation_status\|recommendation_sent_at\|recommendation_recipient\|approval_status" backend/ frontend/src/ --include="*.py" --include="*.ts" --include="*.tsx"
-   ```
-2. Build a complete reference map: file, line number, usage type (model definition, query, serializer, type definition, component prop, form field, grid column)
-3. Update ALL references BEFORE dropping the column. The column drop should be the LAST step, not the first.
-4. For `email_address` specifically: backend has 12 references across 3 files, frontend has 9 references across 3 files. Every one must redirect to `carrier_contacts` lookup.
+1. All animations must use `transform` and `opacity` only -- never animate `height`, `width`, `margin`, or `padding`
+2. Add `will-change: transform, opacity` on animated elements
+3. `shimmer` uses `background: linear-gradient` which is GPU-composited -- safe
+4. `stagger` on requirement cards is fine (8-10 cards max), but NEVER apply stagger to ag-grid rows
+5. `pulse` on pending badge must be pure CSS, not a React re-render interval
+6. Test with Chrome DevTools Performance panel -- any frame > 16ms is a bug
 
-**Detection:** After dropping columns, run the full test suite. Any `AttributeError: 'CarrierConfig' object has no attribute 'email_address'` or TypeScript build errors indicate missed references.
+**Phase:** Wave 4 (tasks 34-39). Animation is correctly the last wave.
 
-**Phase:** Code update phase must complete BEFORE schema drop phase. Two-phase approach: (1) update all code to use new tables/columns, (2) drop old columns only after code is verified.
+---
 
-### Pitfall 7: Partial Unique Indexes with WHERE Clauses in SQLAlchemy
+### Pitfall 8: Skill Domain Knowledge Drifting from Reality
 
-**What goes wrong:** The spec likely requires partial unique indexes (e.g., unique email per carrier, but only for active contacts: `CREATE UNIQUE INDEX ... ON carrier_contacts(carrier_config_id, email) WHERE deleted_at IS NULL`). SQLAlchemy's `UniqueConstraint` does not support WHERE clauses. If you use `UniqueConstraint` without the WHERE clause, soft-deleted contacts block new contacts with the same email.
-
-**Why it happens:** SQLAlchemy distinguishes between constraints and indexes. `UniqueConstraint` maps to `ALTER TABLE ADD CONSTRAINT` (no WHERE support). `Index(..., unique=True)` maps to `CREATE UNIQUE INDEX` and supports `postgresql_where`. The existing codebase already uses this pattern correctly for `idx_quote_source_dedup` (models.py line 2200-2201), but a developer might not notice the distinction.
+**What goes wrong:** Broker skills embed Mexican insurance domain knowledge (contract clause patterns, carrier routing rules, endorsement codes, portal URLs) directly in SKILL.md prompts. This is static text. If Mapfre changes their portal URL, if a carrier's response time changes, if new endorsement codes become standard, skills give wrong guidance.
 
 **Prevention:**
-1. Use `Index("idx_name", "col1", "col2", unique=True, postgresql_where=text("deleted_at IS NULL"))` in `__table_args__`
-2. Do NOT use `UniqueConstraint` for any constraint that needs to exclude soft-deleted rows
-3. Reference the existing pattern at models.py line 2200: `Index("idx_quote_source_dedup", "source_hash", unique=True, postgresql_where=text("source_hash IS NOT NULL"))`
-4. In the migration script (not Alembic), use raw SQL: `CREATE UNIQUE INDEX IF NOT EXISTS ... WHERE deleted_at IS NULL`
+1. Knowledge that changes (carrier details, portal URLs, response times, email addresses) must live in `CarrierConfig` database records, not skill prompts. The `select-carriers` skill must read `GET /broker/carriers`, not hardcoded text.
+2. Knowledge that is stable (contract clause patterns, endorsement codes, premium formulas) can live in skill prompts but should be in separate `references/` files, not inline
+3. Add `DOMAIN_KNOWLEDGE_VERSION` to skill prompts and a quarterly review process
 
-**Detection:** Try to create a contact, soft-delete it, then create another contact with the same email. If you get a unique violation, the index is missing the WHERE clause.
+**Phase:** Wave 1 (task 10) and Wave 2 (tasks 17-23). Prompt architecture decision.
 
-**Phase:** Schema migration phase. Define all partial indexes in the migration script, not just in the SQLAlchemy model.
+---
 
-### Pitfall 8: Name Normalization for Dedup Fails on International Legal Suffixes
+### Pitfall 9: Hook Auth Token Unavailable or Expired
 
-**What goes wrong:** Client and carrier deduplication requires normalized name matching. "Grupo Cementos de Chihuahua S.A. de C.V." and "GCC SAdeCV" and "Grupo Cementos de Chihuahua" should all match the same entity. Simple lowercasing or stripping punctuation fails on Mexican/Latin American legal suffixes (S.A. de C.V., S. de R.L., S.A.P.I., S.A.B.) which can appear in dozens of formats.
-
-**Why it happens:** The project serves Mexican insurance brokers. Company names include legal entity suffixes that vary wildly: "S.A. de C.V." vs "SA de CV" vs "SADECV" vs "S.A.deC.V." These suffixes are meaningless for dedup purposes but defeat simple string matching.
+**What goes wrong:** Hook scripts call backend API using `FLYWHEEL_API_TOKEN` from environment. The token is set by the `SessionStart` hook (`pre-read-context.py`). Failure modes: (a) token expires during long pipeline runs, (b) `pre-read-context.py` fails silently so token is never set, (c) hook scripts exit silently on missing token (by design in spec), meaning gap analysis silently never runs.
 
 **Prevention:**
-1. Strip known legal suffixes before normalization. Build a suffix list: `S.A. de C.V.`, `S. de R.L.`, `S.A.P.I. de C.V.`, `S.A.B. de C.V.`, `S.C.`, `A.C.`, `Inc.`, `LLC`, `Ltd.`, `Corp.`, `GmbH`
-2. Normalize: lowercase, strip punctuation, collapse whitespace, strip suffixes, then compare
-3. Store the normalized name as a separate column (`normalized_name`) for index-based lookups
-4. The existing `entity_normalization.py` service may already handle some of this -- check before building from scratch
-5. Do NOT rely on `LOWER(name)` alone -- it will treat "GCC SA de CV" and "GCC" as different entities
+1. Hook scripts that exit silently should log to `~/.claude/skills/broker/.hook-log` for debugging
+2. `pipeline-check.py` Stop hook should verify gap analysis actually ran (check `gap_status` on coverages), not just that the hook was invoked
+3. Consider returning a visible message to Claude Code context: "Warning: gap analysis hook skipped (no auth token)" rather than silent exit
 
-**Detection:** Create two clients with the same company name but different suffix formatting. If both are created as separate entities, normalization is broken.
+**Phase:** Wave 1 (tasks 14-15). Hook error handling design.
 
-**Phase:** Client entity creation phase. Normalization logic must be defined before the creation endpoint.
+---
 
-### Pitfall 9: broker.py at 2900 Lines Becomes Unmaintainable with 17 New Endpoints
+### Pitfall 10: ag-Grid Row Grouping Conflicts with Inline Editing
 
-**What goes wrong:** The current `broker.py` is 2900 lines with approximately 30 endpoints. Adding 17 new endpoints (client CRUD, contact CRUD, context link management, solicitation draft management, intel endpoints) pushes it past 4000+ lines. At this size, developers cannot find endpoints, merge conflicts become constant, and circular import risks increase.
-
-**Why it happens:** The initial broker module was a single-file implementation (common for MVPs). Each subsequent feature adds more endpoints to the same file because "that is where broker things go." Without explicit file-split discipline, the file grows indefinitely.
+**What goes wrong:** Coverage tab spec calls for ag-grid with section group rows ("INSURANCE COVERAGES", "SURETY BONDS") AND inline editing on `coverage_type` and `required_limit`. ag-grid row grouping changes how row data is structured -- grouped rows use `aggData` not direct field access. The `onCellValueChanged` callback may receive the group node instead of the leaf data, causing edits to silently fail or write to the wrong record.
 
 **Prevention:**
-1. Split broker.py into domain-specific routers BEFORE adding new endpoints:
-   - `broker_projects.py` -- project CRUD, status transitions
-   - `broker_carriers.py` -- carrier config CRUD, contact management
-   - `broker_clients.py` -- client CRUD, contact management (NEW)
-   - `broker_solicitations.py` -- draft, send, follow-up (RESTRUCTURED)
-   - `broker_quotes.py` -- quote receipt, comparison, selection
-   - `broker_tasks.py` -- task generation, gate counts
-   - `broker_delivery.py` -- recommendation drafting, sending
-2. Use a parent router that includes sub-routers: `broker_router.include_router(clients_router, prefix="/clients")`
-3. Move shared helpers (`_project_to_dict`, `_carrier_to_dict`, `_coverage_to_dict`) to `broker_helpers.py`
-4. The split must happen BEFORE new endpoints are added, not after
+1. Use ag-grid's `fullWidthRow` pattern for section headers instead of true row grouping -- keeps leaf rows as normal editable rows
+2. Test inline editing on rows that appear below a section header
+3. `onCellValueChanged` must verify `params.data.id` exists (not a group row) before calling `PATCH /broker/coverages/{id}`
 
-**Detection:** `wc -l broker.py` exceeds 3500 lines. More than 3 endpoints share the same helper function. Merge conflicts on broker.py in every PR.
+**Phase:** Wave 2 (task 25). Coverage tab implementation.
 
-**Phase:** Should be the first or second phase. All subsequent phases benefit from the split.
+---
 
-### Pitfall 10: carrier_pipeline_entry_id FK Blocks pipeline_entries Cleanup
+### Pitfall 11: "Run in Claude Code" Button Confusing Users
 
-**What goes wrong:** `carrier_configs.carrier_pipeline_entry_id` has a foreign key to `pipeline_entries(id)` (models.py line 1984-1986). If the spec calls for dropping this column or changing the FK target, the FK constraint must be dropped FIRST. Attempting to drop the column without dropping the constraint fails. Attempting to modify `pipeline_entries` while this FK exists also fails.
-
-**Why it happens:** PostgreSQL enforces FK constraints strictly. You cannot DROP a referenced column or TABLE while an FK pointing to it exists. The FK has `ON DELETE SET NULL`, so deleting pipeline entries is safe, but structural changes to `pipeline_entries` are blocked.
+**What goes wrong:** The redesign introduces buttons that copy commands to clipboard instead of performing actions. Users click, see "Copied!", and wait for something to happen in the browser. Nothing happens because they need to switch to Claude Code and paste.
 
 **Prevention:**
-1. Drop the FK constraint before dropping the column: `ALTER TABLE carrier_configs DROP CONSTRAINT carrier_configs_carrier_pipeline_entry_id_fkey`
-2. Then drop the column: `ALTER TABLE carrier_configs DROP COLUMN carrier_pipeline_entry_id`
-3. Each statement must be a separate committed transaction (Pitfall 1)
-4. If the column is being REPLACED (not just dropped), create the replacement column+FK first, seed data, then drop the old one
+1. Toast message must say: "Copied! Open Claude Code and paste this command" -- not just "Copied!"
+2. Add one-time popover explaining the workflow on first use (store dismissal in localStorage)
+3. The `prominent` variant includes a description line -- use it on every "Run in Claude Code" instance
+4. Consider adding a visible helper text below each button: "This task runs in Claude Code"
 
-**Detection:** Migration script fails with `constraint ... depends on column ...`. Check `pg_constraint` for FK names before writing drop statements.
+**Phase:** Wave 3 (tasks 27-33). Every page with the button.
 
-**Phase:** Schema migration phase, specifically in the column-drop sub-phase.
+---
+
+### Pitfall 12: Four API Path Mismatches Causing Silent 404s
+
+**What goes wrong:** Redesign spec section 5.1 identifies 4 broken paths in `api.ts`:
+- `editSolicitationDraft`: `PUT /broker/quotes/{quoteId}/draft` -> should be `PUT /broker/solicitation-drafts/{draftId}`
+- `approveSendSolicitation`: `POST /broker/quotes/{quoteId}/approve-send` -> should be `POST /broker/solicitation-drafts/{draftId}/approve-send`
+- `editRecommendation`: `PUT /broker/projects/{projectId}/recommendation-draft` -> should be `PUT /broker/recommendations/{recommendationId}`
+- `sendRecommendation`: `POST /broker/projects/{projectId}/approve-send-recommendation` -> should be `POST /broker/recommendations/{recommendationId}/approve-send`
+
+These are 404s. Core workflow actions (edit email, send email, edit recommendation, send recommendation) silently fail.
+
+**Prevention:** Fix in Wave 0, task 1. After fixing, manually test each action. Add correct endpoint paths as comments in the API function file.
+
+**Phase:** Wave 0 (task 1). Absolute first priority.
+
+---
+
+### Pitfall 13: Shared Grid Theme Changes Breaking GTM Pipeline
+
+**What goes wrong:** The redesign updates `flywheelGridTheme` in `frontend/src/shared/grid/theme.ts` (coral hover, remove column separators). This theme is imported by both broker and GTM pipeline (`PipelinePage.tsx`). Changing it changes the pipeline appearance without testing.
+
+**Prevention:**
+1. After updating `theme.ts`, visually verify the pipeline at `/pipeline`
+2. Coral hover (`rgba(233,77,53,0.03)`) is subtle, likely fine on both surfaces
+3. Removing `headerColumnSeparatorDisplay` may look wrong on the pipeline which has more columns
+4. If pipeline looks wrong: create `brokerGridTheme` extending `gridTheme` with broker-specific overrides instead of modifying shared theme
+
+**Phase:** Wave 0 (task 5). Test pipeline immediately after theme change.
+
+---
+
+### Pitfall 14: New "Analysis" Tab Breaking Step Indicator Logic
+
+**What goes wrong:** Redesign adds a 6th tab ("Analysis") between Overview and Coverage. The existing `StepIndicator.tsx` likely has hardcoded step definitions. Adding a step requires updating: step count, labels, status mapping (now depends on both `status` and `analysis_status`), active step derivation, and URL query param routing (`?tab=analysis`).
+
+**Prevention:**
+1. Step indicator must be data-driven (array of step configs), not hardcoded indexes
+2. The status mapping in redesign spec section 4.3 introduces `analysis_status` as a separate dimension from `status` -- implement exactly
+3. Tab routing must handle the new `?tab=analysis` query param
+4. Default tab remains `overview`
+
+**Phase:** Wave 3 (task 28). Requires updating `BrokerProjectDetail.tsx`.
 
 ---
 
 ## Minor Pitfalls
 
-### Pitfall 11: RLS Policies Missing on New Tables
+### Pitfall 15: Currency Formatting Inconsistency
 
-**What goes wrong:** Supabase enforces Row Level Security. New tables (`broker_clients`, `client_contacts`, `carrier_contacts`, `solicitation_drafts`, `context_links`, `broker_intel`) need RLS policies or they will return empty result sets when accessed through the Supabase client. The backend uses a service role key that bypasses RLS, but any future direct Supabase access (e.g., Edge Functions, direct client SDK) will fail silently.
+**What goes wrong:** Redesign uses "Mex$X,XXX,XXX" format. Different renderers format differently: `CurrencyCell`, inline `ComparisonCell`, quote detail expansion. Inconsistent display undermines the premium feel.
 
-**Prevention:** Apply the same RLS policy template used for existing broker tables. Add `ALTER TABLE [table] ENABLE ROW LEVEL SECURITY` and create tenant-scoped policies in the migration script. Do this in the same migration that creates the table.
+**Prevention:** `CurrencyCell` renderer must export a standalone `formatCurrency(value: number, currency: string): string` function used everywhere. Single source of truth for formatting.
 
-### Pitfall 12: Frontend Type Definitions Drift from Backend Schema
+**Phase:** Wave 0 (task 6). Build once, use everywhere.
 
-**What goes wrong:** After dropping columns from the backend and adding new tables, the frontend TypeScript types in `broker.ts` become stale. The types still reference `email_address`, `recommendation_subject`, etc. TypeScript does not error on extra properties in API responses, so the drift is silent until someone tries to READ a dropped field and gets `undefined`.
+---
 
-**Prevention:** Update `frontend/src/features/broker/types/broker.ts` in the same phase that drops backend columns. Add types for new entities (`BrokerClient`, `ClientContact`, `CarrierContact`, `SolicitationDraft`). Remove dropped fields from `CarrierConfig` and `BrokerProject` types.
+### Pitfall 16: Missing Empty States
 
-### Pitfall 13: Gmail Sync Carrier Matching Breaks After email_address Move
+**What goes wrong:** User explicitly listed "Do NOT skip empty states." Every section needs a contextual empty state (icon + message + CTA), not just "No data."
 
-**What goes wrong:** `gmail_sync.py` (line 1126-1142) matches incoming emails to carriers by comparing sender domain against `carrier_configs.email_address` domain. After moving email to `carrier_contacts`, this query must JOIN through the new table. If this JOIN is not added, carrier email auto-detection stops working -- incoming quote emails are no longer flagged with `is_carrier_quote: true`.
+**Prevention:** Each PR must include a screenshot of the empty state. Empty states must say what to do next (e.g., "Upload a contract and run `/broker:process-project`").
 
-**Prevention:** Update the gmail_sync query to: `SELECT cc.* FROM carrier_configs cc JOIN carrier_contacts ct ON ct.carrier_config_id = cc.id WHERE ct.email IS NOT NULL AND ct.contact_type = 'submission_email'`. This must happen in the same phase that drops `carrier_configs.email_address`.
+**Phase:** Every wave. PR review checklist item.
+
+---
+
+### Pitfall 17: Polling Intervals Stacking
+
+**What goes wrong:** GateStrip polls 30s, Analysis tab polls 10s during analysis, QuoteTracking polls 10s during extraction. All active simultaneously on project detail page creates unnecessary API load.
+
+**Prevention:** Use React Query's `refetchInterval` (already in codebase) with `refetchIntervalInBackground: false`. Verify navigating away from a tab stops its polling.
+
+**Phase:** Wave 2-3. Integration testing.
+
+---
+
+### Pitfall 18: Skill Checkpoint File Conflicts Between Sessions
+
+**What goes wrong:** `process-project` saves state to `~/.claude/skills/broker/.pipeline-state.json`. Two concurrent conversations (or a resumed conversation) overwrite or read the wrong file.
+
+**Prevention:** Include project ID in filename: `.pipeline-state-{project_id}.json`. `pipeline-check.py` matches by project ID, not global file.
+
+**Phase:** Wave 1 (task 15). Checkpoint naming design.
 
 ---
 
@@ -248,26 +317,60 @@ Mistakes that cause data loss, silent failures, or require rollbacks.
 
 | Phase Topic | Likely Pitfall | Mitigation |
 |-------------|---------------|------------|
-| Schema migration (new tables) | Pitfall 1: PgBouncer silent rollback | Use broker_migration.py pattern. Each DDL = separate committed transaction. Verify with direct SQL after. |
-| Schema migration (data seed) | Pitfall 2: Lost email addresses | Three-step: create table, seed data, verify count, THEN drop column in later phase. |
-| Schema migration (CHECK constraints) | Pitfall 4: Existing data violates constraint | Query DISTINCT values before adding. Use NOT VALID + VALIDATE pattern. |
-| Schema migration (partial indexes) | Pitfall 7: Soft-delete exclusion | Use Index(..., unique=True, postgresql_where=...) not UniqueConstraint. |
-| Schema migration (FK drops) | Pitfall 10: FK blocks column drop | Drop constraint first, then column. Separate transactions. |
-| Solicitation restructure | Pitfall 3: 15+ CarrierQuote refs break | Map ALL draft_status/solicited_at refs. Update simultaneously. Cannot be incremental. |
-| Client/contact creation | Pitfall 5: Context entity upsert failure | Use ON CONFLICT DO UPDATE. Wrap in single transaction. Handle existing entities. |
-| Client/contact creation | Pitfall 8: Mexican legal suffix dedup | Build suffix stripping + normalized_name column. Check entity_normalization.py first. |
-| Code updates (pre-drop) | Pitfall 6: Ghost references | Full-codebase grep for every dropped column. Update ALL refs before dropping. |
-| Code updates (pre-drop) | Pitfall 13: Gmail sync breaks | Update gmail_sync.py to JOIN carrier_contacts before dropping email_address. |
-| Router organization | Pitfall 9: 4000+ line broker.py | Split into domain routers BEFORE adding new endpoints. |
-| New table creation | Pitfall 11: Missing RLS | Apply RLS template to every new table in the migration script. |
-| Frontend sync | Pitfall 12: Type drift | Update broker.ts types in same phase as backend column drops. |
+| Wave 0: Foundation | Removing stale types before replacements exist (Pitfall 2) | Add new types first, update consumers, then remove old types |
+| Wave 0: Foundation | Shared theme change breaking pipeline (Pitfall 13) | Visually verify `/pipeline` after theme update |
+| Wave 0: Foundation | API path mismatches blocking all testing (Pitfall 12) | Fix 4 paths as absolute first task |
+| Wave 1: Skills | Hooks firing 15x during pipeline (Pitfall 4) | Pipeline-mode sentinel file pattern |
+| Wave 1: Skills | Hook auth silently failing (Pitfall 9) | Log warnings, verify in Stop hook |
+| Wave 1: Skills | Portal DOM breaking on carrier updates (Pitfall 6) | Mapfre only, verify() function, dry-run mode |
+| Wave 1: Skills | Checkpoint file collisions (Pitfall 18) | Include project_id in filename |
+| Wave 2: High-Impact Frontend | Comparison matrix ag-grid 2-3x over budget (Pitfall 3) | Prototype first, 1-day gate, pivot to custom table |
+| Wave 2: High-Impact Frontend | Coverage tab grouping vs editing conflict (Pitfall 10) | Use fullWidthRow, not true row grouping |
+| Wave 2: AI Skills | Domain knowledge hardcoded in prompts (Pitfall 8) | Read from CarrierConfig API, not prompt text |
+| Wave 3: Remaining Frontend | Spec drift across 3 documents (Pitfall 1) | Quote exact spec section in plan, reconciliation table |
+| Wave 3: Remaining Frontend | Generic CRUD look repeat (Pitfall 5) | Visual spec from day one, screenshot diffs in PRs |
+| Wave 3: Remaining Frontend | "Run in Claude Code" UX confusion (Pitfall 11) | Explicit toast text, first-use popover |
+| Wave 3: Remaining Frontend | Analysis tab breaking step indicator (Pitfall 14) | Data-driven step config, dual status dimension |
+| Wave 4: Animation | CSS jank on data pages (Pitfall 7) | transform/opacity only, DevTools Performance test |
+| All waves | Missing empty states (Pitfall 16) | Screenshot of empty state required per PR |
+
+---
+
+## Integration Pitfalls (Skills + Hooks + Frontend)
+
+### Integration 1: Hook Triggers Gap Analysis, Frontend Shows Stale Data
+
+**What goes wrong:** Skill writes coverages via API. `post-coverage-write.py` hook triggers gap analysis on the backend. Frontend has stale React Query cache showing old gap status. User sees "missing" gaps that were just filled.
+
+**Mitigation:** Skills should output "Data updated. Refresh the browser tab to see changes." Frontend should use `refetchInterval` on coverage query while `analysis_status === 'running'`. Future: WebSocket/SSE for real-time updates.
+
+### Integration 2: Skill Creates Coverages with Fields Frontend Cannot Display
+
+**What goes wrong:** `parse-contract` skill creates coverages with `contract_clause`, `source_excerpt`, `gap_amount`, `ai_critical_finding`. Current `ProjectCoverage` type (broker.ts lines 42-55) lacks most of these fields. Analysis tab renders `undefined`.
+
+**Mitigation:** Wave 0 task 4 (add missing fields to `ProjectCoverage` type) MUST complete before Analysis tab (Wave 3) or Coverage tab updates (Wave 2). Types are the foundation.
+
+### Integration 3: Pipeline Skill Fills Claude Code Context Window
+
+**What goes wrong:** `process-project` pipeline runs 9 steps sequentially, each with API calls, PDF reading, and AI analysis. Full pipeline takes 10-15 minutes. Context window fills with intermediate output, and later steps lose context about earlier results.
+
+**Mitigation:** Each step skill should produce minimal output (1-2 summary lines, not full data dumps). Pipeline uses checkpoint files to track state rather than relying on conversation context.
+
+### Integration 4: Hook and Skill Both Call the Same Endpoint
+
+**What goes wrong:** The `gap-analysis` skill explicitly calls `POST /analyze-gaps`. The `post-coverage-write.py` hook also calls `POST /analyze-gaps`. During a pipeline run where the skill calls gap analysis AND the hook fires, the endpoint is called twice with the same data. Not harmful (idempotent), but wasteful and confusing in logs.
+
+**Mitigation:** Pipeline-mode sentinel (same solution as Pitfall 4) prevents hooks from firing during pipeline runs where the skill handles the orchestration.
 
 ---
 
 ## Sources
 
-- Direct codebase analysis: broker.py (2900 lines), models.py (broker tables at line 1946-2300), gmail_sync.py (line 1120-1160), solicitation_drafter.py, broker_migration.py, entity_normalization.py, contract_analyzer.py (HIGH confidence)
-- Existing broker_migration.py pattern for PgBouncer workaround (HIGH confidence -- proven in production)
-- PostgreSQL CHECK constraint + NOT VALID documentation (HIGH confidence)
-- SQLAlchemy partial index documentation for postgresql_where (HIGH confidence -- existing pattern in codebase at models.py line 2200)
-- Mexican corporate entity suffix conventions (MEDIUM confidence -- common knowledge for Latin American business software)
+- Direct codebase analysis: `frontend/src/features/broker/` (63 files), `frontend/src/shared/grid/theme.ts` (17 lines), `frontend/src/features/broker/types/broker.ts` (379 lines)
+- SPEC-BROKER-REDESIGN.md (1680 lines, all 8 sections + 2 appendices analyzed)
+- SPEC-BROKER-FRONTEND-TECHNICAL.md (837 lines, all 8 sections analyzed)
+- MILESTONES.md (v15.0 Broker Module MVP history, v16.0 Briefing Intelligence)
+- Existing component implementations verified: `ProjectPipelineGrid.tsx` (135 lines), `ComparisonView.tsx` (107 lines), `BrokerDashboard.tsx` (42 lines), `StepIndicator.tsx`, `BrokerProjectDetail.tsx`
+- Claude Code hooks infrastructure: `~/.claude/settings.json` (current hook configuration verified)
+- ag-grid row grouping + pinnedBottomRowData + inline editing interaction (training data, MEDIUM confidence -- prototype recommended)
+- Playwright automation stability patterns (training data, MEDIUM confidence on carrier portal specifics)

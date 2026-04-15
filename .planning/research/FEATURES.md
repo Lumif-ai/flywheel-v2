@@ -1,186 +1,265 @@
-# Feature Landscape — Broker Data Model: Clients, Contacts & Intelligence
+# Feature Landscape: Broker Frontend Redesign
 
-**Domain:** Insurance broker client/contact management, solicitation approval workflows, CRM-style intelligence bridging
-**Researched:** 2026-04-14
-**Context:** Subsequent milestone adding client/contact entities, structural extractions, context store intelligence, and solicitation workflow to existing broker module (6 tables, 29 endpoints, 37 components already built)
+**Domain:** Insurance broker placement workflow UI -- redesign to Alaya Demo v2 quality
+**Researched:** 2026-04-15
+**Source:** Alaya Demo v2 (16-beat demo at `/tmp/alaya-demo-v2/src/App.tsx`), SPEC-BROKER-REDESIGN.md, existing codebase (42 broker components)
+
+---
 
 ## Table Stakes
 
-Features that any commercial insurance broker tool must have at this maturity level. Missing = broker cannot manage real client relationships through the system.
+Features users expect. Missing = product feels incomplete or broken relative to the demo standard.
 
-| Feature | Why Expected | Complexity | Dependencies | Notes |
-|---------|--------------|------------|--------------|-------|
-| Client entity with dedup | Every AMS (Applied Epic, HawkSoft, AMS360) groups projects by client. Without a client entity, the broker cannot answer "how many projects does Alaya have?" or "who is my contact at Tracsa?" The current system has projects floating in isolation — no client grouping. | Med | New `broker_clients` table, normalized_name logic, client CRUD endpoints, client list page | Normalized name dedup with legal suffix stripping (S.A. de C.V., Inc., LLC) is essential for Mexico market. RFC/EIN tax_id is mandatory on Mexican insurance policies per SAT requirements. |
-| Client contacts with roles | Brokers communicate with different people at a client company for different purposes: the CFO approves coverage decisions, the project manager handles technical questions, the billing contact processes invoices. One email per client is inadequate. | Low | New `broker_client_contacts` table, contact CRUD endpoints, role enum (primary, billing, technical, legal, executive) | Role constraints prevent misrouted communications. The `is_primary` flag ensures automated emails go to the right person. Unique constraint on (client_id, email) prevents duplicate contacts. |
-| Carrier contacts with roles | Currently carriers have a single `email_address` string. In practice, a broker sends solicitations to the submissions desk, negotiates with the underwriter, and manages the relationship through an account manager. Different people, different purposes. | Low | New `carrier_contacts` table, migrate existing `email_address` to contact row, role enum (submissions, account_manager, underwriter, claims, billing) | Critical for solicitation routing — sending a solicitation to the claims email is a waste of everyone's time. Dropping `carrier_configs.email_address` (no production data) eliminates dual source of truth. |
-| Client-project link | Projects must be attributable to a client for portfolio views, renewal tracking, and cross-project analysis. "Show me all Alaya projects" is a basic query that cannot work without this FK. | Low | `client_id` FK on `broker_projects` (nullable), join in project list/detail endpoints | Nullable by design: don't block project creation. Application-layer gate: `client_id` required before status transitions past `analyzing`. This matches real workflow — broker creates project from contract email, links client later. |
-| Solicitation approval workflow (separate approve from send) | The current system combines approve and send into one action. Insurance communications have professional and potentially legal weight. A broker must be able to approve a draft (confirming content), then decide WHEN to send (coordinating across carriers for timing). | Med | New `solicitation_drafts` table extracted from CarrierQuote columns, approval status tracking, `approved_by_user_id` + `approved_at` audit trail | Regulatory requirement: insurance solicitations are business communications that may need compliance review. Separation of approve/send also enables batch operations — approve 5 drafts, then send all at once. |
-| Recommendation as proper entity | Currently recommendation_subject, recommendation_body, recommendation_status live as columns on BrokerProject. This means: no version history, no audit trail on who approved what, no ability to revise and resend. In a regulated domain, this is unacceptable. | Med | New `broker_recommendations` table, 1:N from project, partial unique index (one approved at a time), extract existing columns | If a client disputes a recommendation, the broker needs version history showing what was sent, when, by whom, and what changed between versions. This is E&O (errors and omissions) liability protection. |
-| Project email thread tracking | Currently `email_thread_ids` is a TEXT[] array column on BrokerProject. Arrays cannot be queried efficiently, cannot carry metadata (direction, timestamp), and cannot be joined. | Low | New `broker_project_emails` table replacing TEXT[] column, thread_id + direction + received_at per row | Proper entity enables "show all emails for this project" queries, inbound/outbound filtering, and timeline reconstruction. Foundation for future email intelligence features. |
-| Audit columns on all tables | Missing `created_by_user_id` and `updated_by_user_id` on existing tables (broker_projects, carrier_quotes, project_coverages, carrier_configs, submission_documents). In a regulated insurance domain, "who did what when" is not optional. | Low | ALTER TABLE additions across 5 existing tables, populate from session context on all write operations | Applied Epic, AMS360, and every enterprise AMS tracks user attribution on every record. Without this, no compliance audit trail. |
-| Status lifecycle: binding phase | Current status enum jumps from `recommended` to `delivered` to `bound`. Insurance placement requires an active binding phase where the broker confirms coverage, negotiates final terms, and executes the binder. This is a distinct workflow state. | Low | Add `binding` status to CHECK constraint, update frontend status displays and gate logic | BindHQ, Applied Epic, and ExpertInsured all model binding as an explicit workflow step. Without it, the system cannot distinguish "we sent the recommendation" from "we are actively placing coverage" from "coverage is bound." |
+### Foundation (Wave 0 -- blocks everything)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Fix 4 API path mismatches (solicitation edit/send, recommendation edit/send) | Currently silently 404. Emails cannot be sent, recommendations cannot be edited. | Low | `broker.ts` API file | N/A -- bug fix |
+| Remove stale types (5 from BrokerProject, 6 from CarrierQuote) | Type confusion causes incorrect data binding across all broker pages | Low | `types/broker.ts` | N/A -- cleanup |
+| Add missing fields to ProjectCoverage (10 fields: gap_amount, current_limit, contract_clause, source_excerpt, etc.) | Blocks gap analysis dollar amounts, clause references, and analysis view entirely | Low | `types/broker.ts`, backend schema already has them | Beat 6 |
+| Update flywheelGridTheme (coral hover `rgba(233,77,53,0.03)`, no column separators) | Visual baseline. Every ag-grid in broker module uses this theme. Demo uses coral hover everywhere. | Low | `shared/grid/theme.ts` | All beats |
+| Add SolicitationDraft type + useSolicitationDrafts hook | Email approval currently derives data from stale CarrierQuote fields being removed | Low | Types + hooks | Beat 9 |
+
+### Shared Components
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| CurrencyCell renderer (right-aligned, `Mex$X,XXX,XXX` format, red `#EF4444` for gaps, green `#22C55E` for covered) | Used on 4+ pages: gap analysis, quote tracking, comparison matrix, dashboard pipeline. Demo formats all amounts this way. | Low | Shared grid renderers dir | Beats 6, 11, 14 |
+| ClauseLink renderer (coral `#E94D35` text, underline on hover, click scrolls document viewer) | Links coverage rows to contract clause. Core UX pattern in the demo -- clicking "7.1" scrolls to clause 7.1 in the contract viewer. | Low | Document viewer scroll target (data-clause attribute) | Beats 4-6 |
+| CarrierCell renderer (28px colored initials circle from name hash + carrier name text) | Replaces plain text carrier names. Demo uses colored circles everywhere -- Mapfre, GNP, Chubb, Zurich all get unique colors. | Low | Name hash color algorithm | Beats 7, 9, 14 |
+| ToggleCell renderer (coral pill toggle, on=`#E94D35`, off=`#E5E7EB`) | Carrier include/exclude on selection page. Demo shows clean toggles per carrier. | Low | Toggle callback | Beat 7 |
+| DaysCell renderer (number + "days" suffix, orange `#F97316` when > 7) | Days-in-stage on dashboard, response timing on quotes. Demo colors stale items orange. | Low | None | Beats 0, 11 |
+| RunInClaudeCodeButton (dark `#121212` bg, terminal icon, copy-to-clipboard + "Copied!" toast) | Central UX paradigm -- replaces all AI trigger buttons. Used on 5+ pages. This IS the interaction model for Claude Code intelligence. | Low | Clipboard API, toast system (sonner already in project) | Beats 4, 8, 11 |
+| Three-layer Airbnb shadow CSS class (`0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04)`) | Visual consistency. Demo uses this shadow on every card and grid wrapper. Currently the codebase uses flat borders. | Low | CSS utility or Tailwind class | All beats |
+
+### Dashboard (Beat 0)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| 4 KPI MetricCards above pipeline (Active Projects, Pipeline Premium `Mex$120M`, Carriers Configured, Pending Actions) | Demo opens with these. Sets professional "command center" tone. Current dashboard is just TaskList + pipeline grid. | Med | Backend: `total_premium` field in dashboard-stats response (new endpoint addition needed) | Beat 0 |
+| MetricCard design: white bg, 12px radius, Airbnb shadow, 11px uppercase label, 32px bold value, 12px trend line | Demo specifies exact visual treatment. Without this, cards look generic. | Low | MetricCard component | Beat 0 |
+| Pipeline table coral left-border (`3px solid #E94D35`) on action-needed rows | Visual urgency indicator. Demo highlights "Constructora del Pacifico" row with coral accent. Current grid has no row-level urgency signals. | Low | `getRowStyle` callback, `data-action-needed` attribute | Beat 0 |
+| Premium column in pipeline grid | Shows business value per project. Demo has this column. Currently missing. | Low | CurrencyCell, quote premium data | Beat 0 |
+| Days-in-stage column with orange > 7 days | Shows staleness at a glance. Demo shows "18d" with timing context. | Low | DaysCell renderer | Beat 0 |
+| "Needs Attention" filter badge (red pill above grid, filters to action-needed rows) | Demo has this filter. Immediate focus on what matters. | Low | Grid filter state + badge button | Beat 0 |
+
+### Gap Analysis / Coverage Tab (Beat 6)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Current Limit column | Shows what client currently has vs what contract requires. Gap analysis is meaningless without it -- "you need Mex$50M but have Mex$0" vs just "you need Mex$50M". | Low | ProjectCoverage.current_limit field (add to frontend type, already in backend) | Beat 6 |
+| Gap Amount column (red `#dc2626` dollar amounts) | The entire point of gap analysis. Demo shows `Mex$50,000,000` in bold red for missing coverage, dashes for covered items. | Low | CurrencyCell with red text variant | Beat 6 |
+| Clause column (coral ClauseLink -- "7.1", "8.2", "AI" for AI-discovered) | Links each coverage to its contract clause. Core traceability. Demo shows clause refs in coral, "AI" for AI-discovered requirements (Professional Liability, Environmental). | Low | ClauseLink renderer | Beat 6 |
+| Section group rows ("INSURANCE COVERAGES" / "SURETY BONDS" -- uppercase, `#9CA3AF`, letter-spacing 0.08em) | Demo cleanly separates insurance and surety with styled group headers. Current `GapAnalysis.tsx` uses category arrays but renders flat. | Med | ag-grid rowGrouping or manual group header dividers | Beat 6 |
+| Row coloring by gap status (missing: `rgba(239,68,68,0.02)` red tint, insufficient: `rgba(249,115,22,0.04)` orange tint) | Demo tints "No Coverage" rows. Visual scanning without reading every cell. Existing GapAnalysis has no row coloring. | Low | ag-grid `getRowStyle` callback keyed on gap_status | Beat 6 |
+| Urgency banner when project starts within 30 days ("Project starts in 18 days -- June 1, 2026") | Demo shows amber accent card with urgency. Drives action. | Low | Project start_date date math | Beat 6 |
+
+### Email Approval (Beat 9)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Full email body display (no truncation, `white-space: pre-wrap`) | Current EmailApproval.tsx truncates body content. Demo shows full formal Spanish solicitation emails. Brokers must read the full email before approving. | Low | Remove character limit, use pre-wrap | Beat 9 |
+| Prominent "To:" address in card header (e.g., "suscripcion@zurich.com.mx") | Who the email goes to. Currently not shown prominently. Demo makes this a first-class header element. | Low | SolicitationDraft.sent_to_email | Beat 9 |
+| Carrier identity in card header (CarrierCell with colored circle + name) | Which carrier this email targets. Demo shows `[ZM] Zurich Mexico` with colored circle. | Low | CarrierCell renderer reuse | Beat 9 |
+| Separate editable subject field (`<input>` full width) and body field (`<textarea>` min-height 300px) | Current edit mode doesn't properly separate subject from body. Demo has distinct editable regions. | Low | Separate controlled inputs | Beat 9 |
+| Attachments list below body (paperclip icon + file names) | Shows what files are attached to the solicitation. Currently missing entirely. Demo lists "MSA Contract.pdf, Existing Policies.pdf". | Low | Document list from project | Beat 9 |
+
+### Carrier Selection (Beat 7)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Replace checkbox card grid with ag-grid table (Carrier, Method, Routing Rule, Include toggle) | Demo uses a clean table. Current CarrierSelection.tsx uses card grid with match score bars -- visually cluttered, scores lack clear methodology. | Med | CarrierCell, StatusBadge ("Portal" green / "Email" blue), ToggleCell renderers | Beat 7 |
+| Remove match score bar entirely | Demo has no match scores. Routing rule text ("CAR > Mex$30M requires email submission") is more honest and actionable than a 78% score. | Low | Delete existing match score component | Beat 7 |
+| Section headers for Insurance vs Surety carriers | Demo groups these distinctly with uppercase styled headers. | Low | ag-grid group headers or manual section dividers | Beat 7 |
+| "Proceed to Submission (N carriers)" button with included count | Clear transition CTA. Demo shows count of selected carriers. Triggers draft creation for included carriers. | Low | Button + navigation + `POST /projects/{id}/draft-solicitations` | Beat 7 |
+
+### Quote Tracking (Beats 11, 13)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Summary badges at top ("4 of 6 received" green dot, "2 pending" pulsing orange dot) | Demo shows these prominently. Instant status without scanning the list. | Low | Badge components, CSS `pulse 2s infinite` animation | Beat 11 |
+| Premium column per quote (CurrencyCell) | Shows the money. Currently missing from quote rows. | Low | CurrencyCell renderer | Beat 11 |
+| Type badge per quote (Insurance = coral, Surety = blue StatusBadge) | Distinguishes quote categories visually. | Low | StatusBadge | Beat 11 |
+| Received timing column (days since solicited, orange via DaysCell if > 7) | Shows carrier responsiveness. "3 days" vs "14 days" matters for carrier evaluation. | Low | DaysCell renderer | Beat 11 |
+| Completion card when all quotes received ("All quotes received" -- green accent, "Extract & Compare" RunInClaudeCodeButton) | Clear transition point from collecting to comparing. Demo shows this as a prominent green card at Beat 13. | Low | Conditional card render | Beat 13 |
+
+### Comparison Matrix (Beats 12, 14, 15)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Migrate from custom HTML table to ag-grid | Current `ComparisonGrid.tsx` (115 lines) uses a plain HTML `<table>`. Rest of module uses ag-grid. Creates visual inconsistency, missing native sticky headers, no column show/hide, no pinned rows. | High | Custom ComparisonCellRenderer (two-row: premium bold 14px + limit/deductible muted 12px in one cell), `rowHeight: 64` | Beat 14 |
+| Expandable coverage groups (collapsible sections with toggle headers) | Demo groups rows: "General Liability Coverage (3 rows)", "Equipment & CAR (2 rows)", "Professional & Environmental (3 rows)", "Surety Bonds (3 rows)". Expand/collapse per group. | Med | ag-grid groupRowRenderer or manual accordion pattern | Beat 14 |
+| Critical exclusion alert row (red border card, full-width, alert icon) | Demo's signature UX moment: "Zurich Mexico -- Critical Exclusion: Vibration not covered without Endoso 014. This project requires earthwork." Red `2px solid rgba(239,68,68,0.4)` border, `rgba(239,68,68,0.03)` background. | Med | `has_critical_exclusion` field, conditional row rendering between coverage groups | Beat 14 |
+| Recommended carrier column styling (coral `3px` left border on all cells, "BEST OPTION" badge on header, `9px bold #E94D35`) | Demo highlights Mapfre column distinctly. Visual recommendation at a glance. | Low | Column-specific styling via ag-grid cellStyle callback | Beat 14 |
+| Total premium pinned bottom row (sticky at bottom of scrollable grid) | Demo shows total premium per carrier. ag-grid's `pinnedBottomRowData` is designed for exactly this. | Med | `pinnedBottomRowData` configuration, totals computation | Beat 14 |
+| Partial comparison banner ("4 of 6 quotes received, waiting for: GNP, Chubb" -- amber accent) | Demo shows this at Beat 12. Prevents confusion about incomplete data. | Low | Comparison partial flag from API | Beat 12 |
+| Surety comparison view (separate section or tab) | Demo dedicates Beat 15 to surety bonds: performance, quality, advance payment bonds with two carriers (Aserta, Dorama). Different column structure from insurance. | Med | Separate data source, different column layout | Beat 15 |
+
+### Portal Submission (Beat 8)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Replace Python script display with RunInClaudeCodeButton | Current PortalSubmission.tsx shows a Python script. New paradigm: "Run `/broker:fill-portal`" button copies command to clipboard. | Med | RunInClaudeCodeButton component | Beat 8 |
+| Data preview table per portal carrier (Portal Field / Value mapping) | Demo shows exactly which fields will be auto-filled before running. User verification before automation. | Med | Field map data from backend/carrier config, table layout | Beat 8 |
+| Screenshot display after automation completes | Show portal screenshot for user to verify submission correctness. "Confirm Submission" / "Retry" buttons. | Med | `GET /broker/quotes/{id}/portal-screenshot` endpoint, image rendering | Beat 11 |
+
+### Recommendation & Delivery (Beat 16)
+
+| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
+|---------|-------------|------------|--------------|----------|
+| Fix recommendation API paths (editRecommendation, sendRecommendation) | Currently broken -- silently 404. | Low | broker.ts one-line fixes | N/A -- bug fix |
+| Package summary card (Insurance carrier + premium, Surety carrier + premium, Total) | Demo shows "Insurance: Mapfre Mex$847,875 + Surety: Aserta Mex$127,500 = Total Mex$975,375". Clear bottom-line. | Low | Comparison data, CurrencyCell | Beat 16 |
+| "Draft Recommendation" RunInClaudeCodeButton when none exists | CTA to generate recommendation via Claude Code when no BrokerRecommendation record exists yet. | Low | RunInClaudeCodeButton | Beat 16 |
+
+---
 
 ## Differentiators
 
-Features that separate this from standard AMS/CRM tools and create the switching cost moat.
+Features that set the product apart. Not expected, but create signature moments.
 
-| Feature | Value Proposition | Complexity | Dependencies | Notes |
-|---------|-------------------|------------|--------------|-------|
-| Context store intelligence bridge | Every broker entity (client, carrier, project) links to the context store via `context_entity_id`. Meeting notes, email signals, and relationship context automatically surface where they matter. No major AMS does this — they store policy data but not relationship intelligence. | High | Context store entity creation (eager), `context_entity_id` on broker_clients, carrier_configs, broker_projects, bidirectional data flow | This is the moat mechanism. A broker who uses the system for 18 months has accumulated intelligence that makes every AI-drafted solicitation, recommendation, and carrier match more accurate. Competitors cannot replicate accumulated context. McKinsey confirms: "MGAs that combine strong relationships with data ownership and advanced AI use will differentiate themselves most sharply." |
-| AI-powered solicitation personalization from context | When drafting a solicitation for a carrier, the system reads the carrier's context entity to pull: past response times, preferred submission formats, underwriter preferences from past meetings, and relationship notes. The draft is customized to the specific carrier relationship, not generic. | Med | Context store intelligence bridge (above), solicitation_drafter engine enhancement, carrier context entity populated with signals | No broker tool personalizes solicitations based on accumulated carrier relationship intelligence. Applied Epic sends templated emails. This sends relationship-aware emails. "Based on your previous feedback, we've included the seismic risk assessment upfront." |
-| Client intelligence surfacing | Client detail page shows not just contact info and projects, but AI-surfaced insights: "In last meeting, client mentioned expanding to Monterrey — consider regional carrier options" or "Client prefers lowest deductible over lowest premium based on 3 conversations." | Med | Context store intelligence bridge, client detail page with intelligence panel, context entity query on page load | Standard AMS shows policy data. This shows relationship intelligence. The broker walks into a client meeting already knowing what was discussed last time, what the client cares about, and what opportunities exist. |
-| Carrier response pattern tracking | Over time, the system learns which carriers respond fastest, which ones offer competitive rates for construction projects, and which underwriters are responsive. This intelligence feeds carrier matching and selection. | Med | Context store signals accumulated from solicitation/quote lifecycle, carrier matching engine enhancement | "Carrier X responded in 2 days on the last 3 solicitations. Carrier Y averages 14 days." This data-driven carrier selection replaces the broker's mental Rolodex. GenasysTech confirms: "Speed-to-quote becomes a competitive moat" — the system helps brokers route to fast-responding carriers. |
-| Normalized name dedup with legal suffix stripping | Mexican legal entities have structured suffixes: S.A. de C.V., S.A.S. de C.V., S.A.P.I., S. de R.L. de C.V. Simple lowercase comparison fails. Aggressive normalization strips these suffixes from a configurable list, preventing "Alaya Construcciones" and "Alaya Construcciones S.A. de C.V." from creating duplicate client records. | Low | Configurable suffix list in code/config, normalization function applied at insert/update, unique constraint on (tenant_id, normalized_name) | No US-focused AMS handles Mexican legal entity suffixes. This is a genuine competitive advantage in the Mexico construction insurance market. Must be extensible for US expansion (Inc., LLC, Corp., L.P.). |
-| Solicitation draft versioning with audit trail | Multiple drafts per project+carrier, with revision history preserved. Partial unique index ensures only one active draft at a time. Every sent draft is immutable. If a carrier claims they never received a solicitation, the broker has timestamped evidence. | Low | `solicitation_drafts` table with status enum, partial unique index on (project_id, carrier_id) WHERE status IN ('draft', 'pending', 'approved') | Insurance communications retention is a regulatory expectation. Applied Epic stores sent emails but not draft history. This system preserves the full revision chain — valuable for E&O defense. |
+### Document Analysis Split Pane (Beats 4-5) -- NEW TAB
+
+| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
+|---------|-------------------|------------|--------------|----------|
+| Split-pane view: contract text (left, `flex: 1`) + extracted requirements (right, `width: 420px`) | The demo's most visually striking screen. Contract text with highlighted clauses + requirement cards side-by-side. No broker tool does this -- they show either the document OR the extracted data, never together. | High | New Analysis tab in project detail, document viewer component, requirement card component, independent scroll per pane | Beats 4-5 |
+| Highlighted contract clauses (coral `3px` left border + `rgba(233,77,53,0.08)` for insurance clauses 7.x, blue for surety clauses 8.x) with `data-clause` attributes | Clauses light up after analysis. Clicking a requirement card scrolls the left pane to the matching clause via `scrollIntoView`. Bidirectional context linking. | Med | data-clause attributes on clause sections, scrollIntoView smooth behavior, CSS clause highlighting | Beats 4-5 |
+| Requirement cards with confidence progress bars, "AI" sparkle badges, "Critical Finding" badges | Each extracted requirement shows: confidence (coral progress bar, e.g. "87%"), source type ("AI" badge with sparkle for skill-extracted), and critical findings (for requirements found in non-standard clause locations like clause 14.3.2). Rich metadata per coverage. | Med | ProjectCoverage fields: confidence (0.0-1.0), source ("ai"/"manual"), ai_critical_finding boolean | Beats 4-5 |
+| Shimmer loading animation during analysis (coral gradient sweep: `#FFF5F3` -> `rgba(233,77,53,0.15)` -> `#FFF5F3`) | Premium loading state while Claude Code parses contract. React Query polls every 10s until `analysis_status` transitions from "running" to "completed". Cards then appear with staggered fadeUp reveal (60ms delay per card). | Low | CSS shimmer keyframe, React Query `refetchInterval` conditional on analysis_status | Beats 4-5 |
+| Document type tabs within viewer ("MSA Contract" = coral active, "Surety Requirements" = blue active) | Switch between document types. Each tab renders different contract content with its own highlighted clauses. | Low | Tab state, coverages filtered by category (insurance/surety) | Beats 4-5 |
+| Serif font for contract text (Georgia/Times New Roman on `#FAFAF8` cream background, `line-height: 1.8`) | Contracts feel legible and authentic in serif. Distinguishes legal text from UI chrome. Subtle but professional. | Low | CSS font-family on document viewer only | Beats 4-5 |
+
+### AI Insight Card
+
+| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
+|---------|-------------------|------------|--------------|----------|
+| AI recommendation summary below comparison matrix (coral `4px` left border, sparkle icon, natural language) | "Mapfre lowest at Mex$847,000 vs average Mex$941,500. Full coverage including Endoso 014. No critical exclusions." Synthesized judgment, not just data. | Low | BrokerRecommendation.body field, fallback: generate template text from is_best_price/is_recommended flags | Beat 14 |
+
+### Interactive/PDF Toggle on Comparison Matrix
+
+| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
+|---------|-------------------|------------|--------------|----------|
+| PDF Preview mode (print-friendly static table with company letterhead, signature line, reference number) | Toggle between interactive ag-grid and PDF-ready layout. Demo shows a formal "Cuadro Comparativo" with Alaya letterhead, date, reference number, and signature line. Enables "save as PDF" for client delivery. | Med | Static HTML table renderer (no ag-grid), letterhead component, print CSS, `#525659` dark background preview wrapper | Beat 14 |
+
+### "Generated by Claude Code" Badge
+
+| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
+|---------|-------------------|------------|--------------|----------|
+| Coral badge at 10% opacity with sparkle icon on AI-generated content (emails, requirements, recommendations) | Transparency about what was AI-generated vs manual. Trust-building with the broker. "This email was drafted by AI" is both honest and a feature showcase. | Low | source field check (`source === 'ai'` or `auto_generated === true`), reusable badge component | Beats 5, 9, 14 |
+
+### Quote Detail Expansion
+
+| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
+|---------|-------------------|------------|--------------|----------|
+| Expandable inline detail panel per quote (premium breakdown: net + expedition + IVA = total, deductibles per coverage, endorsement green pills, exclusion red pills with alert icon) | Deep-dive without page navigation. Endorsement pills (Endoso 014, CG 20 10, Waiver of Subrogation) show coverage quality at a glance. Critical exclusions as red pills immediately flag problems. | Med | CarrierQuote detail fields (net_premium, expedition_costs, vat_amount, endorsements[], exclusions[]), inline expansion or modal | Beat 11 |
+
+### Left Navigation Phase Stepper
+
+| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
+|---------|-------------------|------------|--------------|----------|
+| Phase-aware left sidebar (200px, `#FAFAFA` bg) showing workflow progress: green checkmark = done, coral square = active, gray circle = pending | Demo's `LumifNav` component. 7 phases: Client Profile, Document Analysis, Gap Assessment, Carrier Selection, Submission, Quotes & Comparison, Send to Client. Orients broker in complex workflow. Clickable to jump between phases. | Med | Project status-to-phase mapping, sidebar layout within project detail, phase click navigation | All Lumif beats (3-16) |
+
+---
 
 ## Anti-Features
 
-Features to explicitly NOT build in this milestone.
+Features to explicitly NOT build.
 
 | Anti-Feature | Why Avoid | What to Do Instead |
 |--------------|-----------|-------------------|
-| Unified contact table (polymorphic) | Structurally identical tables (client contacts and carrier contacts) tempt DRY refactoring into one table with a `type` discriminator. This is wrong: FK constraints cannot enforce correct parentage, runtime type checks replace compile-time guarantees, and the role enums are different (client: primary/billing/technical/legal/executive vs carrier: submissions/account_manager/underwriter/claims/billing). | Keep separate tables. The FK IS the type system. Document merge trigger: revisit if a 3rd stakeholder type appears. |
-| Contact sync with external CRM | Tempting to sync broker contacts with Salesforce, HubSpot, or the GTM pipeline. Broker clients are insured parties, not sales prospects. Different domain, different lifecycle, different data sensitivity. Cross-module coupling creates maintenance burden for zero user value at this stage. | Context store is the intelligence bridge — not direct CRM integration. If a contact exists in GTM AND broker, the context store links them by company domain/name without tight coupling. |
-| Policy management / AMS features | The product boundary is clear: placement workflow tool, NOT an agency management system. No policy issuance, no commission tracking, no renewal management, no certificate issuance. Once bound, the broker enters the policy into their existing AMS. | Status lifecycle ends at `bound`. Post-binding features are a separate product decision. |
-| Real-time contact lookup / enrichment | Auto-filling contact details from LinkedIn, Clearbit, or similar enrichment APIs adds complexity, external dependencies, and potential PII compliance issues (especially in Mexico with LFPDPPP regulations). | Manual contact entry. Broker knows their contacts. Context store accumulates intelligence about contacts over time through natural usage (emails, meetings). |
-| Multi-tenant contact sharing | Some contacts (especially at large carriers like Zurich or Chubb) might be shared across tenants. Building a shared contact directory adds massive complexity around data isolation, permission models, and conflict resolution. | Each tenant has their own contact records. If two tenants have the same carrier contact, they each maintain their own copy. Tenant isolation is sacrosanct. |
-| Client portal / self-service | Letting clients log in to see their projects, approve recommendations, or upload documents is a separate product. The current system is broker-facing only. | Broker sends deliverables via email (Excel export, recommendation email). Client interaction is through the broker, not through the system. |
-| Contact import from CSV/Excel | Bulk import is a onboarding convenience feature that adds edge cases (duplicate handling, validation, error reporting). Not needed when starting with zero data and the broker creates clients as projects arrive. | Manual creation via UI. Broker creates ~10-20 clients over the first month. A create form is sufficient. |
+| Backend AI engines as primary path | SPEC-BROKER-REDESIGN shifts ALL AI to Claude Code skills. Backend engines (`contract_analyzer`, `quote_extractor`, `solicitation_drafter`, `recommendation_drafter`, `followup_drafter`) become API-triggered fallbacks only. Building them as primary duplicates intelligence. | Claude Code skills are primary. Backend engines stay as-is. Frontend shows "Run in Claude Code" buttons, not "Analyze" buttons. |
+| Match score bars on carrier selection | Arbitrary numeric scores (e.g., "78% match") without clear methodology. Demo removed them entirely. Routing rule text ("CAR > Mex$30M requires email") is more honest and actionable. | Show routing rule text as a table column and portal/email method badge. Simple, clear, no magic numbers. |
+| Character truncation on email bodies | Current EmailApproval truncates body content. Insurance solicitations are formal business communications -- brokers must read the full text before approving. Demo shows full content. | Full body with `white-space: pre-wrap`, vertical scroll if extremely long. No character limit. |
+| Custom HTML table for comparison matrix | Current `ComparisonGrid.tsx` uses a plain `<table>`. Every other table in the broker module uses ag-grid with `flywheelGridTheme`. Creates visual inconsistency, duplicates scroll logic, misses native features (column show/hide, pinned rows, sticky headers). | Use ag-grid with custom `ComparisonCellRenderer` (two-row cells for premium + limit/deductible), `pinnedBottomRowData` for totals, `groupRowRenderer` for expandable groups. |
+| Inline AI trigger buttons (`POST /projects/{id}/analyze`) | Old paradigm where frontend triggers backend AI jobs. New paradigm: "Run in Claude Code" copies command to clipboard, user pastes into Claude Code terminal. Backend AI endpoints remain as API but are not the primary UX. | `RunInClaudeCodeButton` component everywhere. One consistent interaction pattern. |
+| Gmail/email view in broker module | Demo shows Gmail as a separate browser tab (it's a demo concept). The product already has a separate email module (`features/email/`). Don't duplicate email UI inside broker. | Broker module handles placement workflow only. Email module handles email. Broker project can link to email threads via `broker_project_emails`. |
+| Client portal view | Demo implies clients see a portal. Out of scope for broker redesign. Adds authentication, permission, and UX complexity for a separate persona. | Broker-facing workflow only. Client gets PDF export via comparison matrix PDF preview mode + recommendation email. |
+| Framer Motion heavy animations | Demo uses Framer Motion for every transition (it's a 260KB single-file demo app). Production needs lightweight CSS animations for performance and bundle size. Demo's `motion.div` + `AnimatePresence` on every row is excessive for production. | CSS `@keyframes` for fadeUp, shimmer, pulse, highlightSweep. Reserve Framer Motion only if already used in the app for page-level transitions. |
+| Real carrier logo SVGs now | Premature polish. Demo has custom SVGs for Mapfre, GNP, Chubb, Zurich but the product needs to support arbitrary carriers. | CarrierCell with colored initials circle (color from name hash). Add real logos as optional image overrides in a future polish pass. |
+| Full i18n / Spanish-first UI | Demo is bilingual (ES/EN toggle) because it demos for a Mexican brokerage. The product UI is English-first. | English UI. Currency formatting handles MXN. Insurance domain terms (Endoso, fianza, prima) appear in DATA (entered by broker or extracted by AI), not in UI chrome labels. |
+| Step indicator redesign | Current `StepIndicator.tsx` exists. Updating from 5 to 6 steps is trivial. A full redesign (like demo's left nav) is separate work. | Update step count from 5 to 6 (add Analysis tab). Visual treatment can match existing style. Left nav is a differentiator, not table stakes. |
+
+---
 
 ## Feature Dependencies
 
 ```
-Context Store Intelligence Bridge
-  <- Context store entity type for "insured company" (may need creation)
-  <- Context store entity type for "insurance carrier" (may need creation)
-  <- Context store entity type for "insurance project" (may need creation)
-  <- Eager entity creation at BrokerClient/CarrierConfig/BrokerProject creation
-  <- Failure handling: fail client creation if context entity creation fails
-  <- Background reconciliation job for healing NULL context_entity_ids
+Wave 0: Foundation (blocks everything)
+  |
+  +-- Fix 4 API paths -----------> Email send/edit, Recommendation send/edit work
+  +-- Fix types ------------------> All components render correct fields
+  +-- Grid theme update ----------> All grids get coral hover, no col separators
+  +-- 7 shared renderers ---------> CurrencyCell, ClauseLink, CarrierCell, ToggleCell,
+  |                                 DaysCell, RunInClaudeCodeButton, Airbnb shadow CSS
+  +-- Batch coverage endpoint ----> parse-contract skill can create 8+ records
+  +-- Dashboard stats premium ----> MetricCards show real data
 
-Client Entity
-  <- broker_clients table (DDL)
-  <- Normalized name function (legal suffix stripping)
-  <- Client CRUD endpoints (list, create, get, update)
-  <- Client list page (ag-grid)
-  <- Client detail page (profile + contacts + projects)
-  <- Sidebar navigation item
+Wave 1: Skills Infrastructure (parallel with frontend)
+  |
+  +-- Skill directory structure --> All skills need ~/.claude/skills/broker/
+  +-- Hook scripts --------------> Auto gap-analysis after coverage write,
+                                    auto comparison after quote write
 
-Client Contacts
-  <- broker_client_contacts table (DDL)
-  <- Contact CRUD endpoints (nested under client)
-  <- Client detail page contacts section
-  <- Client entity (parent FK)
+Wave 2: High-Impact Frontend (depends on Wave 0)
+  |
+  +-- Dashboard MetricCards + highlighted rows (depends: CurrencyCell, DaysCell)
+  +-- Gap Analysis upgrades (depends: CurrencyCell, ClauseLink, types fix)
+  +-- Comparison Matrix overhaul (depends: CurrencyCell, CarrierCell, grid theme)
 
-Carrier Contacts
-  <- carrier_contacts table (DDL)
-  <- Migrate email_address to contact row
-  <- Drop email_address from carrier_configs
-  <- Contact CRUD endpoints (nested under carrier)
-  <- Carrier detail/expand with contacts section
-  <- Update solicitation drafter to use carrier contact email
+Wave 3: Remaining Frontend (depends on Wave 0, benefits from Wave 1 skills)
+  |
+  +-- Document Analysis NEW tab (depends: types fix for ProjectCoverage fields)
+  +-- Email Approval (depends: SolicitationDraft type, API path fixes)
+  +-- Quote Tracking (depends: CurrencyCell, DaysCell, RunInClaudeCodeButton)
+  +-- Carrier Selection (depends: CarrierCell, ToggleCell)
+  +-- Portal Submission (depends: RunInClaudeCodeButton)
+  +-- Recommendation (depends: API path fixes, CurrencyCell)
 
-Client-Project Link
-  <- client_id FK on broker_projects (DDL)
-  <- Update project create endpoint (accept optional client_id)
-  <- Update project list endpoint (include client_name via join)
-  <- Client select/create widget in CreateProjectDialog
-  <- Client entity (must exist first)
-
-Solicitation Drafts (Proper Entity)
-  <- solicitation_drafts table (DDL)
-  <- Extract draft_subject/body/status from carrier_quotes
-  <- Drop old columns from carrier_quotes
-  <- Update draft-solicitations endpoint to write new table
-  <- Update approve-send endpoint to read new table
-  <- Solicitation list endpoint per project
-
-Recommendations (Proper Entity)
-  <- broker_recommendations table (DDL)
-  <- Extract recommendation_* from broker_projects
-  <- Drop old columns from broker_projects
-  <- Update send-recommendation endpoint to use new table
-  <- Recommendation list endpoint per project
-  <- Approval workflow (approve_by_user_id, approved_at)
-
-Project Email Tracking
-  <- broker_project_emails table (DDL)
-  <- Migrate email_thread_ids array data (if any exists)
-  <- Drop email_thread_ids column from broker_projects
-  <- Email list endpoint per project
-
-Audit Columns
-  <- ALTER TABLE additions across 5 existing tables
-  <- Update all write operations to set created_by/updated_by from session
-  <- No frontend changes (backend-only)
-
-Binding Status
-  <- Update CHECK constraint on broker_projects.status
-  <- Update frontend StatusBadge component
-  <- Update gate logic / step indicator
+Wave 4: Animation & Polish (depends on Waves 2-3 being built)
+  |
+  +-- CSS animations: fadeUp, shimmer, pulse, greenFlash, highlightSweep
+  +-- Staggered requirement card reveals in Analysis tab
+  +-- Completion state animations
 ```
+
+**Critical path insight:** RunInClaudeCodeButton and CurrencyCell are used by 5+ downstream features. They MUST land in Wave 0 shared components, not in Wave 2/3 page work.
+
+---
 
 ## MVP Recommendation
 
-Prioritize (in dependency order):
+### Prioritize (maximum demo-quality impact per day):
 
-1. **Database schema changes (all 6 new tables + 5 table modifications)** — Foundation for everything else. Single Alembic migration (executed statement-by-statement via Supabase SQL Editor per established workaround). No data to migrate = clean execution. Includes CHECK constraints, audit columns, and binding status.
+1. **Wave 0: Foundation** -- All 8 items. Without these, downstream work hits type errors, visual inconsistency, and 404 API failures. Estimated: 1-2 days. Non-negotiable.
 
-2. **Client entity + contacts** — The highest-visibility gap. Broker needs to see and manage clients before anything else makes sense. Client CRUD, contact CRUD, client list page, client detail page. Links projects to clients via nullable FK.
+2. **Dashboard MetricCards + pipeline upgrades** -- First screen users see. 4 cards + premium column + days column + coral left-border on action rows transforms dashboard from generic "data dump" to professional "command center." Estimated: half day.
 
-3. **Carrier contacts + email_address migration** — Enables role-based solicitation routing. Update solicitation drafter to use carrier contacts (submissions role) instead of the old email_address column. Drop the old column.
+3. **Gap Analysis upgrades** -- Add current_limit, gap_amount (red), clause links, row coloring, section groups, urgency banner. This is the most-used daily screen for active projects. Estimated: 1 day.
 
-4. **Solicitation drafts + recommendations as proper entities** — Structural extractions that enable approval workflows and version history. Update existing endpoints to read/write new tables. Drop old columns.
+4. **Comparison Matrix overhaul** -- Expandable groups, critical exclusion alerts, recommended column styling, AI insight card, pinned total row, Interactive/PDF toggle, partial comparison banner. Most complex but highest-impact screen -- this is what clients see. Estimated: 2-3 days.
 
-5. **Context store intelligence bridge** — The differentiator. Eager entity creation on client/carrier/project. This can be implemented incrementally: first just create entities and link them (low effort), then build intelligence surfacing in the UI (higher effort, can be phased).
+5. **Email Approval full content** -- Quick win. Remove truncation, add carrier identity header, separate subject field, attachments list, AI badge. Estimated: half day.
 
-6. **Project email tracking entity** — Lowest priority table stakes item. Replace TEXT[] with proper table. Minimal frontend impact.
+### Defer:
 
-Defer:
-- **AI-powered solicitation personalization from context**: Requires accumulated context data. Build the bridge first, personalization second.
-- **Carrier response pattern tracking**: Requires historical solicitation/quote data. Instrument first, surface patterns later.
-- **Client intelligence panel on detail page**: Requires context entities to have accumulated signals. Ship the entity creation, let signals accumulate, build the panel in a subsequent phase.
+- **Document Analysis split pane (NEW tab)**: Highest differentiator value but highest complexity. Requires entirely new component tree (document viewer, requirement cards, scroll sync, shimmer loading). Schedule for Wave 3 -- it's a new tab, not a fix to existing functionality, so nothing is broken without it. The data still renders on the Coverage tab.
 
-## Domain-Specific Insights
+- **Portal Submission redesign**: Depends on Claude Code skills being built and working. The current Python script display functions as a placeholder. Redesign when skills are ready.
 
-### What the insurance broker CRM landscape looks like
+- **Left Navigation Phase Stepper**: Nice-to-have differentiator. Current step indicator works. Phase stepper is additive polish.
 
-The market is bifurcated: on one side, full AMS platforms (Applied Epic, AMS360, HawkSoft) that manage the entire agency lifecycle but have weak placement workflow tooling. On the other side, modern placement tools (BindHQ, BrokerEdge, ExpertInsured) that handle submission-to-bind but lack CRM-depth client intelligence.
+- **Animation polish (Wave 4)**: Ship functional UX first, animate second. CSS keyframes can be added incrementally.
 
-No tool in either category bridges accumulated relationship intelligence (from meetings, emails, conversations) into the placement workflow. Applied Epic knows your policy data but not that the client mentioned earthquake concerns in last week's meeting. BindHQ automates submissions but doesn't personalize them based on carrier relationship history.
+- **PDF Preview mode on comparison**: Useful for client presentations but not blocking daily workflow. Can ship after comparison matrix core is done.
 
-The context store intelligence bridge is genuinely novel. It occupies the gap between "AMS that stores data" and "AI tool that processes documents." It creates an intelligence layer where every interaction makes the next placement smarter.
-
-### Mexico construction specifics relevant to this milestone
-
-- **RFC (Registro Federal de Contribuyentes)** is mandatory on all Mexican insurance policies and business transactions. The `tax_id` field on `broker_clients` directly maps to this requirement. SAT requires exact RFC + legal name + postal code match for CFDI (electronic invoice) validation. Storing both `name` (display) and `legal_name` (for policies/invoices) is domain-correct.
-
-- **Legal entity suffixes** (S.A. de C.V., S.A.S. de C.V., S.A.P.I. de C.V., S. de R.L. de C.V.) are not just formatting — they indicate the legal structure of the company. The normalized_name function must strip these for dedup purposes but preserve them in `legal_name`.
-
-- **Carrier contact structures in Mexico** differ from US: Mexican carriers often have regional offices with different submission contacts per state/region. The carrier_contacts model (multiple contacts per carrier with roles) handles this correctly.
-
-### Solicitation workflow in regulated insurance
-
-Industry-standard workflow at mature brokerages:
-1. Draft solicitation (AI-generated or manual)
-2. Internal review (compliance or senior broker reviews content)
-3. Approve (confirms content is accurate and professional)
-4. Schedule/send (may coordinate timing across multiple carriers)
-
-The current system combines steps 2-4 into one "approve and send" action. The new solicitation_drafts entity with separate `approved` and `sent` statuses correctly models the real workflow. This is not overengineering — it is how BrokerEdge, Applied Epic, and BindHQ all handle outbound communications.
+---
 
 ## Sources
 
-- [Best Insurance Broker CRM Software 2025](https://agencymate.com/insights/insurance-broker-crm/) — Feature comparison of top broker CRM platforms
-- [Best Insurance Broker Management Systems 2025](https://stratoflow.com/insurance-broker-management-system/) — Core feature expectations for broker management
-- [Brokerage Workflow Management](https://www.expertinsured.com/key-features/workflow-and-task-management/brokerage-workflow) — Intake through bind workflow stages
-- [BindHQ - AMS & Operations Platform](https://www.bindhq.com/) — Submission to binding automation, carrier connectivity
-- [BrokerEdge - Insurance Broker Software](https://www.damcogroup.com/insurance/brokeredge-broker-management-software) — Task management, workflow automation, contact management
-- [AI Insurance Distribution: How Brokers Will Win in 2026](https://www.genasystech.com/ai-insurance-distribution-brokers-2026/) — Speed-to-quote moat, carrier relationships
-- [AI-driven transformation in commercial insurance](https://www.deloitte.com/us/en/Industries/financial-services/articles/commercial-insurance-industry-ai-driven-transformation.html) — Data ownership as competitive advantage
-- [McKinsey: AI in Insurance](https://www.mckinsey.com/industries/financial-services/our-insights/ai-in-insurance-understanding-the-implications-for-investors) — Data ownership, AI differentiation
-- [Mexico RFC Number Guide](https://www.signzy.com/blogs/mexico-rfc-for-business-owners) — RFC structure, SAT validation requirements
-- [Salesforce Financial Services for Insurance Brokerages](https://www.salesforce.com/financial-services/insurance-brokerage-management-software/) — Enterprise CRM features for brokerages
-- [Insurance Workflow Software Guide](https://www.herondata.io/blog/insurance-workflow-software) — Workflow automation patterns
-- PROPOSAL-BROKER-DATA-MODEL.md — Internal schema proposal (board-reviewed, all questions resolved)
-- CONCEPT-BRIEF-BROKER-DATA-MODEL.md — Advisory board analysis (14 advisors, 4 rounds)
+- Alaya Demo v2: `/tmp/alaya-demo-v2/src/App.tsx` -- 3816 lines, 16-beat interactive demo, single-file React + Framer Motion
+- Redesign spec: `.planning/SPEC-BROKER-REDESIGN.md` -- comprehensive per-page specification with CSS values, component props, API mappings
+- Existing broker components: `frontend/src/features/broker/` -- 42 `.tsx` files across components/, pages/, comparison/
+- Existing `ComparisonGrid.tsx` -- 115 lines, custom HTML table (needs ag-grid migration)
+- Existing `GapAnalysis.tsx` -- 120 lines, HTML table with basic status badges (missing gap_amount, current_limit, clause columns)
+- Existing `BrokerDashboard.tsx` -- 43 lines, TaskList + ProjectPipelineGrid (no MetricCards)
+- Existing `EmailApproval.tsx` -- truncated body display (needs full content)
+- Demo fixtures: `/tmp/alaya-demo-v2/src/fixtures.ts` -- insurance/surety data structures, comparison matrix grouped format, carrier quotes with premium breakdowns
