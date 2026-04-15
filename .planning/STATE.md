@@ -74,5 +74,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-15
-Stopped at: Completed 134-02-PLAN.md (portal automation layer — base.py, mapfre.py, mapfre.yaml)
+Stopped at: Completed 134-03-PLAN.md (broker hooks -- 5 hook files + settings.json registrations)
 Resume file: None
