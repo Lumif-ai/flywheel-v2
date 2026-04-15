@@ -1,22 +1,17 @@
-import { useProjectQuotes } from '../hooks/useSolicitations'
+import { useSolicitationDrafts } from '../hooks/useSolicitationDrafts'
+import { useCarrierMatches } from '../hooks/useCarrierMatches'
 import { EmailApproval } from './EmailApproval'
 import { PortalSubmission } from './PortalSubmission'
 import { CheckCircle } from 'lucide-react'
 import { Skeleton } from '@/components/ui/skeleton'
-import type { CarrierQuote } from '../types/broker'
-
-// TODO(phase-138): Migrate to SolicitationDraft data
-type QuoteWithLegacyDraft = CarrierQuote & {
-  draft_subject?: string | null
-  draft_status?: string | null
-}
 
 interface SolicitationPanelProps {
   projectId: string
 }
 
 export function SolicitationPanel({ projectId }: SolicitationPanelProps) {
-  const { data: quotes, isLoading } = useProjectQuotes(projectId)
+  const { data: drafts, isLoading } = useSolicitationDrafts(projectId)
+  const { data: matchData } = useCarrierMatches(projectId)
 
   if (isLoading) {
     return (
@@ -27,18 +22,24 @@ export function SolicitationPanel({ projectId }: SolicitationPanelProps) {
     )
   }
 
-  if (!quotes || quotes.length === 0) return null
+  if (!drafts || drafts.length === 0) return null
 
-  const emailQuotes = quotes.filter((q) => (q as QuoteWithLegacyDraft).draft_subject != null)
-  const portalQuotes = quotes.filter(
-    (q) => (q as QuoteWithLegacyDraft).draft_subject == null && q.carrier_config_id != null
-  )
+  // Build carrier submission method map from carrier matches
+  const carrierMethodMap: Record<string, string> = {}
+  ;(matchData?.matches ?? []).forEach((m) => {
+    carrierMethodMap[m.carrier_name] = m.submission_method
+  })
 
-  const totalCarriers = emailQuotes.length + portalQuotes.length
-  const solicitedCount =
-    emailQuotes.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'sent').length +
-    portalQuotes.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'confirmed').length
+  const emailDrafts = drafts.filter((d) => (carrierMethodMap[d.carrier_name] ?? 'email') === 'email')
+  const portalDrafts = drafts.filter((d) => carrierMethodMap[d.carrier_name] === 'portal')
 
+  const sentCount = emailDrafts.filter((d) => d.status === 'sent').length
+  const confirmedCount = portalDrafts.filter(
+    (d) => d.status === 'sent' || d.status === 'approved'
+  ).length
+
+  const totalCarriers = emailDrafts.length + portalDrafts.length
+  const solicitedCount = sentCount + confirmedCount
   const allDone = totalCarriers > 0 && solicitedCount === totalCarriers
 
   return (
@@ -50,13 +51,13 @@ export function SolicitationPanel({ projectId }: SolicitationPanelProps) {
         </span>
       </div>
 
-      {emailQuotes.length > 0 && <EmailApproval projectId={projectId} />}
+      {emailDrafts.length > 0 && <EmailApproval projectId={projectId} />}
 
-      {emailQuotes.length > 0 && portalQuotes.length > 0 && (
+      {emailDrafts.length > 0 && portalDrafts.length > 0 && (
         <div className="border-t" />
       )}
 
-      {portalQuotes.length > 0 && <PortalSubmission projectId={projectId} />}
+      {portalDrafts.length > 0 && <PortalSubmission projectId={projectId} />}
 
       {allDone && (
         <div className="rounded-lg bg-green-50 p-4 flex items-center gap-3 text-green-700">

@@ -37,6 +37,7 @@ export function useApproveSend(projectId: string) {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
       qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
+      qc.invalidateQueries({ queryKey: ['broker', 'solicitation-drafts', projectId] })
       toast.success('Solicitation email sent')
     },
     onError: () => toast.error('Failed to send solicitation email'),

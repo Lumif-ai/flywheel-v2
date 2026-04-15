@@ -1,60 +1,53 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { Mail, CheckCircle, Edit3, Send } from 'lucide-react'
-import { useProjectQuotes } from '../hooks/useSolicitations'
+import { Mail, CheckCircle, Edit3, Send, Sparkles } from 'lucide-react'
 import { useApproveSend, useEditDraft } from '../hooks/useSolicitations'
-import type { CarrierQuote } from '../types/broker'
-
-// TODO(phase-138): Migrate to SolicitationDraft data instead of reading draft fields from CarrierQuote
-// During transition, backend still sends draft_subject/draft_body/draft_status on quote objects.
-// Access via metadata_ to avoid TS errors after field removal from type.
-type QuoteWithLegacyDraft = CarrierQuote & {
-  draft_subject?: string | null
-  draft_body?: string | null
-  draft_status?: string | null
-}
+import { useSolicitationDrafts } from '../hooks/useSolicitationDrafts'
+import { useCarrierMatches } from '../hooks/useCarrierMatches'
+import type { SolicitationDraft } from '../types/broker'
 
 interface EmailApprovalProps {
   projectId: string
 }
 
 function DraftCard({
-  quote: rawQuote,
+  draft,
+  emailAddress,
   projectId,
 }: {
-  quote: CarrierQuote
+  draft: SolicitationDraft
+  emailAddress: string | undefined
   projectId: string
 }) {
-  const quote = rawQuote as QuoteWithLegacyDraft
   const [editing, setEditing] = useState(false)
-  const [subject, setSubject] = useState(quote.draft_subject || '')
-  const [body, setBody] = useState(quote.draft_body || '')
+  const [subject, setSubject] = useState(draft.subject || '')
+  const [body, setBody] = useState(draft.body || '')
   const approveSend = useApproveSend(projectId)
   const editDraft = useEditDraft(projectId)
 
   function handleSave() {
     editDraft.mutate(
-      { draftId: quote.id, payload: { subject, body } },
+      { draftId: draft.id, payload: { subject, body } },
       { onSuccess: () => setEditing(false) }
     )
   }
 
-  if (quote.draft_status === 'sent') {
+  if (draft.status === 'sent') {
     return (
       <div className="rounded-xl border p-4 space-y-2 bg-green-50/30">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle className="h-4 w-4 text-green-600" />
-            <span className="font-medium">{quote.carrier_name}</span>
+            <span className="font-medium">{draft.carrier_name}</span>
           </div>
           <Badge variant="outline" className="bg-green-50 text-green-700 border-0 text-xs">
             Sent
           </Badge>
         </div>
         <p className="text-xs text-muted-foreground">
-          Sent {quote.solicited_at ? new Date(quote.solicited_at).toLocaleString() : ''}
+          Sent {draft.sent_at ? new Date(draft.sent_at).toLocaleString() : ''}
         </p>
       </div>
     )
@@ -65,12 +58,14 @@ function DraftCard({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Mail className="h-4 w-4 text-blue-500" />
-          <span className="font-medium">{quote.carrier_name}</span>
+          <span className="font-medium">{draft.carrier_name}</span>
         </div>
         <Badge variant="outline" className="text-xs">
-          {quote.draft_status || 'pending'}
+          {draft.status || 'pending'}
         </Badge>
       </div>
+
+      <p className="text-xs text-muted-foreground">To: {emailAddress ?? '—'}</p>
 
       {editing ? (
         <div className="space-y-2">
@@ -84,8 +79,7 @@ function DraftCard({
           <textarea
             value={body}
             onChange={(e) => setBody(e.target.value)}
-            rows={6}
-            className="w-full rounded-lg border px-3 py-2 text-sm font-mono"
+            className="w-full rounded-lg border px-3 py-2 text-sm font-mono min-h-[400px]"
             placeholder="Email body"
           />
           <div className="flex gap-2">
@@ -99,9 +93,9 @@ function DraftCard({
         </div>
       ) : (
         <div className="space-y-2">
-          <p className="text-sm font-medium">{quote.draft_subject}</p>
+          <p className="text-sm font-medium">{draft.subject}</p>
           <p className="text-sm text-muted-foreground line-clamp-3">
-            {quote.draft_body?.replace(/<[^>]*>/g, '').slice(0, 200)}
+            {draft.body.replace(/<[^>]*>/g, '').slice(0, 300)}
           </p>
           <div className="flex gap-2">
             <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
@@ -110,7 +104,7 @@ function DraftCard({
             </Button>
             <Button
               size="sm"
-              onClick={() => approveSend.mutate(quote.id)}
+              onClick={() => approveSend.mutate(draft.id)}
               disabled={approveSend.isPending}
             >
               <Send className="h-3 w-3 mr-1" />
@@ -119,12 +113,26 @@ function DraftCard({
           </div>
         </div>
       )}
+
+      <span className="inline-flex items-center gap-1.5 rounded-full border border-[#E94D35]/30 bg-[#E94D35]/5 px-2 py-0.5 text-xs text-[#E94D35]">
+        <Sparkles className="h-3 w-3" />
+        Generated by Claude Code
+      </span>
     </div>
   )
 }
 
 export function EmailApproval({ projectId }: EmailApprovalProps) {
-  const { data: quotes, isLoading } = useProjectQuotes(projectId)
+  const { data: drafts, isLoading } = useSolicitationDrafts(projectId)
+  const { data: matchData } = useCarrierMatches(projectId)
+
+  const emailByCarrierName = useMemo(() => {
+    const map: Record<string, string> = {}
+    ;(matchData?.matches ?? []).forEach((m) => {
+      if (m.email_address) map[m.carrier_name] = m.email_address
+    })
+    return map
+  }, [matchData])
 
   if (isLoading) {
     return (
@@ -136,9 +144,8 @@ export function EmailApproval({ projectId }: EmailApprovalProps) {
     )
   }
 
-  // TODO(phase-138): Use SolicitationDraft data instead of legacy quote fields
-  const emailDrafts = (quotes || []).filter((q) => (q as QuoteWithLegacyDraft).draft_subject != null)
-  const sentCount = emailDrafts.filter((q) => (q as QuoteWithLegacyDraft).draft_status === 'sent').length
+  const emailDrafts = drafts ?? []
+  const sentCount = emailDrafts.filter((d) => d.status === 'sent').length
 
   if (emailDrafts.length === 0) return null
 
@@ -160,8 +167,13 @@ export function EmailApproval({ projectId }: EmailApprovalProps) {
       </div>
 
       <div className="space-y-3">
-        {emailDrafts.map((quote) => (
-          <DraftCard key={quote.id} quote={quote} projectId={projectId} />
+        {emailDrafts.map((draft) => (
+          <DraftCard
+            key={draft.id}
+            draft={draft}
+            emailAddress={emailByCarrierName[draft.carrier_name]}
+            projectId={projectId}
+          />
         ))}
       </div>
 
