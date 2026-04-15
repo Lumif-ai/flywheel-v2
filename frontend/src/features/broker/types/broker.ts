@@ -32,6 +32,15 @@ export interface BrokerProject {
   metadata: Record<string, unknown> | null
   created_at: string
   updated_at: string
+  start_date: string | null
+}
+
+export interface DashboardStats {
+  total_projects: number
+  projects_by_status: Record<string, number>
+  projects_needing_action: number
+  total_premium: number
+  recent_projects: BrokerProject[]
 }
 
 export interface ProjectCoverage {
@@ -257,6 +266,10 @@ export interface ComparisonQuoteCell {
   critical_exclusion_detail: string | null
   exclusions: string[]
   confidence: string
+  // Computed by quote_comparator engine — returned by backend comparison endpoint
+  is_recommended?: boolean
+  is_best_price?: boolean
+  is_best_coverage?: boolean
 }
 
 export interface ComparisonCoverage {

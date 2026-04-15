@@ -16,6 +16,7 @@ import type {
   CreateCarrierPayload,
   CreateClientContactPayload,
   CreateClientPayload,
+  DashboardStats,
   DashboardTasksResponse,
   DraftSolicitationsResponse,
   FollowupResponse,
@@ -45,6 +46,10 @@ export function fetchBrokerProjects(params: {
 
 export function fetchGateCounts(): Promise<GateCounts> {
   return api.get<GateCounts>('/broker/gate-counts')
+}
+
+export function fetchDashboardStats(): Promise<DashboardStats> {
+  return api.get<DashboardStats>('/broker/dashboard-stats')
 }
 
 export function fetchDashboardTasks(): Promise<DashboardTasksResponse> {

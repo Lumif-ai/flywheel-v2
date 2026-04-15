@@ -5,7 +5,7 @@ import { AgGridReact } from 'ag-grid-react'
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { gridTheme } from '@/shared/grid/theme'
-import { DateCell, StatusBadge, type StatusBadgeColors } from '@/shared/grid/cell-renderers'
+import { CurrencyCell, DateCell, DaysCell, StatusBadge, type StatusBadgeColors } from '@/shared/grid/cell-renderers'
 import { useColumnPersistence } from '@/shared/grid/useColumnPersistence'
 import type { BrokerProject } from '../types/broker'
 
@@ -45,9 +45,24 @@ const columnDefs: ColDef<BrokerProject>[] = [
     cellRenderer: StatusBadge,
     cellRendererParams: { colorMap: BROKER_STATUS_COLORS },
   },
+  { field: 'contract_value', headerName: 'Premium', flex: 1, minWidth: 110, cellRenderer: CurrencyCell },
+  {
+    headerName: 'Days Since Update',
+    sortable: false,
+    valueGetter: (params) => {
+      const updatedAt = params.data?.updated_at
+      if (!updatedAt) return null
+      return Math.floor((Date.now() - new Date(updatedAt).getTime()) / 86_400_000)
+    },
+    cellRenderer: DaysCell,
+    flex: 1,
+    minWidth: 120,
+  },
   { field: 'created_at', headerName: 'Created', flex: 1, minWidth: 120, cellRenderer: DateCell },
   { field: 'updated_at', headerName: 'Updated', flex: 1, minWidth: 120, cellRenderer: DateCell },
 ]
+
+const ACTION_STATUSES = ['new_request', 'analysis_failed', 'gaps_identified']
 
 export function ProjectPipelineGrid({
   projects,
@@ -99,6 +114,12 @@ export function ProjectPipelineGrid({
           }}
           defaultColDef={{ resizable: true, sortable: true }}
           sortingOrder={['asc', 'desc', null]}
+          getRowStyle={(params) => {
+            if (params.data?.status && ACTION_STATUSES.includes(params.data.status)) {
+              return { borderLeft: '3px solid #E94D35' }
+            }
+            return undefined
+          }}
         />
       </div>
 

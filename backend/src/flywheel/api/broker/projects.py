@@ -136,6 +136,7 @@ def _project_to_dict(p: BrokerProject) -> dict[str, Any]:
         "context_entity_id": str(p.context_entity_id) if p.context_entity_id else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
+        "start_date": p.start_date.isoformat() if p.start_date else None,
     }
 
 
