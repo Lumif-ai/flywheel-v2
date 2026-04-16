@@ -2,8 +2,9 @@ import { useState, useMemo } from 'react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
-import { CheckCircle, Mail, Loader2, ChevronDown, ChevronUp, Download } from 'lucide-react'
+import { CheckCircle, Mail, Loader2, ChevronDown, ChevronUp, Download, FileText } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
+import { useAuthStore } from '@/stores/auth'
 import {
   useBrokerQuotes,
   useMarkReceived,
@@ -260,6 +261,42 @@ function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor, cove
               {quote.documents.map((doc) => (
                 <DocumentChip key={doc.file_id} doc={doc} />
               ))}
+            </div>
+          </td>
+        </tr>
+      )}
+
+      {/* Source document link */}
+      {quote.source_document_id && (
+        <tr className="bg-muted/5">
+          <td colSpan={5} className="pl-12 pr-4 py-1.5">
+            <div className="flex items-center gap-2">
+              <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground">Source:</span>
+              <a
+                href={`/api/v1/files/${quote.source_document_id}/download`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-xs text-[#E94D35] hover:underline flex items-center gap-1"
+                onClick={async (e) => {
+                  e.preventDefault()
+                  try {
+                    const token = useAuthStore.getState().token
+                    const res = await fetch(`/api/v1/files/${quote.source_document_id}/download`, {
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    })
+                    if (res.ok) {
+                      const data = await res.json()
+                      if (data.download_url) window.open(data.download_url, '_blank')
+                    }
+                  } catch {
+                    // Fallback: show filename only
+                  }
+                }}
+              >
+                {quote.source_document_filename || 'View Document'}
+                <Download className="h-3 w-3" />
+              </a>
             </div>
           </td>
         </tr>

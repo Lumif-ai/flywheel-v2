@@ -66,7 +66,10 @@ class ManualQuoteBody(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _quote_to_dict(quote: CarrierQuote) -> dict[str, Any]:
+def _quote_to_dict(
+    quote: CarrierQuote,
+    filename_map: dict[str, str] | None = None,
+) -> dict[str, Any]:
     """Serialize a CarrierQuote to a JSON-friendly dict.
 
     NOTE: Removed dropped columns:
@@ -74,7 +77,8 @@ def _quote_to_dict(quote: CarrierQuote) -> dict[str, Any]:
       - draft_subject, draft_body, draft_status
     These fields were moved to BrokerRecommendation and SolicitationDraft tables.
     """
-    return {
+    doc_id = str(quote.source_document_id) if quote.source_document_id else None
+    d: dict[str, Any] = {
         "id": str(quote.id),
         "broker_project_id": str(quote.broker_project_id),
         "coverage_id": str(quote.coverage_id) if quote.coverage_id else None,
@@ -98,10 +102,15 @@ def _quote_to_dict(quote: CarrierQuote) -> dict[str, Any]:
         "confidence": quote.confidence,
         "source": quote.source,
         "is_manual_override": quote.is_manual_override,
+        "source_document_id": doc_id,
+        "source_document_filename": (
+            filename_map.get(doc_id, None) if doc_id and filename_map else None
+        ),
         "documents": [],
         "created_at": quote.created_at.isoformat() if quote.created_at else None,
         "updated_at": quote.updated_at.isoformat() if quote.updated_at else None,
     }
+    return d
 
 
 # ---------------------------------------------------------------------------
@@ -137,7 +146,19 @@ async def list_project_quotes(
     )
     quotes = quotes_result.scalars().all()
 
-    return [_quote_to_dict(q) for q in quotes]
+    # Build filename lookup for source documents
+    doc_ids = [q.source_document_id for q in quotes if q.source_document_id]
+    filename_map: dict[str, str] = {}
+    if doc_ids:
+        file_result = await db.execute(
+            select(UploadedFile.id, UploadedFile.filename).where(
+                UploadedFile.id.in_(doc_ids)
+            )
+        )
+        for file_id, filename in file_result.all():
+            filename_map[str(file_id)] = filename
+
+    return [_quote_to_dict(q, filename_map) for q in quotes]
 
 
 # ---------------------------------------------------------------------------

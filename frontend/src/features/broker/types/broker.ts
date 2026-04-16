@@ -228,6 +228,8 @@ export interface CarrierQuote {
   source: string
   is_manual_override: boolean
   coverage_id: string | null
+  source_document_id: string | null
+  source_document_filename: string | null
   metadata_: Record<string, unknown> | null
   documents: SolicitationDocument[]
 }

@@ -19,8 +19,8 @@ interface CarrierSelectionProps {
 type SectionHeaderRow = { _type: 'section-header'; label: string }
 type GridRow = CarrierMatch | SectionHeaderRow
 
-function isSectionHeader(row: GridRow): row is SectionHeaderRow {
-  return (row as SectionHeaderRow)._type === 'section-header'
+function isSectionHeader(row: GridRow | undefined | null): row is SectionHeaderRow {
+  return row != null && (row as SectionHeaderRow)._type === 'section-header'
 }
 
 function SectionHeaderRenderer(props: ICellRendererParams) {
@@ -81,7 +81,7 @@ function AvgResponseCell(props: ICellRendererParams) {
 }
 
 export function CarrierSelection({ projectId }: CarrierSelectionProps) {
-  const { data, isLoading } = useCarrierMatches(projectId)
+  const { data, isLoading, isError } = useCarrierMatches(projectId)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const draftMutation = useDraftSolicitations(projectId)
   const [skipped, setSkipped] = useState<Array<{ carrier: string; reason: string }>>([])
@@ -105,7 +105,7 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
   const columnDefs = useMemo<ColDef<GridRow>[]>(
     () => [
       {
-        checkboxSelection: (params) => !isSectionHeader(params.data as GridRow),
+        checkboxSelection: (params) => !!params.data && !isSectionHeader(params.data as GridRow),
         headerCheckboxSelection: true,
         width: 40,
         resizable: false,
@@ -148,6 +148,20 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
             <Skeleton key={i} className="h-[52px] w-full rounded-xl" />
           ))}
         </div>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex flex-col items-center justify-center py-16 text-center">
+        <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center mb-3">
+          <FileSearch className="h-5 w-5 text-red-400" />
+        </div>
+        <h3 className="text-lg font-medium mb-1">Failed to load carrier matches</h3>
+        <p className="text-sm text-muted-foreground max-w-md">
+          Something went wrong while fetching carrier data. Please try refreshing the page.
+        </p>
       </div>
     )
   }
