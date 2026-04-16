@@ -56,6 +56,13 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
     setPageInputValue(String(currentPage))
   }, [currentPage])
 
+  // Notify parent to fall back to excerpt view when PDF can't load
+  useEffect(() => {
+    if (!isLoading && (error || !url)) {
+      onError?.()
+    }
+  }, [isLoading, error, url, onError])
+
   const computedWidth = useCallback(() => {
     switch (zoom) {
       case 'fit-width':
@@ -97,13 +104,6 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
       </div>
     )
   }
-
-  // Error state — notify parent to fall back to excerpt view
-  useEffect(() => {
-    if (!isLoading && (error || !url)) {
-      onError?.()
-    }
-  }, [isLoading, error, url, onError])
 
   if (error || !url) {
     return null
