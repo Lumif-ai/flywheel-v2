@@ -437,6 +437,7 @@ async def extract_quote_endpoint(
         {
             "id": str(c.id),
             "coverage_type": c.coverage_type,
+            "coverage_type_key": c.coverage_type_key,
             "category": c.category,
             "required_limit": float(c.required_limit) if c.required_limit else None,
         }
@@ -482,18 +483,9 @@ async def _get_quote_pdf_from_document(
     if not uploaded_file or not uploaded_file.storage_path:
         return None
 
-    import httpx
-    from flywheel.config import settings as app_settings
+    from flywheel.services.document_storage import download_file
 
-    url = f"{app_settings.supabase_url}/storage/v1/object/{_UPLOADS_BUCKET}/{uploaded_file.storage_path}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {app_settings.supabase_service_key}"},
-        )
-        if resp.status_code != 200:
-            return None
-        return resp.content
+    return await download_file(uploaded_file.storage_path)
 
 
 async def _get_quote_pdf_from_email(

@@ -46,6 +46,7 @@ from flywheel.db.models import (
     BrokerProject,
     CarrierConfig,
     CarrierQuote,
+    CoverageType,
     Document,
     Email,
     Integration,
@@ -91,6 +92,8 @@ class CreateProjectBody(BaseModel):
     contract_value: float | None = None
     location: str | None = None
     client_id: UUID | None = None
+    country_code: str | None = None
+    line_of_business: str | None = None
 
 
 class CreateFromEmailBody(BaseModel):
@@ -110,6 +113,16 @@ class UpdateCoverageBody(BaseModel):
     current_carrier: str | None = None
     current_policy_number: str | None = None
     gap_notes: str | None = None
+
+
+class UpdateProjectBody(BaseModel):
+    name: str | None = None
+    project_type: str | None = None
+    description: str | None = None
+    contract_value: float | None = None
+    location: str | None = None
+    country_code: str | None = None
+    line_of_business: str | None = None
 
 
 class ExportComparisonBody(BaseModel):
@@ -146,6 +159,8 @@ def _project_to_dict(p: BrokerProject) -> dict[str, Any]:
         "notes": None,
         "metadata": p.metadata_,
         "client_id": str(p.client_id) if p.client_id else None,
+        "country_code": p.country_code,
+        "line_of_business": p.line_of_business,
         "context_entity_id": str(p.context_entity_id) if p.context_entity_id else None,
         "created_at": p.created_at.isoformat() if p.created_at else None,
         "updated_at": p.updated_at.isoformat() if p.updated_at else None,
@@ -162,6 +177,7 @@ def _coverage_to_dict(
         "id": str(c.id),
         "broker_project_id": str(c.broker_project_id),
         "coverage_type": c.coverage_type,
+        "coverage_type_key": c.coverage_type_key,
         "category": c.category,
         "display_name": c.display_name,
         "description": c.required_terms or c.display_name,
@@ -250,6 +266,67 @@ async def broker_health(
 ):
     """Health check for broker module."""
     return {"status": "ok"}
+
+
+# ---------------------------------------------------------------------------
+# GET /broker/coverage-types
+# ---------------------------------------------------------------------------
+
+
+@projects_router.get("/coverage-types")
+async def get_coverage_types(
+    country: str | None = None,
+    lob: str | None = None,
+    db: AsyncSession = Depends(get_tenant_db),
+    _user: TokenPayload = Depends(require_module("broker")),
+) -> dict[str, Any]:
+    """Return filtered taxonomy of canonical coverage types."""
+    from sqlalchemy import or_
+
+    filters = [CoverageType.is_active.is_(True)]
+    if country:
+        filters.append(
+            or_(
+                CoverageType.countries == func.cast(text("'{}'"), CoverageType.countries.type),
+                func.array_position(CoverageType.countries, country).isnot(None),
+            )
+        )
+    if lob:
+        filters.append(
+            or_(
+                CoverageType.lines_of_business == func.cast(text("'{}'"), CoverageType.lines_of_business.type),
+                func.array_position(CoverageType.lines_of_business, lob).isnot(None),
+            )
+        )
+
+    result = await db.execute(
+        select(CoverageType)
+        .where(*filters)
+        .order_by(CoverageType.sort_order, CoverageType.key)
+    )
+    rows = result.scalars().all()
+
+    coverage_types = []
+    for ct in rows:
+        display_names = ct.display_names or {}
+        aliases_map = ct.aliases or {}
+        # Flatten aliases from all locales into a single list
+        all_aliases: list[str] = []
+        for locale_aliases in aliases_map.values():
+            if isinstance(locale_aliases, list):
+                all_aliases.extend(locale_aliases)
+
+        coverage_types.append({
+            "key": ct.key,
+            "category": ct.category,
+            "display_name": display_names.get("en", ct.key),
+            "aliases": all_aliases,
+            "countries": ct.countries or [],
+            "lines_of_business": ct.lines_of_business or [],
+            "is_verified": ct.is_verified,
+        })
+
+    return {"coverage_types": coverage_types}
 
 
 # ---------------------------------------------------------------------------
@@ -531,6 +608,8 @@ async def create_project(
         import_source="manual",
         client_id=body.client_id,
         created_by_user_id=user.sub,
+        **({"country_code": body.country_code} if body.country_code else {}),
+        **({"line_of_business": body.line_of_business} if body.line_of_business else {}),
     )
     db.add(project)
     await db.flush()
@@ -721,6 +800,51 @@ async def cancel_project(
         activity_type="project_cancelled",
         actor_type="user",
         metadata_={},
+    )
+    db.add(activity)
+    await db.commit()
+    await db.refresh(project)
+
+    return _project_to_dict(project)
+
+
+# ---------------------------------------------------------------------------
+# PATCH /broker/projects/{project_id}
+# ---------------------------------------------------------------------------
+
+
+@projects_router.patch("/projects/{project_id}")
+async def update_project(
+    project_id: UUID,
+    body: UpdateProjectBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Update project fields (name, type, description, market context, etc.)."""
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    update_data = body.model_dump(exclude_unset=True)
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    for field, value in update_data.items():
+        setattr(project, field, value)
+
+    activity = BrokerActivity(
+        tenant_id=user.tenant_id,
+        broker_project_id=project_id,
+        activity_type="project_updated",
+        actor_type="user",
+        metadata_={"updated_fields": list(update_data.keys())},
     )
     db.add(activity)
     await db.commit()
@@ -1177,22 +1301,20 @@ async def _run_analysis(project_id: UUID, tenant_id: UUID):
 # ---------------------------------------------------------------------------
 
 
-def _normalize_coverage_key(name: str) -> str:
-    """Normalize coverage type string for comparison: lowercase with underscores."""
-    return name.lower().strip().replace(" ", "_").replace("-", "_")
-
-
 def _compute_carrier_matches(
     carriers: list,
-    project_coverage_types: list[str],
+    project_coverage_keys: list[str],
     contract_value: float | None,
 ) -> list[dict]:
-    """Rank carriers by coverage_type intersection with project needs."""
-    if not project_coverage_types:
+    """Rank carriers by exact coverage_type_key intersection with project needs.
+
+    Uses canonical coverage_type_key values for exact set intersection —
+    no fuzzy normalization needed since keys are already canonical.
+    """
+    if not project_coverage_keys:
         return []
 
-    # Build normalized lookup: normalized_key -> original_name
-    project_norm = {_normalize_coverage_key(ct): ct for ct in project_coverage_types}
+    project_keys = {ct for ct in project_coverage_keys if ct}
 
     matches: list[dict] = []
     for carrier in carriers:
@@ -1206,17 +1328,13 @@ def _compute_carrier_matches(
             if carrier.max_project_value is not None and contract_value > float(carrier.max_project_value):
                 continue
 
-        # Normalize carrier coverages for comparison
-        carrier_norm = {_normalize_coverage_key(cc): cc for cc in carrier_coverages}
-
-        matched_keys = set(carrier_norm.keys()) & set(project_norm.keys())
-        if not matched_keys:
+        carrier_keys = set(carrier_coverages)  # already canonical keys from carrier config
+        matched = project_keys & carrier_keys
+        if not matched:
             continue
 
-        # Map back to original project coverage names for response
-        matched = {project_norm[k] for k in matched_keys}
-        unmatched = set(project_coverage_types) - matched
-        match_score = len(matched) / len(project_coverage_types)
+        unmatched = project_keys - matched
+        match_score = len(matched) / len(project_keys)
 
         matches.append({
             "carrier_config_id": str(carrier.id),
@@ -1257,7 +1375,7 @@ async def get_carrier_matches(
         )
     )
     coverages = cov_result.scalars().all()
-    coverage_types = list({c.coverage_type for c in coverages if c.coverage_type})
+    coverage_keys = list({c.coverage_type_key for c in coverages if c.coverage_type_key})
 
     carrier_result = await db.execute(
         select(CarrierConfig).where(
@@ -1268,9 +1386,9 @@ async def get_carrier_matches(
     carriers = carrier_result.scalars().all()
 
     contract_value = float(project.contract_value) if project.contract_value is not None else None
-    matches = _compute_carrier_matches(carriers, coverage_types, contract_value)
+    matches = _compute_carrier_matches(carriers, coverage_keys, contract_value)
 
-    return {"matches": matches, "project_coverage_count": len(coverage_types)}
+    return {"matches": matches, "project_coverage_count": len(coverage_keys)}
 
 
 # ---------------------------------------------------------------------------

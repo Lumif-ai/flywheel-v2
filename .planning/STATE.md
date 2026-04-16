@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v20.0 Coverage Taxonomy & Multi-Currency Limits
 Phase: 140 (Coverage Taxonomy)
-Plan: 1 of 4 in current phase
+Plan: 2 of 4 in current phase
 Status: Phase 140 — executing plans
-Last activity: 2026-04-16 -- Completed 140-01 (coverage taxonomy DB schema)
+Last activity: 2026-04-16 -- Completed 140-02 (AI extraction pipeline with taxonomy)
 
-Progress: [██░░░░░░░░] 25%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -114,6 +114,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 **v20.0 Execution Decisions:**
 - [Phase 140-01]: asyncpg requires native Python lists for TEXT[] params and CAST() for JSONB (not :: syntax)
 - [Phase 140-01]: CoverageType model at end of broker models section; market context fields grouped after language in BrokerProject
+- [Phase 140-02]: IntegrityError on new CoverageType key triggers rollback then continues (idempotent for concurrent extractions)
+- [Phase 140-02]: JSONB alias mutation uses {**aliases} spread for SQLAlchemy change detection (not in-place dict mutation)
+- [Phase 140-02]: contract_language enum includes 'pt' for Brazilian expansion
 
 ### Pending Todos
 
@@ -131,5 +134,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-16
-Stopped at: Completed 140-01-PLAN.md
+Stopped at: Completed 140-02-PLAN.md
 Resume file: None

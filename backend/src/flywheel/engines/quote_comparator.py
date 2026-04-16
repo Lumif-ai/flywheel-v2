@@ -67,6 +67,7 @@ def compare_quotes(
     for cov in coverages:
         cov_id = cov.get("id")
         coverage_type = cov.get("coverage_type", "")
+        coverage_type_key = cov.get("coverage_type_key")
         category = cov.get("category", "")
         required_limit = cov.get("required_limit")
 
@@ -157,6 +158,7 @@ def compare_quotes(
             {
                 "coverage_id": cov_id,
                 "coverage_type": coverage_type,
+                "coverage_type_key": coverage_type_key,
                 "category": category,
                 "required_limit": required_limit,
                 "quotes": output_quotes,
