@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 
 Milestone: v20.0 Coverage Taxonomy & Multi-Currency Limits
 Phase: 140 (Coverage Taxonomy)
-Plan: 0 of ? in current phase
-Status: Phase 140 — research pending
-Last activity: 2026-04-16 -- Spec written and reviewed (SPEC-COVERAGE-TAXONOMY.md)
+Plan: 1 of 4 in current phase
+Status: Phase 140 — executing plans
+Last activity: 2026-04-16 -- Completed 140-01 (coverage taxonomy DB schema)
 
-Progress: [░░░░░░░░░░] 0%
+Progress: [██░░░░░░░░] 25%
 
 ## Performance Metrics
 
@@ -111,6 +111,10 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - [Phase 138-04]: metadata_? added as optional typed field to SolicitationDraft for screenshot_url type-safe access in portal review state
 - [Phase 139-01]: carrierColorUtils.ts is single source of truth for carrier color mapping — CarrierBadge (plan 02) imports from same file
 
+**v20.0 Execution Decisions:**
+- [Phase 140-01]: asyncpg requires native Python lists for TEXT[] params and CAST() for JSONB (not :: syntax)
+- [Phase 140-01]: CoverageType model at end of broker models section; market context fields grouped after language in BrokerProject
+
 ### Pending Todos
 
 - v18.0 Phase 132-03 awaiting final verify (committed at 387291a)
@@ -126,6 +130,6 @@ None active.
 
 ## Session Continuity
 
-Last session: 2026-04-15
-Stopped at: Completed 139-02-PLAN.md — FINAL plan of FINAL phase (v19.0 Broker Redesign complete)
+Last session: 2026-04-16
+Stopped at: Completed 140-01-PLAN.md
 Resume file: None
