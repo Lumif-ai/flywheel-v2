@@ -20,7 +20,7 @@
 - ✅ **v16.0 Briefing Intelligence Surface** — Phases 120–121 (shipped 2026-04-14)
 - ✅ **v17.0 Broker Frontend** — Phases 122–128.1 (shipped 2026-04-14)
 - ✅ **v18.0 Broker Data Model v2** — Phases 129–132 (shipped 2026-04-15)
-- 🚧 **v19.0 Broker Redesign** — Phases 133–139 (in progress)
+- ✅ **v19.0 Broker Redesign** — Phases 133–139 (shipped 2026-04-15)
 
 ## Phases
 
@@ -261,7 +261,38 @@
 
 ---
 
-### 🚧 v19.0 Broker Redesign (In Progress)
+### 🚧 v20.0 Coverage Taxonomy & Multi-Currency Limits (In Progress)
+
+**Milestone Goal:** Replace free-form coverage type strings with a canonical, self-growing taxonomy supporting multi-market expansion, fix limit extraction for non-USD currencies, and resolve downstream bugs in gap analysis and frontend constants.
+
+- [ ] **Phase 140: Coverage Taxonomy** — DB migration, AI extraction, carrier matching, frontend constants, skill updates
+
+## Phase Details
+
+### Phase 140: Coverage Taxonomy
+**Goal**: A canonical coverage_types table exists, AI extraction maps to canonical keys (and auto-creates new types), carrier matching uses exact key comparison, limits are extracted as numbers with currency, and all downstream bugs (gap_status, category default, frontend duplication) are fixed
+**Depends on**: v19.0 complete
+**Requirements**: TAX-01 through TAX-22
+**Spec**: SPEC-COVERAGE-TAXONOMY.md
+**Success Criteria** (what must be TRUE):
+  1. `coverage_types` table exists with 23 seeded entries, JSONB display_names/aliases, TEXT[] countries/lines_of_business, is_verified/added_by fields
+  2. AI extraction outputs canonical `coverage_type_key` from taxonomy (not free text), auto-creates new taxonomy entries for genuinely new coverage types, and learns aliases
+  3. `_compute_carrier_matches` uses exact canonical key set intersection (no normalize function), carrier configs match AI-extracted coverages
+  4. `gap_status` CHECK constraint accepts `missing`/`insufficient` (not `gap`/`partial`), gap detector output writes without constraint violation
+  5. Frontend imports `INSURANCE_CATEGORIES`, `SURETY_CATEGORIES`, `GAP_STATUS`, `STATUS_COLORS` from single `constants/coverage.ts` — no duplicated arrays in component files
+  6. `broker-parse-policies` skill uses taxonomy API for coverage matching instead of hardcoded translation map
+**Plans**: 4 plans
+
+Plans:
+- [ ] 140-01-PLAN.md — DB migration (coverage_types table, columns, constraints, backfill) + seed 23 coverage types
+- [ ] 140-02-PLAN.md — AI extraction engine (dynamic taxonomy prompt, updated tool schema, new type creation, alias learning)
+- [ ] 140-03-PLAN.md — API endpoint (GET /coverage-types) + carrier matching rewrite + quote passthrough
+- [ ] 140-04-PLAN.md — Frontend constants (single source of truth) + TypeScript type + skill updates
+
+
+---
+
+### ✅ v19.0 Broker Redesign (Complete)
 
 **Milestone Goal:** Redesign the broker frontend to match Alaya Demo v2 quality, build Claude Code skills for the full placement workflow, add hooks for deterministic automation, and implement portal auto-fill via Playwright. Architecture: Claude Code = intelligence, Backend = data, Frontend = presentation.
 
@@ -271,7 +302,7 @@
 - [x] **Phase 136: High-Impact Frontend** - Dashboard KPIs, gap analysis redesign, comparison matrix
 - [x] **Phase 137: Workflow Frontend A** - Client profile redesign, document analysis tab
 - [x] **Phase 138: Workflow Frontend B** - Carrier selection, email approval, quote tracking, portal, delivery
-- [ ] **Phase 139: Polish** - CSS animations, stagger effects, shimmer states, visual consistency
+- [x] **Phase 139: Polish** - CSS animations, stagger effects, shimmer states, visual consistency
 
 ## Phase Details
 
@@ -500,7 +531,8 @@ Plans:
 | 136. High-Impact Frontend | v19.0 | 0/4 | Not started | - |
 | 137. Workflow Frontend A | v19.0 | 0/3 | Not started | - |
 | 138. Workflow Frontend B | v19.0 | 0/4 | Not started | - |
-| 139. Polish | v19.0 | 0/2 | Not started | - |
+| 139. Polish | v19.0 | 2/2 | Complete | 2026-04-15 |
+| 140. Coverage Taxonomy | v20.0 | 0/4 | Not started | - |
 
 ---
 *Roadmap created: 2026-03-24*

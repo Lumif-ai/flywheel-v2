@@ -5,17 +5,17 @@
 See: .planning/PROJECT.md (updated 2026-04-15)
 
 **Core value:** Conversations automatically become tracked commitments and executed deliverables -- the founder's daily operating system
-**Current focus:** v19.0 Broker Redesign -- Phase 134 Skills Infrastructure
+**Current focus:** v20.0 Coverage Taxonomy & Multi-Currency Limits -- Phase 140
 
 ## Current Position
 
-Milestone: v19.0 Broker Redesign
-Phase: 139 of 139 (Polish)
-Plan: 2 of 2 in current phase
-Status: Phase 139 COMPLETE — all plans executed. v19.0 Broker Redesign milestone complete.
-Last activity: 2026-04-15 -- Completed 139-02: CarrierBadge propagation to all non-grid carrier displays (9384cac)
+Milestone: v20.0 Coverage Taxonomy & Multi-Currency Limits
+Phase: 140 (Coverage Taxonomy)
+Plan: 0 of ? in current phase
+Status: Phase 140 — research pending
+Last activity: 2026-04-16 -- Spec written and reviewed (SPEC-COVERAGE-TAXONOMY.md)
 
-Progress: [██████████] 100% (23/23 plans)
+Progress: [░░░░░░░░░░] 0%
 
 ## Performance Metrics
 
@@ -116,6 +116,9 @@ All v1.0-v18.0 decisions archived in PROJECT.md Key Decisions table.
 - v18.0 Phase 132-03 awaiting final verify (committed at 387291a)
 - Title matching false positives in _filter_unprepped (deferred from 66.1)
 - Private import coupling in flywheel_ritual.py (tech debt)
+- **Module-based skill access control**: Add `module` column to `skill_definitions` (broker/gtm/meetings) + `tenant_modules` table to gate skill access by subscription. Currently all skills are visible to all tenants — needs module scoping so broker skills only show for broker subscribers, GTM for GTM, etc.
+- **Broker frontend polish gaps** (from UX audit): Analysis tab contract document rendering, comparison matrix data flow (coverage_id linkage), quote document download links, carrier logos across all views
+- **Full Document Viewer for Broker Analysis Tab**: Replace excerpt-based DocumentViewer with embedded PDF viewer; click requirement card → scroll to clause + highlight; multi-document support (todo: 2026-04-16)
 
 ### Blockers/Concerns
 
