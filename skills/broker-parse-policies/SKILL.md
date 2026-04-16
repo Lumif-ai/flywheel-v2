@@ -23,8 +23,8 @@ dependencies:
 # /broker:parse-policies — Extract Policy Data and Update Project Coverages
 
 Read local policy PDF files using pdfplumber, extract coverage details (carrier,
-limit, policy number), match to the project's coverage records using a
-Spanish-to-English coverage name map, and PATCH each matched coverage record.
+limit, policy number), match to the project's coverage records using the canonical
+coverage taxonomy API, and PATCH each matched coverage record.
 
 **Important:** You (Claude, running this skill) will read the extracted PDF text
 printed to the console and identify the policy terms inline. Do NOT call an external
@@ -142,7 +142,7 @@ Do not call an API for this — analyze the text directly.
 
 For each policy PDF, identify:
 - **current_carrier** — The insurance company name (e.g. "AXA", "MAPFRE", "Zurich")
-- **coverage_type** — The type of coverage (use the translation map below)
+- **coverage_type** — The type of coverage (use the taxonomy alias_map built below)
 - **current_limit** — The policy limit as a number (e.g. 1000000 for 1,000,000)
 - **current_policy_number** — The policy number string (may be absent)
 
@@ -175,7 +175,7 @@ taxonomy = api_client.run(api_client.get(f"coverage-types?{query}"))
 
 # Build a lookup: alias (lowered) → canonical coverage_type key
 alias_map = {}
-for ct in taxonomy.get("items", []):
+for ct in taxonomy.get("coverage_types", []):
     key = ct["key"]
     alias_map[key.lower()] = key
     alias_map[ct.get("display_name", "").lower()] = key
@@ -215,7 +215,7 @@ PROJECT_ID = "<validated-project-id>"
 extracted_policies = [
     {
         "pdf_path": "<path>",
-        "coverage_type": "<english-coverage-type>",  # from translation map
+        "coverage_type": "<english-coverage-type>",  # canonical key from taxonomy
         "current_carrier": "<carrier-name>",
         "current_limit": 0,           # number
         "current_policy_number": None  # string or None
