@@ -27,7 +27,7 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
 const PDF_LETTER_WIDTH = 612
 
 export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentViewerProps) {
-  const { url, isLoading, error } = useDocumentRendition(fileId)
+  const { pdfData, isLoading, error } = useDocumentRendition(fileId)
 
   const [currentPage, setCurrentPage] = useState(1)
   const [numPages, setNumPages] = useState(0)
@@ -58,10 +58,10 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
 
   // Notify parent to fall back to excerpt view when PDF can't load
   useEffect(() => {
-    if (!isLoading && (error || !url)) {
+    if (!isLoading && (error || !pdfData)) {
       onError?.()
     }
-  }, [isLoading, error, url, onError])
+  }, [isLoading, error, pdfData, onError])
 
   const computedWidth = useCallback(() => {
     switch (zoom) {
@@ -105,7 +105,7 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
     )
   }
 
-  if (error || !url) {
+  if (error || !pdfData) {
     return null
   }
 
@@ -131,7 +131,7 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
         <div className={needsHorizontalScroll ? 'min-w-max' : ''}>
           <div className="flex justify-center py-4">
             <Document
-              file={url}
+              file={{ data: pdfData }}
               onLoadSuccess={onDocumentLoadSuccess}
               loading={
                 <div className="flex items-center justify-center py-20">
