@@ -1,6 +1,7 @@
 ---
 name: broker-compare-quotes
 version: "1.0"
+web_tier: 3
 description: Quote comparison workflow — from received quote PDFs to client recommendation
 context-aware: true
 triggers:

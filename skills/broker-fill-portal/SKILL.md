@@ -1,6 +1,7 @@
 ---
 name: broker-fill-portal
 version: "1.0"
+web_tier: 3
 description: Show a data preview for portal submission and delegate portal fill execution to portals/mapfre.py
 context-aware: true
 triggers:

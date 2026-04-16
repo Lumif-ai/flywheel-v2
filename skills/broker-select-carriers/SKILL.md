@@ -1,6 +1,7 @@
 ---
 name: broker-select-carriers
 version: "1.0"
+web_tier: 3
 description: Retrieve carrier matches from the backend, split into portal vs email routing buckets, and ask broker to confirm the routing plan
 context-aware: true
 triggers:

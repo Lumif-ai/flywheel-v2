@@ -1,6 +1,7 @@
 ---
 name: broker-parse-policies
 version: "1.0"
+web_tier: 3
 description: Extract coverage data from local policy PDFs using pdfplumber, match to project coverages, and PATCH current limits and carriers
 context-aware: true
 triggers:

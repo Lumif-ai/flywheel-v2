@@ -1,6 +1,7 @@
 ---
 name: broker-draft-emails
 version: "1.0"
+web_tier: 3
 description: Call POST /draft-solicitations with carrier_config_ids (UUIDs) to create email solicitation drafts in the database
 context-aware: true
 triggers:

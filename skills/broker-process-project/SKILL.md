@@ -1,6 +1,7 @@
 ---
 name: broker-process-project
 version: "1.0"
+web_tier: 3
 description: Full placement workflow — from uploaded documents to carrier solicitations
 context-aware: true
 triggers:

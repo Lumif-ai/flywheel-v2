@@ -1,6 +1,7 @@
 ---
 name: broker-extract-quote
 version: "1.0"
+web_tier: 3
 description: Map a carrier quote PDF to an existing quote row, upload the PDF, trigger async extraction, poll until done, and report premium breakdown with critical exclusions
 context-aware: true
 triggers:

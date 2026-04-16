@@ -1,6 +1,7 @@
 ---
 name: broker-draft-recommendation
 version: "1.0"
+web_tier: 3
 description: Pre-check comparison data, call POST /draft-recommendation, and display the recommendation narrative with recommended carrier highlighted
 context-aware: true
 triggers:

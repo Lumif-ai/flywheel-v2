@@ -1,6 +1,7 @@
 ---
 name: broker-parse-contract
 version: "1.0"
+web_tier: 3
 description: Upload MSA contract PDF and trigger backend async extraction of coverage requirements
 context-aware: true
 triggers:
