@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import { ShimmerSkeleton } from '@/components/ui/skeleton'
 import { useAnalysisPolling } from '../../hooks/useAnalysisPolling'
 import { DocumentViewer } from '../DocumentViewer'
@@ -26,6 +27,7 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
     (d) => d.file_id && d.mimetype === 'application/pdf'
   )
   const hasPdfDocument = !!pdfDocument?.file_id
+  const [pdfFailed, setPdfFailed] = useState(false)
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-[calc(100vh-200px)]">
@@ -38,8 +40,8 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
                 <ShimmerSkeleton key={i} className="h-20 w-full rounded-lg" />
               ))}
             </div>
-          ) : hasPdfDocument ? (
-            <FullDocumentViewer fileId={pdfDocument!.file_id!} filename={pdfDocument!.name} />
+          ) : hasPdfDocument && !pdfFailed ? (
+            <FullDocumentViewer fileId={pdfDocument!.file_id!} filename={pdfDocument!.name} onError={() => setPdfFailed(true)} />
           ) : (
             <div className="overflow-y-auto h-full">
               <DocumentViewer coverages={coverages} />

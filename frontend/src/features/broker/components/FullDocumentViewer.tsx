@@ -11,6 +11,7 @@ pdfjs.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
 interface FullDocumentViewerProps {
   fileId: string
   filename?: string
+  onError?: () => void
 }
 
 type ZoomLevel = 'fit-width' | '75' | '100' | '125'
@@ -25,7 +26,7 @@ const ZOOM_OPTIONS: { value: ZoomLevel; label: string }[] = [
 /** Standard US Letter width in PDF points */
 const PDF_LETTER_WIDTH = 612
 
-export function FullDocumentViewer({ fileId, filename }: FullDocumentViewerProps) {
+export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentViewerProps) {
   const { url, isLoading, error } = useDocumentRendition(fileId)
 
   const [currentPage, setCurrentPage] = useState(1)
@@ -97,20 +98,15 @@ export function FullDocumentViewer({ fileId, filename }: FullDocumentViewerProps
     )
   }
 
-  // Error state
+  // Error state — notify parent to fall back to excerpt view
+  useEffect(() => {
+    if (!isLoading && (error || !url)) {
+      onError?.()
+    }
+  }, [isLoading, error, url, onError])
+
   if (error || !url) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-3">
-        <p className="text-sm text-muted-foreground">Failed to load document</p>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={() => window.location.reload()}
-        >
-          Retry
-        </Button>
-      </div>
-    )
+    return null
   }
 
   const pageWidth = computedWidth()
