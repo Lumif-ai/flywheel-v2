@@ -396,6 +396,16 @@ async def start_run(
             detail=f"Skill '{body.skill_name}' not found",
         )
 
+    # --- Tier 3 gate: reject immediately instead of queuing for executor ---
+    if skill.web_tier == 3:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=(
+                f"Skill '{body.skill_name}' requires the local Claude Code agent. "
+                "Run it locally with the corresponding /skill command in Claude Code."
+            ),
+        )
+
     # --- Input validation against skill's input_schema ---
     parameters = skill.parameters or {}
     input_schema = parameters.get("input_schema")
