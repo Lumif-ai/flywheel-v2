@@ -2,15 +2,13 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Check, AlertTriangle, X, HelpCircle } from 'lucide-react'
 import { useGapAnalysis } from '../hooks/useGapAnalysis'
+import { INSURANCE_CATEGORIES, SURETY_CATEGORIES } from '../constants/coverage'
 import type { ProjectCoverage } from '../types/broker'
 
 interface GapAnalysisProps {
   coverages: ProjectCoverage[]
   projectId: string
 }
-
-const INSURANCE_CATEGORIES = ['liability', 'property', 'auto', 'workers_comp', 'specialty']
-const SURETY_CATEGORIES = ['surety']
 
 const STATUS_CONFIG: Record<string, { bg: string; text: string; icon: React.ElementType }> = {
   covered: { bg: 'bg-green-50', text: 'text-green-700', icon: Check },

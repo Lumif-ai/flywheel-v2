@@ -146,25 +146,53 @@ For each policy PDF, identify:
 - **current_limit** — The policy limit as a number (e.g. 1000000 for 1,000,000)
 - **current_policy_number** — The policy number string (may be absent)
 
-### Spanish-to-English Coverage Translation Map
+### Load Coverage Taxonomy from API
 
-Use this map to match Spanish coverage names in the PDF to English coverage types
-in the project:
+Before matching, fetch the canonical coverage types with their aliases from the
+taxonomy API. This replaces any hardcoded translation maps and supports all
+languages automatically:
 
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
+import api_client
+
+PROJECT_ID = "<validated-project-id>"
+
+# Get project details to determine country and line of business
+project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
+country = project.get("country_code", "")
+lob = project.get("line_of_business", "")
+
+# Fetch canonical coverage types with aliases for this market
+params = []
+if country:
+    params.append(f"country={country}")
+if lob:
+    params.append(f"lob={lob}")
+query = "&".join(params)
+taxonomy = api_client.run(api_client.get(f"coverage-types?{query}"))
+
+# Build a lookup: alias (lowered) → canonical coverage_type key
+alias_map = {}
+for ct in taxonomy.get("items", []):
+    key = ct["key"]
+    alias_map[key.lower()] = key
+    alias_map[ct.get("display_name", "").lower()] = key
+    for lang, aliases in ct.get("aliases", {}).items():
+        for alias in aliases:
+            alias_map[alias.lower()] = key
+
+print(f"Loaded {len(taxonomy.get('items', []))} coverage types with {len(alias_map)} aliases")
 ```
-"Responsabilidad Civil General" / "RC General"       → "General Liability"
-"Responsabilidad Civil Contratista"                  → "Contractor Liability"
-"Todo Riesgo Construcción" / "TRC"                   → "Construction All Risk"
-"Responsabilidad Civil de Productos"                 → "Products Liability"
-"Accidentes Personales"                              → "Personal Accident"
-"Equipo de Contratista"                              → "Contractor's Equipment"
-"Fianza de Cumplimiento"                             → "Performance Bond"
-"Fianza de Anticipo" / "Anticipo"                    → "Advance Payment Bond"
-"Fianza de Vicios Ocultos"                           → "Latent Defects Bond"
-```
 
-For coverage types not in this map, use your best judgment based on context.
-If you cannot determine the coverage type, skip the file and note it as unmatched.
+Use `alias_map` to match coverage names found in the PDF text (lowered) to
+canonical keys. The aliases include contract-language terms (e.g. Spanish,
+Portuguese names) so they will match policy documents in any supported language.
+
+If a coverage name from the PDF does not match any alias, use your best judgment
+based on context. If you cannot determine the coverage type, skip the file and
+note it as unmatched.
 
 ## Step 6: Match Coverages and PATCH Records
 

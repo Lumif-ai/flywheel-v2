@@ -1,7 +1,6 @@
 import type { ComparisonCoverage } from '../../types/broker'
 
-export const INSURANCE_CATEGORIES = ['liability', 'property', 'auto', 'workers_comp', 'specialty']
-export const SURETY_CATEGORIES = ['surety']
+export { INSURANCE_CATEGORIES, SURETY_CATEGORIES } from '../../constants/coverage'
 
 export function formatCurrency(value: number | null, currency: string): string {
   if (value === null) return '\u2014'

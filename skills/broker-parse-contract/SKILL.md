@@ -174,7 +174,7 @@ else:
     insurance_count = 0
     surety_count = 0
     for c in coverages:
-        category = c.get("coverage_category", "unknown")
+        category = c.get("category", "unknown")
         if category == "insurance":
             insurance_count += 1
         elif category == "surety":

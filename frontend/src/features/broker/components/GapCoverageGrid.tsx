@@ -4,10 +4,9 @@ import { AllCommunityModule } from 'ag-grid-community'
 import type { ColDef, ICellRendererParams } from 'ag-grid-community'
 import { gridTheme, GRID_SHADOW, GRID_BORDER_RADIUS } from '@/shared/grid/theme'
 import { CurrencyCell, ClauseLink } from '@/shared/grid/cell-renderers'
+import { INSURANCE_CATEGORIES, SURETY_CATEGORIES, STATUS_COLORS } from '../constants/coverage'
+import type { GapStatus } from '../constants/coverage'
 import type { ProjectCoverage } from '../types/broker'
-
-const INSURANCE_CATEGORIES = ['liability', 'property', 'auto', 'workers_comp', 'specialty']
-const SURETY_CATEGORIES = ['surety']
 
 type SectionHeaderRow = { _type: 'section-header'; label: string }
 type GridRow = ProjectCoverage | SectionHeaderRow
@@ -70,19 +69,12 @@ function GapAmountCell(props: ICellRendererParams) {
   )
 }
 
-const STATUS_COLORS: Record<string, { bg: string; text: string }> = {
-  missing: { bg: '#FEE2E2', text: '#B91C1C' },
-  insufficient: { bg: '#FEF3C7', text: '#A16207' },
-  covered: { bg: '#DCFCE7', text: '#15803D' },
-  unknown: { bg: '#F3F4F6', text: '#6B7280' },
-}
-
 function GapStatusCell(props: ICellRendererParams) {
   const cov = props.data as ProjectCoverage & { _type?: string }
   if (!cov || cov._type === 'section-header') return null
 
-  const status = cov.gap_status ?? 'unknown'
-  const colors = STATUS_COLORS[status.toLowerCase()] ?? STATUS_COLORS.unknown
+  const status = (cov.gap_status ?? 'unknown') as GapStatus
+  const colors = STATUS_COLORS[status.toLowerCase() as GapStatus] ?? STATUS_COLORS.unknown
 
   return (
     <div className="flex items-center h-full">

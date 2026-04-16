@@ -69,6 +69,7 @@ export interface ProjectCoverage {
   current_policy_number: string | null
   current_expiry: string | null
   ai_critical_finding: boolean
+  coverage_type_key?: string
 }
 
 export interface BrokerActivity {
