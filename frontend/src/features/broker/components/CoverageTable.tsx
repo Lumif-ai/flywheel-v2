@@ -137,7 +137,7 @@ export function CoverageTable({ coverages, projectId, isAnalyzing }: CoverageTab
                   </td>
                   <td className="px-3 py-2">
                     {cov.required_limit != null
-                      ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(cov.required_limit)
+                      ? new Intl.NumberFormat('en-US', { style: 'currency', currency: cov.limit_currency || 'USD', maximumFractionDigits: 0 }).format(cov.required_limit)
                       : '—'}
                   </td>
                   <td className="px-3 py-2 text-muted-foreground">{cov.category}</td>

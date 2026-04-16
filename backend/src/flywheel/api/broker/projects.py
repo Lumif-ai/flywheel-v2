@@ -183,6 +183,7 @@ def _coverage_to_dict(
         "description": c.required_terms or c.display_name,
         "language": getattr(c, "language", None),
         "required_limit": float(c.required_limit) if c.required_limit is not None else None,
+        "limit_currency": (c.metadata_ or {}).get("limit_currency"),
         "required_deductible": float(c.required_deductible) if c.required_deductible is not None else None,
         "required_terms": c.required_terms,
         "contract_clause": c.contract_clause,

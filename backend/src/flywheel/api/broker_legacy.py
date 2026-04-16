@@ -229,6 +229,7 @@ def _coverage_to_dict(c: ProjectCoverage) -> dict[str, Any]:
         "description": c.display_name,
         "language": getattr(c, 'language', None),
         "required_limit": float(c.required_limit) if c.required_limit is not None else None,
+        "limit_currency": (c.metadata_ or {}).get("limit_currency"),
         "required_deductible": float(c.required_deductible) if c.required_deductible is not None else None,
         "required_terms": c.required_terms,
         "contract_clause": c.contract_clause,
@@ -1001,19 +1002,16 @@ async def upload_project_documents(
                 f"Allowed: PDF, PNG, JPEG",
             )
 
-        # Upload to Supabase Storage
+        # Upload to storage (Supabase with local fallback)
         file_uuid = uuid4()
         filename = file.filename or "unknown"
-        try:
-            storage_path = await upload_to_storage(
-                tenant_id=tenant_id,
-                file_id=str(file_uuid),
-                filename=filename,
-                content=content,
-                mime_type=file.content_type or "application/octet-stream",
-            )
-        except Exception:
-            storage_path = f"local://{tenant_id}/{file_uuid}/{filename}"
+        storage_path = await upload_to_storage(
+            tenant_id=tenant_id,
+            file_id=str(file_uuid),
+            filename=filename,
+            content=content,
+            mime_type=file.content_type or "application/octet-stream",
+        )
 
         # Create UploadedFile record
         uploaded_file = UploadedFile(
@@ -1036,6 +1034,15 @@ async def upload_project_documents(
             "uploaded_at": uploaded_file.created_at.isoformat() if uploaded_file.created_at else None,
         }
         uploaded_docs.append(doc_ref)
+
+    # Set source_document_id to the first uploaded PDF if not already set
+    if not project.source_document_id:
+        first_pdf = next(
+            (d for d in uploaded_docs if d.get("mimetype") == "application/pdf"),
+            None,
+        )
+        if first_pdf:
+            project.source_document_id = UUID(first_pdf["file_id"])
 
     # Store document references in project metadata
     existing_docs = (project.metadata_ or {}).get("documents", [])
@@ -1238,12 +1245,24 @@ async def trigger_analysis(
 
 async def _get_project_pdf(session: AsyncSession, project, tenant_id: UUID) -> bytes | None:
     """Retrieve PDF bytes for a project from Supabase Storage."""
-    if not project.source_document_id:
-        return None
+    doc_id = project.source_document_id
+
+    # Fallback: if source_document_id is not set, use the first PDF from metadata
+    if not doc_id:
+        docs = (project.metadata_ or {}).get("documents", [])
+        first_pdf = next(
+            (d for d in docs if d.get("mimetype") == "application/pdf"),
+            None,
+        )
+        if not first_pdf:
+            return None
+        doc_id = UUID(first_pdf["file_id"]) if isinstance(first_pdf["file_id"], str) else first_pdf["file_id"]
+        # Backfill the FK so future calls don't need the fallback
+        project.source_document_id = doc_id
 
     result = await session.execute(
         select(UploadedFile).where(
-            UploadedFile.id == project.source_document_id,
+            UploadedFile.id == doc_id,
             UploadedFile.tenant_id == tenant_id,
         )
     )
@@ -1251,19 +1270,9 @@ async def _get_project_pdf(session: AsyncSession, project, tenant_id: UUID) -> b
     if not uploaded_file or not uploaded_file.storage_path:
         return None
 
-    # Download from Supabase Storage
-    import httpx
-    from flywheel.config import settings as app_settings
+    from flywheel.services.document_storage import download_file
 
-    url = f"{app_settings.supabase_url}/storage/v1/object/{_UPLOADS_BUCKET}/{uploaded_file.storage_path}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {app_settings.supabase_service_key}"},
-        )
-        if resp.status_code != 200:
-            return None
-        return resp.content
+    return await download_file(uploaded_file.storage_path)
 
 
 # Bucket name constant for storage downloads
@@ -2139,18 +2148,9 @@ async def _get_quote_pdf_from_document(
     if not uploaded_file or not uploaded_file.storage_path:
         return None
 
-    import httpx
-    from flywheel.config import settings as app_settings
+    from flywheel.services.document_storage import download_file
 
-    url = f"{app_settings.supabase_url}/storage/v1/object/{_UPLOADS_BUCKET}/{uploaded_file.storage_path}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {app_settings.supabase_service_key}"},
-        )
-        if resp.status_code != 200:
-            return None
-        return resp.content
+    return await download_file(uploaded_file.storage_path)
 
 
 async def _get_quote_pdf_from_email(

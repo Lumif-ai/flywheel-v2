@@ -51,6 +51,7 @@ export interface ProjectCoverage {
   category: string
   gap_status: string
   required_limit: number | null
+  limit_currency: string | null
   current_limit: number | null
   confidence: string
   is_manual_override: boolean

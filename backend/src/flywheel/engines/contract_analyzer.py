@@ -214,11 +214,11 @@ Always include source_excerpt with the exact verbatim text from the contract."""
 # ---------------------------------------------------------------------------
 
 
-def _validate_limit(amount: float | int | None) -> float | None:
+def _validate_limit(amount: float | int | str | None) -> float | None:
     """Validate and normalize a limit amount from AI extraction.
 
-    With limit_amount now a number from the AI (not a string),
-    this is a simple validation rather than a parser.
+    Handles both numeric values and currency strings like
+    "MX$42,000,000", "$5,000,000 USD", "MX$4,200,000 (10% of contract value)".
     """
     if amount is None:
         return None
@@ -226,7 +226,22 @@ def _validate_limit(amount: float | int | None) -> float | None:
         val = float(amount)
         return val if val > 0 else None
     except (TypeError, ValueError):
-        return None
+        pass
+    # AI sometimes returns currency strings instead of numbers
+    if isinstance(amount, str):
+        import re
+        # Remove parenthetical notes like "(10% of contract value)"
+        cleaned = re.sub(r"\(.*?\)", "", amount)
+        # Strip currency prefixes/suffixes and whitespace
+        cleaned = re.sub(r"[A-Za-z$€£¥]+", "", cleaned).strip()
+        # Remove commas (thousand separators)
+        cleaned = cleaned.replace(",", "")
+        try:
+            val = float(cleaned)
+            return val if val > 0 else None
+        except (TypeError, ValueError):
+            return None
+    return None
 
 
 def _score_to_confidence_text(score: float) -> str:

@@ -23,7 +23,7 @@ export function RequirementCard({ coverage, style, onClauseClick }: RequirementC
     coverage.required_limit != null
       ? new Intl.NumberFormat('en-US', {
           style: 'currency',
-          currency: 'USD',
+          currency: coverage.limit_currency || 'USD',
           maximumFractionDigits: 0,
         }).format(coverage.required_limit)
       : null
