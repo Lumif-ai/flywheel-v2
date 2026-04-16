@@ -109,12 +109,21 @@ EXTRACTION_TOOL = {
                             "type": "string",
                             "description": "The specific contract clause or section reference (e.g., Section 11.1)",
                         },
+                        "source_excerpt": {
+                            "type": "string",
+                            "description": "The exact verbatim text from the contract that defines this requirement. Quote the original language directly.",
+                        },
+                        "source_page": {
+                            "type": "integer",
+                            "description": "Page number where this requirement appears, if identifiable",
+                        },
                     },
                     "required": [
                         "coverage_type",
                         "description",
                         "category",
                         "confidence_score",
+                        "source_excerpt",
                     ],
                 },
             },
@@ -301,6 +310,8 @@ async def analyze_contract(
                 required_deductible=_parse_limit_amount(cov.get("deductible")),
                 required_terms=cov.get("description"),
                 contract_clause=cov.get("contract_clause"),
+                source_excerpt=cov.get("source_excerpt"),
+                source_page=cov.get("source_page"),
                 confidence=_score_to_confidence_text(
                     cov.get("confidence_score", 0.5)
                 ),
@@ -327,8 +338,10 @@ async def analyze_contract(
         project.analysis_completed_at = datetime.now(timezone.utc)
 
         if coverages_created:
-            from flywheel.api.broker import validate_transition
-            validate_transition(project.status, "gaps_identified")
+            from flywheel.api.broker._shared import validate_transition
+            validate_transition(
+                project.status, "gaps_identified", client_id=project.client_id
+            )
             project.status = "gaps_identified"
         # else keep "new_request" — no coverages found
 
@@ -382,12 +395,14 @@ async def analyze_contract(
 
     except Exception as exc:
         # Non-fatal error handling: set analysis_status='failed' and log
+        import traceback
         logger.error(
-            "Contract analysis failed for project_id=%s tenant_id=%s: %s: %s",
+            "Contract analysis failed for project_id=%s tenant_id=%s: %s: %s\n%s",
             project_id,
             tenant_id,
             type(exc).__name__,
             exc,
+            traceback.format_exc(),
         )
 
         try:

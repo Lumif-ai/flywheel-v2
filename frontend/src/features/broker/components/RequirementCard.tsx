@@ -52,6 +52,13 @@ export function RequirementCard({ coverage, style, onClauseClick }: RequirementC
         </span>
       </div>
 
+      {/* Description — supporting detail text */}
+      {coverage.required_terms && coverage.required_terms !== coverage.display_name && (
+        <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
+          {coverage.required_terms}
+        </p>
+      )}
+
       {/* Required limit — large and bold */}
       {formattedLimit && (
         <p className="text-xl font-bold text-foreground tracking-tight">

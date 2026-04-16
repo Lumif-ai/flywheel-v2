@@ -12,10 +12,10 @@ interface DocumentViewerProps {
  */
 export function DocumentViewer({ coverages }: DocumentViewerProps) {
   const insuranceCoverages = coverages.filter(
-    (c) => c.category !== 'surety' && c.source_excerpt
+    (c) => c.category !== 'surety' && (c.source_excerpt || c.required_terms)
   )
   const suretyCoverages = coverages.filter(
-    (c) => c.category === 'surety' && c.source_excerpt
+    (c) => c.category === 'surety' && (c.source_excerpt || c.required_terms)
   )
 
   return (
@@ -115,7 +115,7 @@ function ContractPaper({
                     </p>
                   )}
                   <p className="text-sm text-[#374151] leading-relaxed">
-                    {cov.source_excerpt}
+                    {cov.source_excerpt || cov.required_terms}
                   </p>
                   {cov.source_section && (
                     <p className="text-xs text-muted-foreground mt-2">

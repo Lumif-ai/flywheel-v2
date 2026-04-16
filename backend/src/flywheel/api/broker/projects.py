@@ -106,6 +106,9 @@ class UpdateCoverageBody(BaseModel):
     required_deductible: float | None = None
     required_terms: str | None = None
     contract_clause: str | None = None
+    current_limit: float | None = None
+    current_carrier: str | None = None
+    current_policy_number: str | None = None
     gap_notes: str | None = None
 
 
@@ -161,7 +164,7 @@ def _coverage_to_dict(
         "coverage_type": c.coverage_type,
         "category": c.category,
         "display_name": c.display_name,
-        "description": c.display_name,
+        "description": c.required_terms or c.display_name,
         "language": getattr(c, "language", None),
         "required_limit": float(c.required_limit) if c.required_limit is not None else None,
         "required_deductible": float(c.required_deductible) if c.required_deductible is not None else None,
@@ -879,16 +882,13 @@ async def upload_project_documents(
 
         file_uuid = uuid4()
         filename = file.filename or "unknown"
-        try:
-            storage_path = await upload_to_storage(
-                tenant_id=tenant_id,
-                file_id=str(file_uuid),
-                filename=filename,
-                content=content,
-                mime_type=file.content_type or "application/octet-stream",
-            )
-        except Exception:
-            storage_path = f"local://{tenant_id}/{file_uuid}/{filename}"
+        storage_path = await upload_to_storage(
+            tenant_id=tenant_id,
+            file_id=str(file_uuid),
+            filename=filename,
+            content=content,
+            mime_type=file.content_type or "application/octet-stream",
+        )
 
         uploaded_file = UploadedFile(
             tenant_id=user.tenant_id,
@@ -903,13 +903,22 @@ async def upload_project_documents(
 
         doc_ref = {
             "file_id": str(uploaded_file.id),
-            "filename": filename,
+            "name": filename,
             "mimetype": file.content_type,
-            "size_bytes": size,
+            "size": size,
             "storage_path": storage_path,
             "uploaded_at": uploaded_file.created_at.isoformat() if uploaded_file.created_at else None,
         }
         uploaded_docs.append(doc_ref)
+
+    # Set source_document_id to the first uploaded PDF if not already set
+    if not project.source_document_id:
+        first_pdf = next(
+            (d for d in uploaded_docs if d.get("mimetype") == "application/pdf"),
+            None,
+        )
+        if first_pdf:
+            project.source_document_id = UUID(first_pdf["file_id"])
 
     existing_docs = (project.metadata_ or {}).get("documents", [])
     existing_docs.extend(uploaded_docs)
@@ -1080,13 +1089,28 @@ async def trigger_analysis(
 
 
 async def _get_project_pdf(session, project, tenant_id: UUID) -> bytes | None:
-    """Retrieve PDF bytes for a project from Supabase Storage."""
-    if not project.source_document_id:
-        return None
+    """Retrieve PDF bytes for a project from storage (Supabase or local fallback)."""
+    from flywheel.services.document_storage import download_file
+
+    doc_id = project.source_document_id
+
+    # Fallback: if source_document_id is not set, use the first PDF from metadata
+    if not doc_id:
+        docs = (project.metadata_ or {}).get("documents", [])
+        first_pdf = next(
+            (d for d in docs if d.get("mimetype") == "application/pdf"),
+            None,
+        )
+        if not first_pdf:
+            return None
+        from uuid import UUID as _UUID
+        doc_id = _UUID(first_pdf["file_id"]) if isinstance(first_pdf["file_id"], str) else first_pdf["file_id"]
+        # Backfill the FK so future calls don't need the fallback
+        project.source_document_id = doc_id
 
     result = await session.execute(
         select(UploadedFile).where(
-            UploadedFile.id == project.source_document_id,
+            UploadedFile.id == doc_id,
             UploadedFile.tenant_id == tenant_id,
         )
     )
@@ -1094,18 +1118,7 @@ async def _get_project_pdf(session, project, tenant_id: UUID) -> bytes | None:
     if not uploaded_file or not uploaded_file.storage_path:
         return None
 
-    import httpx
-    from flywheel.config import settings as app_settings
-
-    url = f"{app_settings.supabase_url}/storage/v1/object/{_UPLOADS_BUCKET}/{uploaded_file.storage_path}"
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(
-            url,
-            headers={"Authorization": f"Bearer {app_settings.supabase_service_key}"},
-        )
-        if resp.status_code != 200:
-            return None
-        return resp.content
+    return await download_file(uploaded_file.storage_path)
 
 
 async def _run_analysis(project_id: UUID, tenant_id: UUID):
@@ -1139,7 +1152,8 @@ async def _run_analysis(project_id: UUID, tenant_id: UUID):
             await analyze_contract(session, tenant_id, project_id, pdf_content)
             await session.commit()
     except Exception as exc:
-        _logger.error("Analysis failed for project %s: %s", project_id, exc)
+        import traceback as _tb
+        _logger.error("Analysis failed for project %s: %s\n%s", project_id, exc, _tb.format_exc())
         try:
             async with factory() as err_session:
                 await err_session.execute(
