@@ -2257,6 +2257,10 @@ class BrokerProject(Base):
     distance_km: Mapped[float | None] = mapped_column(Numeric, nullable=True)
     language: Mapped[str] = mapped_column(Text, server_default=text("'en'"))
 
+    # Market context
+    country_code: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'MX'"))
+    line_of_business: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'construction'"))
+
     # Workflow state
     status: Mapped[str] = mapped_column(Text, server_default=text("'new_request'"))
     approval_status: Mapped[str] = mapped_column(Text, server_default=text("'draft'"))
@@ -2343,7 +2347,8 @@ class ProjectCoverage(Base):
 
     # Coverage details
     coverage_type: Mapped[str] = mapped_column(Text, nullable=False)
-    category: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'insurance'"))
+    coverage_type_key: Mapped[str | None] = mapped_column(Text, nullable=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'liability'"))
     display_name: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str] = mapped_column(Text, server_default=text("'en'"))
 
@@ -2596,4 +2601,31 @@ class BrokerActivity(Base):
     # Relationships
     broker_project: Mapped["BrokerProject"] = relationship(
         back_populates="activities"
+    )
+
+
+class CoverageType(Base):
+    """Canonical coverage type taxonomy — platform-wide reference table.
+
+    Seeded with 23 coverage types for Mexican construction insurance.
+    Expandable by AI extraction (is_verified=false for auto-created).
+    """
+
+    __tablename__ = "coverage_types"
+
+    key: Mapped[str] = mapped_column(Text, primary_key=True)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    display_names: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    aliases: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    countries: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    lines_of_business: Mapped[list] = mapped_column(ARRAY(Text), nullable=False, server_default=text("'{}'::text[]"))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    is_verified: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    added_by: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'seed'"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=False, server_default=text("now()")
     )
