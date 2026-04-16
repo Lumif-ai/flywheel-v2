@@ -227,24 +227,14 @@ def extract_from_document(content_bytes: bytes, mimetype: str) -> str:
         )
 
     if mimetype == "application/pdf":
-        import io
-        import pdfplumber
+        from flywheel.services.file_extraction import _extract_pdf
 
-        pages_text = []
-        with pdfplumber.open(io.BytesIO(content_bytes)) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    pages_text.append(text)
-        return "\n\n".join(pages_text)
+        return _extract_pdf(content_bytes)
 
     if mimetype == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-        import io
-        import docx
+        from flywheel.services.file_extraction import _extract_docx
 
-        doc = docx.Document(io.BytesIO(content_bytes))
-        paragraphs = [p.text for p in doc.paragraphs if p.text.strip()]
-        return "\n\n".join(paragraphs)
+        return _extract_docx(content_bytes)
 
     # text/plain or text/markdown
     return content_bytes.decode("utf-8")

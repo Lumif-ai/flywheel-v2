@@ -74,16 +74,39 @@ async def extract_text(content: bytes, mimetype: str) -> str:
 
 
 def _extract_pdf(content: bytes) -> str:
-    """Extract text from PDF using pdfplumber."""
-    import pdfplumber
+    """Extract structured markdown from PDF using opendataloader-pdf.
 
-    pages_text = []
-    with pdfplumber.open(BytesIO(content)) as pdf:
-        for page in pdf.pages:
-            text = page.extract_text()
-            if text:
-                pages_text.append(text)
-    return "\n\n".join(pages_text)
+    Uses the local Java engine for fast extraction (~60 pages/sec) with
+    proper reading order, table detection, and heading hierarchy.
+    """
+    import tempfile
+    from pathlib import Path
+
+    import opendataloader_pdf
+
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        input_path = Path(tmp_dir) / "input.pdf"
+        input_path.write_bytes(content)
+
+        opendataloader_pdf.convert(
+            input_path=str(input_path),
+            output_dir=tmp_dir,
+            format="markdown",
+            reading_order="xycut",
+            image_output="off",
+            quiet=True,
+        )
+
+        md_path = Path(tmp_dir) / "input.md"
+        if md_path.exists():
+            return md_path.read_text(encoding="utf-8")
+
+        # Fallback: find any .md file in output dir
+        md_files = list(Path(tmp_dir).glob("*.md"))
+        if md_files:
+            return md_files[0].read_text(encoding="utf-8")
+
+        return ""
 
 
 def _extract_docx(content: bytes) -> str:

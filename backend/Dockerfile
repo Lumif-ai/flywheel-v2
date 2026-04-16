@@ -12,6 +12,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libcairo2 \
     libgdk-pixbuf2.0-0 \
     libffi-dev \
+    default-jre-headless \
     && rm -rf /var/lib/apt/lists/*
 
 # Install dependencies first (cache layer)
