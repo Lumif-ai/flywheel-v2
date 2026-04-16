@@ -13,21 +13,12 @@ const SOURCE_STYLE: Record<string, string> = {
   contract: 'bg-amber-100 text-amber-700',
 }
 
-const GAP_STATUS_STYLE: Record<string, string> = {
-  covered: 'bg-green-100 text-green-700',
-  insufficient: 'bg-amber-100 text-amber-700',
-  missing: 'bg-red-100 text-red-700',
-  unknown: 'bg-muted text-muted-foreground',
-}
-
 const CATEGORY_STYLE: Record<string, string> = {
   insurance: 'bg-[rgba(233,77,53,0.1)] text-[#E94D35]',
   surety: 'bg-blue-100 text-blue-700',
 }
 
 export function RequirementCard({ coverage, style, onClauseClick }: RequirementCardProps) {
-  const gapStyle = GAP_STATUS_STYLE[coverage.gap_status] ?? GAP_STATUS_STYLE.unknown
-
   const formattedLimit =
     coverage.required_limit != null
       ? new Intl.NumberFormat('en-US', {
@@ -42,28 +33,26 @@ export function RequirementCard({ coverage, style, onClauseClick }: RequirementC
       className="rounded-xl border p-4 space-y-3 animate-fade-slide-up bg-card hover:shadow-sm transition-shadow"
       style={style}
     >
-      {/* Header: coverage name + status badge */}
+      {/* Header: coverage name + required limit */}
       <div className="flex items-start justify-between gap-2">
         <h4 className="text-sm font-semibold text-foreground leading-snug">
           {coverage.display_name ?? coverage.coverage_type}
         </h4>
-        <span className={`text-xs px-2.5 py-0.5 rounded-full capitalize font-semibold flex-shrink-0 ${gapStyle}`}>
-          {coverage.gap_status}
-        </span>
+        {formattedLimit ? (
+          <span className="text-sm font-bold text-foreground flex-shrink-0">
+            {formattedLimit}
+          </span>
+        ) : (
+          <span className="text-xs px-2.5 py-0.5 rounded-full font-medium flex-shrink-0 bg-muted text-muted-foreground">
+            No limit specified
+          </span>
+        )}
       </div>
 
       {/* Description — supporting detail text */}
       {coverage.required_terms && coverage.required_terms !== coverage.display_name && (
         <p className="text-xs text-muted-foreground leading-relaxed line-clamp-3">
           {coverage.required_terms}
-        </p>
-      )}
-
-      {/* Required limit — large and bold */}
-      {formattedLimit && (
-        <p className="text-xl font-bold text-foreground tracking-tight">
-          {formattedLimit}
-          <span className="text-xs font-normal text-muted-foreground ml-1.5">required limit</span>
         </p>
       )}
 
