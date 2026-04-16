@@ -12,8 +12,8 @@ See: .planning/PROJECT.md (updated 2026-04-15)
 Milestone: v20.0 Coverage Taxonomy & Multi-Currency Limits
 Phase: 140 (Coverage Taxonomy)
 Plan: 4 of 4 in current phase (COMPLETE)
-Status: Phase 140 — all plans complete
-Last activity: 2026-04-16 -- Completed 140-04 (frontend constants DRY + taxonomy-aware skills)
+Status: Phase 140 — executed, verified, gap-fixed, milestone shipped
+Last activity: 2026-04-16 -- Phase 140 executed (4 plans, 3 waves, 5 commits) + verification gap fix
 
 Progress: [██████████] 100%
 
@@ -138,5 +138,5 @@ None active.
 ## Session Continuity
 
 Last session: 2026-04-16
-Stopped at: Completed 140-04-PLAN.md — Phase 140 complete
+Stopped at: v20.0 milestone complete — Phase 140 executed and verified
 Resume file: None

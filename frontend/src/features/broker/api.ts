@@ -254,6 +254,10 @@ export function deleteCarrierContact(carrierId: string, contactId: string): Prom
   return api.delete(`/broker/carriers/${carrierId}/contacts/${contactId}`)
 }
 
+export function getDocumentRendition(fileId: string): Promise<{ download_url: string; filename: string }> {
+  return api.get<{ download_url: string; filename: string }>(`/files/${fileId}/download`)
+}
+
 export async function uploadProjectDocuments(
   projectId: string,
   files: File[]

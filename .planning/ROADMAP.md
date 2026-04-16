@@ -21,6 +21,7 @@
 - ✅ **v17.0 Broker Frontend** — Phases 122–128.1 (shipped 2026-04-14)
 - ✅ **v18.0 Broker Data Model v2** — Phases 129–132 (shipped 2026-04-15)
 - ✅ **v19.0 Broker Redesign** — Phases 133–139 (shipped 2026-04-15)
+- ✅ **v20.0 Coverage Taxonomy & Multi-Currency Limits** — Phase 140 (shipped 2026-04-16)
 
 ## Phases
 
@@ -261,11 +262,11 @@
 
 ---
 
-### 🚧 v20.0 Coverage Taxonomy & Multi-Currency Limits (In Progress)
+### ✅ v20.0 Coverage Taxonomy & Multi-Currency Limits (Complete)
 
 **Milestone Goal:** Replace free-form coverage type strings with a canonical, self-growing taxonomy supporting multi-market expansion, fix limit extraction for non-USD currencies, and resolve downstream bugs in gap analysis and frontend constants.
 
-- [ ] **Phase 140: Coverage Taxonomy** — DB migration, AI extraction, carrier matching, frontend constants, skill updates
+- [x] **Phase 140: Coverage Taxonomy** — DB migration, AI extraction, carrier matching, frontend constants, skill updates
 
 ## Phase Details
 
@@ -532,7 +533,7 @@ Plans:
 | 137. Workflow Frontend A | v19.0 | 0/3 | Not started | - |
 | 138. Workflow Frontend B | v19.0 | 0/4 | Not started | - |
 | 139. Polish | v19.0 | 2/2 | Complete | 2026-04-15 |
-| 140. Coverage Taxonomy | v20.0 | 0/4 | Not started | - |
+| 140. Coverage Taxonomy | v20.0 | 4/4 | Complete | 2026-04-16 |
 
 ---
 *Roadmap created: 2026-03-24*

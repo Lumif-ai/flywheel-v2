@@ -10,7 +10,7 @@ Conversations automatically become tracked commitments and executed deliverables
 
 ## Current State
 
-Ten milestones shipped. The platform is functionally complete for single-founder dogfooding with Claude Code as the brain and Flywheel as the data layer. The CRM surface is now a unified pipeline — one table for all companies and people, with saved views, automatic lifecycle management, and full provenance tracking.
+Twenty milestones shipped. The platform is functionally complete for single-founder dogfooding with Claude Code as the brain and Flywheel as the data layer. The CRM surface is a unified pipeline. The insurance broker module has a canonical coverage taxonomy with multi-market support.
 
 **Shipped milestones:**
 - **v1.0 Email Copilot** (2026-03-25) — Gmail sync, 5-tier scoring, voice-learned drafts, review UI, feedback loop
@@ -22,9 +22,19 @@ Ten milestones shipped. The platform is functionally complete for single-founder
 - **v6.0 Email-to-Tasks** (2026-03-29) — Email action item extraction, task attribution, sync integration
 - **v7.0 Email Voice & Intelligence Overhaul** (2026-03-30) — 10-field voice profiles, voice settings UI, draft regeneration, voice as context store asset, email context extractor, confidence-routed extraction pipeline
 - **v8.0 Flywheel Platform Architecture** (2026-04-05) — 10 MCP data primitives, skill catalog seed, feature flags, CLAUDE.md template, leads pipeline frontend
-- **v9.0 Unified Pipeline** (2026-04-06) — Unified schema (pipeline_entries + contacts + activities + sources), data migration, full pipeline API, multi-source integration, AG Grid with saved views, side panel + profile, retirement flow
+- **v9.0 Unified Pipeline** (2026-04-06) — Unified schema, data migration, full pipeline API, AG Grid with saved views, side panel + profile, retirement flow
+- **v10.0 Contact Outreach Pipeline** (2026-04-07) — Contact scraping, enrichment, fit scoring, personalized outreach drafting and sending
+- **v11.0 Briefing Page Redesign** (2026-04-08) — Intelligence-first briefing, meeting prep cards, task prioritization
+- **v12.0 Library Redesign** (2026-04-10) — Tagged/deduped document library with type tabs, company filter, infinite scroll, tag autocomplete, export infrastructure, one-pager skill
+- **v14.0 Meeting Intelligence Synthesis** (2026-04-11) — Cross-meeting pattern detection, pain landscape synthesis, context store pagination
+- **v15.0 Broker Module MVP** (2026-04-13) — Full insurance broker placement workflow: contract intake → coverage analysis → gap detection → carrier solicitation → quote comparison → client delivery. 8 phases, 25 plans, ~5,900 LOC.
+- **v16.0 Briefing Intelligence Surface** (2026-04-14) — Pain landscape on briefing page, meeting-prep integration, tenant bootstrap fix
+- **v17.0 Broker Frontend** (2026-04-14) — Dashboard + projects list, tabbed project detail, coverage/comparison tabs, carriers page
+- **v18.0 Broker Data Model v2** (2026-04-15) — New broker tables (clients, contacts, agencies), schema modifications, atomic backend release, clients frontend
+- **v19.0 Broker Redesign** (2026-04-15) — Foundation fixes, skills infrastructure, 11 AI skills, high-impact frontend, workflow UI, polish animations
+- **v20.0 Coverage Taxonomy** (2026-04-16) — Canonical coverage_types table, taxonomy-aware AI extraction, exact carrier matching, multi-currency limits, DRY frontend constants
 
-**Codebase:** FastAPI + React, ~60K LOC backend, ~39K LOC frontend, ~800K LOC MCP CLI
+**Codebase:** FastAPI + React, ~62K LOC backend, ~42K LOC frontend, ~800K LOC MCP CLI
 
 ## Requirements
 
@@ -116,19 +126,26 @@ Ten milestones shipped. The platform is functionally complete for single-founder
 - ✓ Retirement scanner (60d stale, 90d retire, clear-on-activity) — v9.0 Phase 90
 - ✓ Manual retire/reactivate with visual stale/retired indicators — v9.0 Phase 90
 
+- ✓ Module gating (tenant.settings.modules JSONB + @require_module + useFeatureFlag) — v15.0 Phase 112
+- ✓ 6 broker database tables with ORM models — v15.0 Phase 112
+- ✓ Contract intake (Gmail PDF detection, AI analysis, coverage extraction) — v15.0 Phase 113
+- ✓ Gap analysis + carrier matching with ranking — v15.0 Phase 114
+- ✓ Solicitation (portal submission, email approval, submission packages) — v15.0 Phase 115
+- ✓ Quote comparison (detection, extraction, matrix, follow-up drafting) — v15.0 Phase 116
+- ✓ Client delivery (recommendation drafting, status lifecycle, document library) — v15.0 Phase 117
+- ✓ Broker navigation (purpose-built sidebar, lazy routing, stub pages) — v15.0 Phase 118
+- ✓ API-frontend wiring fixes (6 critical blockers closed) — v15.0 Phase 119
+- ✓ Canonical coverage_types table (23 types, JSONB display names/aliases, country/LOB arrays) — v20.0 Phase 140
+- ✓ Taxonomy-aware AI extraction (canonical keys, auto-create new types, alias learning) — v20.0 Phase 140
+- ✓ Exact canonical key carrier matching (delete normalizer) — v20.0 Phase 140
+- ✓ Multi-currency limit extraction (numeric limit_amount + limit_currency) — v20.0 Phase 140
+- ✓ Gap status/category constraint fixes — v20.0 Phase 140
+- ✓ Frontend coverage constants DRY (single constants/coverage.ts) — v20.0 Phase 140
+- ✓ Broker skills taxonomy API integration — v20.0 Phase 140
+
 ### Active
 
-## Current Milestone: v10.0 Contact Outreach Pipeline
-
-**Goal:** Person-first pipeline grid as the default view, with a contact detail panel showing editable outreach sequences (email + LinkedIn), AI-computed next steps, and company as a secondary toggle — turning the CRM into an outreach command center.
-
-**Target features:**
-- Contact-first grid: 317 rows showing contact name, company, title, channel, variant, step, status, next step, subject
-- Contact detail panel: full outreach sequence (N steps), editable message bodies (email + LinkedIn), field editing, action buttons
-- AI-computed "Next Step" column: derived from activity status + elapsed time (Ready to send / Follow up in Nd / Replied - engage)
-- Contacts | Companies view toggle (contacts default, companies secondary)
-- MCP tool extensions: `flywheel_list_pipeline_contacts` (flattened contact view), `flywheel_create_outreach_step` (generate step N)
-- Dynamic sequence length: step_number is an integer, UI shows "Step X of N", "Generate next step" always available
+(No active milestone — planning next)
 
 ### Out of Scope
 
@@ -219,5 +236,13 @@ Ten milestones shipped. The platform is functionally complete for single-founder
 | Context entity bridging via FK | Pipeline is CRM surface, context store is AI knowledge — share identity, not table | ✓ Good — context_entity_id on pipeline_entries |
 | Fit tier renamed Strong/Medium/Weak | A/B/C not intuitive for non-technical founders | ✓ Good — shipped in v9.0 grid |
 
+| Broker as feature module not microservice | Same codebase, same deployment, feature-flagged — faster iteration, shared auth/RLS | ✓ Good — shipped v15.0 |
+| Manual dict serializers over Pydantic | Explicit field control, matches existing broker.py patterns | ✓ Good — enabled precise gap closure in Phase 119 |
+| Playwright portal submission with screenshot gate | Safety: no auto-submit, mandatory human review of screenshots | ✓ Good |
+| contract_analyzer with Opus + tool_use | PDF-native analysis, structured coverage extraction with confidence | ✓ Good |
+| Flat array returns over paginated for small lists | Carriers list is <100 items, pagination adds frontend complexity for no benefit | ✓ Good — fixed in Phase 119 |
+| Canonical taxonomy over free-text coverage types | Exact key matching eliminates false positives, self-growing via AI, multi-market | ✓ Good — shipped v20.0 |
+| JSONB aliases + TEXT[] countries/LOBs | Flexible multi-language support without separate tables, filterable by market | ✓ Good — shipped v20.0 |
+
 ---
-*Last updated: 2026-04-07 after v10.0 Contact Outreach Pipeline milestone start*
+*Last updated: 2026-04-16 after v20.0 Coverage Taxonomy & Multi-Currency Limits milestone*

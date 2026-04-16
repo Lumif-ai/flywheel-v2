@@ -191,3 +191,140 @@
 
 ---
 
+
+## v10.0 — Contact Outreach Pipeline ✓
+
+**Goal:** End-to-end outreach pipeline — scrape contacts, enrich, score fit, draft personalized messages, send via email/LinkedIn.
+
+**Started:** 2026-04-07
+**Completed:** 2026-04-07
+**Phases:** 91-94 (4 phases, 7 plans)
+**Last phase number:** 94
+
+**Key deliverables:**
+- Contact scraping from directories and event pages
+- Lead enrichment and fit scoring
+- Personalized outreach drafting with context store integration
+- Email and LinkedIn message sending with rate tracking
+
+---
+
+## v11.0 — Briefing Page Redesign ✓
+
+**Goal:** Redesign the daily briefing page with narrative intelligence, meeting prep cards, and task prioritization.
+
+**Started:** 2026-04-08
+**Completed:** 2026-04-08
+**Phases:** 96-100 (5 phases, 10 plans)
+**Last phase number:** 100
+
+**Key deliverables:**
+- Redesigned briefing layout with intelligence-first approach
+- Meeting prep cards with context-aware content
+- Task prioritization with urgency signals
+- Responsive design for all screen sizes
+
+---
+
+## v12.0 — Library Redesign ✓
+
+**Goal:** Transform the document library from a flat dump into a filterable, tagged, deduped document surface with type tabs, company filtering, infinite scroll, and inline tag management.
+
+**Started:** 2026-04-08
+**Completed:** 2026-04-10
+**Phases:** 101-106 (6 core phases + 2 inserted: 104.1, 104.2)
+**Last phase number:** 106
+
+**Key deliverables:**
+- Schema migration — tags TEXT[] with GIN index, account_id FK, dedup partial unique indexes, title cleanup, duplicate merge
+- Document API — 7 endpoints (list with cursor pagination, from-content with dedup, tag PATCH, counts-by-type, tag counts, export, share)
+- Library UI — type tabs, company filter, tag pills with autocomplete, debounced search, infinite scroll, list/grid toggle, date grouping
+- Legacy model cleanup — all 9 backend files rewired from Account/AccountContact to PipelineEntry/Contact/Activity
+- Skill input schema validation — server-side validation, structured input_data, enriched fetch_skills
+- Foundation export infrastructure — WeasyPrint, HTML sanitization, async PDF/DOCX export
+- One-pager skill — output_schema, OnePagerRenderer, end-to-end structured output pipeline
+
+**Tech debt:** Phase 104 skill adoption incomplete — 2/8 skills pass account_id/tags to flywheel_save_document
+
+---
+
+## v14.0 — Meeting Intelligence Synthesis ✓
+
+**Goal:** Cross-meeting pattern detection — a synthesis skill that reads pain-points from the context store, identifies recurring patterns via LLM, and writes calibrated entries to pain-landscape.md.
+
+**Started:** 2026-04-11
+**Completed:** 2026-04-11
+**Phases:** 110-111 (2 phases, 4 plans)
+**Last phase number:** 111
+
+**Key deliverables:**
+- Synthesis infrastructure — pagination read pattern for context files, meeting_type metadata in context entries
+- Pain landscape synthesis skill — data loading, LLM grouping, confidence-calibrated pain entries, co-occurrence detection, library save
+- Context store enhancements — offset parameter in read_context_file, metadata param in write_context
+
+---
+
+## v20.0 — Coverage Taxonomy & Multi-Currency Limits ✓
+
+**Goal:** Replace free-form coverage type strings with a canonical, self-growing taxonomy that supports multi-market expansion (countries + LOBs), multi-language display names, and accurate limit extraction with currency awareness. Fix downstream bugs (gap_status mismatch, category default, frontend duplication).
+
+**Started:** 2026-04-16
+**Completed:** 2026-04-16
+**Phases:** 140 (1 phase, 4 plans)
+**Last phase number:** 140
+**Stats:** 20 files changed, +1,122 / -265 lines
+
+**Key deliverables:**
+- `coverage_types` reference table with 23 canonical types, JSONB display names/aliases, country/LOB arrays, self-growing via AI extraction
+- Taxonomy-aware AI extraction — dynamic prompt with filtered taxonomy, canonical key output, auto-creates new types, learns aliases
+- Exact canonical key carrier matching — replaces fuzzy normalization, zero false positives
+- Multi-currency limit extraction — numeric `limit_amount` + `limit_currency` fields, currency mismatch detection
+- Gap status/category fixes — CHECK constraint aligned with detector output, category default corrected to 'liability'
+- Frontend constants DRY — single `constants/coverage.ts` source of truth, zero duplicated arrays
+- Broker skills updated to use taxonomy API instead of hardcoded translation maps
+
+**Spec:** SPEC-COVERAGE-TAXONOMY.md
+
+---
+
+## v15.0 — Broker Module MVP ✓
+
+**Goal:** Full insurance broker placement workflow — contract intake → coverage analysis → gap detection → carrier solicitation → quote comparison → client delivery.
+
+**Started:** 2026-04-13
+**Completed:** 2026-04-13
+**Phases:** 112-119 (8 phases, 25 plans)
+**Last phase number:** 119
+**Stats:** ~5,900 LOC (2,520 backend + 3,374 frontend), 37 files
+
+**Key deliverables:**
+- Module gating — tenant.settings.modules JSONB, @require_module decorator, frontend feature flag
+- Database foundation — 6 broker tables (projects, coverages, carriers, quotes, solicitations, documents) with ORM models
+- Contract intake — Gmail PDF detection, AI contract analysis (Opus), coverage extraction with confidence scoring
+- Gap analysis — pure Python gap detector, ranked carrier recommendations with matching scores
+- Solicitation — portal submission via Playwright, email approval flow, submission package builder
+- Quote comparison — Gmail quote detection, AI extraction, comparison matrix with critical exclusion alerts, follow-up drafting
+- Client delivery — recommendation email drafting, project status lifecycle, document library integration
+- Broker navigation — purpose-built sidebar replacing GTM nav, lazy-loaded routing, stub pages
+- Gap closure (Phase 119) — fixed 6 critical blockers: missing quotes endpoint, serializer field gaps, response shape mismatches, query key alignment, status transition
+
+---
+
+## v16.0 — Briefing Intelligence Surface ✓
+
+**Goal:** Wire pain-landscape.md intelligence into the briefing API and meeting-prep skill, add Market Patterns section to BriefingPageV2, fix tenant bootstrap persistence.
+
+**Started:** 2026-04-14
+**Completed:** 2026-04-14
+**Phases:** 120-121 (2 phases, 3 plans)
+**Last phase number:** 121
+
+**Key deliverables:**
+- Market patterns backend — PainPatternItem/MarketPatternsSection models, _build_market_patterns() section builder, narrative injection
+- Market patterns frontend — MarketPatternsSection component with loading/empty/loaded states, wired into BriefingPageV2
+- Meeting-prep SKILL.md v4.1 — Step 0c pain landscape loading via local FlywheelClient, Section 1.95 Market Pain Patterns
+- Tenant bootstrap fix — Zustand persist middleware, TenantBootstrap gate component, pure queryFn, BrokerGuard null-safe, volatile cache invalidation
+
+---
+
+
