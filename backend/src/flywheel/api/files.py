@@ -13,6 +13,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, HTTPException, Query, UploadFile
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,6 +21,7 @@ from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload
 from flywheel.db.models import UploadedFile
 from flywheel.services.document_storage import (
+    download_file as download_from_storage,
     get_file_url,
     upload_file as upload_to_storage,
 )
@@ -202,3 +204,39 @@ async def download_file(
 
     signed_url = await get_file_url(uploaded.storage_path)
     return {"download_url": signed_url, "filename": uploaded.filename}
+
+
+# ---------------------------------------------------------------------------
+# GET /files/{file_id}/content -- Proxy raw file bytes (avoids CORS)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{file_id}/content")
+async def get_file_content(
+    file_id: UUID,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> Response:
+    """Return raw file bytes, proxied through the backend to avoid CORS."""
+    result = await db.execute(
+        select(UploadedFile).where(UploadedFile.id == file_id)
+    )
+    uploaded = result.scalar_one_or_none()
+    if uploaded is None:
+        raise HTTPException(status_code=404, detail="File not found")
+
+    if uploaded.storage_path.startswith("local://"):
+        raise HTTPException(
+            status_code=404,
+            detail="File not available (stored before Supabase integration)",
+        )
+
+    content = await download_from_storage(uploaded.storage_path)
+    if content is None:
+        raise HTTPException(status_code=404, detail="File content not found in storage")
+
+    return Response(
+        content=content,
+        media_type=uploaded.mimetype or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{uploaded.filename}"'},
+    )
