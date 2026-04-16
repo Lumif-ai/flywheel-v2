@@ -1,6 +1,7 @@
 import { ShimmerSkeleton } from '@/components/ui/skeleton'
 import { useAnalysisPolling } from '../../hooks/useAnalysisPolling'
 import { DocumentViewer } from '../DocumentViewer'
+import { FullDocumentViewer } from '../FullDocumentViewer'
 import { RequirementsPanel } from '../RequirementsPanel'
 import type { BrokerProjectDetail } from '../../types/broker'
 
@@ -14,19 +15,35 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
   const coverages = data?.coverages ?? project.coverages ?? []
   const isRunning = analysisStatus === 'running'
 
+  // Detect if project has an uploaded PDF document
+  interface DocumentEntry {
+    file_id?: string
+    name?: string
+    mimetype?: string
+  }
+  const documents = (project.metadata?.documents as DocumentEntry[] | undefined) ?? []
+  const pdfDocument = documents.find(
+    (d) => d.file_id && d.mimetype === 'application/pdf'
+  )
+  const hasPdfDocument = !!pdfDocument?.file_id
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 min-h-[calc(100vh-200px)]">
       {/* Left: Document viewer */}
       <div className="rounded-xl border overflow-hidden flex flex-col">
-        <div className="flex-1 overflow-y-auto">
+        <div className="flex-1 overflow-hidden">
           {isRunning ? (
-            <div className="p-4 space-y-3">
+            <div className="p-4 space-y-3 overflow-y-auto h-full">
               {Array.from({ length: 4 }).map((_, i) => (
                 <ShimmerSkeleton key={i} className="h-20 w-full rounded-lg" />
               ))}
             </div>
+          ) : hasPdfDocument ? (
+            <FullDocumentViewer fileId={pdfDocument!.file_id!} filename={pdfDocument!.name} />
           ) : (
-            <DocumentViewer coverages={coverages} />
+            <div className="overflow-y-auto h-full">
+              <DocumentViewer coverages={coverages} />
+            </div>
           )}
         </div>
       </div>
