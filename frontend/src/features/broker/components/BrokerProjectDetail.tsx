@@ -145,7 +145,7 @@ export function BrokerProjectDetail() {
             <CarriersTab projectId={project.id} />
           </TabsContent>
           <TabsContent value="quotes">
-            <QuotesTab projectId={project.id} />
+            <QuotesTab projectId={project.id} coverages={project.coverages ?? []} />
           </TabsContent>
           <TabsContent value="compare">
             <CompareTab projectId={project.id} />

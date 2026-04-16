@@ -10,15 +10,16 @@ import {
   useManualQuoteEntry,
   useDraftFollowups,
 } from '../hooks/useBrokerQuotes'
-import type { CarrierQuote, ManualQuotePayload, SolicitationDocument } from '../types/broker'
+import type { CarrierQuote, ManualQuotePayload, SolicitationDocument, ProjectCoverage } from '../types/broker'
 import { RunInClaudeCodeButton } from './shared/RunInClaudeCodeButton'
 import { CarrierBadge } from './CarrierBadge'
 
 interface QuoteTrackingProps {
   projectId: string
+  coverages: ProjectCoverage[]
 }
 
-type QuoteDisplayStatus = 'pending' | 'solicited' | 'received' | 'extracting' | 'extracted' | 'needs_follow_up'
+type QuoteDisplayStatus = 'pending' | 'solicited' | 'received' | 'extracting' | 'extracted' | 'selected' | 'needs_follow_up'
 
 function formatCurrency(val: number): string {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 }).format(val)
@@ -35,13 +36,14 @@ function getDisplayStatus(quote: CarrierQuote): QuoteDisplayStatus {
 /** Determine the aggregate status for a group of quotes from the same carrier */
 function getGroupStatus(quotes: CarrierQuote[]): QuoteDisplayStatus {
   const statuses = quotes.map(getDisplayStatus)
-  // Priority: needs_follow_up > extracting > solicited > pending > received > extracted
+  // Priority: needs_follow_up > extracting > solicited > pending > received > extracted > selected
   if (statuses.includes('needs_follow_up')) return 'needs_follow_up'
   if (statuses.includes('extracting')) return 'extracting'
   if (statuses.includes('solicited')) return 'solicited'
   if (statuses.includes('pending')) return 'pending'
   if (statuses.includes('received')) return 'received'
   if (statuses.includes('extracted')) return 'extracted'
+  if (statuses.includes('selected')) return 'selected'
   return 'pending'
 }
 
@@ -52,6 +54,7 @@ function statusBadgeVariant(status: QuoteDisplayStatus): string {
     case 'received': return 'bg-green-100 text-green-700'
     case 'extracting': return 'bg-blue-100 text-blue-700'
     case 'extracted': return 'bg-emerald-100 text-emerald-700'
+    case 'selected': return 'bg-purple-100 text-purple-700'
     case 'needs_follow_up': return 'bg-orange-100 text-orange-700'
   }
 }
@@ -63,6 +66,7 @@ function statusLabel(status: QuoteDisplayStatus): string {
     case 'received': return 'Received'
     case 'extracting': return 'Extracting...'
     case 'extracted': return 'Extracted'
+    case 'selected': return 'Selected'
     case 'needs_follow_up': return 'Needs Follow-up'
   }
 }
@@ -161,11 +165,12 @@ function DocumentChip({ doc }: { doc: SolicitationDocument }) {
 }
 
 /** Sub-row for individual coverage line items within a carrier group */
-function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor }: {
+function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor, coverageMap }: {
   quote: CarrierQuote
   projectId: string
   showManualFor: string | null
   setShowManualFor: (id: string | null) => void
+  coverageMap: Map<string, ProjectCoverage>
 }) {
   const displayStatus = getDisplayStatus(quote)
   const markReceivedMutation = useMarkReceived(projectId)
@@ -173,10 +178,13 @@ function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor }: {
   return (
     <>
       <tr className="bg-muted/5 border-t border-dashed">
-        {/* Coverage type or quote ID */}
+        {/* Coverage name */}
         <td className="pl-12 pr-4 py-2">
-          <span className="text-xs text-muted-foreground">
-            {quote.coverage_id ? `Coverage Line` : 'Quote'}
+          <span className="text-xs font-medium text-gray-700">
+            {quote.coverage_id && coverageMap.has(quote.coverage_id)
+              ? coverageMap.get(quote.coverage_id)!.display_name || coverageMap.get(quote.coverage_id)!.coverage_type.replace(/_/g, ' ')
+              : quote.carrier_type === 'insurance' ? 'Insurance' : 'Surety'
+            }
           </span>
         </td>
 
@@ -191,7 +199,7 @@ function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor }: {
         {/* Premium */}
         <td className="px-4 py-2" colSpan={2}>
           <div className="flex items-center gap-3">
-            {['extracted', 'received'].includes(displayStatus) && quote.premium != null ? (
+            {['extracted', 'received', 'selected'].includes(displayStatus) && quote.premium != null ? (
               <span className="text-sm font-medium">{formatCurrency(quote.premium)}</span>
             ) : (
               <span className="text-sm text-muted-foreground">---</span>
@@ -235,7 +243,7 @@ function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor }: {
                 Enter Manually
               </Button>
             )}
-            {displayStatus === 'extracted' && (
+            {(displayStatus === 'extracted' || displayStatus === 'selected') && (
               <span className="text-xs text-emerald-600 flex items-center gap-1">
                 <CheckCircle className="h-3 w-3" />
               </span>
@@ -279,11 +287,20 @@ interface CarrierGroup {
   latestDate: string | null
 }
 
-export function QuoteTracking({ projectId }: QuoteTrackingProps) {
+export function QuoteTracking({ projectId, coverages }: QuoteTrackingProps) {
   const { data: quotes, isLoading } = useBrokerQuotes(projectId)
   const followupsMutation = useDraftFollowups(projectId)
   const [expandedCarrier, setExpandedCarrier] = useState<string | null>(null)
   const [showManualFor, setShowManualFor] = useState<string | null>(null)
+
+  // Build coverage lookup map from coverage_id -> ProjectCoverage
+  const coverageMap = useMemo(() => {
+    const map = new Map<string, ProjectCoverage>()
+    for (const c of coverages) {
+      map.set(c.id, c)
+    }
+    return map
+  }, [coverages])
 
   // Group quotes by carrier
   const carrierGroups = useMemo<CarrierGroup[]>(() => {
@@ -333,13 +350,13 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
 
   // Count unique carriers by status
   const receivedCarriers = carrierGroups.filter(g =>
-    ['received', 'extracting', 'extracted'].includes(g.groupStatus)
+    ['received', 'extracting', 'extracted', 'selected'].includes(g.groupStatus)
   ).length
   const pendingCarriers = carrierGroups.filter(g =>
     ['solicited', 'pending', 'needs_follow_up'].includes(g.groupStatus)
   ).length
-  const hasReceived = quotes.some(q => q.status === 'received')
-  const allExtracted = quotes.length > 0 && quotes.every(q => ['extracted', 'received'].includes(q.status))
+  const hasReceived = quotes.some(q => ['received', 'selected'].includes(q.status))
+  const allExtracted = quotes.length > 0 && quotes.every(q => ['extracted', 'received', 'selected'].includes(q.status))
   const hasSolicited = quotes.some((q) => q.status === 'solicited')
 
   return (
@@ -458,6 +475,7 @@ export function QuoteTracking({ projectId }: QuoteTrackingProps) {
                       projectId={projectId}
                       showManualFor={showManualFor}
                       setShowManualFor={setShowManualFor}
+                      coverageMap={coverageMap}
                     />
                   ))}
                 </>
