@@ -23,7 +23,7 @@ tags:
   - gtm
   - fit-analysis
 context-aware: true
-web_tier: 2
+web_tier: 3
 ---
 
 # Company Fit Analyzer Skill

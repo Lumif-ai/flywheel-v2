@@ -26,6 +26,7 @@ output:
   - pain-landscape-entries
   - synthesis-terminal-report
   - flywheel-library-document
+web_tier: 3
 ---
 
 # meeting-intelligence

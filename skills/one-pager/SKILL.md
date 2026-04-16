@@ -2,7 +2,7 @@
 name: one-pager
 version: "1.0"
 context-aware: true
-web_tier: 1
+web_tier: 3
 token_budget: 8192
 description: >
   Create professional B2B value proposition one-pagers that survive scrutiny

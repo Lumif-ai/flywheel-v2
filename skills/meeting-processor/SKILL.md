@@ -26,7 +26,7 @@ dependencies:
 output:
   - context-store-writes
   - standalone-enriched-report
-web_tier: 1
+web_tier: 3
 parameters:
   input_schema:
     type: object

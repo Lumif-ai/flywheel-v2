@@ -26,7 +26,7 @@ output:
   - call-intelligence-html
   - call-intelligence-json
   - context-store-writes
-web_tier: 1
+web_tier: 3
 ---
 
 # call-intelligence

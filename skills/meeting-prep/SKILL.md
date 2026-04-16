@@ -32,7 +32,7 @@ output:
   - meeting-prep-briefing-html
   - context-store-cross-references
   - research-intelligence-writes
-web_tier: 1
+web_tier: 3
 ---
 
 # meeting-prep

@@ -12,6 +12,7 @@ description: >
   "review my outreach", "score these emails", "are these ready to send", "check these drafts",
   "build persona", "outreach feedback", "draft follow-ups". Also integrates as a pre-send
   quality gate in the GTM pipeline.
+web_tier: 3
 ---
 
 # outreach-drafter v1.1

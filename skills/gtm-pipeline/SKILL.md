@@ -24,7 +24,7 @@ dependencies:
 output:
   - context-store-writes
   - pipeline-report
-web_tier: 2
+web_tier: 3
 ---
 
 # gtm-pipeline

@@ -18,6 +18,7 @@ description: >
   Requires: Playwright MCP connected. A scored CSV with Fit_Score and Fit_Tier columns.
 compatibility: "Requires Playwright MCP connected. Works with Gmail, Outlook, Zoho (browser), and LinkedIn."
 context-aware: true
+web_tier: 3
 ---
 
 # Outbound Messenger Skill
