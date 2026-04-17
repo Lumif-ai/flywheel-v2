@@ -28,10 +28,10 @@ import asyncio
 import io
 import re
 from datetime import datetime, timezone
-from typing import Any
+from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Query, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import exists, func, select, text
@@ -971,6 +971,8 @@ async def analyze_gaps(
 async def upload_project_documents(
     project_id: UUID,
     files: list[UploadFile] = File(...),
+    # document_type is a single scalar per POST. Frontend sends one request per zone.
+    document_type: Annotated[str, Form()] = "requirements",
     user: TokenPayload = Depends(require_module("broker")),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict[str, Any]:
@@ -980,12 +982,21 @@ async def upload_project_documents(
     result = await db.execute(
         select(BrokerProject).where(
             BrokerProject.id == project_id,
+            # Tenant scoping parity with PATCH; previously absent (pre-Phase 145 latent bug).
+            BrokerProject.tenant_id == user.tenant_id,
             BrokerProject.deleted_at.is_(None),
         )
     )
     project = result.scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=404, detail="Project not found")
+
+    # Whitelist; keep narrow so mid-pipeline code can trust the value.
+    if document_type not in ("requirements", "coverage"):
+        raise HTTPException(
+            status_code=400,
+            detail=f"document_type must be 'requirements' or 'coverage', got {document_type!r}",
+        )
 
     uploaded_docs: list[dict[str, Any]] = []
     tenant_id = str(user.tenant_id)
@@ -1035,6 +1046,7 @@ async def upload_project_documents(
             "size": size,
             "storage_path": storage_path,
             "uploaded_at": uploaded_file.created_at.isoformat() if uploaded_file.created_at else None,
+            "document_type": document_type,
         }
         uploaded_docs.append(doc_ref)
 
@@ -1062,6 +1074,75 @@ async def upload_project_documents(
     await db.commit()
 
     return {"documents": uploaded_docs, "total": len(uploaded_docs)}
+
+
+# ---------------------------------------------------------------------------
+# PATCH /broker/projects/{project_id}/documents/{file_id}
+# ---------------------------------------------------------------------------
+
+
+class _DocumentPatchBody(BaseModel):
+    document_type: Literal["requirements", "coverage"]
+
+
+@projects_router.patch(
+    "/projects/{project_id}/documents/{file_id}",
+    status_code=200,
+)
+async def patch_project_document(
+    project_id: UUID,
+    file_id: UUID,
+    body: _DocumentPatchBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict[str, Any]:
+    """Update document_type on a single metadata.documents[] entry.
+
+    Used by the frontend's misrouted-chip "Move to other zone" action. Clears
+    any existing `misrouted` flag on the same entry since the user has just
+    asserted the correct zone. Does NOT trigger re-analysis -- user must click
+    "Analyze Documents with Claude" again explicitly (see RESEARCH Open Q 2).
+    """
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    file_id_str = str(file_id)
+    existing_meta = dict(project.metadata_) if project.metadata_ else {}
+    docs = list(existing_meta.get("documents", []))
+
+    new_docs: list[dict[str, Any]] = []
+    matched = False
+    for doc in docs:
+        if doc.get("file_id") == file_id_str:
+            new_doc = dict(doc)
+            new_doc["document_type"] = body.document_type
+            # Clear misrouted: user has asserted the correct zone.
+            new_doc.pop("misrouted", None)
+            new_docs.append(new_doc)
+            matched = True
+        else:
+            new_docs.append(doc)
+
+    if not matched:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Document {file_id_str} not found on project {project_id}",
+        )
+
+    existing_meta["documents"] = new_docs
+    # Spread-and-reassign: required for SQLAlchemy JSONB change detection.
+    project.metadata_ = {**existing_meta}
+
+    await db.commit()
+    return {"file_id": file_id_str, "document_type": body.document_type}
 
 
 # ---------------------------------------------------------------------------
