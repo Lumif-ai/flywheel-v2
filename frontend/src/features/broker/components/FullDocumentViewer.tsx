@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { Document, Page, pdfjs } from 'react-pdf'
 import 'react-pdf/dist/Page/AnnotationLayer.css'
 import 'react-pdf/dist/Page/TextLayer.css'
@@ -105,7 +105,12 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
     )
   }
 
-  if (error || !pdfData) {
+  const fileObj = useMemo(
+    () => (pdfData ? { data: pdfData.slice() } : null),
+    [pdfData],
+  )
+
+  if (error || !fileObj) {
     return null
   }
 
@@ -131,7 +136,7 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
         <div className={needsHorizontalScroll ? 'min-w-max' : ''}>
           <div className="flex justify-center py-4">
             <Document
-              file={{ data: pdfData }}
+              file={fileObj}
               onLoadSuccess={onDocumentLoadSuccess}
               loading={
                 <div className="flex items-center justify-center py-20">
