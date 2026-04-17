@@ -1,265 +1,458 @@
-# Feature Landscape: Broker Frontend Redesign
+# Feature Landscape — v22.0 Skill Platform Consolidation
 
-**Domain:** Insurance broker placement workflow UI -- redesign to Alaya Demo v2 quality
-**Researched:** 2026-04-15
-**Source:** Alaya Demo v2 (16-beat demo at `/tmp/alaya-demo-v2/src/App.tsx`), SPEC-BROKER-REDESIGN.md, existing codebase (42 broker components)
+**Domain:** Server-hosted skill asset delivery + ephemeral remote-code execution for Claude Code
+**Researched:** 2026-04-17
+**Overall confidence:** HIGH — grounded in six well-documented reference systems (npm, Homebrew, AWS Lambda layers, Cloudflare Workers, Deno, pip)
+
+---
+
+## Executive Summary
+
+Every mature "fetch-and-run" system converges on the **same four primitives**: (1) a content-addressed artifact, (2) a pinned version identifier, (3) a checksum gate before execution, (4) an isolated/ephemeral execution surface. Variations are about *caching strategy* (permanent vs TTL vs per-invocation) and *trust model* (signed publisher vs first-party only vs zero-trust).
+
+For Flywheel v22.0 — broker Python helpers served to one trusted party (the user's own Claude Code) from a first-party backend the user is already authenticated to — the design lives closer to the **Cloudflare Worker / Lambda Layer** end of the spectrum (tight publisher trust, version-pinned, deterministic) than the **npm/npx** end (open registry, transitive deps, arbitrary publishers).
+
+The critical design choice is **caching policy**. Three options:
+1. **No cache (pure ephemeral):** every `/broker:*` run fetches fresh — highest freshness, worst latency, breaks offline.
+2. **TTL + ETag (pip model):** fetch on first use, conditional revalidate thereafter — best balance for Flywheel.
+3. **Persistent with manual invalidate (Homebrew model):** only refetch on explicit version bump — fastest but drifts.
+
+**Recommendation: Option 2 (TTL-with-revalidate, backed by content-addressed cache keyed on `sha256:<hash>`).** The cache is an optimisation, not a persistence model — the bundle is still "ephemeral" in the sense that it is not managed by the user, is invalidated centrally, and is re-verifiable from the server at any time.
+
+---
+
+## Feature Categories
+
+Features are grouped as:
+
+| Category | Definition |
+|----------|------------|
+| **Table Stakes** | MUST-HAVE. Without these, the system is a regression from today's local `~/.claude/skills/broker/` setup. |
+| **Differentiators** | NICE-TO-HAVE that make the server-hosted model *better* than local files, justifying the migration. |
+| **Anti-Features** | Explicitly OUT OF SCOPE. Listed to prevent scope creep during roadmap planning. |
 
 ---
 
 ## Table Stakes
 
-Features users expect. Missing = product feels incomplete or broken relative to the demo standard.
+Features whose absence would make v22.0 *worse* than the current local filesystem setup.
 
-### Foundation (Wave 0 -- blocks everything)
+### TS-01 — Version-pinned bundle identifier
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Fix 4 API path mismatches (solicitation edit/send, recommendation edit/send) | Currently silently 404. Emails cannot be sent, recommendations cannot be edited. | Low | `broker.ts` API file | N/A -- bug fix |
-| Remove stale types (5 from BrokerProject, 6 from CarrierQuote) | Type confusion causes incorrect data binding across all broker pages | Low | `types/broker.ts` | N/A -- cleanup |
-| Add missing fields to ProjectCoverage (10 fields: gap_amount, current_limit, contract_clause, source_excerpt, etc.) | Blocks gap analysis dollar amounts, clause references, and analysis view entirely | Low | `types/broker.ts`, backend schema already has them | Beat 6 |
-| Update flywheelGridTheme (coral hover `rgba(233,77,53,0.03)`, no column separators) | Visual baseline. Every ag-grid in broker module uses this theme. Demo uses coral hover everywhere. | Low | `shared/grid/theme.ts` | All beats |
-| Add SolicitationDraft type + useSolicitationDrafts hook | Email approval currently derives data from stale CarrierQuote fields being removed | Low | Types + hooks | Beat 9 |
+| Attribute | Value |
+|-----------|-------|
+| What | Every skill has a resolvable `(name, version)` tuple; MCP fetch accepts an explicit version or "latest-stable" |
+| Why | Without version pinning, a silently pushed server update breaks an in-flight `/broker:process-project` pipeline mid-run. This is the #1 Lambda Layer production footgun. |
+| Complexity | **Moderate** — requires `skill_version` column + foreign-key on bundle, plus server-side semver ordering |
+| Depends on | Alembic migration, existing `skills` table from Phase 77 |
+| User-visible behaviour | `flywheel_fetch_skill_bundle("broker/portals/mapfre", version="1.2.3")` always returns the same bytes |
+| Reference systems | Lambda Layers (version-ARN pinning); npm lockfile; Deno `--lock` |
 
-### Shared Components
+### TS-02 — SHA-256 checksum verification before execution
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| CurrencyCell renderer (right-aligned, `Mex$X,XXX,XXX` format, red `#EF4444` for gaps, green `#22C55E` for covered) | Used on 4+ pages: gap analysis, quote tracking, comparison matrix, dashboard pipeline. Demo formats all amounts this way. | Low | Shared grid renderers dir | Beats 6, 11, 14 |
-| ClauseLink renderer (coral `#E94D35` text, underline on hover, click scrolls document viewer) | Links coverage rows to contract clause. Core UX pattern in the demo -- clicking "7.1" scrolls to clause 7.1 in the contract viewer. | Low | Document viewer scroll target (data-clause attribute) | Beats 4-6 |
-| CarrierCell renderer (28px colored initials circle from name hash + carrier name text) | Replaces plain text carrier names. Demo uses colored circles everywhere -- Mapfre, GNP, Chubb, Zurich all get unique colors. | Low | Name hash color algorithm | Beats 7, 9, 14 |
-| ToggleCell renderer (coral pill toggle, on=`#E94D35`, off=`#E5E7EB`) | Carrier include/exclude on selection page. Demo shows clean toggles per carrier. | Low | Toggle callback | Beat 7 |
-| DaysCell renderer (number + "days" suffix, orange `#F97316` when > 7) | Days-in-stage on dashboard, response timing on quotes. Demo colors stale items orange. | Low | None | Beats 0, 11 |
-| RunInClaudeCodeButton (dark `#121212` bg, terminal icon, copy-to-clipboard + "Copied!" toast) | Central UX paradigm -- replaces all AI trigger buttons. Used on 5+ pages. This IS the interaction model for Claude Code intelligence. | Low | Clipboard API, toast system (sonner already in project) | Beats 4, 8, 11 |
-| Three-layer Airbnb shadow CSS class (`0 1px 2px rgba(0,0,0,0.04), 0 4px 12px rgba(0,0,0,0.06), 0 8px 24px rgba(0,0,0,0.04)`) | Visual consistency. Demo uses this shadow on every card and grid wrapper. Currently the codebase uses flat borders. | Low | CSS utility or Tailwind class | All beats |
+| Attribute | Value |
+|-----------|-------|
+| What | Bundle payload includes `sha256:<hex>`; client recomputes locally and refuses to exec on mismatch |
+| Why | Without this we have unauthenticated remote code execution from whatever the transport returns. Every reference system has had *at least one* CVE teach this lesson (npm EINTEGRITY, Homebrew manifest checksum errors, axios supply-chain March 2026). |
+| Complexity | **Trivial** — 10 lines of Python using `hashlib.sha256()`; server pre-computes on publish |
+| Depends on | Nothing new |
+| User-visible behaviour | On mismatch: clear error "Skill bundle checksum failed — refusing to run. Re-authenticate or contact support." No silent fallback. |
+| Reference systems | npm `integrity` field; Homebrew bottle `sha256`; pip wheel hash mode |
 
-### Dashboard (Beat 0)
+### TS-03 — Atomic swap (either the new version runs, or the old one does — never a mix)
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| 4 KPI MetricCards above pipeline (Active Projects, Pipeline Premium `Mex$120M`, Carriers Configured, Pending Actions) | Demo opens with these. Sets professional "command center" tone. Current dashboard is just TaskList + pipeline grid. | Med | Backend: `total_premium` field in dashboard-stats response (new endpoint addition needed) | Beat 0 |
-| MetricCard design: white bg, 12px radius, Airbnb shadow, 11px uppercase label, 32px bold value, 12px trend line | Demo specifies exact visual treatment. Without this, cards look generic. | Low | MetricCard component | Beat 0 |
-| Pipeline table coral left-border (`3px solid #E94D35`) on action-needed rows | Visual urgency indicator. Demo highlights "Constructora del Pacifico" row with coral accent. Current grid has no row-level urgency signals. | Low | `getRowStyle` callback, `data-action-needed` attribute | Beat 0 |
-| Premium column in pipeline grid | Shows business value per project. Demo has this column. Currently missing. | Low | CurrencyCell, quote premium data | Beat 0 |
-| Days-in-stage column with orange > 7 days | Shows staleness at a glance. Demo shows "18d" with timing context. | Low | DaysCell renderer | Beat 0 |
-| "Needs Attention" filter badge (red pill above grid, filters to action-needed rows) | Demo has this filter. Immediate focus on what matters. | Low | Grid filter state + badge button | Beat 0 |
+| Attribute | Value |
+|-----------|-------|
+| What | Fetch resolves the *entire* bundle (all files together) before any file is used; no partial writes |
+| Why | Today's local setup is atomic because git pulls are atomic. A naive "download file-by-file on demand" would let `portals/mapfre.py v1.2` import `_shared/api_client.py v1.3` mid-run. This is the AWS Lambda layer-merge failure mode. |
+| Complexity | **Moderate** — server returns bundle as manifest + tarball or multi-file JSON; client writes to a fresh tempdir then atomically swaps |
+| Depends on | TS-01, TS-02 |
+| User-visible behaviour | Mid-pipeline version updates are deferred to the next invocation; no "already running" process ever sees a mixed state |
+| Reference systems | Cloudflare Workers "all-at-once deployment"; Lambda layer immutability; git checkout |
 
-### Gap Analysis / Coverage Tab (Beat 6)
+### TS-04 — Actionable error messages when fetch fails
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Current Limit column | Shows what client currently has vs what contract requires. Gap analysis is meaningless without it -- "you need Mex$50M but have Mex$0" vs just "you need Mex$50M". | Low | ProjectCoverage.current_limit field (add to frontend type, already in backend) | Beat 6 |
-| Gap Amount column (red `#dc2626` dollar amounts) | The entire point of gap analysis. Demo shows `Mex$50,000,000` in bold red for missing coverage, dashes for covered items. | Low | CurrencyCell with red text variant | Beat 6 |
-| Clause column (coral ClauseLink -- "7.1", "8.2", "AI" for AI-discovered) | Links each coverage to its contract clause. Core traceability. Demo shows clause refs in coral, "AI" for AI-discovered requirements (Professional Liability, Environmental). | Low | ClauseLink renderer | Beat 6 |
-| Section group rows ("INSURANCE COVERAGES" / "SURETY BONDS" -- uppercase, `#9CA3AF`, letter-spacing 0.08em) | Demo cleanly separates insurance and surety with styled group headers. Current `GapAnalysis.tsx` uses category arrays but renders flat. | Med | ag-grid rowGrouping or manual group header dividers | Beat 6 |
-| Row coloring by gap status (missing: `rgba(239,68,68,0.02)` red tint, insufficient: `rgba(249,115,22,0.04)` orange tint) | Demo tints "No Coverage" rows. Visual scanning without reading every cell. Existing GapAnalysis has no row coloring. | Low | ag-grid `getRowStyle` callback keyed on gap_status | Beat 6 |
-| Urgency banner when project starts within 30 days ("Project starts in 18 days -- June 1, 2026") | Demo shows amber accent card with urgency. Drives action. | Low | Project start_date date math | Beat 6 |
+| Attribute | Value |
+|-----------|-------|
+| What | Clear, distinct error strings for each failure class: network unreachable, 401 auth, 404 not found, 403 module-not-subscribed, 409 version-not-pinned, checksum mismatch |
+| Why | Today, if the broker skill has a bug, the user sees a Python traceback pointing at a local file — easy to debug. If v22.0 fails with "MCP error: -32603" or a generic `OSError`, the user has no recovery path and blames the feature. |
+| Complexity | **Trivial** — structured MCP error codes + a router in the ephemeral-exec helper |
+| Depends on | Nothing new |
+| User-visible behaviour | `"Skill broker/portals/mapfre could not be fetched: 403 Forbidden — your tenant does not have the 'broker' module enabled. Contact admin."` |
+| Reference systems | pip's explicit error taxonomy; Homebrew's "Couldn't find manifest matching bottle checksum" (still imperfect but diagnostic) |
 
-### Email Approval (Beat 9)
+### TS-05 — Offline behaviour: last-known-good cached bundle usable when server unreachable
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Full email body display (no truncation, `white-space: pre-wrap`) | Current EmailApproval.tsx truncates body content. Demo shows full formal Spanish solicitation emails. Brokers must read the full email before approving. | Low | Remove character limit, use pre-wrap | Beat 9 |
-| Prominent "To:" address in card header (e.g., "suscripcion@zurich.com.mx") | Who the email goes to. Currently not shown prominently. Demo makes this a first-class header element. | Low | SolicitationDraft.sent_to_email | Beat 9 |
-| Carrier identity in card header (CarrierCell with colored circle + name) | Which carrier this email targets. Demo shows `[ZM] Zurich Mexico` with colored circle. | Low | CarrierCell renderer reuse | Beat 9 |
-| Separate editable subject field (`<input>` full width) and body field (`<textarea>` min-height 300px) | Current edit mode doesn't properly separate subject from body. Demo has distinct editable regions. | Low | Separate controlled inputs | Beat 9 |
-| Attachments list below body (paperclip icon + file names) | Shows what files are attached to the solicitation. Currently missing entirely. Demo lists "MSA Contract.pdf, Existing Policies.pdf". | Low | Document list from project | Beat 9 |
+| Attribute | Value |
+|-----------|-------|
+| What | Client keeps the most recently verified bundle under a content-addressed cache; if the backend is unreachable *and* the user has a recent cached bundle, run it with a clear warning |
+| Why | Broker placement is time-sensitive. A carrier portal appointment at 14:00 cannot fail because the Flywheel backend is rebooting. Without offline fallback, server-hosted skills are *strictly worse* than local files. This is the #1 objection to this entire migration. |
+| Complexity | **Moderate** — cache directory under `~/.cache/flywheel/skills/<sha>`, TTL metadata, fallback logic, clear UX |
+| Depends on | TS-02 (cache is keyed on sha256), TS-04 |
+| User-visible behaviour | `"Warning: offline — using cached broker/portals/mapfre@1.2.3 (fetched 2 hours ago). Online refresh will be attempted next invocation."` |
+| Reference systems | pip `--prefer-offline`; npm `--offline`; Deno DENO_DIR cache; Homebrew local tap |
 
-### Carrier Selection (Beat 7)
+### TS-06 — Ephemeral execution — no persistent writes under user's home
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Replace checkbox card grid with ag-grid table (Carrier, Method, Routing Rule, Include toggle) | Demo uses a clean table. Current CarrierSelection.tsx uses card grid with match score bars -- visually cluttered, scores lack clear methodology. | Med | CarrierCell, StatusBadge ("Portal" green / "Email" blue), ToggleCell renderers | Beat 7 |
-| Remove match score bar entirely | Demo has no match scores. Routing rule text ("CAR > Mex$30M requires email submission") is more honest and actionable than a 78% score. | Low | Delete existing match score component | Beat 7 |
-| Section headers for Insurance vs Surety carriers | Demo groups these distinctly with uppercase styled headers. | Low | ag-grid group headers or manual section dividers | Beat 7 |
-| "Proceed to Submission (N carriers)" button with included count | Clear transition CTA. Demo shows count of selected carriers. Triggers draft creation for included carriers. | Low | Button + navigation + `POST /projects/{id}/draft-solicitations` | Beat 7 |
+| Attribute | Value |
+|-----------|-------|
+| What | Fetched code runs from a tempdir (or OS cache dir), NOT from `~/.claude/skills/`; tempdir cleaned up after each skill invocation |
+| Why | The whole point of the milestone. If we leave files in `~/.claude/skills/broker/`, we have *both* a local and server-hosted copy, which is worse than either alone. |
+| Complexity | **Trivial** — `tempfile.TemporaryDirectory()` context manager; `sys.path.insert()` scoped to that context |
+| Depends on | TS-03 |
+| User-visible behaviour | `ls ~/.claude/skills/broker/` returns empty; `ps` during skill run shows Python importing from `/tmp/flywheel-skill-<hash>/` |
+| Reference systems | Lambda `/tmp` (512MB ephemeral); Deno runtime isolates; npx temporary install dir |
 
-### Quote Tracking (Beats 11, 13)
+### TS-07 — Module gating enforced server-side
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Summary badges at top ("4 of 6 received" green dot, "2 pending" pulsing orange dot) | Demo shows these prominently. Instant status without scanning the list. | Low | Badge components, CSS `pulse 2s infinite` animation | Beat 11 |
-| Premium column per quote (CurrencyCell) | Shows the money. Currently missing from quote rows. | Low | CurrencyCell renderer | Beat 11 |
-| Type badge per quote (Insurance = coral, Surety = blue StatusBadge) | Distinguishes quote categories visually. | Low | StatusBadge | Beat 11 |
-| Received timing column (days since solicited, orange via DaysCell if > 7) | Shows carrier responsiveness. "3 days" vs "14 days" matters for carrier evaluation. | Low | DaysCell renderer | Beat 11 |
-| Completion card when all quotes received ("All quotes received" -- green accent, "Extract & Compare" RunInClaudeCodeButton) | Clear transition point from collecting to comparing. Demo shows this as a prominent green card at Beat 13. | Low | Conditional card render | Beat 13 |
+| Attribute | Value |
+|-----------|-------|
+| What | `flywheel_fetch_skill_bundle("broker/*")` rejects with 403 if tenant does not have `modules.broker = true` |
+| Why | Today, a non-broker tenant who stumbles into `~/.claude/skills/broker/` can still run the code (the backend API will reject, but the Python runs locally). Moving to server delivery lets us enforce access at source. Also a prerequisite for any future commercial tier. |
+| Complexity | **Trivial** — reuse existing `@require_module` dependency from v15.0 |
+| Depends on | Existing module-gating from v15.0 Phase 112 |
+| User-visible behaviour | `"Skill broker/portals/mapfre requires the 'broker' module. Enable it in tenant settings."` |
+| Reference systems | Stripe "products gated by subscription tier"; AWS IAM resource-level perms on Lambda Layers |
 
-### Comparison Matrix (Beats 12, 14, 15)
+### TS-08 — Dependency closure in a single fetch
 
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Migrate from custom HTML table to ag-grid | Current `ComparisonGrid.tsx` (115 lines) uses a plain HTML `<table>`. Rest of module uses ag-grid. Creates visual inconsistency, missing native sticky headers, no column show/hide, no pinned rows. | High | Custom ComparisonCellRenderer (two-row: premium bold 14px + limit/deductible muted 12px in one cell), `rowHeight: 64` | Beat 14 |
-| Expandable coverage groups (collapsible sections with toggle headers) | Demo groups rows: "General Liability Coverage (3 rows)", "Equipment & CAR (2 rows)", "Professional & Environmental (3 rows)", "Surety Bonds (3 rows)". Expand/collapse per group. | Med | ag-grid groupRowRenderer or manual accordion pattern | Beat 14 |
-| Critical exclusion alert row (red border card, full-width, alert icon) | Demo's signature UX moment: "Zurich Mexico -- Critical Exclusion: Vibration not covered without Endoso 014. This project requires earthwork." Red `2px solid rgba(239,68,68,0.4)` border, `rgba(239,68,68,0.03)` background. | Med | `has_critical_exclusion` field, conditional row rendering between coverage groups | Beat 14 |
-| Recommended carrier column styling (coral `3px` left border on all cells, "BEST OPTION" badge on header, `9px bold #E94D35`) | Demo highlights Mapfre column distinctly. Visual recommendation at a glance. | Low | Column-specific styling via ag-grid cellStyle callback | Beat 14 |
-| Total premium pinned bottom row (sticky at bottom of scrollable grid) | Demo shows total premium per carrier. ag-grid's `pinnedBottomRowData` is designed for exactly this. | Med | `pinnedBottomRowData` configuration, totals computation | Beat 14 |
-| Partial comparison banner ("4 of 6 quotes received, waiting for: GNP, Chubb" -- amber accent) | Demo shows this at Beat 12. Prevents confusion about incomplete data. | Low | Comparison partial flag from API | Beat 12 |
-| Surety comparison view (separate section or tab) | Demo dedicates Beat 15 to surety bonds: performance, quality, advance payment bonds with two carriers (Aserta, Dorama). Different column structure from insurance. | Med | Separate data source, different column layout | Beat 15 |
-
-### Portal Submission (Beat 8)
-
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Replace Python script display with RunInClaudeCodeButton | Current PortalSubmission.tsx shows a Python script. New paradigm: "Run `/broker:fill-portal`" button copies command to clipboard. | Med | RunInClaudeCodeButton component | Beat 8 |
-| Data preview table per portal carrier (Portal Field / Value mapping) | Demo shows exactly which fields will be auto-filled before running. User verification before automation. | Med | Field map data from backend/carrier config, table layout | Beat 8 |
-| Screenshot display after automation completes | Show portal screenshot for user to verify submission correctness. "Confirm Submission" / "Retry" buttons. | Med | `GET /broker/quotes/{id}/portal-screenshot` endpoint, image rendering | Beat 11 |
-
-### Recommendation & Delivery (Beat 16)
-
-| Feature | Why Expected | Complexity | Dependencies | Demo Ref |
-|---------|-------------|------------|--------------|----------|
-| Fix recommendation API paths (editRecommendation, sendRecommendation) | Currently broken -- silently 404. | Low | broker.ts one-line fixes | N/A -- bug fix |
-| Package summary card (Insurance carrier + premium, Surety carrier + premium, Total) | Demo shows "Insurance: Mapfre Mex$847,875 + Surety: Aserta Mex$127,500 = Total Mex$975,375". Clear bottom-line. | Low | Comparison data, CurrencyCell | Beat 16 |
-| "Draft Recommendation" RunInClaudeCodeButton when none exists | CTA to generate recommendation via Claude Code when no BrokerRecommendation record exists yet. | Low | RunInClaudeCodeButton | Beat 16 |
+| Attribute | Value |
+|-----------|-------|
+| What | Fetching `broker/portals/mapfre` automatically includes its declared deps (`broker/api_client.py`, `broker/field_validator.py`, `_shared/context-protocol.md`); not N round-trips |
+| Why | Today, a skill imports 3 files. If v22.0 makes 3 sequential MCP round-trips, a `/broker:fill-portal` adds ~600ms of fetch latency over baseline. Bundle-level closure keeps it at ~200ms. |
+| Complexity | **Moderate** — server-side dependency graph at publish time; client fetches one blob |
+| Depends on | TS-01, TS-03 |
+| User-visible behaviour | Single MCP call returns a manifest listing all files + content; client extracts whole tree to tempdir |
+| Reference systems | Cloudflare Workers bundler (esbuild); Webpack; Lambda "one layer, many files" |
 
 ---
 
 ## Differentiators
 
-Features that set the product apart. Not expected, but create signature moments.
+Features that make server-hosted notably *better* than the current local setup and justify the migration cost.
 
-### Document Analysis Split Pane (Beats 4-5) -- NEW TAB
+### DIFF-01 — Instant central update — no user action needed
 
-| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
-|---------|-------------------|------------|--------------|----------|
-| Split-pane view: contract text (left, `flex: 1`) + extracted requirements (right, `width: 420px`) | The demo's most visually striking screen. Contract text with highlighted clauses + requirement cards side-by-side. No broker tool does this -- they show either the document OR the extracted data, never together. | High | New Analysis tab in project detail, document viewer component, requirement card component, independent scroll per pane | Beats 4-5 |
-| Highlighted contract clauses (coral `3px` left border + `rgba(233,77,53,0.08)` for insurance clauses 7.x, blue for surety clauses 8.x) with `data-clause` attributes | Clauses light up after analysis. Clicking a requirement card scrolls the left pane to the matching clause via `scrollIntoView`. Bidirectional context linking. | Med | data-clause attributes on clause sections, scrollIntoView smooth behavior, CSS clause highlighting | Beats 4-5 |
-| Requirement cards with confidence progress bars, "AI" sparkle badges, "Critical Finding" badges | Each extracted requirement shows: confidence (coral progress bar, e.g. "87%"), source type ("AI" badge with sparkle for skill-extracted), and critical findings (for requirements found in non-standard clause locations like clause 14.3.2). Rich metadata per coverage. | Med | ProjectCoverage fields: confidence (0.0-1.0), source ("ai"/"manual"), ai_critical_finding boolean | Beats 4-5 |
-| Shimmer loading animation during analysis (coral gradient sweep: `#FFF5F3` -> `rgba(233,77,53,0.15)` -> `#FFF5F3`) | Premium loading state while Claude Code parses contract. React Query polls every 10s until `analysis_status` transitions from "running" to "completed". Cards then appear with staggered fadeUp reveal (60ms delay per card). | Low | CSS shimmer keyframe, React Query `refetchInterval` conditional on analysis_status | Beats 4-5 |
-| Document type tabs within viewer ("MSA Contract" = coral active, "Surety Requirements" = blue active) | Switch between document types. Each tab renders different contract content with its own highlighted clauses. | Low | Tab state, coverages filtered by category (insurance/surety) | Beats 4-5 |
-| Serif font for contract text (Georgia/Times New Roman on `#FAFAF8` cream background, `line-height: 1.8`) | Contracts feel legible and authentic in serif. Distinguishes legal text from UI chrome. Subtle but professional. | Low | CSS font-family on document viewer only | Beats 4-5 |
+| Attribute | Value |
+|-----------|-------|
+| What | When we fix a bug in `portals/mapfre.py`, every user on the next `/broker:fill-portal` run gets the fix — no `git pull`, no reinstall |
+| Why | Today, pushing a fix requires every user to `cd ~/.claude/skills/broker && git pull`. In practice half of users never do this and run stale code for weeks. For a broker portal that we reverse-engineer and update weekly, this is *the* reason to build v22.0. |
+| Complexity | **Trivial** (free from TS-01 design) |
+| Depends on | TS-01, TS-02 |
+| User-visible behaviour | Next invocation after a publish picks up v1.2.4 automatically; user sees `"(using broker/portals/mapfre v1.2.4)"` in skill output |
+| Reference systems | Cloudflare Workers "push and it's live globally"; server-rendered apps |
 
-### AI Insight Card
+### DIFF-02 — Zero-drift guarantee across machines
 
-| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
-|---------|-------------------|------------|--------------|----------|
-| AI recommendation summary below comparison matrix (coral `4px` left border, sparkle icon, natural language) | "Mapfre lowest at Mex$847,000 vs average Mex$941,500. Full coverage including Endoso 014. No critical exclusions." Synthesized judgment, not just data. | Low | BrokerRecommendation.body field, fallback: generate template text from is_best_price/is_recommended flags | Beat 14 |
+| Attribute | Value |
+|-----------|-------|
+| What | A user on MacBook and MacMini runs the exact same bytes for the same `(tenant, skill, version)` tuple. No "works on my machine." |
+| Why | Local git clones drift silently (user edited a file and forgot, or a merge conflict was auto-resolved wrong). Server-hosted with checksum verification makes drift impossible. |
+| Complexity | **Trivial** (free from TS-02) |
+| Depends on | TS-02 |
+| User-visible behaviour | Skill output includes `bundle_sha256` — support debugging can say "are you on the same hash?" |
+| Reference systems | Docker image digests; Lambda version-ARNs |
 
-### Interactive/PDF Toggle on Comparison Matrix
+### DIFF-03 — Retraction / kill-switch for IP leak or security incident
 
-| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
-|---------|-------------------|------------|--------------|----------|
-| PDF Preview mode (print-friendly static table with company letterhead, signature line, reference number) | Toggle between interactive ag-grid and PDF-ready layout. Demo shows a formal "Cuadro Comparativo" with Alaya letterhead, date, reference number, and signature line. Enables "save as PDF" for client delivery. | Med | Static HTML table renderer (no ag-grid), letterhead component, print CSS, `#525659` dark background preview wrapper | Beat 14 |
+| Attribute | Value |
+|-----------|-------|
+| What | Server can mark a bundle version as `revoked=true`; MCP fetch returns 410 Gone; clients refuse to run a cached revoked bundle |
+| Why | If we discover our reverse-engineered `portals/mapfre.py` has been leaked or copied into a competitor product, we need to stop serving it without shipping a new CLI release. Also essential if a published bundle contains a vulnerability (think March 2026 axios incident). |
+| Complexity | **Moderate** — server-side `is_revoked` + revocation check on every exec, even for cached bundles (requires a lightweight server round-trip, OR revocation expiry time baked into the cache) |
+| Depends on | TS-01, TS-05 (interacts with offline policy) |
+| User-visible behaviour | `"Skill broker/portals/mapfre v1.2.3 has been revoked: use v1.2.4 or later. Contact support if this is unexpected."` |
+| Reference systems | RubyGems yanked versions; npm unpublish; TLS certificate revocation lists |
+| Risk | Revocation-check on every run can violate TS-05 (offline). Mitigation: cache bundles with a short max-age (e.g., 24h) after which revocation must be re-checked online. |
 
-### "Generated by Claude Code" Badge
+### DIFF-04 — Per-tenant customisation (future-proof)
 
-| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
-|---------|-------------------|------------|--------------|----------|
-| Coral badge at 10% opacity with sparkle icon on AI-generated content (emails, requirements, recommendations) | Transparency about what was AI-generated vs manual. Trust-building with the broker. "This email was drafted by AI" is both honest and a feature showcase. | Low | source field check (`source === 'ai'` or `auto_generated === true`), reusable badge component | Beats 5, 9, 14 |
+| Attribute | Value |
+|-----------|-------|
+| What | Server can return a tenant-specific variant of a bundle (e.g., `portals/mapfre.py` with the user's agency-specific field mappings baked in) |
+| Why | Today every broker gets the same `mapfre.py`. As we onboard more agencies, each has slightly different field defaults. Server-side variant selection makes this clean. Not needed for v22.0 ship, but the architecture should not preclude it. |
+| Complexity | **Do not build in v22.0** — just ensure the fetch API is `(tenant, skill, version)` keyed, not global |
+| Depends on | TS-01 (API shape) |
+| User-visible behaviour | None for now — this is architectural headroom |
+| Reference systems | Shopify private apps; Salesforce managed packages |
 
-### Quote Detail Expansion
+### DIFF-05 — Telemetry on skill usage
 
-| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
-|---------|-------------------|------------|--------------|----------|
-| Expandable inline detail panel per quote (premium breakdown: net + expedition + IVA = total, deductibles per coverage, endorsement green pills, exclusion red pills with alert icon) | Deep-dive without page navigation. Endorsement pills (Endoso 014, CG 20 10, Waiver of Subrogation) show coverage quality at a glance. Critical exclusions as red pills immediately flag problems. | Med | CarrierQuote detail fields (net_premium, expedition_costs, vat_amount, endorsements[], exclusions[]), inline expansion or modal | Beat 11 |
+| Attribute | Value |
+|-----------|-------|
+| What | Backend knows exactly which skill versions each tenant is running and how often |
+| Why | Today, skill usage is invisible server-side. Server-hosted fetches produce an authoritative log. This informs deprecation decisions ("nobody uses v1.1, safe to drop") and billing (future). |
+| Complexity | **Trivial** — log the fetch in an existing `skill_runs` or new `skill_bundle_fetches` table |
+| Depends on | TS-01 |
+| User-visible behaviour | None |
+| Reference systems | PyPI download stats; Docker Hub pull counts |
 
-### Left Navigation Phase Stepper
+### DIFF-06 — Asset types beyond Python — prompts, YAML configs, test fixtures, reference docs
 
-| Feature | Value Proposition | Complexity | Dependencies | Demo Ref |
-|---------|-------------------|------------|--------------|----------|
-| Phase-aware left sidebar (200px, `#FAFAFA` bg) showing workflow progress: green checkmark = done, coral square = active, gray circle = pending | Demo's `LumifNav` component. 7 phases: Client Profile, Document Analysis, Gap Assessment, Carrier Selection, Submission, Quotes & Comparison, Send to Client. Orients broker in complex workflow. Clickable to jump between phases. | Med | Project status-to-phase mapping, sidebar layout within project detail, phase click navigation | All Lumif beats (3-16) |
+| Attribute | Value |
+|-----------|-------|
+| What | The bundle contract is generic: any file type the skill declares. Not Python-specific. |
+| Why | Broker skills today include `portals/mapfre.yaml` (field mappings), `_shared/context-protocol.md`, test fixtures. A Python-only delivery channel would leave these stranded. |
+| Complexity | **Trivial** — bundle is a file tree, not a Python package |
+| Depends on | TS-03 |
+| User-visible behaviour | `.yaml`, `.md`, `.json`, `.txt`, `.py` all flow through the same endpoint |
+| Reference systems | Lambda layers (any content); Homebrew bottles (arbitrary file trees) |
 
 ---
 
 ## Anti-Features
 
-Features to explicitly NOT build.
+Scope discipline — things we should *explicitly not* build in v22.0, even if tempting.
 
-| Anti-Feature | Why Avoid | What to Do Instead |
-|--------------|-----------|-------------------|
-| Backend AI engines as primary path | SPEC-BROKER-REDESIGN shifts ALL AI to Claude Code skills. Backend engines (`contract_analyzer`, `quote_extractor`, `solicitation_drafter`, `recommendation_drafter`, `followup_drafter`) become API-triggered fallbacks only. Building them as primary duplicates intelligence. | Claude Code skills are primary. Backend engines stay as-is. Frontend shows "Run in Claude Code" buttons, not "Analyze" buttons. |
-| Match score bars on carrier selection | Arbitrary numeric scores (e.g., "78% match") without clear methodology. Demo removed them entirely. Routing rule text ("CAR > Mex$30M requires email") is more honest and actionable. | Show routing rule text as a table column and portal/email method badge. Simple, clear, no magic numbers. |
-| Character truncation on email bodies | Current EmailApproval truncates body content. Insurance solicitations are formal business communications -- brokers must read the full text before approving. Demo shows full content. | Full body with `white-space: pre-wrap`, vertical scroll if extremely long. No character limit. |
-| Custom HTML table for comparison matrix | Current `ComparisonGrid.tsx` uses a plain `<table>`. Every other table in the broker module uses ag-grid with `flywheelGridTheme`. Creates visual inconsistency, duplicates scroll logic, misses native features (column show/hide, pinned rows, sticky headers). | Use ag-grid with custom `ComparisonCellRenderer` (two-row cells for premium + limit/deductible), `pinnedBottomRowData` for totals, `groupRowRenderer` for expandable groups. |
-| Inline AI trigger buttons (`POST /projects/{id}/analyze`) | Old paradigm where frontend triggers backend AI jobs. New paradigm: "Run in Claude Code" copies command to clipboard, user pastes into Claude Code terminal. Backend AI endpoints remain as API but are not the primary UX. | `RunInClaudeCodeButton` component everywhere. One consistent interaction pattern. |
-| Gmail/email view in broker module | Demo shows Gmail as a separate browser tab (it's a demo concept). The product already has a separate email module (`features/email/`). Don't duplicate email UI inside broker. | Broker module handles placement workflow only. Email module handles email. Broker project can link to email threads via `broker_project_emails`. |
-| Client portal view | Demo implies clients see a portal. Out of scope for broker redesign. Adds authentication, permission, and UX complexity for a separate persona. | Broker-facing workflow only. Client gets PDF export via comparison matrix PDF preview mode + recommendation email. |
-| Framer Motion heavy animations | Demo uses Framer Motion for every transition (it's a 260KB single-file demo app). Production needs lightweight CSS animations for performance and bundle size. Demo's `motion.div` + `AnimatePresence` on every row is excessive for production. | CSS `@keyframes` for fadeUp, shimmer, pulse, highlightSweep. Reserve Framer Motion only if already used in the app for page-level transitions. |
-| Real carrier logo SVGs now | Premature polish. Demo has custom SVGs for Mapfre, GNP, Chubb, Zurich but the product needs to support arbitrary carriers. | CarrierCell with colored initials circle (color from name hash). Add real logos as optional image overrides in a future polish pass. |
-| Full i18n / Spanish-first UI | Demo is bilingual (ES/EN toggle) because it demos for a Mexican brokerage. The product UI is English-first. | English UI. Currency formatting handles MXN. Insurance domain terms (Endoso, fianza, prima) appear in DATA (entered by broker or extracted by AI), not in UI chrome labels. |
-| Step indicator redesign | Current `StepIndicator.tsx` exists. Updating from 5 to 6 steps is trivial. A full redesign (like demo's left nav) is separate work. | Update step count from 5 to 6 (add Analysis tab). Visual treatment can match existing style. Left nav is a differentiator, not table stakes. |
+### AF-01 — A package registry for arbitrary third-party skill publishers
+
+**What it would be:** A public or community skill registry where any developer can publish skills, with namespace reservation, author reputation, etc.
+
+**Why avoid:** The v22.0 use case is "Flywheel-owned broker skills delivered to authenticated Flywheel users." We are a first-party publisher, not a registry. Going full-registry adds: publisher identity (sign-ups, OAuth), namespace rules, trust-on-first-use model, dependency conflict resolution across untrusted authors, take-down process for malicious packages. All of that is 10x the scope of v22.0 and violates YAGNI.
+
+**What to do instead:** Keep the API shape tenant+skill+version so we *could* add publisher_id later, but only Flywheel publishes for now.
+
+**Reference systems we are NOT building:** npm, PyPI, RubyGems, Cargo crates.io.
+
+### AF-02 — Transitive dependency resolution between independent skills
+
+**What it would be:** Skill A declares "depends on skill B@^2.0"; client resolves a DAG, locks, etc.
+
+**Why avoid:** Bundler/pip-style semver dependency resolution is one of the hardest problems in package management (Bundler took from 2012–2016 to converge on the compact index format). Our dependencies are *intra-skill* (broker's own files depend on broker's own `api_client.py`) — that's a file tree, not a graph.
+
+**What to do instead:** Flatten deps into the bundle. If two skills need `_shared/context-protocol.md`, each bundle ships its own copy. Duplicate bytes are cheap; dep-solver bugs are not.
+
+**Reference systems we are NOT building:** npm's node_modules resolution, Bundler's compact index.
+
+### AF-03 — User-uploaded custom skills ("bring your own Python")
+
+**What it would be:** A broker agency uploads their own `portals/zurich.py` via Flywheel UI; it gets delivered to all their users.
+
+**Why avoid:** Arbitrary user-uploaded code that then runs inside every user's Claude Code session is a security nightmare (think: malicious agency admin, compromised tenant account, persistent code injection). The Flywheel CLAUDE.md memory explicitly flags the March 2026 supply-chain incidents.
+
+**What to do instead:** Keep publishing Flywheel-internal only. If a broker needs a new portal, they file a request and Flywheel engineering builds + publishes it.
+
+### AF-04 — Multiple concurrent versions executing on the same machine
+
+**What it would be:** User A's `/broker:fill-portal` runs v1.2.3 while user B's concurrent invocation runs v1.2.4 on the same box.
+
+**Why avoid:** Adds version-isolation complexity (venvs? process isolation? sys.path fragility?) with no real use case. At most one Claude Code session per user per machine in practice.
+
+**What to do instead:** One user = one active skill cache generation at a time. If the server publishes a new version mid-run, the current run completes on the old bundle; the *next* invocation picks up new.
+
+### AF-05 — In-place skill editing / hot-reload
+
+**What it would be:** User edits `portals/mapfre.py` in their editor, Claude Code picks up the edit live.
+
+**Why avoid:** The whole premise of v22.0 is "no local files to edit." If we support hot-reload we re-invent the local-files problem. If a user wants to patch a skill, they file an issue and we publish v1.2.4.
+
+**What to do instead:** Document the workflow: "Skills are server-delivered. For bugs, file an issue. For custom behaviour, discuss with Flywheel."
+
+### AF-06 — Signed bundles / cryptographic publisher identity
+
+**What it would be:** Each bundle signed with Flywheel's private key; client verifies against pinned public key.
+
+**Why avoid (in v22.0):** We are already relying on authenticated HTTPS + tenant JWT + first-party CA. Adding signing is belt-and-suspenders for a first-party-only system. Ship integrity (sha256) for correctness; defer signing for when we have third-party publishers (which per AF-01 is never, or at least far out).
+
+**What to do instead:** TS-02 (sha256 integrity) is sufficient because the transport is already authenticated. Revisit only if AF-01 is ever reconsidered.
+
+### AF-07 — Automatic skill upgrade prompts in Claude Code UI
+
+**What it would be:** Claude Code notices a new bundle version is available and prompts "update?"
+
+**Why avoid:** With server-hosted delivery there is no concept of "update" — the server decides. Prompting the user re-creates the local-files mental model we are leaving behind.
+
+**What to do instead:** Next invocation silently uses new version (DIFF-01). If a breaking change is shipped, the server exposes it through a new major version and the skill prompt (the markdown) documents migration.
+
+### AF-08 — Skill sandboxing (cgroups/seccomp/wasm)
+
+**What it would be:** Fetched Python runs inside a restricted sandbox that cannot touch the user's filesystem, network, etc.
+
+**Why avoid:** Our threat model is "Flywheel is a trusted first-party publisher." Flywheel already has API-level authority to read every tenant's data. Sandboxing Python from itself is security theatre in this model — the same Flywheel employee could exfiltrate via the backend API.
+
+**What to do instead:** Focus security budget on publish-time review (code review, CI tests, automated scans) rather than runtime sandboxing.
 
 ---
 
-## Feature Dependencies
+## User-Visible Behaviours (Success Criteria Concrete Enough for QA)
 
-```
-Wave 0: Foundation (blocks everything)
-  |
-  +-- Fix 4 API paths -----------> Email send/edit, Recommendation send/edit work
-  +-- Fix types ------------------> All components render correct fields
-  +-- Grid theme update ----------> All grids get coral hover, no col separators
-  +-- 7 shared renderers ---------> CurrencyCell, ClauseLink, CarrierCell, ToggleCell,
-  |                                 DaysCell, RunInClaudeCodeButton, Airbnb shadow CSS
-  +-- Batch coverage endpoint ----> parse-contract skill can create 8+ records
-  +-- Dashboard stats premium ----> MetricCards show real data
+Given a broker running `/broker:process-project` against a project with 3 coverages and 1 portal carrier:
 
-Wave 1: Skills Infrastructure (parallel with frontend)
-  |
-  +-- Skill directory structure --> All skills need ~/.claude/skills/broker/
-  +-- Hook scripts --------------> Auto gap-analysis after coverage write,
-                                    auto comparison after quote write
+### UVB-01 — First invocation ever (empty cache, online)
 
-Wave 2: High-Impact Frontend (depends on Wave 0)
-  |
-  +-- Dashboard MetricCards + highlighted rows (depends: CurrencyCell, DaysCell)
-  +-- Gap Analysis upgrades (depends: CurrencyCell, ClauseLink, types fix)
-  +-- Comparison Matrix overhaul (depends: CurrencyCell, CarrierCell, grid theme)
+1. User runs `/broker:process-project 67de-...`
+2. Claude Code calls MCP `flywheel_fetch_skill_bundle(name="broker", version="latest-stable")`
+3. MCP returns bundle manifest: 9 Python files, 2 markdown, 1 yaml, `sha256:abc...`, `~48 KB gzipped`
+4. Client verifies sha256, extracts to `/tmp/flywheel-skill-<sha>/`
+5. Python imports from that tempdir
+6. Pipeline runs; final artefacts written to the user's normal output dirs
+7. Tempdir removed at session end (NOT at each step — steps share the bundle)
+8. **Observed latency added:** 200–400 ms on first invocation (single fetch, ~50 KB)
 
-Wave 3: Remaining Frontend (depends on Wave 0, benefits from Wave 1 skills)
-  |
-  +-- Document Analysis NEW tab (depends: types fix for ProjectCoverage fields)
-  +-- Email Approval (depends: SolicitationDraft type, API path fixes)
-  +-- Quote Tracking (depends: CurrencyCell, DaysCell, RunInClaudeCodeButton)
-  +-- Carrier Selection (depends: CarrierCell, ToggleCell)
-  +-- Portal Submission (depends: RunInClaudeCodeButton)
-  +-- Recommendation (depends: API path fixes, CurrencyCell)
+### UVB-02 — Subsequent invocation, same day (cache hit, online)
 
-Wave 4: Animation & Polish (depends on Waves 2-3 being built)
-  |
-  +-- CSS animations: fadeUp, shimmer, pulse, greenFlash, highlightSweep
-  +-- Staggered requirement card reveals in Analysis tab
-  +-- Completion state animations
-```
+1. Client checks cache for `sha256:abc...`; finds it
+2. Client makes a conditional HEAD request to server with `If-None-Match: abc...`
+3. Server returns 304 Not Modified
+4. Client uses cached bundle, extracts to tempdir
+5. **Observed latency added:** 20–40 ms (cache revalidation round-trip only)
 
-**Critical path insight:** RunInClaudeCodeButton and CurrencyCell are used by 5+ downstream features. They MUST land in Wave 0 shared components, not in Wave 2/3 page work.
+### UVB-03 — Invocation while offline
+
+1. Client checks cache; finds `sha256:abc...` with cached-at timestamp 4h ago
+2. Client attempts conditional revalidate; fails (no network)
+3. If cache age < max-age (e.g., 24h): use cached bundle with warning
+4. If cache age > max-age: refuse with actionable error "Last cached 3 days ago, need network to revalidate. Retry when online, or run `flywheel skill cache extend` to accept risk."
+5. **Behaviour:** predictable, loud, no silent execution of expired cache
+
+### UVB-04 — Invocation after central fix published
+
+1. Flywheel engineer publishes `broker@1.2.4` with mapfre-portal fix
+2. User runs next `/broker:fill-portal`
+3. Client conditionally revalidates; server returns new bundle, new sha256
+4. Client verifies new sha256, extracts to new tempdir, runs
+5. Skill output shows `(broker@1.2.4)` banner
+6. **No user action required** — DIFF-01 achieved
+
+### UVB-05 — Retracted bundle attempted
+
+1. Server marks `broker@1.2.3` as revoked
+2. User has `1.2.3` in cache, age 2h
+3. User runs `/broker:*`
+4. Revalidation returns 410 Gone + `replaced_by: 1.2.4`
+5. Client auto-fetches 1.2.4, verifies, runs
+6. User sees `"Note: broker@1.2.3 was retracted; using broker@1.2.4."`
+
+### UVB-06 — Checksum tampering detected
+
+1. MITM attacker (or disk corruption) mangles bytes between server and client
+2. Client computes sha256 on received payload; mismatch
+3. Client refuses to execute
+4. Error: `"Skill bundle checksum failed. Cached result discarded. Please check network and retry."`
+5. **No fallback to running unverified code, ever**
+
+### UVB-07 — Partial outage (catalog reachable, asset delivery down)
+
+1. User runs `/broker:*`
+2. Catalog API returns skill definition including prompt
+3. Asset delivery endpoint returns 503
+4. Client checks cache; uses if valid (TS-05 path)
+5. Otherwise: clear error `"Skill asset delivery temporarily unavailable (503). Status: status.flywheel.ai"`
 
 ---
 
-## MVP Recommendation
+## Feature Complexity Summary
 
-### Prioritize (maximum demo-quality impact per day):
+| Feature | Complexity | Critical Path | Depends on |
+|---------|------------|---------------|------------|
+| TS-01 Version pinning | Moderate | YES | Alembic migration |
+| TS-02 Checksum gate | Trivial | YES | — |
+| TS-03 Atomic swap | Moderate | YES | TS-01, TS-02 |
+| TS-04 Actionable errors | Trivial | YES | — |
+| TS-05 Offline cache + TTL | Moderate | YES | TS-02 |
+| TS-06 Ephemeral exec | Trivial | YES | TS-03 |
+| TS-07 Module gating | Trivial | YES | v15.0 existing |
+| TS-08 Dep closure | Moderate | YES | TS-01, TS-03 |
+| DIFF-01 Central update | Trivial | Free from TS-01 | — |
+| DIFF-02 Zero drift | Trivial | Free from TS-02 | — |
+| DIFF-03 Retraction | Moderate | NO (can ship TS-only first) | TS-01, TS-05 |
+| DIFF-04 Tenant variants | — | NO — architectural only | TS-01 |
+| DIFF-05 Telemetry | Trivial | NO | TS-01 |
+| DIFF-06 Any-file bundle | Trivial | Free from TS-03 | — |
 
-1. **Wave 0: Foundation** -- All 8 items. Without these, downstream work hits type errors, visual inconsistency, and 404 API failures. Estimated: 1-2 days. Non-negotiable.
+---
 
-2. **Dashboard MetricCards + pipeline upgrades** -- First screen users see. 4 cards + premium column + days column + coral left-border on action rows transforms dashboard from generic "data dump" to professional "command center." Estimated: half day.
+## Dependencies on Existing Systems
 
-3. **Gap Analysis upgrades** -- Add current_limit, gap_amount (red), clause links, row coloring, section groups, urgency banner. This is the most-used daily screen for active projects. Estimated: 1 day.
+### Supabase Storage
+- **Likely bundle storage backend.** 20–50 KB bundles per skill, ~20 skills, versioning — fits well within Storage limits and pricing.
+- **Alternative:** bytea column in a `skill_bundles` table. Simpler ops (no separate service), fine for small bundles. Recommendation: bytea for now; migrate to Storage only if bundles exceed ~500 KB or total storage > 1 GB.
+- Existing Supabase Storage pattern from v21.0 document renditions can be reused.
 
-4. **Comparison Matrix overhaul** -- Expandable groups, critical exclusion alerts, recommended column styling, AI insight card, pinned total row, Interactive/PDF toggle, partial comparison banner. Most complex but highest-impact screen -- this is what clients see. Estimated: 2-3 days.
+### MCP server (existing from v8.0 / v15.0)
+- New MCP tool: `flywheel_fetch_skill_bundle(name, version="latest-stable") -> {manifest, files[], sha256}`
+- Existing `flywheel_fetch_skill_prompt` keeps working (backward compat).
+- Existing `flywheel_fetch_skills` catalog stays the skill-discovery entry point.
+- **MCP binary transport:** MCP protocol supports base64-encoded `blob` in resource responses — use this for the bundle tarball or return per-file JSON.
 
-5. **Email Approval full content** -- Quick win. Remove truncation, add carrier identity header, separate subject field, attachments list, AI badge. Estimated: half day.
+### Alembic migrations
+- New tables: `skill_bundles (id, skill_id, version_semver, sha256, size_bytes, storage_ref, published_at, revoked_at, revoked_reason)`
+- FK: `skill_bundles.skill_id → skills.id`
+- **Remember Supabase DDL workaround** (from global memory): run each DDL statement as its own commit then `alembic stamp`.
 
-### Defer:
+### Existing `skills` table (from v8.0 Phase 77 + Phase 95)
+- No schema change required; bundles live in a separate table referencing skills.
+- `skills.has_bundle` convenience boolean could help MCP routing.
 
-- **Document Analysis split pane (NEW tab)**: Highest differentiator value but highest complexity. Requires entirely new component tree (document viewer, requirement cards, scroll sync, shimmer loading). Schedule for Wave 3 -- it's a new tab, not a fix to existing functionality, so nothing is broken without it. The data still renders on the Coverage tab.
+### Module gating (from v15.0 Phase 112)
+- Reuse `@require_module("broker")` on the bundle fetch endpoint.
+- Skills in `_shared/` and `gtm-shared/` have no module gate (available to all tenants).
 
-- **Portal Submission redesign**: Depends on Claude Code skills being built and working. The current Python script display functions as a placeholder. Redesign when skills are ready.
+### Existing CLI (`flywheel` package)
+- New commands (post-MVP, optional): `flywheel skill cache clear`, `flywheel skill cache status`, `flywheel skill pin <name>@<version>`.
+- **Not required** to ship the MVP — ephemeral exec runs transparently through MCP.
 
-- **Left Navigation Phase Stepper**: Nice-to-have differentiator. Current step indicator works. Phase stepper is additive polish.
+### Client-side ephemeral-exec helper
+- New utility lives in the MCP client path (likely in the Flywheel CLI's MCP handler, not in a user-edited skill file).
+- Implementation: `tempfile.TemporaryDirectory()` + `sys.path.insert()` + `importlib.util.spec_from_file_location()`.
+- Cleanup at skill-invocation boundary (context manager pattern).
 
-- **Animation polish (Wave 4)**: Ship functional UX first, animate second. CSS keyframes can be added incrementally.
+---
 
-- **PDF Preview mode on comparison**: Useful for client presentations but not blocking daily workflow. Can ship after comparison matrix core is done.
+## Implications for Roadmap
+
+Suggested phase ordering:
+
+1. **Foundation: bundle schema + publish path** (TS-01 partial, TS-06 infra)
+   - Alembic migration for `skill_bundles`
+   - Server-side bundle build + upload + sha256 compute
+   - Admin CLI/endpoint to publish a bundle for an existing skill
+
+2. **MCP fetch endpoint + ephemeral exec** (TS-02, TS-03, TS-06, TS-08)
+   - New MCP tool `flywheel_fetch_skill_bundle`
+   - Client-side verify + tempdir + sys.path integration
+   - Hard-path: one skill end-to-end (pick `_shared/context-protocol.md` as simplest)
+
+3. **Broker scripts migration** (TS-07, DIFF-06 in practice)
+   - Publish broker bundle (9 Python files + yaml + md)
+   - Update broker SKILL.md to fetch from MCP instead of file paths
+   - Retire `~/.claude/skills/broker/` dependency from the router
+
+4. **Resilience: cache + offline + errors** (TS-04, TS-05)
+   - Content-addressed local cache
+   - TTL + conditional revalidate
+   - Error taxonomy + user-facing messages
+
+5. **Hardening: retraction + telemetry** (DIFF-03, DIFF-05)
+   - `revoked_at` column + 410 Gone handling
+   - Fetch log table + simple admin dashboard
+
+6. **Cleanup: retire legacy distribution**
+   - Remove `~/.claude/skills/broker/` git repo as a distribution channel
+   - Update install docs
+   - Codebase-wide grep for any lingering file-path references (per user's cleanup-phases preference)
+
+Phase 3 is the "broker dogfood" moment — once that lands, the value of v22.0 is visible and further phases are incremental.
 
 ---
 
 ## Sources
 
-- Alaya Demo v2: `/tmp/alaya-demo-v2/src/App.tsx` -- 3816 lines, 16-beat interactive demo, single-file React + Framer Motion
-- Redesign spec: `.planning/SPEC-BROKER-REDESIGN.md` -- comprehensive per-page specification with CSS values, component props, API mappings
-- Existing broker components: `frontend/src/features/broker/` -- 42 `.tsx` files across components/, pages/, comparison/
-- Existing `ComparisonGrid.tsx` -- 115 lines, custom HTML table (needs ag-grid migration)
-- Existing `GapAnalysis.tsx` -- 120 lines, HTML table with basic status badges (missing gap_amount, current_limit, clause columns)
-- Existing `BrokerDashboard.tsx` -- 43 lines, TaskList + ProjectPipelineGrid (no MetricCards)
-- Existing `EmailApproval.tsx` -- truncated body display (needs full content)
-- Demo fixtures: `/tmp/alaya-demo-v2/src/fixtures.ts` -- insurance/surety data structures, comparison matrix grouped format, carrier quotes with premium breakdowns
+- [AWS Lambda: Managing Lambda dependencies with layers](https://docs.aws.amazon.com/lambda/latest/dg/chapter-layers.html) — HIGH (official docs, ephemeral /tmp + layer immutability + version ARN pinning)
+- [Layers in AWS Lambda: Production Patterns (2026)](https://thelinuxcode.com/layers-in-aws-lambda-production-patterns-pitfalls-and-practical-workflows-2026/) — MEDIUM (version pinning as production pattern)
+- [Cloudflare Workers: How Workers works](https://developers.cloudflare.com/workers/reference/how-workers-works/) — HIGH (isolates + all-at-once deployment)
+- [Cloudflare Workers: Versions & Deployments](https://developers.cloudflare.com/workers/configuration/versions-and-deployments/) — HIGH (atomic version semantics)
+- [npm: package-lock.json](https://docs.npmjs.com/cli/v11/configuring-npm/package-lock-json/) — HIGH (SHA-512 integrity verification)
+- [Lockfile poisoning and hashes verify integrity](https://medium.com/node-js-cybersecurity/lockfile-poisoning-and-how-hashes-verify-integrity-in-node-js-lockfiles-0f105a6a18cd) — MEDIUM (why checksum gate matters)
+- [Homebrew: Bottles documentation](https://docs.brew.sh/Bottles) — HIGH (SHA-256 bottle verification)
+- [Homebrew: Checksum Deprecation](https://docs.brew.sh/Checksum_Deprecation) — HIGH (SHA-1/MD5 deprecated, SHA-256 required)
+- [pip documentation: Caching](https://pip.pypa.io/en/stable/topics/caching/) — HIGH (ETag + conditional revalidate pattern)
+- [MCP: Resources](https://modelcontextprotocol.info/docs/concepts/resources/) — HIGH (base64 blob binary transport)
+- [Deno: DENO_DIR, Code Fetch and Cache](https://denolib.gitbook.io/guide/advanced/deno_dir-code-fetch-and-cache) — MEDIUM (remote import + cache-to-disk pattern)
+- [Deno: Security and permissions](https://docs.deno.com/runtime/fundamentals/security/) — HIGH (trusted-registries model)
+- [Python docs: importlib](https://docs.python.org/3/library/importlib.html) — HIGH (spec_from_file_location dynamic import)
+- [Python docs: tempfile](https://docs.python.org/3/library/tempfile.html) — HIGH (context-manager cleanup semantics)
+- [The Register: Claude Code collaboration tools allowed remote code execution (Feb 2026)](https://www.theregister.com/2026/02/26/clade_code_cves/) — MEDIUM (recent RCE footgun in adjacent system — motivates TS-02 and AF-08 trade-off)
+- [Axios supply-chain incident (March 2026)](https://www.aikido.dev/blog/software-supply-chain-security-vulnerabilities) — MEDIUM (recent maintainer-compromise — motivates AF-01, AF-03, DIFF-03)
+- [npx documentation](https://docs.npmjs.com/cli/v11/commands/npx/) — HIGH (fetch-once-run-once pattern reference)
+- [Bundler compact index (historical context)](https://nesbitt.io/2025/12/28/the-compact-index.html) — MEDIUM (why transitive dep resolution is hard, motivates AF-02)
