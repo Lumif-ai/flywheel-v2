@@ -5,7 +5,11 @@ import { useAnalysisPolling } from '../../hooks/useAnalysisPolling'
 import { DocumentViewer } from '../DocumentViewer'
 import { FullDocumentViewer } from '../FullDocumentViewer'
 import { RequirementsPanel } from '../RequirementsPanel'
-import type { BrokerProjectDetail, ProjectCoverage } from '../../types/broker'
+import type {
+  BrokerProjectDetail,
+  DocumentEntry,
+  ProjectCoverage,
+} from '../../types/broker'
 
 interface AnalysisTabProps {
   project: BrokerProjectDetail
@@ -17,11 +21,6 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
   const coverages = data?.coverages ?? project.coverages ?? []
   const isRunning = analysisStatus === 'running'
 
-  interface DocumentEntry {
-    file_id?: string
-    name?: string
-    mimetype?: string
-  }
   const documents = (project.metadata?.documents as DocumentEntry[] | undefined) ?? []
   const pdfDocuments = documents
     .filter((d) => d.file_id && d.mimetype === 'application/pdf')

@@ -1,4 +1,4 @@
-import type { BrokerProjectDetail } from '../../types/broker'
+import type { BrokerProjectDetail, DocumentEntry } from '../../types/broker'
 import { ClientProfile } from '../ClientProfile'
 import { DocumentUploadZone } from '../DocumentUploadZone'
 
@@ -6,17 +6,16 @@ interface OverviewTabProps {
   project: BrokerProjectDetail
 }
 
-interface DocumentEntry {
-  file_id?: string
-  name?: string
-  type?: string
-  mimetype?: string
-  size?: number
-  uploaded_at?: string
-}
-
 export function OverviewTab({ project }: OverviewTabProps) {
-  const documents = ((project.metadata?.documents as DocumentEntry[]) ?? []).filter(Boolean)
+  const allDocs = ((project.metadata?.documents as DocumentEntry[]) ?? []).filter(
+    Boolean,
+  )
+  // Phase 145: Legacy docs without document_type default to 'requirements'
+  // (matches backend default in projects.py:_get_project_pdfs).
+  const requirementsDocs = allDocs.filter(
+    (d) => (d.document_type ?? 'requirements') === 'requirements',
+  )
+  const coverageDocs = allDocs.filter((d) => d.document_type === 'coverage')
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -24,7 +23,7 @@ export function OverviewTab({ project }: OverviewTabProps) {
       <div className="space-y-4">
         <ClientProfile metadata={project.metadata ?? null} />
       </div>
-      {/* Right column: Project description + upload */}
+      {/* Right column: Project description + two upload zones */}
       <div className="space-y-4">
         {project.description && (
           <div className="rounded-xl border p-4">
@@ -32,7 +31,20 @@ export function OverviewTab({ project }: OverviewTabProps) {
             <p className="text-sm text-muted-foreground">{project.description}</p>
           </div>
         )}
-        <DocumentUploadZone projectId={project.id} documents={documents} />
+        <DocumentUploadZone
+          projectId={project.id}
+          kind="requirements"
+          title="Requirements"
+          description="MSA, surety annexes, bond schedules"
+          documents={requirementsDocs}
+        />
+        <DocumentUploadZone
+          projectId={project.id}
+          kind="coverage"
+          title="Current coverage & supplements"
+          description="COIs, in-force policies, schedules of insurance"
+          documents={coverageDocs}
+        />
       </div>
     </div>
   )

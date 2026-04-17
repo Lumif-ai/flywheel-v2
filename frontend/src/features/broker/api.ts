@@ -20,6 +20,7 @@ import type {
   CreateProjectPayload,
   DashboardStats,
   DashboardTasksResponse,
+  DocumentZoneKind,
   DraftSolicitationsResponse,
   FollowupResponse,
   GapAnalysisResponse,
@@ -260,17 +261,48 @@ export function getDocumentRendition(fileId: string): Promise<{ download_url: st
 
 export async function uploadProjectDocuments(
   projectId: string,
-  files: File[]
+  files: File[],
+  documentType: DocumentZoneKind = 'requirements',
 ): Promise<{ documents: unknown[]; total: number }> {
   const token = useAuthStore.getState().token
   const formData = new FormData()
   files.forEach((f) => formData.append('files', f))
+  // Phase 145: single scalar document_type per request (research Pitfall 4).
+  formData.append('document_type', documentType)
   const res = await fetch(`/api/v1/broker/projects/${projectId}/documents`, {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     // DO NOT set Content-Type — browser sets multipart/form-data boundary automatically
     body: formData,
   })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+/**
+ * PATCH a single uploaded document's `document_type` (Phase 145 zone move).
+ *
+ * Backend (145-01) clears any `misrouted` flag as part of the update; caller
+ * should invalidate the `broker-project` query on success so the UI re-renders
+ * without the chip.
+ */
+export async function patchProjectDocument(
+  projectId: string,
+  fileId: string,
+  documentType: DocumentZoneKind,
+): Promise<{ file_id: string; document_type: DocumentZoneKind }> {
+  const token = useAuthStore.getState().token
+  const res = await fetch(
+    `/api/v1/broker/projects/${projectId}/documents/${fileId}`,
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ document_type: documentType }),
+    },
+  )
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

@@ -208,6 +208,47 @@ export interface SolicitationDocument {
   included: boolean
 }
 
+// --- Project Document Metadata (Phase 145) ---
+
+export type DocumentZoneKind = 'requirements' | 'coverage'
+
+export interface DocumentMisroutedFlag {
+  reason: string
+  detected_type?: 'requirements' | 'coverage' | 'quote' | 'unknown'
+}
+
+/**
+ * Shape of an entry in `project.metadata.documents[]`.
+ *
+ * `document_type` is first-class as of Phase 145. Legacy docs uploaded before
+ * Phase 145 will not have it — treat missing as 'requirements' for back-compat.
+ *
+ * `misrouted` is set by the backend's extraction passes when a document in one
+ * zone is detected as actually belonging to the other zone (e.g., a COI in the
+ * requirements zone, or an MSA in the coverage zone). Both extraction passes
+ * emit structured misrouted flags as of Phase 145 Plan 02. Cleared by the PATCH
+ * endpoint when the broker moves the doc to the correct zone.
+ */
+export interface DocumentEntry {
+  file_id?: string
+  name?: string
+  type?: string
+  mimetype?: string
+  size?: number
+  uploaded_at?: string
+  storage_path?: string
+  document_type?: DocumentZoneKind
+  misrouted?: DocumentMisroutedFlag
+}
+
+export interface OrphanPolicy {
+  coverage_type_key: string
+  carrier?: string | null
+  policy_number?: string | null
+  limit_amount?: number | null
+  source_document_filename?: string | null
+}
+
 export interface CarrierQuote {
   id: string
   broker_project_id: string

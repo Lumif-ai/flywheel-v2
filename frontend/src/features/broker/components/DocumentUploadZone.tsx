@@ -1,21 +1,17 @@
 import { useRef, useState } from 'react'
-import { Download, FileText, Upload } from 'lucide-react'
+import { AlertTriangle, Download, FileText, Upload } from 'lucide-react'
 import { format } from 'date-fns'
 import { useDocumentUpload } from '../hooks/useDocumentUpload'
+import { useDocumentMove } from '../hooks/useDocumentMove'
 import { RunInClaudeCodeButton } from './shared/RunInClaudeCodeButton'
 import { useAuthStore } from '@/stores/auth'
-
-interface DocumentEntry {
-  file_id?: string
-  name?: string
-  type?: string
-  mimetype?: string
-  size?: number
-  uploaded_at?: string
-}
+import type { DocumentEntry, DocumentZoneKind } from '../types/broker'
 
 interface DocumentUploadZoneProps {
   projectId: string
+  kind: DocumentZoneKind
+  title: string
+  description?: string
   documents: DocumentEntry[]
 }
 
@@ -51,10 +47,17 @@ function formatDate(dateStr?: string): string {
   }
 }
 
-export function DocumentUploadZone({ projectId, documents }: DocumentUploadZoneProps) {
+export function DocumentUploadZone({
+  projectId,
+  kind,
+  title,
+  description,
+  documents,
+}: DocumentUploadZoneProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [isDragOver, setIsDragOver] = useState(false)
-  const { mutate: upload, isPending } = useDocumentUpload(projectId)
+  const { mutate: upload, isPending } = useDocumentUpload(projectId, kind)
+  const { mutate: moveDocument, isPending: isMoving } = useDocumentMove(projectId)
 
   const handleFiles = (files: FileList | null) => {
     if (!files || files.length === 0) return
@@ -80,8 +83,19 @@ export function DocumentUploadZone({ projectId, documents }: DocumentUploadZoneP
     inputRef.current?.click()
   }
 
+  const otherKind: DocumentZoneKind =
+    kind === 'requirements' ? 'coverage' : 'requirements'
+
   return (
     <div className="space-y-3">
+      {/* Zone header (Phase 145) */}
+      <div>
+        <h3 className="text-sm font-semibold">{title}</h3>
+        {description && (
+          <p className="text-xs text-muted-foreground mt-0.5">{description}</p>
+        )}
+      </div>
+
       {/* Drop zone */}
       <div
         className={`relative border-2 border-dashed rounded-xl p-6 flex flex-col items-center justify-center gap-2 cursor-pointer transition-colors ${
@@ -137,7 +151,7 @@ export function DocumentUploadZone({ projectId, documents }: DocumentUploadZoneP
             const iconColor = getIconColor(mime)
             return (
               <div
-                key={doc.name ?? idx}
+                key={doc.file_id ?? doc.name ?? idx}
                 className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${doc.file_id ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
                 onClick={async () => {
                   if (!doc.file_id) return
@@ -168,6 +182,27 @@ export function DocumentUploadZone({ projectId, documents }: DocumentUploadZoneP
                   <span className="text-xs text-muted-foreground flex-shrink-0">
                     {formatDate(doc.uploaded_at)}
                   </span>
+                )}
+                {/* Phase 145: misrouted chip with one-click move to the other zone. */}
+                {doc.misrouted && doc.file_id && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      moveDocument({
+                        fileId: doc.file_id!,
+                        documentType: otherKind,
+                      })
+                    }}
+                    disabled={isMoving}
+                    className="inline-flex items-center gap-1 rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-xs text-amber-800 hover:bg-amber-100 disabled:opacity-50 flex-shrink-0"
+                    title={doc.misrouted.reason}
+                  >
+                    <AlertTriangle className="h-3 w-3" />
+                    <span>
+                      Looks like {doc.misrouted.detected_type ?? 'other'} — move
+                    </span>
+                  </button>
                 )}
                 {doc.file_id && (
                   <Download className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
