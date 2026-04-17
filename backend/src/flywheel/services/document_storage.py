@@ -11,8 +11,10 @@ Public API:
 from __future__ import annotations
 
 import logging
+import os
 import re
 from datetime import date
+from pathlib import Path
 
 import httpx
 
@@ -22,6 +24,12 @@ logger = logging.getLogger(__name__)
 
 BUCKET = "documents"
 UPLOADS_BUCKET = "uploads"
+
+# Local file storage fallback directory
+_LOCAL_STORAGE_DIR = Path(os.environ.get(
+    "FLYWHEEL_LOCAL_STORAGE_DIR",
+    Path(__file__).resolve().parents[3] / "storage" / "uploads",
+))
 
 
 async def get_document_url(storage_path: str, expires_in: int = 3600) -> str:
@@ -56,26 +64,71 @@ async def upload_file(
     content: bytes,
     mime_type: str = "application/octet-stream",
 ) -> str:
-    """Upload raw file bytes to the 'uploads' bucket. Returns storage path."""
+    """Upload raw file bytes to the 'uploads' bucket. Returns storage path.
+
+    Falls back to local file storage if Supabase Storage is unavailable.
+    Local paths are prefixed with ``local://`` so download_file can route correctly.
+    """
+    storage_path = f"{tenant_id}/{file_id}/{filename}"
+
+    # Try Supabase Storage first
     supabase_url = settings.supabase_url
     service_key = settings.supabase_service_key
 
-    storage_path = f"{tenant_id}/{file_id}/{filename}"
+    try:
+        url = f"{supabase_url}/storage/v1/object/{UPLOADS_BUCKET}/{storage_path}"
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                url,
+                content=content,
+                headers={
+                    "Authorization": f"Bearer {service_key}",
+                    "Content-Type": mime_type,
+                },
+            )
+            resp.raise_for_status()
+        logger.info("Uploaded file to Supabase: %s (%d bytes)", storage_path, len(content))
+        return storage_path
+    except Exception as exc:
+        logger.warning("Supabase upload failed (%s), falling back to local storage", exc)
+
+    # Local fallback — write bytes to disk
+    local_path = _LOCAL_STORAGE_DIR / storage_path
+    local_path.parent.mkdir(parents=True, exist_ok=True)
+    local_path.write_bytes(content)
+    logger.info("Uploaded file to local: %s (%d bytes)", local_path, len(content))
+    return f"local://{storage_path}"
+
+
+async def download_file(storage_path: str) -> bytes | None:
+    """Download file bytes from Supabase Storage or local fallback.
+
+    Handles both Supabase paths (``tenant/file_id/name``) and local paths
+    (``local://tenant/file_id/name``).
+    """
+    if storage_path.startswith("local://"):
+        # Local fallback
+        relative = storage_path[len("local://"):]
+        local_path = _LOCAL_STORAGE_DIR / relative
+        if not local_path.exists():
+            logger.error("Local file not found: %s", local_path)
+            return None
+        return local_path.read_bytes()
+
+    # Supabase Storage
+    supabase_url = settings.supabase_url
+    service_key = settings.supabase_service_key
     url = f"{supabase_url}/storage/v1/object/{UPLOADS_BUCKET}/{storage_path}"
 
     async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
+        resp = await client.get(
             url,
-            content=content,
-            headers={
-                "Authorization": f"Bearer {service_key}",
-                "Content-Type": mime_type,
-            },
+            headers={"Authorization": f"Bearer {service_key}"},
         )
-        resp.raise_for_status()
-
-    logger.info("Uploaded file to %s (%d bytes)", storage_path, len(content))
-    return storage_path
+        if resp.status_code != 200:
+            logger.error("Supabase download failed: %s -> %d", storage_path, resp.status_code)
+            return None
+        return resp.content
 
 
 async def get_file_url(storage_path: str, expires_in: int = 3600) -> str:
