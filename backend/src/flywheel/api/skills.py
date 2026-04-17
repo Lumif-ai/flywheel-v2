@@ -15,6 +15,7 @@ Endpoints:
 from __future__ import annotations
 
 import asyncio
+import base64
 import datetime
 import json
 import logging
@@ -32,7 +33,7 @@ import re as _re
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload, decode_jwt
-from flywheel.db.models import ContextEntry, SkillDefinition, SkillRun, TenantSkill, WorkItem
+from flywheel.db.models import ContextEntry, SkillAsset, SkillDefinition, SkillRun, TenantSkill, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit, limiter
 
@@ -57,6 +58,24 @@ class StartRunResponse(BaseModel):
     run_id: str
     status: str
     stream_url: str
+
+
+class SkillAssetsResponse(BaseModel):
+    """Response body for GET /skills/{name}/assets.
+
+    bundle_b64 is the zipped skill bundle encoded with stdlib base64 standard
+    alphabet (NOT urlsafe). The caller decodes via base64.b64decode, verifies
+    sha256, then extracts the zip. format is always "zip" in v22.0 but returned
+    from the DB column (bundle_format) for forward compatibility with tar.gz/wheel
+    in later versions.
+    """
+
+    bundle_b64: str
+    sha256: str
+    size: int
+    format: str = "zip"
+    version: str | None = None
+    updated_at: datetime.datetime | None = None
 
 
 class AttributionEntry(BaseModel):
@@ -342,6 +361,102 @@ async def get_skill_prompt(
         }
 
     return {"skill_name": skill.name, "system_prompt": skill.system_prompt}
+
+
+@router.get("/{skill_name}/assets", response_model=SkillAssetsResponse)
+@limiter.limit("10/minute")
+async def get_skill_assets(
+    request: Request,
+    skill_name: str,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> SkillAssetsResponse:
+    """Return the zipped asset bundle for a skill as base64-encoded JSON.
+
+    Mirrors ``get_skill_prompt`` auth / tenant-override / rate-limit shape
+    (see lines 283-344 of this file). Two additional divergences:
+
+    - Protected skills raise 403 (their code executes server-side; bytes must
+      not ship to the client). The check happens BEFORE the ``skill_assets``
+      SELECT so protected bundles are never read into memory.
+    - Skills with no ``skill_assets`` row (prompt-only skills) raise 404 with
+      a distinct message so callers can differentiate from "skill unknown".
+    """
+    # ---- Tenant-override probe + skill lookup (verbatim from get_skill_prompt) ----
+    has_overrides = await db.execute(
+        select(TenantSkill.skill_id)
+        .where(TenantSkill.tenant_id == user.tenant_id)
+        .limit(1)
+    )
+    if has_overrides.scalar_one_or_none() is not None:
+        # Tenant has explicit skill assignments -- use them
+        stmt = (
+            select(SkillDefinition)
+            .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+            .where(
+                TenantSkill.tenant_id == user.tenant_id,
+                TenantSkill.enabled == True,  # noqa: E712
+                SkillDefinition.enabled == True,  # noqa: E712
+                SkillDefinition.name == skill_name,
+            )
+        )
+    else:
+        # No overrides -- all enabled skills available
+        stmt = (
+            select(SkillDefinition)
+            .where(
+                SkillDefinition.enabled == True,  # noqa: E712
+                SkillDefinition.name == skill_name,
+            )
+        )
+    result = await db.execute(stmt)
+    skill = result.scalar_one_or_none()
+
+    if skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{skill_name}' not found or not available for this tenant",
+        )
+
+    # ---- Protected-skill short-circuit (BEFORE any skill_assets read) ----
+    if skill.protected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This skill executes server-side; assets are not distributed to clients.",
+        )
+
+    # ---- Second query: fetch SkillAsset row by skill_id ----
+    # Intentionally NOT selectinload(SkillDefinition.asset): eager-loading would
+    # read bundle bytes for protected skills above, defeating DELIVER-03.
+    asset_result = await db.execute(
+        select(SkillAsset).where(SkillAsset.skill_id == skill.id)
+    )
+    asset = asset_result.scalar_one_or_none()
+
+    if asset is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{skill_name}' has no asset bundle — this is a prompt-only skill.",
+        )
+
+    # ---- Encode and return ----
+    # bytes() wrapper defends against drivers that return memoryview (asyncpg quirk).
+    bundle_b64 = base64.b64encode(bytes(asset.bundle)).decode("ascii")
+
+    logger.info(
+        "asset_fetch tenant=%s skill=%s user=%s size=%d sha256=%s",
+        user.tenant_id, skill_name, user.sub,
+        asset.bundle_size_bytes, asset.bundle_sha256[:12],
+    )
+
+    return SkillAssetsResponse(
+        bundle_b64=bundle_b64,
+        sha256=asset.bundle_sha256,
+        size=asset.bundle_size_bytes,
+        format=asset.bundle_format,
+        version=skill.version,
+        updated_at=asset.updated_at,
+    )
 
 
 # ---------------------------------------------------------------------------

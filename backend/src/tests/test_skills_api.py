@@ -7,8 +7,12 @@ SSE stream with late-connect replay.
 
 from __future__ import annotations
 
+import base64
 import datetime
+import hashlib
+import io
 import json
+import zipfile
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
@@ -91,6 +95,35 @@ class MockSkillRun:
         self.events_log = events_log or []
         self.error = error
         self.created_at = created_at or datetime.datetime(2026, 3, 20, tzinfo=datetime.timezone.utc)
+
+
+class MockSkillDefinition:
+    def __init__(self, id=None, name="test-skill", protected=False, version="1.2.3"):
+        self.id = id or uuid4()
+        self.name = name
+        self.protected = protected
+        self.version = version
+
+
+class MockSkillAsset:
+    def __init__(self, skill_id, bundle, bundle_sha256, bundle_size_bytes, bundle_format="zip", updated_at=None):
+        self.id = uuid4()
+        self.skill_id = skill_id
+        self.bundle = bundle
+        self.bundle_sha256 = bundle_sha256
+        self.bundle_size_bytes = bundle_size_bytes
+        self.bundle_format = bundle_format
+        self.updated_at = updated_at or datetime.datetime(2026, 4, 10, tzinfo=datetime.timezone.utc)
+
+
+def _build_test_bundle():
+    """Build an in-memory zip with one known .py file. Returns (bytes, sha256_hex)."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("hello.py", "def hello():\n    return 'world'\n")
+    bundle_bytes = buf.getvalue()
+    digest = hashlib.sha256(bundle_bytes).hexdigest()
+    return bundle_bytes, digest
 
 
 def _mock_db(execute_side_effects=None):
@@ -366,3 +399,211 @@ class TestSSEStream:
 
         events = [l for l in lines if l.startswith("event:")]
         assert any("error" in e for e in events)
+
+
+# ===========================================================================
+# TestAssetEndpoint
+# ===========================================================================
+
+
+class TestAssetEndpoint:
+    def test_fetch_assets_success(self, client):
+        """Valid tenant + public skill + asset row -> 200 with decodable bundle."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        skill = MockSkillDefinition(name="broker-parse-contract", protected=False)
+        bundle_bytes, digest = _build_test_bundle()
+        asset = MockSkillAsset(
+            skill_id=skill.id,
+            bundle=bundle_bytes,
+            bundle_sha256=digest,
+            bundle_size_bytes=len(bundle_bytes),
+        )
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),       # tenant-override probe: no overrides
+            MockResult(value=skill),      # skill lookup
+            MockResult(value=asset),      # asset lookup
+        ])
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get("/api/v1/skills/broker-parse-contract/assets")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["sha256"] == digest
+        assert body["size"] == len(bundle_bytes)
+        assert body["format"] == "zip"
+        assert body["version"] == "1.2.3"
+        # Round-trip: decode, unzip, inspect contents
+        decoded = base64.b64decode(body["bundle_b64"])
+        assert decoded == bundle_bytes
+        with zipfile.ZipFile(io.BytesIO(decoded)) as zf:
+            assert zf.namelist() == ["hello.py"]
+            assert zf.read("hello.py") == b"def hello():\n    return 'world'\n"
+
+    def test_fetch_assets_requires_auth(self, client):
+        """No Authorization header -> 401 (from require_tenant)."""
+        # Deliberately DO NOT override require_tenant.
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+        resp = client.get("/api/v1/skills/any-skill/assets")
+        assert resp.status_code == 401
+
+    def test_fetch_assets_protected_returns_403(self, client):
+        """Protected skill -> 403 BEFORE any skill_assets read."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        skill = MockSkillDefinition(name="company-intel", protected=True)
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),       # override probe: none
+            MockResult(value=skill),      # skill row: protected=True
+            # NO third side_effect -- the handler must NOT query skill_assets
+        ])
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get("/api/v1/skills/company-intel/assets")
+        assert resp.status_code == 403
+        body = resp.json()
+        assert "server-side" in body["message"].lower()
+        # Verify no asset lookup happened (only 2 execute calls, not 3)
+        assert mock_db.execute.await_count == 2
+
+    def test_fetch_assets_skill_not_found(self, client):
+        """Skill name not in DB -> 404 with 'not found' message (prompt-endpoint parity)."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),       # override probe: none
+            MockResult(value=None),       # skill lookup: no row
+        ])
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get("/api/v1/skills/does-not-exist/assets")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert "not found or not available for this tenant" in body["message"]
+
+    def test_fetch_assets_no_bundle_row(self, client):
+        """Skill exists but skill_assets row missing -> 404 with DISTINCT prompt-only message."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        skill = MockSkillDefinition(name="prompt-only-skill", protected=False)
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),       # override probe: none
+            MockResult(value=skill),      # skill row exists
+            MockResult(value=None),       # asset row: missing
+        ])
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get("/api/v1/skills/prompt-only-skill/assets")
+        assert resp.status_code == 404
+        body = resp.json()
+        # Distinct from the "not found" message above
+        assert "prompt-only" in body["message"]
+        assert "not found or not available" not in body["message"]
+
+    def test_fetch_assets_tenant_override_parity_allows(self, client):
+        """Tenant has overrides + skill IS in override list -> 200 (override branch hit)."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        skill = MockSkillDefinition(name="scoped-skill", protected=False)
+        bundle_bytes, digest = _build_test_bundle()
+        asset = MockSkillAsset(
+            skill_id=skill.id,
+            bundle=bundle_bytes,
+            bundle_sha256=digest,
+            bundle_size_bytes=len(bundle_bytes),
+        )
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=uuid4()),    # override probe: HAS overrides (some skill_id)
+            MockResult(value=skill),      # join-based skill lookup succeeds
+            MockResult(value=asset),
+        ])
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get("/api/v1/skills/scoped-skill/assets")
+        assert resp.status_code == 200
+        assert resp.json()["sha256"] == digest
+
+    def test_fetch_assets_tenant_override_excludes(self, client):
+        """Tenant has overrides + skill NOT in override list -> 404 (same 'not found' message)."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=uuid4()),    # override probe: HAS overrides
+            MockResult(value=None),       # join-based skill lookup: no row
+        ])
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get("/api/v1/skills/hidden-skill/assets")
+        assert resp.status_code == 404
+        body = resp.json()
+        assert "not found or not available for this tenant" in body["message"]
+
+    def test_fetch_assets_rate_limit(self, client):
+        """11 rapid requests from same user -> 429 on/around the 11th."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        skill = MockSkillDefinition(name="rate-test-skill", protected=False)
+        bundle_bytes, digest = _build_test_bundle()
+        asset = MockSkillAsset(
+            skill_id=skill.id,
+            bundle=bundle_bytes,
+            bundle_sha256=digest,
+            bundle_size_bytes=len(bundle_bytes),
+        )
+
+        # Build enough side_effects for 15 attempts worth of DB calls
+        # Each successful call uses 3 executes; once 429 hits, no DB call happens.
+        side_effects = []
+        for _ in range(15):
+            side_effects.extend([
+                MockResult(value=None),
+                MockResult(value=skill),
+                MockResult(value=asset),
+            ])
+        mock_db = _mock_db(execute_side_effects=side_effects)
+
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        hit_429 = False
+        for _ in range(15):
+            resp = client.get("/api/v1/skills/rate-test-skill/assets")
+            if resp.status_code == 429:
+                body = resp.json()
+                assert body["error"] == "RateLimitExceeded"
+                assert body["code"] == 429
+                assert "Retry-After" in resp.headers
+                hit_429 = True
+                break
+        # slowapi timing in tests can occasionally miss, but the handler format is
+        # what we most care about. Mirror test_rate_limit.py lines 147-161 tolerance.
+        assert hit_429, "Expected to hit 429 within 15 rapid requests"
+        # Cleanup so other tests aren't polluted
+        limiter.reset()
