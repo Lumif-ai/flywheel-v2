@@ -127,6 +127,7 @@ EXTRACTION_TOOL = {
                         "category",
                         "confidence_score",
                         "source_document_filename",
+                        "source_excerpt",  # NEW — INFRA-05: every AI-extracted coverage must carry its verbatim source
                     ],
                 },
             },
@@ -359,6 +360,7 @@ async def _process_extracted_coverage(
     project: BrokerProject,
     db: AsyncSession,
     contract_language: str,
+    pdf_by_name: dict[str, UUID],
 ) -> ProjectCoverage:
     """Process a single AI-extracted coverage into a ProjectCoverage row.
 
@@ -366,6 +368,7 @@ async def _process_extracted_coverage(
     - New taxonomy type creation (is_new_type=True)
     - Alias learning (suggested_alias for existing types)
     - Currency mismatch detection
+    - Resolution of source_document_filename -> source_document_id UUID
     - ProjectCoverage row creation with canonical key
 
     Args:
@@ -373,11 +376,33 @@ async def _process_extracted_coverage(
         project: The BrokerProject being analyzed.
         db: Async SQLAlchemy session.
         contract_language: Detected contract language code.
+        pdf_by_name: Map from input-PDF filename to file UUID. Pre-computed
+            once per analysis run by the caller; used here to resolve
+            per-coverage source_document_id.
 
     Returns:
         ProjectCoverage instance (not yet added to session).
     """
     key = cov["coverage_type_key"]
+
+    # Resolve per-coverage source_document_id from the filename Claude returned.
+    # pdf_by_name is pre-computed once per analysis at the caller; don't recompute here.
+    source_doc_id: UUID | None = None
+    extracted_filename = (cov.get("source_document_filename") or "").strip()
+    if extracted_filename:
+        source_doc_id = pdf_by_name.get(extracted_filename)
+        if source_doc_id is None:
+            # Case-insensitive fallback — Claude sometimes normalizes case
+            for fname, fid in pdf_by_name.items():
+                if fname.lower() == extracted_filename.lower():
+                    source_doc_id = fid
+                    break
+        if source_doc_id is None:
+            logger.warning(
+                "source_document_filename=%r not matched for coverage key=%r",
+                extracted_filename,
+                key,
+            )
 
     # Handle new taxonomy type creation
     if cov.get("is_new_type"):
@@ -462,6 +487,7 @@ async def _process_extracted_coverage(
         contract_clause=cov.get("contract_clause"),
         source_excerpt=cov.get("source_excerpt"),
         source_page=cov.get("source_page"),
+        source_document_id=source_doc_id,
         confidence=_score_to_confidence_text(
             cov.get("confidence_score", 0.5)
         ),
@@ -676,12 +702,15 @@ async def analyze_contract(
                 project_id,
             )
 
+        # Build filename->id map once; used for both primary-contract backfill
+        # and per-coverage source_document_id resolution.
+        pdf_by_name = {fname: fid for fid, fname, _ in pdfs}
+
         # Backfill source_document_id from the model's classification of the primary
         # contract. This replaces the prior "first uploaded PDF" heuristic, which
         # could point source_document_id at an annex or policy summary.
         primary_filename = (extracted.get("primary_contract_filename") or "").strip()
         if primary_filename:
-            pdf_by_name = {fname: fid for fid, fname, _ in pdfs}
             matched_id = pdf_by_name.get(primary_filename)
             if matched_id is not None:
                 project.source_document_id = matched_id
@@ -696,7 +725,7 @@ async def analyze_contract(
         coverages_created = []
         for cov in extracted.get("coverages", []):
             coverage = await _process_extracted_coverage(
-                cov, project, db, contract_language
+                cov, project, db, contract_language, pdf_by_name
             )
             db.add(coverage)
             coverages_created.append(

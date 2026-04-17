@@ -28,6 +28,7 @@ export interface BrokerProject {
   language: string | null
   source: 'manual' | 'email'
   source_ref: string | null
+  source_document_id: string | null
   notes: string | null
   metadata: Record<string, unknown> | null
   created_at: string
@@ -67,6 +68,7 @@ export interface ProjectCoverage {
   source_excerpt: string | null
   source_page: number | null
   source_section: string | null
+  source_document_id: string | null
   current_policy_number: string | null
   current_expiry: string | null
   ai_critical_finding: boolean
