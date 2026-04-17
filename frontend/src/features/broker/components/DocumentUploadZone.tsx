@@ -1,10 +1,12 @@
 import { useRef, useState } from 'react'
-import { FileText, Upload } from 'lucide-react'
+import { Download, FileText, Upload } from 'lucide-react'
 import { format } from 'date-fns'
 import { useDocumentUpload } from '../hooks/useDocumentUpload'
 import { RunInClaudeCodeButton } from './shared/RunInClaudeCodeButton'
+import { useAuthStore } from '@/stores/auth'
 
 interface DocumentEntry {
+  file_id?: string
   name?: string
   type?: string
   mimetype?: string
@@ -136,7 +138,22 @@ export function DocumentUploadZone({ projectId, documents }: DocumentUploadZoneP
             return (
               <div
                 key={doc.name ?? idx}
-                className="flex items-center gap-3 rounded-lg border px-3 py-2"
+                className={`flex items-center gap-3 rounded-lg border px-3 py-2 ${doc.file_id ? 'cursor-pointer hover:bg-gray-50 transition-colors' : ''}`}
+                onClick={async () => {
+                  if (!doc.file_id) return
+                  try {
+                    const token = useAuthStore.getState().token
+                    const res = await fetch(`/api/v1/files/${doc.file_id}/download`, {
+                      headers: token ? { Authorization: `Bearer ${token}` } : {},
+                    })
+                    if (res.ok) {
+                      const data = await res.json()
+                      if (data.download_url) window.open(data.download_url, '_blank')
+                    }
+                  } catch {
+                    // silent
+                  }
+                }}
               >
                 <FileText className="h-4 w-4 flex-shrink-0" style={{ color: iconColor }} />
                 <span className="text-sm font-medium truncate flex-1">
@@ -151,6 +168,9 @@ export function DocumentUploadZone({ projectId, documents }: DocumentUploadZoneP
                   <span className="text-xs text-muted-foreground flex-shrink-0">
                     {formatDate(doc.uploaded_at)}
                   </span>
+                )}
+                {doc.file_id && (
+                  <Download className="h-3.5 w-3.5 text-muted-foreground flex-shrink-0" />
                 )}
               </div>
             )

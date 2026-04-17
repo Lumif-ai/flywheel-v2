@@ -30,7 +30,7 @@ async function fetchPdfContent(fileId: string): Promise<{ pdfData: Uint8Array; f
 
 export function useDocumentRendition(fileId: string | null | undefined): DocumentRendition {
   const { data, isLoading, error } = useQuery({
-    queryKey: ['document-rendition', fileId],
+    queryKey: ['document-pdf-content', fileId],
     queryFn: () => fetchPdfContent(fileId!),
     enabled: !!fileId,
     staleTime: 45 * 60 * 1000,

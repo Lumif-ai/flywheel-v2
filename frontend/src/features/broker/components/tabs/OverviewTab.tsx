@@ -7,6 +7,7 @@ interface OverviewTabProps {
 }
 
 interface DocumentEntry {
+  file_id?: string
   name?: string
   type?: string
   mimetype?: string

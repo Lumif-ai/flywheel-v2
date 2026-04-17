@@ -106,7 +106,7 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
   }
 
   const fileObj = useMemo(
-    () => (pdfData ? { data: pdfData.slice() } : null),
+    () => (pdfData instanceof Uint8Array ? { data: pdfData.slice() } : null),
     [pdfData],
   )
 
