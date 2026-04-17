@@ -3,7 +3,8 @@ import type { ProjectCoverage } from '../types/broker'
 interface RequirementCardProps {
   coverage: ProjectCoverage
   style?: React.CSSProperties
-  onClauseClick?: (clause: string) => void
+  isActive?: boolean
+  onClauseClick?: (coverage: ProjectCoverage) => void
 }
 
 const SOURCE_STYLE: Record<string, string> = {
@@ -18,7 +19,12 @@ const CATEGORY_STYLE: Record<string, string> = {
   surety: 'bg-blue-100 text-blue-700',
 }
 
-export function RequirementCard({ coverage, style, onClauseClick }: RequirementCardProps) {
+export function RequirementCard({
+  coverage,
+  style,
+  isActive = false,
+  onClauseClick,
+}: RequirementCardProps) {
   const formattedLimit =
     coverage.required_limit != null
       ? new Intl.NumberFormat('en-US', {
@@ -28,9 +34,16 @@ export function RequirementCard({ coverage, style, onClauseClick }: RequirementC
         }).format(coverage.required_limit)
       : null
 
+  // NAV-06: active state renders a 4px coral left border. We must explicitly re-add
+  // the 1px top/right/bottom borders when active because `border-l-4` overrides
+  // ONLY the left edge (other edges would otherwise revert to 0).
+  const borderClass = isActive
+    ? 'border-l-4 border-l-[#E94D35] border-y border-r border-border'
+    : 'border border-border'
+
   return (
     <div
-      className="rounded-xl border p-4 space-y-3 animate-fade-slide-up bg-card hover:shadow-sm transition-shadow"
+      className={`rounded-xl p-4 space-y-3 animate-fade-slide-up bg-card hover:shadow-sm transition-shadow ${borderClass}`}
       style={style}
     >
       {/* Header: coverage name + required limit */}
@@ -78,7 +91,7 @@ export function RequirementCard({ coverage, style, onClauseClick }: RequirementC
         <button
           type="button"
           className="w-full text-left text-xs text-[#E94D35] hover:text-[#d4432e] font-medium border-t pt-2.5 leading-relaxed cursor-pointer transition-colors flex items-center gap-1"
-          onClick={() => onClauseClick?.(coverage.contract_clause!)}
+          onClick={() => onClauseClick?.(coverage)}
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="flex-shrink-0">
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />

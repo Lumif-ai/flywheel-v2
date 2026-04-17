@@ -5,9 +5,16 @@ import { RequirementCard } from './RequirementCard'
 interface RequirementsPanelProps {
   coverages: ProjectCoverage[]
   analysisStatus: AnalysisStatus
+  activeCoverageId?: string | null
+  onClauseClick?: (coverage: ProjectCoverage) => void
 }
 
-export function RequirementsPanel({ coverages, analysisStatus }: RequirementsPanelProps) {
+export function RequirementsPanel({
+  coverages,
+  analysisStatus,
+  activeCoverageId = null,
+  onClauseClick,
+}: RequirementsPanelProps) {
   if (analysisStatus === 'running') {
     return (
       <div className="space-y-3">
@@ -42,6 +49,8 @@ export function RequirementsPanel({ coverages, analysisStatus }: RequirementsPan
         <RequirementCard
           key={coverage.id}
           coverage={coverage}
+          isActive={coverage.id === activeCoverageId}
+          onClauseClick={onClauseClick}
           style={{
             // Spec requires 60ms stagger — do NOT use staggerDelay() which is 50ms
             animationDelay: `${index * 60}ms`,
