@@ -1213,37 +1213,62 @@ async def trigger_analysis(
     return {"status": "analyzing", "project_id": str(project_id)}
 
 
-async def _get_project_pdf(session, project, tenant_id: UUID) -> bytes | None:
-    """Retrieve PDF bytes for a project from storage (Supabase or local fallback)."""
+async def _get_project_pdfs(
+    session, project, tenant_id: UUID
+) -> list[tuple[UUID, str, bytes]]:
+    """Retrieve all PDFs for a project from storage.
+
+    Returns a list of (file_id, filename, content) tuples in the order they
+    appear in project.metadata_.documents. Files that fail to download or
+    have no storage_path are skipped. Non-PDF documents are ignored.
+
+    Does NOT pick a "source" PDF — the analyzer classifies which one is the
+    primary contract and backfills source_document_id after extraction.
+    """
+    from uuid import UUID as _UUID
+
     from flywheel.services.document_storage import download_file
 
-    doc_id = project.source_document_id
+    docs = (project.metadata_ or {}).get("documents", [])
+    pdf_docs = [d for d in docs if d.get("mimetype") == "application/pdf"]
+    if not pdf_docs:
+        return []
 
-    # Fallback: if source_document_id is not set, use the first PDF from metadata
-    if not doc_id:
-        docs = (project.metadata_ or {}).get("documents", [])
-        first_pdf = next(
-            (d for d in docs if d.get("mimetype") == "application/pdf"),
-            None,
-        )
-        if not first_pdf:
-            return None
-        from uuid import UUID as _UUID
-        doc_id = _UUID(first_pdf["file_id"]) if isinstance(first_pdf["file_id"], str) else first_pdf["file_id"]
-        # Backfill the FK so future calls don't need the fallback
-        project.source_document_id = doc_id
+    # Resolve each metadata doc to its UploadedFile row (for storage_path)
+    file_ids = []
+    for d in pdf_docs:
+        fid = d["file_id"]
+        file_ids.append(_UUID(fid) if isinstance(fid, str) else fid)
 
     result = await session.execute(
         select(UploadedFile).where(
-            UploadedFile.id == doc_id,
+            UploadedFile.id.in_(file_ids),
             UploadedFile.tenant_id == tenant_id,
         )
     )
-    uploaded_file = result.scalar_one_or_none()
-    if not uploaded_file or not uploaded_file.storage_path:
-        return None
+    rows_by_id = {row.id: row for row in result.scalars().all()}
 
-    return await download_file(uploaded_file.storage_path)
+    pdfs: list[tuple[UUID, str, bytes]] = []
+    for fid in file_ids:
+        row = rows_by_id.get(fid)
+        if not row or not row.storage_path:
+            continue
+        try:
+            content = await download_file(row.storage_path)
+        except Exception as e:
+            _logger = logging.getLogger(__name__)
+            _logger.warning(
+                "Failed to download PDF %s (%s) for project %s: %s",
+                fid,
+                row.filename,
+                project.id,
+                e,
+            )
+            continue
+        if content:
+            pdfs.append((row.id, row.filename, content))
+
+    return pdfs
 
 
 async def _run_analysis(project_id: UUID, tenant_id: UUID):
@@ -1268,13 +1293,13 @@ async def _run_analysis(project_id: UUID, tenant_id: UUID):
             if not project:
                 return
 
-            pdf_content = await _get_project_pdf(session, project, tenant_id)
-            if not pdf_content:
+            pdfs = await _get_project_pdfs(session, project, tenant_id)
+            if not pdfs:
                 project.analysis_status = "failed"
                 await session.commit()
                 return
 
-            await analyze_contract(session, tenant_id, project_id, pdf_content)
+            await analyze_contract(session, tenant_id, project_id, pdfs)
             await session.commit()
     except Exception as exc:
         import traceback as _tb

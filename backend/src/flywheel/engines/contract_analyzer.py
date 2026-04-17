@@ -10,8 +10,8 @@ to a BrokerProject. It populates ProjectCoverage rows with confidence scores
 and updates the project's analysis_status.
 
 Functions:
-  analyze_contract(db, tenant_id, project_id, pdf_content, api_key=None) -> dict
-    Main entry point. Orchestrates the full analysis pipeline.
+  analyze_contract(db, tenant_id, project_id, pdfs, api_key=None) -> dict
+    Main entry point. Orchestrates the full analysis pipeline over all project PDFs.
 """
 
 import base64
@@ -114,6 +114,10 @@ EXTRACTION_TOOL = {
                             "type": "integer",
                             "description": "Page number where this requirement appears, if identifiable.",
                         },
+                        "source_document_filename": {
+                            "type": "string",
+                            "description": "Filename of the document this coverage was extracted from. Must match one of the input document filenames exactly.",
+                        },
                     },
                     "required": [
                         "coverage_type_key",
@@ -122,6 +126,7 @@ EXTRACTION_TOOL = {
                         "description",
                         "category",
                         "confidence_score",
+                        "source_document_filename",
                     ],
                 },
             },
@@ -134,11 +139,16 @@ EXTRACTION_TOOL = {
                 "description": "Brief summary of the contract scope.",
             },
             "total_coverages_found": {"type": "integer"},
+            "primary_contract_filename": {
+                "type": "string",
+                "description": "Filename of the document you identified as the PRIMARY CONTRACT (the MSA/construction agreement being executed). Must match one of the input document filenames exactly. Return empty string if none of the inputs is a primary contract.",
+            },
         },
         "required": [
             "coverages",
             "contract_language",
             "total_coverages_found",
+            "primary_contract_filename",
         ],
     },
 }
@@ -168,19 +178,44 @@ def build_extraction_prompt(
 
     return f"""\
 You are an expert insurance and surety analyst specializing in construction contracts.
-Your job is to read a construction contract PDF and extract ALL insurance and surety
-coverage requirements.
+You will receive ONE OR MORE documents from a single construction project and must
+extract ALL insurance and surety coverage REQUIREMENTS.
+
+DOCUMENT TYPES you may receive:
+- Primary contract / MSA (e.g., "Contrato de Obra", "Master Service Agreement") -- extract from this.
+- Exhibits / annexes / schedules referenced by the contract (bond schedules,
+  insurance requirement annexes) -- extract from these and attribute to their filename.
+- Current policy summaries / certificates of insurance / COIs -- DO NOT extract.
+  These describe existing policies, not contract requirements.
+- Quote letters from carriers or surety companies -- DO NOT extract. These are proposals,
+  not requirements.
+
+Identify the PRIMARY CONTRACT (the agreement being executed) and set
+primary_contract_filename to its exact input filename. If multiple documents look
+like contracts, pick the one with the most comprehensive scope/requirements body.
+
+For every coverage you extract, set source_document_filename to the exact filename
+of the input document where you found it.
 
 COVERAGE TYPE TAXONOMY -- map each coverage to one of these canonical keys:
 {taxonomy_block}
 
 INSTRUCTIONS:
-- For each coverage found in the contract, match it to the most appropriate canonical key above.
+- Extract every insurance coverage and every surety bond stated as a REQUIREMENT of the
+  contract or its requirement-annexes. Do not skip items because a limit or detail is
+  missing; use lower confidence_score instead.
+- Match each coverage to the most appropriate canonical key above. Spanish/Portuguese
+  phrasings map to English keys (e.g., "Responsabilidad Civil General" -> general_liability,
+  "Fianza de Cumplimiento" -> performance_bond, "Todo Riesgo Construccion" -> builders_risk,
+  "Fianza de Anticipo" -> advance_payment_bond, "Fianza de Vicios Ocultos" -> maintenance_bond,
+  "Fianza de Pago" -> payment_bond, "Responsabilidad Civil Vehicular" -> auto,
+  "Riesgos de Trabajo" -> workers_compensation).
 - If the contract uses a different name for an existing type (e.g., "CGL" for general_liability),
   use the existing key and set suggested_alias to the contract's phrasing.
 - Only set is_new_type=true if the coverage is genuinely distinct from ALL existing types.
   When creating a new type, provide display_names in English and the contract's language.
 - Use snake_case for new keys, following the pattern of existing keys.
+- total_coverages_found MUST equal the length of the coverages array.
 
 LIMIT EXTRACTION:
 - Extract the numeric limit amount as a number (not a string).
@@ -405,6 +440,7 @@ async def _process_extracted_coverage(
         "ai_description": cov.get("description", ""),
         "raw_limit_text": str(cov.get("limit_amount")) if cov.get("limit_amount") is not None else None,
         "raw_deductible_text": cov.get("deductible"),
+        "source_document_filename": cov.get("source_document_filename"),
     }
 
     # Create ProjectCoverage row
@@ -446,24 +482,18 @@ async def analyze_contract(
     db: AsyncSession,
     tenant_id: UUID,
     project_id: UUID,
-    pdf_content: bytes,
+    pdfs: list[tuple[UUID, str, bytes]],
     api_key: str | None = None,
 ) -> dict:
-    """Analyze a construction contract PDF and extract coverage requirements.
+    """Analyze one or more construction-project PDFs and extract coverage requirements.
 
-    Main entry point. Orchestrates the full pipeline:
-    1. Set analysis_status='running' on BrokerProject
-    2. Load taxonomy for project context
-    3. Get model config for contract_analysis engine
-    4. Build dynamic prompt with filtered taxonomy
-    5. Encode PDF as base64 and send to Claude with tool_use
-    6. Parse structured extraction result
-    7. Process each coverage through taxonomy pipeline
-    8. Update project status and analysis timestamps
-    9. Log BrokerActivity events
+    Accepts the full set of PDFs attached to a project. The model classifies which
+    document is the primary contract and extracts coverage requirements from the
+    contract + its referenced exhibits/annexes. source_document_id is backfilled
+    from the model's classification.
 
-    On any failure: sets analysis_status='failed', logs BrokerActivity error
-    event, and returns error dict. Does NOT re-raise (safe for background tasks).
+    On truncation or count mismatch: sets analysis_status='failed'. Does NOT accept
+    partial extraction as success.
 
     Args:
         db: Async SQLAlchemy session. Caller sets RLS context and manages
@@ -471,7 +501,7 @@ async def analyze_contract(
             not commit.
         tenant_id: Tenant UUID.
         project_id: BrokerProject UUID to analyze.
-        pdf_content: Raw PDF bytes.
+        pdfs: List of (file_id, filename, content_bytes) tuples. Must be non-empty.
         api_key: Optional explicit API key. If None, uses
                  settings.flywheel_subsidy_api_key (background job default).
 
@@ -518,39 +548,53 @@ async def analyze_contract(
         # Step 4: Build dynamic prompt with taxonomy
         system_prompt = build_extraction_prompt(taxonomy_types, project.currency)
 
-        # Step 5: Build and send Claude API request with PDF document block
+        # Step 5: Build and send Claude API request with one document block per PDF
+        if not pdfs:
+            raise ValueError("analyze_contract called with no PDFs")
+
         effective_api_key = api_key or settings.flywheel_subsidy_api_key
         client = anthropic.AsyncAnthropic(api_key=effective_api_key)
-        pdf_b64 = base64.standard_b64encode(pdf_content).decode("utf-8")
+
+        content_blocks: list[dict] = []
+        for _, filename, pdf_bytes in pdfs:
+            pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+            content_blocks.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64,
+                    },
+                    "title": filename,
+                }
+            )
+
+        filename_list = "\n".join(f"  - {f}" for _, f, _ in pdfs)
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": (
+                    f"The {len(pdfs)} documents above are all from the same construction project. "
+                    f"Their filenames are:\n{filename_list}\n\n"
+                    "Identify the primary contract, ignore policy summaries and quote letters, "
+                    "and extract every insurance and surety coverage REQUIREMENT from the contract "
+                    "and any requirement-annexes. Set source_document_filename on each coverage "
+                    "and primary_contract_filename at the top level, using the filenames above."
+                ),
+            }
+        )
 
         response = await client.messages.create(
             model=model,
-            max_tokens=4096,
+            max_tokens=16384,
             system=system_prompt,
             tools=[EXTRACTION_TOOL],
             tool_choice={
                 "type": "tool",
                 "name": "extract_coverage_requirements",
             },
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": pdf_b64,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": "Analyze this construction contract and extract all insurance/surety coverage requirements.",
-                        },
-                    ],
-                }
-            ],
+            messages=[{"role": "user", "content": content_blocks}],
         )
 
         # Step 6: Parse tool_use response
@@ -563,7 +607,90 @@ async def analyze_contract(
             )
 
         extracted = tool_block.input  # Already a dict when using tool_use
+
+        # Diagnostic: surface response shape so 0-coverage outcomes are not silent
+        stop_reason = getattr(response, "stop_reason", None)
+        usage = getattr(response, "usage", None)
+        output_tokens = getattr(usage, "output_tokens", None) if usage else None
+        input_tokens = getattr(usage, "input_tokens", None) if usage else None
+        extracted_keys = (
+            list(extracted.keys()) if isinstance(extracted, dict) else None
+        )
+        raw_coverages = (
+            extracted.get("coverages", []) if isinstance(extracted, dict) else []
+        )
+        logger.info(
+            "Contract analysis API response: project_id=%s stop_reason=%s "
+            "input_tokens=%s output_tokens=%s extracted_keys=%s coverages_in_response=%d "
+            "total_coverages_found=%s contract_language=%s",
+            project_id,
+            stop_reason,
+            input_tokens,
+            output_tokens,
+            extracted_keys,
+            len(raw_coverages) if isinstance(raw_coverages, list) else -1,
+            extracted.get("total_coverages_found") if isinstance(extracted, dict) else None,
+            extracted.get("contract_language") if isinstance(extracted, dict) else None,
+        )
+        # Fail fast on truncation — partial extractions must not be saved as success
+        if stop_reason == "max_tokens":
+            raise ValueError(
+                f"Response truncated at max_tokens (output_tokens={output_tokens}). "
+                "Partial extraction rejected."
+            )
+
+        # Fail fast on count mismatch — indicates truncation or model inconsistency
+        reported_total = (
+            extracted.get("total_coverages_found")
+            if isinstance(extracted, dict)
+            else None
+        )
+        actual_count = len(raw_coverages) if isinstance(raw_coverages, list) else 0
+        if (
+            reported_total is not None
+            and isinstance(reported_total, int)
+            and reported_total != actual_count
+        ):
+            raise ValueError(
+                f"total_coverages_found={reported_total} but coverages array has "
+                f"{actual_count} items — response inconsistent, likely truncated"
+            )
+
         contract_language = extracted.get("contract_language", "es")
+
+        # Clear prior AI-extracted coverages for this project to prevent duplicates on
+        # re-analysis. Manually-added or manually-overridden coverages are preserved.
+        from sqlalchemy import delete
+
+        delete_stmt = delete(ProjectCoverage).where(
+            ProjectCoverage.broker_project_id == project_id,
+            ProjectCoverage.tenant_id == tenant_id,
+            ProjectCoverage.source == "ai_extraction",
+            ProjectCoverage.is_manual_override.is_(False),
+        )
+        delete_result = await db.execute(delete_stmt)
+        if delete_result.rowcount:
+            logger.info(
+                "Cleared %d prior AI-extracted coverages for project_id=%s",
+                delete_result.rowcount,
+                project_id,
+            )
+
+        # Backfill source_document_id from the model's classification of the primary
+        # contract. This replaces the prior "first uploaded PDF" heuristic, which
+        # could point source_document_id at an annex or policy summary.
+        primary_filename = (extracted.get("primary_contract_filename") or "").strip()
+        if primary_filename:
+            pdf_by_name = {fname: fid for fid, fname, _ in pdfs}
+            matched_id = pdf_by_name.get(primary_filename)
+            if matched_id is not None:
+                project.source_document_id = matched_id
+            else:
+                logger.warning(
+                    "primary_contract_filename=%r not in input PDFs for project_id=%s",
+                    primary_filename,
+                    project_id,
+                )
 
         # Step 7: Process each coverage through taxonomy pipeline
         coverages_created = []
@@ -587,13 +714,13 @@ async def analyze_contract(
         project.analysis_status = "completed"
         project.analysis_completed_at = datetime.now(timezone.utc)
 
-        if coverages_created:
+        if coverages_created and project.status != "gaps_identified":
             from flywheel.api.broker._shared import validate_transition
             validate_transition(
                 project.status, "gaps_identified", client_id=project.client_id
             )
             project.status = "gaps_identified"
-        # else keep "new_request" -- no coverages found
+        # else keep current status -- no coverages found, or already in gaps_identified (re-run)
 
         # Store contract summary in project metadata
         contract_summary = extracted.get("contract_summary", "")
