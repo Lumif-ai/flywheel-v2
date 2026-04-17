@@ -1,4 +1,5 @@
 ---
+public: true
 name: gtm-pipeline
 version: "2.1"
 description: >

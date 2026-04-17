@@ -1,4 +1,5 @@
 ---
+public: true
 name: meeting-intelligence
 version: "1.0"
 description: >

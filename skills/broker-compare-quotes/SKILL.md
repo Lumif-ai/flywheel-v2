@@ -1,4 +1,5 @@
 ---
+public: true
 name: broker-compare-quotes
 version: "1.0"
 web_tier: 3

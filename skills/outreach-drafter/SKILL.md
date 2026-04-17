@@ -1,4 +1,5 @@
 ---
+public: true
 name: outreach-drafter
 version: "1.1"
 description: >

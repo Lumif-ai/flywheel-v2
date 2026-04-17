@@ -1,4 +1,5 @@
 ---
+public: true
 name: meeting-processor
 version: "2.3"
 description: >

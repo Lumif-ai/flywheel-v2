@@ -1,4 +1,5 @@
 ---
+public: true
 name: meeting-prep
 version: "4.1"
 description: >

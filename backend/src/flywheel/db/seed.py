@@ -62,7 +62,7 @@ class SkillData:
     token_budget: int | None = None
     parameters: dict = field(default_factory=dict)
     enabled: bool = True
-    protected: bool = True
+    protected: bool = False
 
 
 @dataclass
@@ -297,11 +297,13 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
         if not isinstance(enabled, bool):
             enabled = True
 
-        # Read public flag from frontmatter (default False = protected by default)
-        is_public = data.get("public", False)
-        if not isinstance(is_public, bool):
-            is_public = False
-        protected = not is_public
+        # Read protected flag from frontmatter (default False = CC-as-brain, per
+        # platform architecture: backend makes no LLM calls when CC is the caller).
+        # Opt-in server-side execution via `protected: true`.
+        protected = bool(data.get("protected", False))
+        # Back-compat: honor `public: true` as explicit opt-out of protection.
+        if data.get("public") is True:
+            protected = False
 
         skills.append(
             SkillData(

@@ -847,7 +847,7 @@ class SkillDefinition(Base):
         Boolean, nullable=False, server_default=text("true")
     )
     protected: Mapped[bool] = mapped_column(
-        Boolean, nullable=False, server_default=text("true")
+        Boolean, nullable=False, server_default=text("false")
     )
     token_budget: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(

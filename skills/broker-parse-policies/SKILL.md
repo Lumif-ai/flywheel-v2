@@ -1,4 +1,5 @@
 ---
+public: true
 name: broker-parse-policies
 version: "1.0"
 web_tier: 3
