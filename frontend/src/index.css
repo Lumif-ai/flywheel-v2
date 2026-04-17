@@ -418,7 +418,8 @@
    selectable-only (canvas holds the visible glyphs). <mark> must inherit
    or text would render twice (once on canvas, once on the mark). */
 .excerpt-highlight {
-  background-color: #fef08a; /* Tailwind yellow-200 */
+  background-color: rgba(254, 240, 138, 0.55); /* translucent yellow-200 */
+  mix-blend-mode: multiply; /* lets canvas-layer text show through */
   padding: 0 1px;
   border-radius: 2px;
   color: inherit;
