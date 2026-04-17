@@ -96,6 +96,11 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
     }
   }
 
+  const fileObj = useMemo(
+    () => (pdfData instanceof Uint8Array ? { data: pdfData.slice() } : null),
+    [pdfData],
+  )
+
   // Loading state
   if (isLoading) {
     return (
@@ -104,11 +109,6 @@ export function FullDocumentViewer({ fileId, filename, onError }: FullDocumentVi
       </div>
     )
   }
-
-  const fileObj = useMemo(
-    () => (pdfData instanceof Uint8Array ? { data: pdfData.slice() } : null),
-    [pdfData],
-  )
 
   if (error || !fileObj) {
     return null
