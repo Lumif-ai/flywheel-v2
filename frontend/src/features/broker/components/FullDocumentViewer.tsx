@@ -291,6 +291,12 @@ export function FullDocumentViewer({
   const pageWidth = computedWidth()
   const needsHorizontalScroll = zoom !== 'fit-width'
   const showTabs = documents.length > 1
+  // Defensive clamp: if upstream sets currentPage out of range (e.g. clause click
+  // with source_page=10 while the active doc only has 2 pages), render a valid
+  // page instead of crashing react-pdf with "Failed to render PDF". Falls back to
+  // currentPage when numPages is still 0 (pdf not yet loaded).
+  const safePage =
+    numPages > 0 ? Math.min(Math.max(1, currentPage), numPages) : currentPage
 
   return (
     <div className="flex flex-col h-full">
@@ -352,7 +358,7 @@ export function FullDocumentViewer({
               }
             >
               <Page
-                pageNumber={currentPage}
+                pageNumber={safePage}
                 width={pageWidth}
                 renderTextLayer={true}
                 renderAnnotationLayer={true}

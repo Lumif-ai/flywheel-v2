@@ -41,28 +41,31 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
   } | null>(null)
 
   // Validity: if the document list changes and the current activeFileId is gone, pick the first.
+  // Auto-migration is a context switch, so clear any stale highlight/active card too.
   useEffect(() => {
     if (pdfDocuments.length === 0) {
-      if (activeFileId !== null) setActiveFileId(null)
+      if (activeFileId !== null) {
+        setActiveFileId(null)
+        setHighlight(null)
+        setActiveCoverageId(null)
+      }
       return
     }
     if (!pdfDocuments.some((d) => d.fileId === activeFileId)) {
       setActiveFileId(pdfDocuments[0].fileId)
+      setHighlight(null)
+      setActiveCoverageId(null)
     }
   }, [pdfDocuments, activeFileId])
 
-  // Clear highlight AND active card when the active document changes.
-  // Rationale: active card persistence lives INDEPENDENTLY of highlight decay
-  // (5s timer / scroll-away only clear highlight — see Plan 03). However, tab
-  // switching is a deliberate context change: showing a coral border on a card
-  // whose source doc is no longer visible would be misleading. Both clear here.
-  useEffect(() => {
-    setHighlight(null)
-    setActiveCoverageId(null)
-  }, [activeFileId])
-
+  // User-initiated tab click: clear highlight + active card (deliberate context change).
+  // NOTE: cross-doc clause clicks intentionally do NOT go through this path — they set
+  // activeFileId + highlight + activeCoverageId together via handleClauseClick so the
+  // highlight survives the switch.
   const handleFileChange = useCallback((fileId: string) => {
     setActiveFileId(fileId)
+    setHighlight(null)
+    setActiveCoverageId(null)
   }, [])
 
   const handlePageChange = useCallback((page: number) => {
@@ -96,11 +99,11 @@ export function AnalysisTab({ project }: AnalysisTabProps) {
       // Phase 143 note: Phase 144 fully implements multi-doc filtering; here we only switch
       // if source_document_id is non-null AND differs AND is a PDF we have.
       const targetFileId = coverage.source_document_id
-      if (
-        targetFileId &&
-        targetFileId !== activeFileId &&
-        pdfDocuments.some((d) => d.fileId === targetFileId)
-      ) {
+      if (targetFileId && !pdfDocuments.some((d) => d.fileId === targetFileId)) {
+        toast.info('Clause belongs to a document not available in the viewer')
+        return
+      }
+      if (targetFileId && targetFileId !== activeFileId) {
         setActiveFileId(targetFileId)
       }
 
