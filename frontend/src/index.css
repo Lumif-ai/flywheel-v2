@@ -410,3 +410,16 @@
   border: 2px solid rgba(239,68,68,0.6);
   animation: pulse-soft 2s ease-in-out infinite;
 }
+
+/* ==================================================================
+   PDF EXCERPT HIGHLIGHT (Phase 143 NAV-02)
+   ================================================================== */
+/* react-pdf's text layer sets color: transparent on spans so text is
+   selectable-only (canvas holds the visible glyphs). <mark> must inherit
+   or text would render twice (once on canvas, once on the mark). */
+.excerpt-highlight {
+  background-color: #fef08a; /* Tailwind yellow-200 */
+  padding: 0 1px;
+  border-radius: 2px;
+  color: inherit;
+}
