@@ -92,7 +92,7 @@ Single per-plan commit covering Task 3 (prod seed log artifacts live at /tmp —
 3. **Task 3: Real prod seed** — `/tmp/149-prod-seed.log` captured (3 added, 10 updated, 0 errors, COMMIT hit)
 4. **Task 4: SELECT verify + MIGRATION-NOTES.md** — `/tmp/149-verify-sql.txt` captured byte-matching hashes; `skills/broker/MIGRATION-NOTES.md` authored
 
-**Plan commit:** `0e9faef` — `chore(149): seed broker bundle to prod + document migration`
+**Plan commit:** `9ab93a1` — `chore(149): seed broker bundle to prod + document migration` (final hash after self-referential amends)
 
 ## Files Created/Modified
 
