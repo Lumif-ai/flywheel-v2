@@ -16,7 +16,8 @@ Functions:
 
 import base64
 import logging
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
+from decimal import Decimal, InvalidOperation
 from uuid import UUID
 
 import anthropic
@@ -144,6 +145,31 @@ EXTRACTION_TOOL = {
                 "type": "string",
                 "description": "Filename of the document you identified as the PRIMARY CONTRACT (the MSA/construction agreement being executed). Must match one of the input document filenames exactly. Return empty string if none of the inputs is a primary contract.",
             },
+            "misrouted_documents": {
+                "type": "array",
+                "description": (
+                    "Documents in this call that appear to be CURRENT POLICIES (COIs, "
+                    "declarations pages, in-force schedules) or CARRIER QUOTES rather than "
+                    "contract requirements. Populate ONLY when very confident. Do NOT "
+                    "extract coverages from these — list them here instead."
+                ),
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_document_filename": {"type": "string"},
+                        "detected_type": {
+                            "type": "string",
+                            "enum": ["coverage", "quote", "unknown"],
+                            "description": "Best guess at what the document actually is.",
+                        },
+                        "reason": {
+                            "type": "string",
+                            "description": "One-sentence human-readable reason.",
+                        },
+                    },
+                    "required": ["source_document_filename", "detected_type"],
+                },
+            },
         },
         "required": [
             "coverages",
@@ -160,6 +186,18 @@ EXTRACTION_TOOL = {
 # ---------------------------------------------------------------------------
 
 
+def _format_taxonomy(coverage_types: list[dict]) -> str:
+    """Format the coverage taxonomy into a prompt-ready bullet list.
+
+    Shared by build_extraction_prompt and build_policy_extraction_prompt so both
+    extraction passes see the same taxonomy rendering.
+    """
+    return "\n".join(
+        f"- {ct['key']}: {ct['display_name']} (aliases: {', '.join(ct['aliases'])})"
+        for ct in coverage_types
+    )
+
+
 def build_extraction_prompt(
     coverage_types: list[dict], project_currency: str
 ) -> str:
@@ -172,10 +210,7 @@ def build_extraction_prompt(
     Returns:
         Full system prompt string for the extraction API call.
     """
-    taxonomy_block = "\n".join(
-        f"- {ct['key']}: {ct['display_name']} (aliases: {', '.join(ct['aliases'])})"
-        for ct in coverage_types
-    )
+    taxonomy_block = _format_taxonomy(coverage_types)
 
     return f"""\
 You are an expert insurance and surety analyst specializing in construction contracts.
@@ -190,6 +225,17 @@ DOCUMENT TYPES you may receive:
   These describe existing policies, not contract requirements.
 - Quote letters from carriers or surety companies -- DO NOT extract. These are proposals,
   not requirements.
+
+If a document in this call appears to be a Certificate of Insurance (COI), a policy
+declarations page, an in-force coverage schedule, or a carrier quote letter, DO NOT
+extract coverages from it. Instead, add an entry to `misrouted_documents` with:
+- `source_document_filename`: the EXACT filename as provided,
+- `detected_type`: one of `'coverage' | 'quote' | 'unknown'`,
+- `reason`: a one-sentence explanation (e.g., "Document is a COI listing policy
+  numbers -- belongs in the coverage zone").
+Be conservative: only flag when very confident. Borderline docs get no misrouted
+entry and zero extracted coverages. `misrouted_documents` may be absent or empty
+on normal runs.
 
 Identify the PRIMARY CONTRACT (the agreement being executed) and set
 primary_contract_filename to its exact input filename. If multiple documents look
@@ -243,6 +289,173 @@ COVERAGE CATEGORIES:
 NOTE: Contracts may be in Spanish or Portuguese (Latin American construction industry).
 Analyze in the original language and provide raw_coverage_name in the original language.
 Always include source_excerpt with the exact verbatim text from the contract."""
+
+
+# ---------------------------------------------------------------------------
+# Policy extraction (current in-force coverage pass — Phase 145 Plan 02)
+# ---------------------------------------------------------------------------
+
+# Tool schema for the second extraction pass: pulls current in-force policies
+# out of COIs / policy summaries / schedules so we can populate the
+# current_limit / current_carrier / current_policy_number / current_expiry
+# fields on matched ProjectCoverage rows and surface orphans. Mirrors
+# EXTRACTION_TOOL's misrouted_documents mechanism so no document is silently
+# dropped.
+POLICY_EXTRACTION_TOOL = {
+    "name": "extract_current_policies",
+    "description": (
+        "Extract current in-force insurance policies and surety bonds from "
+        "Certificates of Insurance (COIs), policy summaries, and schedules. "
+        "Do NOT extract contract requirements or quote proposals."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "documents": {
+                "type": "array",
+                "description": "One entry per input document. Use filename as id.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "source_document_filename": {"type": "string"},
+                        "document_misrouted": {
+                            "type": "boolean",
+                            "description": (
+                                "True ONLY if this document is clearly NOT a current-"
+                                "policy / COI / in-force policy summary (e.g., it is a "
+                                "contract, MSA, or carrier quote letter). Be conservative "
+                                "-- only flag if very high confidence."
+                            ),
+                        },
+                        "misrouted_reason": {
+                            "type": "string",
+                            "description": "Short human-readable reason when document_misrouted=true.",
+                        },
+                        "detected_type": {
+                            "type": "string",
+                            "enum": ["requirements", "quote", "unknown"],
+                            "description": "Best guess at what this document actually is, when misrouted.",
+                        },
+                    },
+                    "required": ["source_document_filename", "document_misrouted"],
+                },
+            },
+            "policies": {
+                "type": "array",
+                "description": "All extracted policies across ALL documents in this call.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "coverage_type_key": {
+                            "type": "string",
+                            "description": "Canonical snake_case key from taxonomy.",
+                        },
+                        "raw_coverage_name": {"type": "string"},
+                        "category": {"type": "string"},
+                        "carrier": {"type": "string"},
+                        "policy_number": {"type": "string"},
+                        "limit_amount": {
+                            "type": ["number", "null"],
+                            "description": "Numeric limit; null if unstated.",
+                        },
+                        "limit_currency": {"type": "string"},
+                        "expiry_date": {
+                            "type": "string",
+                            "description": "ISO 8601 date (YYYY-MM-DD) when the policy expires.",
+                        },
+                        "source_document_filename": {"type": "string"},
+                        "confidence_score": {"type": "number"},
+                    },
+                    "required": ["coverage_type_key", "source_document_filename"],
+                },
+            },
+            "total_policies_found": {"type": "integer"},
+        },
+        "required": ["documents", "policies", "total_policies_found"],
+    },
+}
+
+
+def build_policy_extraction_prompt(
+    coverage_types: list[dict], project_currency: str
+) -> str:
+    """Build the policy-extraction system prompt with embedded taxonomy.
+
+    Mirrors `build_extraction_prompt` but for the coverage-zone pass: the
+    model extracts current in-force policies instead of contract requirements
+    and emits a per-document misrouted flag when it sees a contract / quote
+    by mistake.
+
+    Args:
+        coverage_types: List of dicts with key, display_name, aliases, category.
+        project_currency: The project's default currency (e.g. 'MXN').
+
+    Returns:
+        Full system prompt string for the policy-extraction API call.
+    """
+    taxonomy_block = _format_taxonomy(coverage_types)
+
+    return f"""\
+You are an expert insurance and surety analyst. You will receive ONE OR MORE
+documents and must extract CURRENT IN-FORCE POLICIES -- i.e., the coverage the
+insured already has.
+
+DOCUMENT TYPES you may receive:
+- Certificates of Insurance (COIs) -- extract from these.
+- Current policy summaries / declarations pages / schedules of insurance -- extract.
+- Surety bond schedules listing in-force bonds -- extract.
+
+DOCUMENT TYPES you MUST REFUSE:
+- Construction contracts / MSAs / bond requirement annexes -- DO NOT extract.
+  These describe requirements, not current coverage.
+- Carrier quote letters / surety proposals -- DO NOT extract. These are
+  proposals, not in-force policies.
+
+If you receive a document that is NOT a current-policy / COI / in-force
+policy summary, set its `document_misrouted` flag to true with a concise
+`misrouted_reason` and a `detected_type` ('requirements' | 'quote' | 'unknown').
+Do NOT attempt to extract policies from a misrouted document. Set
+document_misrouted to true ONLY when you are very confident the document is
+not what the user intended (e.g., it is clearly a contract with no policy
+numbers). Borderline documents get document_misrouted=false and zero
+extracted policies.
+
+COVERAGE TYPE TAXONOMY -- map each policy to one of these canonical keys:
+{taxonomy_block}
+
+INSTRUCTIONS:
+- Extract every policy / bond stated as CURRENTLY IN-FORCE.
+- Use the canonical snake_case key from the taxonomy above. If a genuinely
+  distinct type exists and is not in the taxonomy, use a new snake_case key
+  (the backend will create the type if needed).
+- total_policies_found MUST equal the length of the policies array.
+
+POLICY FIELDS:
+- carrier: The insurer / surety company name (e.g., "Travelers", "Liberty Mutual").
+- policy_number: The policy or bond number as printed.
+- limit_amount: Numeric limit. If the limit is stated as "per occurrence" vs
+  "aggregate", prefer the per-occurrence limit for liability coverages and
+  the penal sum for surety bonds.
+- limit_currency: ISO code. Project currency is {project_currency}.
+- expiry_date: ISO 8601 YYYY-MM-DD.
+- source_document_filename: EXACT filename of the input document.
+- confidence_score: 0.0-1.0.
+
+NOTE: Documents may be in Spanish or Portuguese. Analyze in the original
+language. Policy numbers and carrier names stay in their original casing.
+"""
+
+
+def _normalize_coverage_key(key: str | None) -> str:
+    """Normalize canonical coverage_type_key for exact matching.
+
+    Keys are canonical snake_case post-Phase 140. Defensive strip+lower only.
+    DO NOT use `_normalize_coverage_type` from quote_extractor.py -- that one
+    replaces underscores with spaces and is for display-name fuzzy matching.
+    """
+    if not key:
+        return ""
+    return key.strip().lower()
 
 
 # ---------------------------------------------------------------------------
@@ -500,6 +713,297 @@ async def _process_extracted_coverage(
 
 
 # ---------------------------------------------------------------------------
+# Current-policies extraction pass (coverage-zone docs)
+# ---------------------------------------------------------------------------
+
+
+async def extract_current_policies(
+    db: AsyncSession,
+    tenant_id: UUID,
+    project_id: UUID,
+    policy_pdfs: list[tuple[UUID, str, bytes]],
+    taxonomy_types: list[dict],
+    model: str,
+    api_key: str | None = None,
+) -> dict:
+    """Extract current in-force policies and update matching ProjectCoverage rows.
+
+    Mirrors the structure of analyze_contract but runs the new
+    POLICY_EXTRACTION_TOOL on `document_type='coverage'` PDFs only. Populates
+    current_limit / current_carrier / current_policy_number / current_expiry
+    on rows matched by canonical coverage_type_key. Unmatched policies become
+    orphans and are returned in the result so the caller can persist them to
+    `project.metadata_.orphan_policies[]`. Preserves rows with
+    is_manual_override=True untouched.
+
+    Args:
+        db: Async SQLAlchemy session. Caller owns the transaction; this
+            function flushes but does not commit.
+        tenant_id: Tenant UUID.
+        project_id: BrokerProject UUID.
+        policy_pdfs: List of (file_id, filename, bytes) tuples tagged as
+            coverage-zone docs. May be empty — function early-returns.
+        taxonomy_types: Pre-loaded taxonomy (same shape as _load_taxonomy).
+        model: Anthropic model name.
+        api_key: Optional override; defaults to settings.flywheel_subsidy_api_key.
+
+    Returns:
+        On success:
+            {
+                "status": "completed",
+                "policies_extracted": int,
+                "rows_updated": int,
+                "orphans": [{coverage_type_key, carrier, policy_number,
+                             limit_amount, source_document_filename}],
+                "misrouted": {file_id_str: {reason: str, detected_type: str}},
+            }
+        On failure:
+            {"status": "failed", "error": str}
+    """
+    # Early exit — no coverage-zone docs means nothing to do.
+    if not policy_pdfs:
+        return {
+            "status": "completed",
+            "policies_extracted": 0,
+            "rows_updated": 0,
+            "orphans": [],
+            "misrouted": {},
+        }
+
+    try:
+        # Load project for currency context.
+        project_result = await db.execute(
+            select(BrokerProject).where(
+                BrokerProject.id == project_id,
+                BrokerProject.tenant_id == tenant_id,
+            )
+        )
+        project = project_result.scalar_one_or_none()
+        if project is None:
+            logger.error(
+                "extract_current_policies: project not found project_id=%s tenant_id=%s",
+                project_id,
+                tenant_id,
+            )
+            return {"status": "failed", "error": "Project not found"}
+
+        system_prompt = build_policy_extraction_prompt(
+            taxonomy_types, project.currency or "USD"
+        )
+
+        effective_api_key = api_key or settings.flywheel_subsidy_api_key
+        client = anthropic.AsyncAnthropic(api_key=effective_api_key)
+
+        # Build one document block per PDF + trailing text block listing filenames.
+        content_blocks: list[dict] = []
+        for _, filename, pdf_bytes in policy_pdfs:
+            pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+            content_blocks.append(
+                {
+                    "type": "document",
+                    "source": {
+                        "type": "base64",
+                        "media_type": "application/pdf",
+                        "data": pdf_b64,
+                    },
+                    "title": filename,
+                }
+            )
+
+        filename_list = "\n".join(f"  - {f}" for _, f, _ in policy_pdfs)
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": (
+                    f"The {len(policy_pdfs)} documents above are current-policy / "
+                    "COI / in-force schedule uploads. Their filenames are:\n"
+                    f"{filename_list}\n\n"
+                    "Extract every current in-force policy and bond. Use the canonical "
+                    "taxonomy keys. Populate the `documents` array with one entry per "
+                    "input filename, flagging misrouted contracts/quotes. The "
+                    "`policies` array is flat across all input documents — set "
+                    "source_document_filename on each policy."
+                ),
+            }
+        )
+
+        response = await client.messages.create(
+            model=model,
+            max_tokens=16384,
+            system=system_prompt,
+            tools=[POLICY_EXTRACTION_TOOL],
+            tool_choice={
+                "type": "tool",
+                "name": "extract_current_policies",
+            },
+            messages=[{"role": "user", "content": content_blocks}],
+        )
+
+        tool_block = next(
+            (b for b in response.content if b.type == "tool_use"), None
+        )
+        if tool_block is None:
+            raise ValueError(
+                "Claude response did not contain a tool_use block (policy pass)"
+            )
+
+        extracted = tool_block.input
+
+        stop_reason = getattr(response, "stop_reason", None)
+        usage = getattr(response, "usage", None)
+        output_tokens = getattr(usage, "output_tokens", None) if usage else None
+        input_tokens = getattr(usage, "input_tokens", None) if usage else None
+        raw_policies = (
+            extracted.get("policies", []) if isinstance(extracted, dict) else []
+        )
+        logger.info(
+            "Policy extraction API response: project_id=%s stop_reason=%s "
+            "input_tokens=%s output_tokens=%s policies_in_response=%d "
+            "total_policies_found=%s",
+            project_id,
+            stop_reason,
+            input_tokens,
+            output_tokens,
+            len(raw_policies) if isinstance(raw_policies, list) else -1,
+            extracted.get("total_policies_found") if isinstance(extracted, dict) else None,
+        )
+
+        # Fail fast on truncation — partial extractions must not be saved as success.
+        if stop_reason == "max_tokens":
+            raise ValueError(
+                f"Policy response truncated at max_tokens (output_tokens={output_tokens}). "
+                "Partial extraction rejected."
+            )
+
+        reported_total = (
+            extracted.get("total_policies_found")
+            if isinstance(extracted, dict)
+            else None
+        )
+        actual_count = len(raw_policies) if isinstance(raw_policies, list) else 0
+        if (
+            reported_total is not None
+            and isinstance(reported_total, int)
+            and reported_total != actual_count
+        ):
+            raise ValueError(
+                f"total_policies_found={reported_total} but policies array has "
+                f"{actual_count} items — response inconsistent, likely truncated"
+            )
+
+        # Surface per-document misrouted flags keyed by file_id string.
+        filename_to_file_id = {fname: str(fid) for fid, fname, _ in policy_pdfs}
+        misrouted: dict[str, dict] = {}
+        for doc_entry in extracted.get("documents", []) or []:
+            if doc_entry.get("document_misrouted"):
+                fname = doc_entry.get("source_document_filename") or ""
+                file_id_str = filename_to_file_id.get(fname)
+                if file_id_str:
+                    misrouted[file_id_str] = {
+                        "reason": doc_entry.get(
+                            "misrouted_reason",
+                            "Document does not appear to be a current policy",
+                        ),
+                        "detected_type": doc_entry.get("detected_type", "unknown"),
+                    }
+
+        # Load existing ProjectCoverage rows to match against.
+        cov_result = await db.execute(
+            select(ProjectCoverage).where(
+                ProjectCoverage.broker_project_id == project_id,
+                ProjectCoverage.tenant_id == tenant_id,
+            )
+        )
+        existing_coverages = cov_result.scalars().all()
+        coverage_by_key = {
+            _normalize_coverage_key(c.coverage_type_key): c
+            for c in existing_coverages
+            if c.coverage_type_key
+        }
+
+        rows_updated = 0
+        orphans: list[dict] = []
+        for policy in extracted.get("policies", []) or []:
+            norm_key = _normalize_coverage_key(policy.get("coverage_type_key"))
+            if not norm_key:
+                continue
+            match = coverage_by_key.get(norm_key)
+            if match is None:
+                orphans.append(
+                    {
+                        "coverage_type_key": policy.get("coverage_type_key"),
+                        "carrier": policy.get("carrier"),
+                        "policy_number": policy.get("policy_number"),
+                        "limit_amount": policy.get("limit_amount"),
+                        "source_document_filename": policy.get("source_document_filename"),
+                    }
+                )
+                continue
+            if match.is_manual_override:
+                logger.info(
+                    "Skipping policy for %s: is_manual_override=True preserves broker edit",
+                    norm_key,
+                )
+                continue
+
+            # Write current_* fields. Use Decimal via str() so float-binary
+            # drift does not corrupt money values.
+            limit_amount = policy.get("limit_amount")
+            if limit_amount is not None:
+                try:
+                    match.current_limit = Decimal(str(limit_amount))
+                except (InvalidOperation, TypeError, ValueError):
+                    logger.warning(
+                        "Invalid current_limit %r for %s", limit_amount, norm_key
+                    )
+            if policy.get("carrier"):
+                match.current_carrier = policy["carrier"]
+            if policy.get("policy_number"):
+                match.current_policy_number = policy["policy_number"]
+            expiry = policy.get("expiry_date")
+            if expiry:
+                try:
+                    match.current_expiry = date.fromisoformat(expiry)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "Invalid expiry_date %r for %s", expiry, norm_key
+                    )
+            rows_updated += 1
+
+        await db.flush()
+
+        logger.info(
+            "Policy extraction completed for project_id=%s: %d policies extracted, "
+            "%d rows updated, %d orphans, %d misrouted",
+            project_id,
+            actual_count,
+            rows_updated,
+            len(orphans),
+            len(misrouted),
+        )
+
+        return {
+            "status": "completed",
+            "policies_extracted": actual_count,
+            "rows_updated": rows_updated,
+            "orphans": orphans,
+            "misrouted": misrouted,
+        }
+
+    except Exception as exc:
+        import traceback
+        logger.error(
+            "Policy extraction failed for project_id=%s tenant_id=%s: %s: %s\n%s",
+            project_id,
+            tenant_id,
+            type(exc).__name__,
+            exc,
+            traceback.format_exc(),
+        )
+        return {"status": "failed", "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
 
@@ -508,18 +1012,29 @@ async def analyze_contract(
     db: AsyncSession,
     tenant_id: UUID,
     project_id: UUID,
-    pdfs: list[tuple[UUID, str, bytes]],
+    pdfs: list[tuple[UUID, str, bytes, str]],
     api_key: str | None = None,
 ) -> dict:
     """Analyze one or more construction-project PDFs and extract coverage requirements.
 
-    Accepts the full set of PDFs attached to a project. The model classifies which
-    document is the primary contract and extracts coverage requirements from the
-    contract + its referenced exhibits/annexes. source_document_id is backfilled
-    from the model's classification.
+    Accepts the full set of PDFs attached to a project. PDFs are partitioned by
+    their `document_type` tag (fourth tuple element) and dispatched to two
+    passes:
 
-    On truncation or count mismatch: sets analysis_status='failed'. Does NOT accept
-    partial extraction as success.
+    * `document_type='requirements'` (MSAs, annexes, default for legacy) →
+      contract-requirements extraction populating `required_limit` /
+      `required_terms` / etc.
+    * `document_type='coverage'` (COIs, policy schedules) →
+      `extract_current_policies` populating `current_limit` / `current_carrier`
+      / `current_policy_number` / `current_expiry` on matched rows, with
+      orphans landing in `project.metadata_.orphan_policies[]`.
+
+    Misrouted documents from BOTH passes are merged into
+    `misrouted_by_file_id` in the return dict so the caller can persist the
+    flag onto `metadata.documents[i]` (Plan 03).
+
+    On truncation or count mismatch: sets analysis_status='failed'. Does NOT
+    accept partial extraction as success.
 
     Args:
         db: Async SQLAlchemy session. Caller sets RLS context and manages
@@ -527,13 +1042,18 @@ async def analyze_contract(
             not commit.
         tenant_id: Tenant UUID.
         project_id: BrokerProject UUID to analyze.
-        pdfs: List of (file_id, filename, content_bytes) tuples. Must be non-empty.
+        pdfs: List of (file_id, filename, content_bytes, document_type)
+            tuples. Must be non-empty. `document_type` is 'requirements' |
+            'coverage'; legacy docs default to 'requirements' via
+            `_get_project_pdfs`.
         api_key: Optional explicit API key. If None, uses
                  settings.flywheel_subsidy_api_key (background job default).
 
     Returns:
-        Dict with keys: status, coverages_found, contract_language,
-        contract_summary. On error: status='failed', error=str.
+        Dict with keys: status, coverages_found, coverages, contract_language,
+        contract_summary, policies_extracted, policy_rows_updated,
+        orphans_count, misrouted_by_file_id. On error: status='failed',
+        error=str.
     """
     try:
         # Step 1: Update project analysis_status to 'running'
@@ -571,121 +1091,37 @@ async def analyze_contract(
             db, tenant_id, "contract_analysis", "claude-opus-4-6"
         )
 
-        # Step 4: Build dynamic prompt with taxonomy
-        system_prompt = build_extraction_prompt(taxonomy_types, project.currency)
-
-        # Step 5: Build and send Claude API request with one document block per PDF
+        # Step 4: Partition PDFs by document_type. Legacy docs default to
+        # 'requirements' (set by _get_project_pdfs).
         if not pdfs:
             raise ValueError("analyze_contract called with no PDFs")
 
-        effective_api_key = api_key or settings.flywheel_subsidy_api_key
-        client = anthropic.AsyncAnthropic(api_key=effective_api_key)
-
-        content_blocks: list[dict] = []
-        for _, filename, pdf_bytes in pdfs:
-            pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
-            content_blocks.append(
-                {
-                    "type": "document",
-                    "source": {
-                        "type": "base64",
-                        "media_type": "application/pdf",
-                        "data": pdf_b64,
-                    },
-                    "title": filename,
-                }
-            )
-
-        filename_list = "\n".join(f"  - {f}" for _, f, _ in pdfs)
-        content_blocks.append(
-            {
-                "type": "text",
-                "text": (
-                    f"The {len(pdfs)} documents above are all from the same construction project. "
-                    f"Their filenames are:\n{filename_list}\n\n"
-                    "Identify the primary contract, ignore policy summaries and quote letters, "
-                    "and extract every insurance and surety coverage REQUIREMENT from the contract "
-                    "and any requirement-annexes. Set source_document_filename on each coverage "
-                    "and primary_contract_filename at the top level, using the filenames above."
-                ),
-            }
-        )
-
-        response = await client.messages.create(
-            model=model,
-            max_tokens=16384,
-            system=system_prompt,
-            tools=[EXTRACTION_TOOL],
-            tool_choice={
-                "type": "tool",
-                "name": "extract_coverage_requirements",
-            },
-            messages=[{"role": "user", "content": content_blocks}],
-        )
-
-        # Step 6: Parse tool_use response
-        tool_block = next(
-            (b for b in response.content if b.type == "tool_use"), None
-        )
-        if tool_block is None:
-            raise ValueError(
-                "Claude response did not contain a tool_use block"
-            )
-
-        extracted = tool_block.input  # Already a dict when using tool_use
-
-        # Diagnostic: surface response shape so 0-coverage outcomes are not silent
-        stop_reason = getattr(response, "stop_reason", None)
-        usage = getattr(response, "usage", None)
-        output_tokens = getattr(usage, "output_tokens", None) if usage else None
-        input_tokens = getattr(usage, "input_tokens", None) if usage else None
-        extracted_keys = (
-            list(extracted.keys()) if isinstance(extracted, dict) else None
-        )
-        raw_coverages = (
-            extracted.get("coverages", []) if isinstance(extracted, dict) else []
-        )
+        requirements_pdfs = [
+            (fid, fname, content)
+            for fid, fname, content, dt in pdfs
+            if dt == "requirements"
+        ]
+        coverage_pdfs = [
+            (fid, fname, content)
+            for fid, fname, content, dt in pdfs
+            if dt == "coverage"
+        ]
         logger.info(
-            "Contract analysis API response: project_id=%s stop_reason=%s "
-            "input_tokens=%s output_tokens=%s extracted_keys=%s coverages_in_response=%d "
-            "total_coverages_found=%s contract_language=%s",
+            "Analysis dispatch: project_id=%s requirements=%d coverage=%d",
             project_id,
-            stop_reason,
-            input_tokens,
-            output_tokens,
-            extracted_keys,
-            len(raw_coverages) if isinstance(raw_coverages, list) else -1,
-            extracted.get("total_coverages_found") if isinstance(extracted, dict) else None,
-            extracted.get("contract_language") if isinstance(extracted, dict) else None,
+            len(requirements_pdfs),
+            len(coverage_pdfs),
         )
-        # Fail fast on truncation — partial extractions must not be saved as success
-        if stop_reason == "max_tokens":
+
+        if not requirements_pdfs and not coverage_pdfs:
             raise ValueError(
-                f"Response truncated at max_tokens (output_tokens={output_tokens}). "
-                "Partial extraction rejected."
+                "analyze_contract called with no usable PDFs (all had unknown document_type)"
             )
 
-        # Fail fast on count mismatch — indicates truncation or model inconsistency
-        reported_total = (
-            extracted.get("total_coverages_found")
-            if isinstance(extracted, dict)
-            else None
-        )
-        actual_count = len(raw_coverages) if isinstance(raw_coverages, list) else 0
-        if (
-            reported_total is not None
-            and isinstance(reported_total, int)
-            and reported_total != actual_count
-        ):
-            raise ValueError(
-                f"total_coverages_found={reported_total} but coverages array has "
-                f"{actual_count} items — response inconsistent, likely truncated"
-            )
-
-        contract_language = extracted.get("contract_language", "es")
-
-        # Clear prior AI-extracted coverages for this project to prevent duplicates on
-        # re-analysis. Manually-added or manually-overridden coverages are preserved.
+        # Step 5: UNCONDITIONALLY clear prior AI-extracted coverages. This
+        # runs on every invocation so coverage-only re-runs start from a
+        # clean slate. Manually-added or manually-overridden coverages are
+        # preserved.
         from sqlalchemy import delete
 
         delete_stmt = delete(ProjectCoverage).where(
@@ -701,71 +1137,243 @@ async def analyze_contract(
                 delete_result.rowcount,
                 project_id,
             )
+        await db.flush()
 
-        # Build filename->id map once; used for both primary-contract backfill
-        # and per-coverage source_document_id resolution.
-        pdf_by_name = {fname: fid for fid, fname, _ in pdfs}
+        # State the rest of the function reads — initialized to defaults so
+        # the no-requirements branch still has valid values.
+        coverages_created: list[dict] = []
+        contract_language = project.language or "es"
+        contract_summary = ""
+        req_misrouted: dict[str, dict] = {}
 
-        # Backfill source_document_id from the model's classification of the primary
-        # contract. This replaces the prior "first uploaded PDF" heuristic, which
-        # could point source_document_id at an annex or policy summary.
-        primary_filename = (extracted.get("primary_contract_filename") or "").strip()
-        if primary_filename:
-            matched_id = pdf_by_name.get(primary_filename)
-            if matched_id is not None:
-                project.source_document_id = matched_id
-            else:
-                logger.warning(
-                    "primary_contract_filename=%r not in input PDFs for project_id=%s",
-                    primary_filename,
-                    project_id,
+        effective_api_key = api_key or settings.flywheel_subsidy_api_key
+
+        if requirements_pdfs:
+            # Step 6: Build dynamic prompt with taxonomy.
+            system_prompt = build_extraction_prompt(
+                taxonomy_types, project.currency
+            )
+
+            # Step 7: Build and send Claude API request with one document
+            # block per requirements PDF.
+            client = anthropic.AsyncAnthropic(api_key=effective_api_key)
+
+            content_blocks: list[dict] = []
+            for _, filename, pdf_bytes in requirements_pdfs:
+                pdf_b64 = base64.standard_b64encode(pdf_bytes).decode("utf-8")
+                content_blocks.append(
+                    {
+                        "type": "document",
+                        "source": {
+                            "type": "base64",
+                            "media_type": "application/pdf",
+                            "data": pdf_b64,
+                        },
+                        "title": filename,
+                    }
                 )
 
-        # Step 7: Process each coverage through taxonomy pipeline
-        coverages_created = []
-        for cov in extracted.get("coverages", []):
-            coverage = await _process_extracted_coverage(
-                cov, project, db, contract_language, pdf_by_name
-            )
-            db.add(coverage)
-            coverages_created.append(
+            filename_list = "\n".join(f"  - {f}" for _, f, _ in requirements_pdfs)
+            content_blocks.append(
                 {
-                    "coverage_type_key": cov["coverage_type_key"],
-                    "coverage_type": cov.get("raw_coverage_name", cov["coverage_type_key"]),
-                    "category": cov["category"],
-                    "confidence_score": cov.get("confidence_score"),
-                    "is_new_type": cov.get("is_new_type", False),
-                    "limit_currency": cov.get("limit_currency"),
+                    "type": "text",
+                    "text": (
+                        f"The {len(requirements_pdfs)} documents above are all from the same construction project. "
+                        f"Their filenames are:\n{filename_list}\n\n"
+                        "Identify the primary contract, ignore policy summaries and quote letters, "
+                        "and extract every insurance and surety coverage REQUIREMENT from the contract "
+                        "and any requirement-annexes. Set source_document_filename on each coverage "
+                        "and primary_contract_filename at the top level, using the filenames above."
+                    ),
                 }
             )
 
-        # Step 8: Update project status and metadata
+            response = await client.messages.create(
+                model=model,
+                max_tokens=16384,
+                system=system_prompt,
+                tools=[EXTRACTION_TOOL],
+                tool_choice={
+                    "type": "tool",
+                    "name": "extract_coverage_requirements",
+                },
+                messages=[{"role": "user", "content": content_blocks}],
+            )
+
+            # Step 8: Parse tool_use response
+            tool_block = next(
+                (b for b in response.content if b.type == "tool_use"), None
+            )
+            if tool_block is None:
+                raise ValueError(
+                    "Claude response did not contain a tool_use block"
+                )
+
+            extracted = tool_block.input  # Already a dict when using tool_use
+
+            # Diagnostic: surface response shape so 0-coverage outcomes are not silent
+            stop_reason = getattr(response, "stop_reason", None)
+            usage = getattr(response, "usage", None)
+            output_tokens = getattr(usage, "output_tokens", None) if usage else None
+            input_tokens = getattr(usage, "input_tokens", None) if usage else None
+            extracted_keys = (
+                list(extracted.keys()) if isinstance(extracted, dict) else None
+            )
+            raw_coverages = (
+                extracted.get("coverages", []) if isinstance(extracted, dict) else []
+            )
+            logger.info(
+                "Contract analysis API response: project_id=%s stop_reason=%s "
+                "input_tokens=%s output_tokens=%s extracted_keys=%s coverages_in_response=%d "
+                "total_coverages_found=%s contract_language=%s",
+                project_id,
+                stop_reason,
+                input_tokens,
+                output_tokens,
+                extracted_keys,
+                len(raw_coverages) if isinstance(raw_coverages, list) else -1,
+                extracted.get("total_coverages_found") if isinstance(extracted, dict) else None,
+                extracted.get("contract_language") if isinstance(extracted, dict) else None,
+            )
+            # Fail fast on truncation — partial extractions must not be saved as success
+            if stop_reason == "max_tokens":
+                raise ValueError(
+                    f"Response truncated at max_tokens (output_tokens={output_tokens}). "
+                    "Partial extraction rejected."
+                )
+
+            # Fail fast on count mismatch — indicates truncation or model inconsistency
+            reported_total = (
+                extracted.get("total_coverages_found")
+                if isinstance(extracted, dict)
+                else None
+            )
+            actual_count = len(raw_coverages) if isinstance(raw_coverages, list) else 0
+            if (
+                reported_total is not None
+                and isinstance(reported_total, int)
+                and reported_total != actual_count
+            ):
+                raise ValueError(
+                    f"total_coverages_found={reported_total} but coverages array has "
+                    f"{actual_count} items — response inconsistent, likely truncated"
+                )
+
+            contract_language = extracted.get("contract_language", "es")
+
+            # Build filename->id map once; used for both primary-contract backfill
+            # and per-coverage source_document_id resolution.
+            pdf_by_name = {fname: fid for fid, fname, _ in requirements_pdfs}
+
+            # Backfill source_document_id from the model's classification of the primary
+            # contract. This replaces the prior "first uploaded PDF" heuristic, which
+            # could point source_document_id at an annex or policy summary.
+            primary_filename = (extracted.get("primary_contract_filename") or "").strip()
+            if primary_filename:
+                matched_id = pdf_by_name.get(primary_filename)
+                if matched_id is not None:
+                    project.source_document_id = matched_id
+                else:
+                    logger.warning(
+                        "primary_contract_filename=%r not in input PDFs for project_id=%s",
+                        primary_filename,
+                        project_id,
+                    )
+
+            # Surface requirements-pass misrouted entries keyed by file_id string.
+            req_filename_to_file_id = {
+                fname: str(fid) for fid, fname, _ in requirements_pdfs
+            }
+            for entry in extracted.get("misrouted_documents", []) or []:
+                fname = entry.get("source_document_filename") or ""
+                fid = req_filename_to_file_id.get(fname)
+                if fid:
+                    req_misrouted[fid] = {
+                        "reason": entry.get(
+                            "reason",
+                            "Document does not appear to be a contract/requirements doc",
+                        ),
+                        "detected_type": entry.get("detected_type", "unknown"),
+                    }
+
+            # Step 9: Process each coverage through taxonomy pipeline
+            for cov in extracted.get("coverages", []):
+                coverage = await _process_extracted_coverage(
+                    cov, project, db, contract_language, pdf_by_name
+                )
+                db.add(coverage)
+                coverages_created.append(
+                    {
+                        "coverage_type_key": cov["coverage_type_key"],
+                        "coverage_type": cov.get("raw_coverage_name", cov["coverage_type_key"]),
+                        "category": cov["category"],
+                        "confidence_score": cov.get("confidence_score"),
+                        "is_new_type": cov.get("is_new_type", False),
+                        "limit_currency": cov.get("limit_currency"),
+                    }
+                )
+
+            # Status transition + language update only run when requirements
+            # extraction actually happened.
+            if coverages_created and project.status != "gaps_identified":
+                from flywheel.api.broker._shared import validate_transition
+                validate_transition(
+                    project.status, "gaps_identified", client_id=project.client_id
+                )
+                project.status = "gaps_identified"
+            # else keep current status -- no coverages found, or already in gaps_identified (re-run)
+
+            contract_summary = extracted.get("contract_summary", "")
+
+            # Update project language from contract if detected
+            if contract_language and contract_language in ("en", "es", "pt"):
+                project.language = contract_language
+
+        # Step 10: Policy extraction pass on coverage-zone PDFs. ALWAYS runs
+        # (the function itself early-returns cleanly when coverage_pdfs is
+        # empty) so a coverage-only re-run still updates policies + orphans.
+        policy_result = await extract_current_policies(
+            db=db,
+            tenant_id=tenant_id,
+            project_id=project_id,
+            policy_pdfs=coverage_pdfs,
+            taxonomy_types=taxonomy_types,
+            model=model,
+            api_key=api_key,
+        )
+        if policy_result.get("status") == "failed":
+            # Do not fail the whole analysis; surface in metadata and continue.
+            logger.error(
+                "Policy extraction failed for project %s: %s",
+                project_id,
+                policy_result.get("error"),
+            )
+            policy_result.setdefault("orphans", [])
+            policy_result.setdefault("misrouted", {})
+
+        # Merge misrouted dicts from both passes. file_id is globally unique
+        # so no collision is expected, but if one occurs policy-pass wins
+        # (it's the semantically narrower check).
+        merged_misrouted: dict[str, dict] = {}
+        merged_misrouted.update(req_misrouted)
+        merged_misrouted.update(policy_result.get("misrouted", {}) or {})
+
+        # Step 11: Update project completion state + metadata (ALWAYS runs).
         project.analysis_status = "completed"
         project.analysis_completed_at = datetime.now(timezone.utc)
 
-        if coverages_created and project.status != "gaps_identified":
-            from flywheel.api.broker._shared import validate_transition
-            validate_transition(
-                project.status, "gaps_identified", client_id=project.client_id
-            )
-            project.status = "gaps_identified"
-        # else keep current status -- no coverages found, or already in gaps_identified (re-run)
-
-        # Store contract summary in project metadata
-        contract_summary = extracted.get("contract_summary", "")
         project_meta = dict(project.metadata_) if project.metadata_ else {}
         project_meta["contract_summary"] = contract_summary
         project_meta["contract_language"] = contract_language
         project_meta["analysis_model"] = model
+        project_meta["orphan_policies"] = policy_result.get("orphans", [])
+        # Spread-and-reassign pattern: reassignment is required for SQLAlchemy
+        # JSONB dirty detection. Do NOT mutate project.metadata_ in place.
         project.metadata_ = project_meta
-
-        # Update project language from contract if detected
-        if contract_language and contract_language in ("en", "es", "pt"):
-            project.language = contract_language
 
         await db.flush()
 
-        # Step 9: Create BrokerActivity for successful analysis
+        # Step 12: Create BrokerActivity for successful analysis
         activity = BrokerActivity(
             tenant_id=tenant_id,
             broker_project_id=project_id,
@@ -780,16 +1388,25 @@ async def analyze_contract(
                 "new_types_created": sum(
                     1 for c in coverages_created if c.get("is_new_type")
                 ),
+                "policies_extracted": policy_result.get("policies_extracted", 0),
+                "policy_rows_updated": policy_result.get("rows_updated", 0),
+                "orphans_count": len(policy_result.get("orphans", [])),
+                "misrouted_count": len(merged_misrouted),
             },
         )
         db.add(activity)
         await db.flush()
 
         logger.info(
-            "Contract analysis completed for project_id=%s tenant_id=%s: %d coverages",
+            "Contract analysis completed for project_id=%s tenant_id=%s: "
+            "%d coverages, %d policies, %d rows updated, %d orphans, %d misrouted",
             project_id,
             tenant_id,
             len(coverages_created),
+            policy_result.get("policies_extracted", 0),
+            policy_result.get("rows_updated", 0),
+            len(policy_result.get("orphans", [])),
+            len(merged_misrouted),
         )
 
         return {
@@ -798,6 +1415,10 @@ async def analyze_contract(
             "coverages": coverages_created,
             "contract_language": contract_language,
             "contract_summary": contract_summary,
+            "policies_extracted": policy_result.get("policies_extracted", 0),
+            "policy_rows_updated": policy_result.get("rows_updated", 0),
+            "orphans_count": len(policy_result.get("orphans", [])),
+            "misrouted_by_file_id": merged_misrouted,
         }
 
     except Exception as exc:

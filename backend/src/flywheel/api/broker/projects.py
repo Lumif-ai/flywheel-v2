@@ -1298,12 +1298,17 @@ async def trigger_analysis(
 
 async def _get_project_pdfs(
     session, project, tenant_id: UUID
-) -> list[tuple[UUID, str, bytes]]:
+) -> list[tuple[UUID, str, bytes, str]]:
     """Retrieve all PDFs for a project from storage.
 
-    Returns a list of (file_id, filename, content) tuples in the order they
-    appear in project.metadata_.documents. Files that fail to download or
-    have no storage_path are skipped. Non-PDF documents are ignored.
+    Returns a list of (file_id, filename, content, document_type) tuples in
+    the order they appear in project.metadata_.documents. Files that fail to
+    download or have no storage_path are skipped. Non-PDF documents are
+    ignored.
+
+    Tuples are (file_id, filename, content, document_type). document_type
+    defaults to 'requirements' for legacy docs without the field (backward
+    compat for pre-Phase-145 uploads).
 
     Does NOT pick a "source" PDF — the analyzer classifies which one is the
     primary contract and backfills source_document_id after extraction.
@@ -1316,6 +1321,14 @@ async def _get_project_pdfs(
     pdf_docs = [d for d in docs if d.get("mimetype") == "application/pdf"]
     if not pdf_docs:
         return []
+
+    # Map file_id -> document_type. Legacy docs pre-Phase-145 have no
+    # document_type key; default to 'requirements' so dispatch below routes
+    # them through the existing extraction pipeline.
+    doc_type_by_file_id: dict[str, str] = {}
+    for d in pdf_docs:
+        fid_str = str(d["file_id"])
+        doc_type_by_file_id[fid_str] = d.get("document_type", "requirements")
 
     # Resolve each metadata doc to its UploadedFile row (for storage_path)
     file_ids = []
@@ -1331,7 +1344,7 @@ async def _get_project_pdfs(
     )
     rows_by_id = {row.id: row for row in result.scalars().all()}
 
-    pdfs: list[tuple[UUID, str, bytes]] = []
+    pdfs: list[tuple[UUID, str, bytes, str]] = []
     for fid in file_ids:
         row = rows_by_id.get(fid)
         if not row or not row.storage_path:
@@ -1349,7 +1362,8 @@ async def _get_project_pdfs(
             )
             continue
         if content:
-            pdfs.append((row.id, row.filename, content))
+            doc_type = doc_type_by_file_id.get(str(row.id), "requirements")
+            pdfs.append((row.id, row.filename, content, doc_type))
 
     return pdfs
 
