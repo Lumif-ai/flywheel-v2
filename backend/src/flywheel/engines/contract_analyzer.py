@@ -32,6 +32,7 @@ from flywheel.db.models import (
     CoverageType,
     ProjectCoverage,
 )
+from flywheel.engines.gap_detector import detect_gaps, summarize_gaps
 from flywheel.engines.model_config import get_engine_model
 
 # ---------------------------------------------------------------------------
@@ -1139,6 +1140,28 @@ async def analyze_contract(
             )
         await db.flush()
 
+        # Reset prior misrouted flags on ALL documents before re-analysis.
+        # Safer than clearing only coverage-typed docs — keeps the slate clean.
+        # The new pass will re-apply flags only for truly misrouted docs.
+        # Both passes now emit structured misrouted flags (Plan 02 Task 2b
+        # extended EXTRACTION_TOOL + POLICY_EXTRACTION_TOOL), so clearing ALL
+        # `misrouted` keys is correct.
+        #
+        # Spread-and-reassign (required for SQLAlchemy JSONB dirty detection).
+        pre_meta = dict(project.metadata_) if project.metadata_ else {}
+        pre_docs = list(pre_meta.get("documents", []))
+        reset_docs: list[dict] = []
+        for d in pre_docs:
+            if isinstance(d, dict) and "misrouted" in d:
+                clean = dict(d)
+                clean.pop("misrouted", None)
+                reset_docs.append(clean)
+            else:
+                reset_docs.append(d)
+        pre_meta["documents"] = reset_docs
+        project.metadata_ = pre_meta
+        await db.flush()
+
         # State the rest of the function reads — initialized to defaults so
         # the no-requirements branch still has valid values.
         coverages_created: list[dict] = []
@@ -1358,6 +1381,39 @@ async def analyze_contract(
         merged_misrouted.update(req_misrouted)
         merged_misrouted.update(policy_result.get("misrouted", {}) or {})
 
+        # Persist merged misrouted flags (from both requirements + policy
+        # extraction passes) onto project.metadata_.documents[i]. Plan 02 built
+        # `merged_misrouted` above; this block writes it onto the JSONB
+        # documents array.
+        #
+        # ORDERING INVARIANT: this block MUST run BEFORE Step 11's
+        # `project_meta = dict(project.metadata_)` rebuild. Step 11's shallow
+        # copy picks up whatever documents[] state exists at that moment; if
+        # this write runs AFTER the rebuild, Step 11 overwrites the misrouted
+        # flags.
+        if merged_misrouted:
+            post_meta = dict(project.metadata_) if project.metadata_ else {}
+            post_docs = list(post_meta.get("documents", []))
+            updated_docs: list[dict] = []
+            for d in post_docs:
+                fid = d.get("file_id") if isinstance(d, dict) else None
+                if fid and fid in merged_misrouted:
+                    new_doc = dict(d)
+                    new_doc["misrouted"] = {
+                        "reason": merged_misrouted[fid].get(
+                            "reason", "Document routing mismatch"
+                        ),
+                        "detected_type": merged_misrouted[fid].get(
+                            "detected_type", "unknown"
+                        ),
+                    }
+                    updated_docs.append(new_doc)
+                else:
+                    updated_docs.append(d)
+            post_meta["documents"] = updated_docs
+            project.metadata_ = post_meta
+            await db.flush()
+
         # Step 11: Update project completion state + metadata (ALWAYS runs).
         project.analysis_status = "completed"
         project.analysis_completed_at = datetime.now(timezone.utc)
@@ -1372,6 +1428,63 @@ async def analyze_contract(
         project.metadata_ = project_meta
 
         await db.flush()
+
+        # Step 11.5: Inline gap detection — every ProjectCoverage row gets a
+        # non-NULL gap_status before the caller commits. Replaces the historical
+        # requirement to manually POST /analyze-gaps after analysis.
+        # (See Phase 145 RESEARCH Architecture Pattern #5.)
+        #
+        # Anchor invariant: this block runs AFTER Step 11's project_meta flush
+        # and BEFORE the BrokerActivity construction, so gap_summary is
+        # available for the activity's metadata_ dict.
+        #
+        # Note: rows where required_limit is None will receive gap_status="unknown"
+        # (per gap_detector.py rules) — this is correct when required data is
+        # missing and does not violate the "no NULL gap_status" invariant.
+        cov_reload = await db.execute(
+            select(ProjectCoverage)
+            .where(ProjectCoverage.broker_project_id == project_id)
+            .order_by(ProjectCoverage.created_at)
+        )
+        all_coverages = cov_reload.scalars().all()
+        coverage_dicts = [
+            {
+                "id": str(c.id),
+                "required_limit": float(c.required_limit)
+                if c.required_limit is not None
+                else None,
+                "current_limit": float(c.current_limit)
+                if c.current_limit is not None
+                else None,
+                "is_manual_override": c.is_manual_override,
+            }
+            for c in all_coverages
+        ]
+        gap_results = detect_gaps(coverage_dicts)
+        gap_summary = summarize_gaps(gap_results)
+        result_by_id = {r["id"]: r for r in gap_results}
+        for cov_orm in all_coverages:
+            updated = result_by_id.get(str(cov_orm.id))
+            if updated is None:
+                continue
+            # is_manual_override rows are passed through unchanged by detect_gaps
+            # (no gap_status/gap_amount keys set on them), so skip assignment
+            # when those keys are absent — preserves the broker's manual values.
+            if "gap_status" in updated:
+                cov_orm.gap_status = updated.get("gap_status")
+            if "gap_amount" in updated:
+                cov_orm.gap_amount = updated.get("gap_amount")
+        await db.flush()
+
+        logger.info(
+            "Inline gap detection for project_id=%s: "
+            "covered=%d insufficient=%d missing=%d unknown=%d",
+            project_id,
+            gap_summary.get("covered", 0),
+            gap_summary.get("insufficient", 0),
+            gap_summary.get("missing", 0),
+            gap_summary.get("unknown", 0),
+        )
 
         # Step 12: Create BrokerActivity for successful analysis
         activity = BrokerActivity(
@@ -1392,6 +1505,7 @@ async def analyze_contract(
                 "policy_rows_updated": policy_result.get("rows_updated", 0),
                 "orphans_count": len(policy_result.get("orphans", [])),
                 "misrouted_count": len(merged_misrouted),
+                "gap_summary": gap_summary,
             },
         )
         db.add(activity)
@@ -1419,6 +1533,7 @@ async def analyze_contract(
             "policy_rows_updated": policy_result.get("rows_updated", 0),
             "orphans_count": len(policy_result.get("orphans", [])),
             "misrouted_by_file_id": merged_misrouted,
+            "gap_summary": gap_summary,
         }
 
     except Exception as exc:
