@@ -69,8 +69,8 @@ class SavedViewsService:
     def _ownership_filter(self):
         """Return SQLAlchemy filter for tenant + owner isolation."""
         return (
-            SavedView.tenant_id == UUID(self.user.tenant_id),
-            SavedView.owner_id == UUID(self.user.sub),
+            SavedView.tenant_id == self.user.tenant_id,
+            SavedView.owner_id == self.user.sub,
         )
 
     async def _get_owned_view(self, view_id: UUID) -> SavedView | None:
@@ -105,8 +105,8 @@ class SavedViewsService:
         next_position = max_pos_result.scalar() + 1
 
         view = SavedView(
-            tenant_id=UUID(self.user.tenant_id),
-            owner_id=UUID(self.user.sub),
+            tenant_id=self.user.tenant_id,
+            owner_id=self.user.sub,
             name=req.name,
             filters=req.filters,
             sort=req.sort,
