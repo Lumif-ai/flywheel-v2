@@ -1060,8 +1060,8 @@ async def upload_project_documents(
             project.source_document_id = UUID(first_pdf["file_id"])
 
     existing_docs = (project.metadata_ or {}).get("documents", [])
-    existing_docs.extend(uploaded_docs)
-    project.metadata_ = {**(project.metadata_ or {}), "documents": existing_docs}
+    new_docs = [*existing_docs, *uploaded_docs]
+    project.metadata_ = {**(project.metadata_ or {}), "documents": new_docs}
 
     activity = BrokerActivity(
         tenant_id=user.tenant_id,
