@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-extract-quote
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Map a carrier quote PDF to an existing quote row, upload the PDF, trigger async extraction, poll until done, and report premium breakdown with critical exclusions
 context-aware: true
@@ -13,6 +13,8 @@ tags:
   - quote
   - extraction
   - pdf
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

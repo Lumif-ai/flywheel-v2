@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-draft-recommendation
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Pre-check comparison data, call POST /draft-recommendation, and display the recommendation narrative with recommended carrier highlighted
 context-aware: true
@@ -12,6 +12,8 @@ tags:
   - insurance
   - recommendation
   - quote
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

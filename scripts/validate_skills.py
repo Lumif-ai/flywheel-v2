@@ -30,7 +30,7 @@ except ImportError:
 # ---------------------------------------------------------------------------
 
 SKILLS_DIR = os.path.join(os.path.dirname(__file__), "..", "skills")
-SKIP_DIRS = {"_archived", "_shared", "gtm-shared"}
+SKIP_DIRS = {"_archived"}
 REQUIRED_FIELDS = ["name", "version", "description", "web_tier"]
 VALID_WEB_TIERS = {1, 2, 3}
 
@@ -162,8 +162,17 @@ def validate_skill(filepath):
     except ValueError as e:
         return None, [str(e)]
 
+    # Library skills (tagged "library" or explicitly enabled: false) are not directly
+    # invokable and do not need web_tier. They still need name/version/description.
+    tags = data.get("tags") or []
+    is_library = (
+        (isinstance(tags, list) and "library" in tags)
+        or data.get("enabled") is False
+    )
+    required = [f for f in REQUIRED_FIELDS if not (is_library and f == "web_tier")]
+
     # Check required fields exist
-    for field in REQUIRED_FIELDS:
+    for field in required:
         if field not in data or data[field] is None:
             errors.append("missing required field: %s" % field)
 
@@ -231,7 +240,7 @@ def main():
         entry_path = os.path.join(skills_dir, entry)
         if not os.path.isdir(entry_path):
             continue
-        if entry.startswith(".") or entry.startswith("_") or entry in SKIP_DIRS:
+        if entry.startswith(".") or entry in SKIP_DIRS:
             continue
 
         skill_md = os.path.join(entry_path, "SKILL.md")

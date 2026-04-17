@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-draft-emails
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Call POST /draft-solicitations with carrier_config_ids (UUIDs) to create email solicitation drafts in the database
 context-aware: true
@@ -12,6 +12,8 @@ tags:
   - insurance
   - email
   - solicitation
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

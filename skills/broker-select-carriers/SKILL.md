@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-select-carriers
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Retrieve carrier matches from the backend, split into portal vs email routing buckets, and ask broker to confirm the routing plan
 context-aware: true
@@ -12,6 +12,8 @@ tags:
   - insurance
   - carrier
   - routing
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

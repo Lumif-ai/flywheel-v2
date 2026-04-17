@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-process-project
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Full placement workflow — from uploaded documents to carrier solicitations
 context-aware: true
@@ -12,6 +12,8 @@ tags:
   - insurance
   - pipeline
   - placement
+assets: []
+depends_on: ["broker"]
 dependencies:
   skills:
     - broker-parse-contract

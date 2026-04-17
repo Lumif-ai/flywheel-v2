@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-fill-portal
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Show a data preview for portal submission and delegate portal fill execution to portals/mapfre.py
 context-aware: true
@@ -13,6 +13,8 @@ tags:
   - portal
   - automation
   - playwright
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

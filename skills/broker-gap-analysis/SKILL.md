@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-gap-analysis
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Call the analyze-gaps endpoint and print a coverage gap summary table
 context-aware: true
@@ -12,6 +12,8 @@ tags:
   - insurance
   - gap-analysis
   - coverage
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

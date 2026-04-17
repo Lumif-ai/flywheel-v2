@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-parse-contract
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Upload MSA contract PDF and trigger backend async extraction of coverage requirements
 context-aware: true
@@ -13,6 +13,8 @@ tags:
   - contract
   - extraction
   - pdf
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"

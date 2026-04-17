@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-parse-policies
-version: "1.0"
+version: "1.1"
 web_tier: 3
 description: Extract coverage data from local policy PDFs using pdfplumber, match to project coverages, and PATCH current limits and carriers
 context-aware: true
@@ -13,6 +13,8 @@ tags:
   - policy
   - extraction
   - pdf
+assets: []
+depends_on: ["broker"]
 dependencies:
   files:
     - "~/.claude/skills/broker/api_client.py"
