@@ -199,6 +199,25 @@ def _login_headless(email: str, password: str) -> dict:
     return resp.json()
 
 
+def _send_magic_link(email: str, redirect_uri: str, code_challenge: str) -> None:
+    """Send a magic link email via Supabase with PKCE challenge."""
+    resp = httpx.post(
+        f"{SUPABASE_URL}/auth/v1/magiclink",
+        json={
+            "email": email,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "s256",
+        },
+        headers={
+            "apikey": SUPABASE_ANON_KEY,
+            "Content-Type": "application/json",
+        },
+        params={"redirect_to": redirect_uri},
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+
+
 def _fetch_profile(access_token: str) -> dict:
     """Fetch user profile from the Flywheel API."""
     api_url = get_api_url()
@@ -228,8 +247,9 @@ def _save_from_token_response(data: dict) -> str:
 
 @cli.command()
 @click.option("--headless", is_flag=True, help="Use email/password instead of browser.")
-def login(headless: bool) -> None:
-    """Authenticate with Flywheel (browser PKCE or headless)."""
+@click.option("--magic-link", is_flag=True, help="Use magic link (email OTP) instead of browser.")
+def login(headless: bool, magic_link: bool) -> None:
+    """Authenticate with Flywheel (browser PKCE, headless, or magic link)."""
     if not SUPABASE_URL:
         raise click.ClickException(
             "FLYWHEEL_SUPABASE_URL not set. "
@@ -255,6 +275,52 @@ def login(headless: bool) -> None:
         console.print(
             "[dim]Note: password auth must be enabled in Supabase dashboard.[/dim]"
         )
+    elif magic_link:
+        email = click.prompt("Email")
+        verifier, challenge = _generate_pkce()
+        redirect_uri = f"http://localhost:{CALLBACK_PORT}/callback"
+
+        with console.status("Sending magic link..."):
+            try:
+                _send_magic_link(email, redirect_uri, challenge)
+            except httpx.HTTPStatusError as exc:
+                raise click.ClickException(
+                    f"Magic link failed ({exc.response.status_code}). "
+                    "Check the email address."
+                ) from exc
+
+        # Start local callback server — wait up to 120s for the user to click the link
+        _CallbackHandler.auth_code = None
+        server = HTTPServer(("127.0.0.1", CALLBACK_PORT), _CallbackHandler)
+        server.timeout = 120
+
+        console.print(
+            Panel(
+                f"Magic link sent to [bold]{email}[/bold]\n"
+                "Check your email and click the login link.\n"
+                "Waiting up to 2 minutes...",
+                title="Flywheel Magic Link Login",
+                border_style="cyan",
+            )
+        )
+
+        server.handle_request()
+        server.server_close()
+
+        code = _CallbackHandler.auth_code
+        if not code:
+            raise click.ClickException(
+                "Authentication timed out. No callback received — "
+                "check your email and try again."
+            )
+
+        with console.status("Exchanging tokens..."):
+            try:
+                data = _exchange_pkce_code(code, verifier)
+            except httpx.HTTPStatusError as exc:
+                raise click.ClickException(
+                    f"Token exchange failed ({exc.response.status_code})."
+                ) from exc
     else:
         # PKCE browser flow
         verifier, challenge = _generate_pkce()

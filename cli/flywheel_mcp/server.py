@@ -1407,9 +1407,34 @@ def _ensure_claude_md():
         logger.warning("Failed to ensure CLAUDE.md: %s", exc)
 
 
+def _warm_token_refresh():
+    """Pre-emptively refresh token at startup so the MCP session starts fresh.
+
+    Also logs the token expiry so operators can see when it will need refresh.
+    """
+    import datetime
+
+    try:
+        from flywheel_cli.auth import get_token, load_credentials
+
+        token = get_token()  # triggers refresh if near expiry
+        creds = load_credentials()
+        if creds:
+            expires_at = creds.get("expires_at", 0)
+            expiry_str = datetime.datetime.fromtimestamp(expires_at).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            logger.info("Token valid until %s", expiry_str)
+        else:
+            logger.warning("No credentials found — MCP tools will fail auth")
+    except Exception as exc:
+        logger.warning("Token warm-up failed: %s", exc)
+
+
 def main():
     """Start the Flywheel MCP server with stdio transport."""
     _ensure_claude_md()
+    _warm_token_refresh()
     mcp.run(transport="stdio")
 
 
