@@ -857,6 +857,50 @@ class SkillDefinition(Base):
         TIMESTAMP(timezone=True), server_default=text("now()")
     )
 
+    asset: Mapped["SkillAsset | None"] = relationship(
+        back_populates="skill", uselist=False, cascade="all, delete-orphan"
+    )
+
+
+class SkillAsset(Base):
+    """Zipped Python bundle for a skill_definitions row.
+
+    One active bundle per skill (enforced by DB unique index on skill_id).
+    Bundle bytes are authoritative; `bundle_sha256` is the content-address
+    cache key used by Phase 150's MCP fetch path. Authoritative version
+    lives on `skill_definitions.version`; this row is always "the current
+    version's bundle".
+
+    Phase 146 — v22.0 Skill Platform Consolidation.
+    """
+
+    __tablename__ = "skill_assets"
+    __table_args__ = (
+        UniqueConstraint("skill_id", name="uq_skill_assets_skill_id"),
+        Index("idx_skill_assets_bundle_sha256", "bundle_sha256"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    skill_id: Mapped[UUID] = mapped_column(
+        ForeignKey("skill_definitions.id", ondelete="CASCADE"), nullable=False
+    )
+    bundle: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    bundle_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    bundle_size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    bundle_format: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="zip"
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+    updated_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+    skill: Mapped["SkillDefinition"] = relationship(back_populates="asset")
+
 
 class TenantSkill(Base):
     __tablename__ = "tenant_skills"
