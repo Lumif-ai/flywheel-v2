@@ -19,7 +19,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
+from flywheel.api.broker._enforcement import (
+    SubsidyDecision,
+    raise_endpoint_deprecated,
+    require_subsidy_decision,
+)
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -31,7 +35,6 @@ from flywheel.db.models import (
     ProjectCoverage,
     SolicitationDraft,
 )
-from flywheel.engines.solicitation_drafter import draft_solicitation_email
 from flywheel.services.email_dispatch import send_email_as_user
 
 logger = logging.getLogger(__name__)
@@ -163,185 +166,23 @@ def _solicitation_draft_to_dict(
 
 
 # ---------------------------------------------------------------------------
-# POST /broker/projects/{project_id}/draft-solicitations
+# POST /broker/projects/{project_id}/draft-solicitations — DEPRECATED
+# (Phase 150.1 Plan 04)
+#
+# Flipped to HTTP 410 Gone. Replaced by Pattern 3a pair:
+#   POST /api/v1/broker/extract/solicitation-draft
+#   POST /api/v1/broker/save/solicitation-draft
 # ---------------------------------------------------------------------------
 
 
 @solicitations_router.post("/projects/{project_id}/draft-solicitations")
-async def draft_solicitations(
-    project_id: UUID,
-    body: DraftSolicitationsBody,
-    user: TokenPayload = Depends(require_module("broker")),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> dict[str, Any]:
-    """Batch-draft solicitation emails — creates SolicitationDraft rows."""
-    result = await db.execute(
-        select(BrokerProject).where(
-            BrokerProject.id == project_id,
-            BrokerProject.tenant_id == user.tenant_id,
-            BrokerProject.deleted_at.is_(None),
-        )
-    )
-    project = result.scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
+async def draft_solicitations_deprecated(project_id: UUID):
+    """DEPRECATED (Phase 150.1): returns 410 Gone.
 
-    # Load coverages
-    cov_result = await db.execute(
-        select(ProjectCoverage).where(
-            ProjectCoverage.broker_project_id == project_id
-        )
-    )
-    coverages_list = [_coverage_to_dict(c) for c in cov_result.scalars().all()]
-
-    # Batch load carrier contacts (avoids N+1)
-    contact_emails = await _load_carrier_contacts(
-        db, user.tenant_id, body.carrier_config_ids
-    )
-
-    drafts: list[dict] = []
-    portal_submissions: list[dict] = []
-    skipped: list[dict] = []
-
-    for carrier_config_id in body.carrier_config_ids:
-        carrier_result = await db.execute(
-            select(CarrierConfig).where(
-                CarrierConfig.id == carrier_config_id,
-                CarrierConfig.tenant_id == user.tenant_id,
-                CarrierConfig.is_active.is_(True),
-            )
-        )
-        carrier = carrier_result.scalar_one_or_none()
-        if carrier is None:
-            skipped.append({
-                "carrier_config_id": str(carrier_config_id),
-                "reason": "Carrier not found or inactive",
-            })
-            continue
-
-        method = carrier.submission_method or "email"
-        carrier_email = contact_emails.get(carrier_config_id)
-
-        # Email track
-        if method in ("email", "both"):
-            if not carrier_email or not _EMAIL_RE.match(carrier_email):
-                skipped.append({
-                    "carrier_config_id": str(carrier_config_id),
-                    "carrier_name": carrier.carrier_name,
-                    "reason": "No primary submissions contact email configured",
-                })
-                if method == "email":
-                    continue
-            else:
-                # Check for existing active draft (unique partial index guard)
-                existing_result = await db.execute(
-                    select(SolicitationDraft).where(
-                        SolicitationDraft.broker_project_id == project_id,
-                        SolicitationDraft.carrier_config_id == carrier_config_id,
-                        SolicitationDraft.status.in_(["draft", "pending", "approved"]),
-                    )
-                )
-                existing_draft = existing_result.scalar_one_or_none()
-
-                if existing_draft:
-                    # Return existing draft rather than creating duplicate
-                    drafts.append({
-                        "solicitation_draft_id": str(existing_draft.id),
-                        "carrier_name": carrier.carrier_name,
-                        "carrier_config_id": str(carrier_config_id),
-                        "submission_method": method,
-                        "subject": existing_draft.subject,
-                        "body": existing_draft.body,
-                        "status": existing_draft.status,
-                        "reused": True,
-                    })
-                    continue
-
-                # Create SolicitationDraft (not CarrierQuote)
-                draft = SolicitationDraft(
-                    tenant_id=user.tenant_id,
-                    broker_project_id=project_id,
-                    carrier_config_id=carrier_config_id,
-                    status="draft",
-                    sent_to_email=carrier_email,
-                    created_by_user_id=user.sub,
-                )
-                db.add(draft)
-                await db.flush()
-
-                # Generate AI draft
-                project_dict = _project_to_dict(project)
-                carrier_dict = _carrier_to_dict(carrier, email=carrier_email)
-                language = project.language or "en"
-
-                try:
-                    ai_result = await draft_solicitation_email(
-                        project_dict, carrier_dict, coverages_list, [], language
-                    )
-                    draft.subject = ai_result.get("subject", "")
-                    draft.body = ai_result.get("body_html", "")
-                    draft.status = "pending"
-                except Exception as exc:
-                    logger.warning(
-                        "AI draft failed for carrier %s: %s", carrier.carrier_name, exc
-                    )
-                    draft.subject = ""
-                    draft.body = ""
-                    draft.status = "draft"
-
-                drafts.append({
-                    "solicitation_draft_id": str(draft.id),
-                    "carrier_name": carrier.carrier_name,
-                    "carrier_config_id": str(carrier_config_id),
-                    "submission_method": method,
-                    "subject": draft.subject,
-                    "body": draft.body,
-                    "status": draft.status,
-                    "documents": [],
-                })
-
-        # Portal track
-        if method in ("portal", "both"):
-            portal_draft = SolicitationDraft(
-                tenant_id=user.tenant_id,
-                broker_project_id=project_id,
-                carrier_config_id=carrier_config_id,
-                status="draft",
-                created_by_user_id=user.sub,
-            )
-            db.add(portal_draft)
-            await db.flush()
-
-            portal_submissions.append({
-                "solicitation_draft_id": str(portal_draft.id),
-                "carrier_name": carrier.carrier_name,
-                "carrier_config_id": str(carrier_config_id),
-                "submission_method": method,
-                "portal_url": carrier.portal_url,
-                "documents": [],
-            })
-
-    await db.commit()
-
-    activity = BrokerActivity(
-        tenant_id=user.tenant_id,
-        broker_project_id=project_id,
-        activity_type="solicitations_drafted",
-        actor_type="user",
-        metadata_={
-            "email_count": len(drafts),
-            "portal_count": len(portal_submissions),
-            "skipped_count": len(skipped),
-        },
-    )
-    db.add(activity)
-    await db.commit()
-
-    return {
-        "drafts": drafts,
-        "portal_submissions": portal_submissions,
-        "skipped": skipped,
-    }
+    Use POST /api/v1/broker/extract/solicitation-draft +
+    POST /api/v1/broker/save/solicitation-draft (Pattern 3a).
+    """
+    raise_endpoint_deprecated(operation="solicitation-draft")
 
 
 # ---------------------------------------------------------------------------

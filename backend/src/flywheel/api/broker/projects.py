@@ -31,14 +31,18 @@ from datetime import datetime, timezone
 from typing import Annotated, Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from sqlalchemy import exists, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
+from flywheel.api.broker._enforcement import (
+    SubsidyDecision,
+    raise_endpoint_deprecated,
+    require_subsidy_decision,
+)
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -1263,38 +1267,22 @@ async def create_project_from_email(
 
 
 # ---------------------------------------------------------------------------
-# POST /broker/projects/{project_id}/analyze
+# POST /broker/projects/{project_id}/analyze — DEPRECATED (Phase 150.1 Plan 04)
+#
+# Flipped to HTTP 410 Gone. Replaced by Pattern 3a pair:
+#   POST /api/v1/broker/extract/contract-analysis
+#   POST /api/v1/broker/save/contract-analysis
 # ---------------------------------------------------------------------------
 
 
-@projects_router.post("/projects/{project_id}/analyze", status_code=202)
-async def trigger_analysis(
-    project_id: UUID,
-    background_tasks: BackgroundTasks,
-    user: TokenPayload = Depends(require_module("broker")),
-    db: AsyncSession = Depends(get_tenant_db),
-):
-    """Trigger async contract analysis for a project."""
-    result = await db.execute(
-        select(BrokerProject)
-        .where(
-            BrokerProject.id == project_id,
-            BrokerProject.deleted_at.is_(None),
-        )
-        .with_for_update()
-    )
-    project = result.scalar_one_or_none()
-    if not project:
-        raise HTTPException(404, "Project not found")
-    if project.analysis_status == "running":
-        raise HTTPException(409, "Analysis already in progress")
+@projects_router.post("/projects/{project_id}/analyze")
+async def analyze_project_deprecated(project_id: UUID):
+    """DEPRECATED (Phase 150.1): returns 410 Gone.
 
-    project.analysis_status = "running"
-    project.status = "analyzing"
-    await db.commit()
-
-    background_tasks.add_task(_run_analysis, project_id, user.tenant_id)
-    return {"status": "analyzing", "project_id": str(project_id)}
+    Use POST /api/v1/broker/extract/contract-analysis +
+    POST /api/v1/broker/save/contract-analysis (Pattern 3a).
+    """
+    raise_endpoint_deprecated(operation="contract-analysis")
 
 
 async def _get_project_pdfs(
@@ -1369,55 +1357,11 @@ async def _get_project_pdfs(
     return pdfs
 
 
-async def _run_analysis(project_id: UUID, tenant_id: UUID):
-    """Background: retrieve PDF from Supabase Storage, run contract_analyzer."""
-    import logging as _logging
-
-    from flywheel.db.session import get_session_factory
-    from flywheel.engines.contract_analyzer import analyze_contract
-
-    _logger = _logging.getLogger(__name__)
-    factory = get_session_factory()
-
-    try:
-        async with factory() as session:
-            await session.execute(text(f"SET LOCAL app.tenant_id = '{tenant_id}'"))
-
-            project = (
-                await session.execute(
-                    select(BrokerProject).where(BrokerProject.id == project_id)
-                )
-            ).scalar_one_or_none()
-            if not project:
-                return
-
-            pdfs = await _get_project_pdfs(session, project, tenant_id)
-            if not pdfs:
-                project.analysis_status = "failed"
-                await session.commit()
-                return
-
-            await analyze_contract(session, tenant_id, project_id, pdfs)
-            await session.commit()
-    except Exception as exc:
-        import traceback as _tb
-        _logger.error("Analysis failed for project %s: %s\n%s", project_id, exc, _tb.format_exc())
-        try:
-            async with factory() as err_session:
-                await err_session.execute(
-                    text(f"SET LOCAL app.tenant_id = '{tenant_id}'")
-                )
-                proj = (
-                    await err_session.execute(
-                        select(BrokerProject).where(BrokerProject.id == project_id)
-                    )
-                ).scalar_one()
-                proj.analysis_status = "failed"
-                validate_transition(proj.status, "analysis_failed")
-                proj.status = "analysis_failed"
-                await err_session.commit()
-        except Exception:
-            _logger.error("Failed to update status for project %s", project_id)
+# ---------------------------------------------------------------------------
+# _run_analysis background task REMOVED in Phase 150.1 Plan 04
+# (was the only caller of legacy contract_analyzer.analyze_contract — which
+# has also been deleted. The /analyze endpoint returns 410 Gone above.)
+# ---------------------------------------------------------------------------
 
 
 # ---------------------------------------------------------------------------

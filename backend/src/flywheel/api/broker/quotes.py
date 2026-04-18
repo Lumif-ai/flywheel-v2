@@ -10,7 +10,6 @@ Endpoints:
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -21,7 +20,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
+from flywheel.api.broker._enforcement import (
+    SubsidyDecision,
+    raise_endpoint_deprecated,
+    require_subsidy_decision,
+)
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -386,83 +389,22 @@ async def portal_confirm(
 
 
 # ---------------------------------------------------------------------------
-# POST /broker/quotes/{quote_id}/extract
+# POST /broker/quotes/{quote_id}/extract — DEPRECATED (Phase 150.1 Plan 04)
+#
+# Flipped to HTTP 410 Gone. Replaced by Pattern 3a pair:
+#   POST /api/v1/broker/extract/quote-extraction
+#   POST /api/v1/broker/save/quote-extraction
 # ---------------------------------------------------------------------------
 
 
-@quotes_router.post("/quotes/{quote_id}/extract", status_code=202)
-async def extract_quote_endpoint(
-    quote_id: UUID,
-    force: bool = Query(False),
-    user: TokenPayload = Depends(require_module("broker")),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> dict[str, Any]:
-    """Trigger async PDF extraction for a carrier quote."""
-    from flywheel.engines.quote_extractor import extract_quote
+@quotes_router.post("/quotes/{quote_id}/extract")
+async def extract_quote_deprecated(quote_id: UUID):
+    """DEPRECATED (Phase 150.1): returns 410 Gone.
 
-    result = await db.execute(
-        select(CarrierQuote).where(
-            CarrierQuote.id == quote_id,
-            CarrierQuote.tenant_id == user.tenant_id,
-        )
-    )
-    quote = result.scalar_one_or_none()
-    if quote is None:
-        raise HTTPException(status_code=404, detail="Quote not found")
-
-    if quote.status in ("extracted", "reviewed") and not force:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Quote already {quote.status}. Use ?force=true to re-extract.",
-        )
-
-    pdf_content = None
-    if quote.source_document_id:
-        pdf_content = await _get_quote_pdf_from_document(db, quote, user.tenant_id)
-    elif quote.source_email_id:
-        pdf_content = await _get_quote_pdf_from_email(db, quote, user.tenant_id)
-
-    if pdf_content is None:
-        raise HTTPException(
-            status_code=422,
-            detail="No PDF source found for this quote (no source_document_id or source_email_id)",
-        )
-
-    cov_result = await db.execute(
-        select(ProjectCoverage).where(
-            ProjectCoverage.broker_project_id == quote.broker_project_id
-        )
-    )
-    coverages = cov_result.scalars().all()
-    coverages_dicts = [
-        {
-            "id": str(c.id),
-            "coverage_type": c.coverage_type,
-            "coverage_type_key": c.coverage_type_key,
-            "category": c.category,
-            "required_limit": float(c.required_limit) if c.required_limit else None,
-        }
-        for c in coverages
-    ]
-
-    tenant_id = user.tenant_id
-
-    async def _run_extraction():
-        from flywheel.db.session import get_session_factory
-        factory = get_session_factory()
-        try:
-            async with factory() as session:
-                await session.execute(text(f"SET LOCAL app.tenant_id = '{tenant_id}'"))
-                await extract_quote(
-                    session, tenant_id, quote_id, pdf_content, coverages_dicts, force=force
-                )
-                await session.commit()
-        except Exception as exc:
-            logger.error("Quote extraction failed for %s: %s", quote_id, exc)
-
-    asyncio.create_task(_run_extraction())
-
-    return {"status": "extracting", "quote_id": str(quote_id)}
+    Use POST /api/v1/broker/extract/quote-extraction +
+    POST /api/v1/broker/save/quote-extraction (Pattern 3a).
+    """
+    raise_endpoint_deprecated(operation="quote-extraction")
 
 
 # ---------------------------------------------------------------------------

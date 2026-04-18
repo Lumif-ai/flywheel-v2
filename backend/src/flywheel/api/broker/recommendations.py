@@ -17,7 +17,11 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
+from flywheel.api.broker._enforcement import (
+    SubsidyDecision,
+    raise_endpoint_deprecated,
+    require_subsidy_decision,
+)
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -83,110 +87,23 @@ def _quote_to_dict(q: CarrierQuote) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# POST /broker/projects/{project_id}/draft-recommendation
+# POST /broker/projects/{project_id}/draft-recommendation — DEPRECATED
+# (Phase 150.1 Plan 04)
+#
+# Flipped to HTTP 410 Gone. Replaced by Pattern 3a pair:
+#   POST /api/v1/broker/extract/recommendation-draft
+#   POST /api/v1/broker/save/recommendation-draft
 # ---------------------------------------------------------------------------
 
 
 @recommendations_router.post("/projects/{project_id}/draft-recommendation")
-async def draft_recommendation(
-    project_id: UUID,
-    body: DraftRecommendationBody | None = None,
-    user: TokenPayload = Depends(require_module("broker")),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> dict[str, Any]:
-    """Generate an AI recommendation and create a BrokerRecommendation row.
+async def draft_recommendation_deprecated(project_id: UUID):
+    """DEPRECATED (Phase 150.1): returns 410 Gone.
 
-    Requires project status 'quotes_complete'. Transitions project to 'recommended'.
+    Use POST /api/v1/broker/extract/recommendation-draft +
+    POST /api/v1/broker/save/recommendation-draft (Pattern 3a).
     """
-    from flywheel.engines.quote_comparator import compare_quotes, summarize_comparison
-    from flywheel.engines.recommendation_drafter import draft_recommendation_email
-
-    result = await db.execute(
-        select(BrokerProject).where(
-            BrokerProject.id == project_id,
-            BrokerProject.tenant_id == user.tenant_id,
-            BrokerProject.deleted_at.is_(None),
-        )
-    )
-    project = result.scalar_one_or_none()
-    if project is None:
-        raise HTTPException(status_code=404, detail="Project not found")
-
-    # Status gate: must be transitioning to 'recommended'
-    validate_transition(project.status, "recommended", client_id=project.client_id)
-
-    # Load coverages and quotes
-    cov_result = await db.execute(
-        select(ProjectCoverage).where(ProjectCoverage.broker_project_id == project_id)
-    )
-    coverages = cov_result.scalars().all()
-    coverage_dicts = [_coverage_to_dict(c) for c in coverages]
-
-    quote_result = await db.execute(
-        select(CarrierQuote).where(
-            CarrierQuote.broker_project_id == project_id,
-            CarrierQuote.status.in_(("extracted", "reviewed", "selected")),
-        )
-    )
-    quotes = quote_result.scalars().all()
-    quote_dicts = [_quote_to_dict(q) for q in quotes]
-
-    project_dict = {
-        "id": str(project.id),
-        "name": project.name,
-        "project_type": project.project_type,
-        "description": project.description,
-        "contract_value": float(project.contract_value) if project.contract_value is not None else None,
-        "currency": project.currency,
-        "location": project.location,
-        "language": project.language,
-        "status": project.status,
-    }
-
-    language = project.language or "en"
-    comparison = compare_quotes(coverage_dicts, quote_dicts)
-    summary = summarize_comparison(comparison)
-    draft_result = await draft_recommendation_email(
-        project_dict, comparison, summary, language
-    )
-
-    recipient = (body.recipient_email if body else None)
-
-    # Create BrokerRecommendation row (status='draft')
-    recommendation = BrokerRecommendation(
-        tenant_id=user.tenant_id,
-        broker_project_id=project_id,
-        subject=draft_result["subject"],
-        body=draft_result["body_html"],
-        recipient_email=recipient,
-        status="draft",
-        created_by_user_id=user.sub,
-    )
-    db.add(recommendation)
-
-    # Transition project status
-    project.status = "recommended"
-    project.updated_at = datetime.now(timezone.utc)
-
-    activity = BrokerActivity(
-        tenant_id=user.tenant_id,
-        broker_project_id=project.id,
-        activity_type="recommendation_drafted",
-        actor_type="system",
-        description=f"AI recommendation drafted for {project.name}",
-        metadata_={"recipient": recipient},
-    )
-    db.add(activity)
-    await db.commit()
-    await db.refresh(recommendation)
-
-    return {
-        "recommendation_id": str(recommendation.id),
-        "subject": recommendation.subject,
-        "body_html": recommendation.body,
-        "recipient": recipient,
-        "status": recommendation.status,
-    }
+    raise_endpoint_deprecated(operation="recommendation-draft")
 
 
 # ---------------------------------------------------------------------------

@@ -1,34 +1,31 @@
 """
-solicitation_drafter.py - AI-powered solicitation email draft generation.
+solicitation_drafter.py - Pattern 3a helpers for solicitation email drafts.
 
-Generates carrier-specific solicitation emails using Claude, respecting the
-project's language setting. Takes plain dicts (not ORM objects) so it can be
-tested independently without a database.
+Phase 150.1 Plan 04 completed the CC-as-Brain migration by deleting the
+legacy `draft_solicitation_email` function (which constructed an async
+Anthropic client via a module-local import binding).
+Backend no longer runs any LLM call for solicitation drafts;
+Claude-in-conversation owns inference. The module exposes only Pattern 3a
+public helpers:
 
-Phase 150.1 Plan 02 — This module now exposes Pattern 3a public helpers
-(`build_solicitation_prompt`, `SOLICITATION_TOOL`, `persist_solicitation_draft`)
-for the /extract/solicitation-draft + /save/solicitation-draft endpoints.
-The legacy `draft_solicitation_email` function (which instantiates
-AsyncAnthropic via the `from anthropic import AsyncAnthropic` module-local
-binding) is untouched — Plan 04 removes it. Tests MUST patch
-`flywheel.engines.solicitation_drafter.AsyncAnthropic` (module-local path),
-not `anthropic.AsyncAnthropic` (package path), to cover this shape.
+  * `build_solicitation_prompt(project, carrier, coverages, documents, language)`
+    → rendered prompt string for the /extract/solicitation-draft endpoint.
+  * `SOLICITATION_TOOL` — Anthropic tool schema declaring the expected
+    {subject, body_html} output shape.
+  * `persist_solicitation_draft(db, ..., tool_use_output)`
+    → SolicitationDraft ORM row (for /save/solicitation-draft).
 
-Functions:
-  draft_solicitation_email(project, carrier, coverages, documents, language)
-    -> {"subject": str, "body_html": str}   (legacy; Plan 04 removes)
-  build_solicitation_prompt(...) -> str     (Pattern 3a public helper)
-  persist_solicitation_draft(...) -> SolicitationDraft  (save endpoint)
+CC-as-Brain invariant (Phase 150.1): this module MUST NOT import or
+construct an Anthropic async client. The `test_broker_zero_anthropic.py`
+regression grep-guards enforce this at CI time.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
-from anthropic import AsyncAnthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +35,6 @@ logger = logging.getLogger(__name__)
 # Constants
 # ---------------------------------------------------------------------------
 
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
 DEADLINE_DAYS = 30
 
 
@@ -123,65 +119,10 @@ Return ONLY the JSON object, no other text."""
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# Phase 150.1 Plan 04 — legacy `draft_solicitation_email` DELETED.
+# Backend owns zero LLM calls for solicitation drafts. Claude-in-conversation
+# consumes `build_solicitation_prompt` + `SOLICITATION_TOOL` (Pattern 3a).
 # ---------------------------------------------------------------------------
-
-
-async def draft_solicitation_email(
-    project: dict,
-    carrier: dict,
-    coverages: list[dict],
-    documents: list[dict],
-    language: str = "en",
-) -> dict:
-    """Generate a solicitation email draft using AI.
-
-    Args:
-        project: Dict with project details (name, project_type, contract_value, currency).
-        carrier: Dict with carrier details (carrier_name).
-        coverages: List of coverage dicts (coverage_type, required_limit, gap_status).
-        documents: List of document dicts (display_name, document_type, included).
-        language: Language code for the email ("en", "es", etc.).
-
-    Returns:
-        {"subject": str, "body_html": str}
-    """
-    prompt = _build_prompt(project, carrier, coverages, documents, language)
-
-    client = AsyncAnthropic()
-    message = await client.messages.create(
-        model=DEFAULT_MODEL,
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    # Extract text content from the response
-    response_text = ""
-    for block in message.content:
-        if block.type == "text":
-            response_text += block.text
-
-    # Parse JSON response
-    try:
-        # Handle potential markdown code fences around JSON
-        cleaned = response_text.strip()
-        if cleaned.startswith("```"):
-            # Remove code fence
-            lines = cleaned.split("\n")
-            # Remove first and last lines (```json and ```)
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            cleaned = "\n".join(lines)
-
-        result = json.loads(cleaned)
-        subject = result.get("subject", "Insurance Quote Request")
-        body_html = result.get("body_html", "<p>Error generating email body.</p>")
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.error("Failed to parse solicitation draft response: %s", e)
-        # Fallback: use raw text as body
-        subject = "Insurance Quote Request"
-        body_html = f"<p>{response_text}</p>"
-
-    return {"subject": subject, "body_html": body_html}
 
 
 # ---------------------------------------------------------------------------

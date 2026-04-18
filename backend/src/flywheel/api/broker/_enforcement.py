@@ -46,11 +46,52 @@ BYOK MECHANISM (chosen by Task 1 POC on 2026-04-18):
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 from fastapi import Header, HTTPException, Request
 
 from flywheel.config import settings
+
+logger = logging.getLogger(__name__)
+
+
+def raise_endpoint_deprecated(*, operation: str) -> None:
+    """Raise HTTP 410 Gone with the Phase 150.1 Pattern 3a migration hint.
+
+    Called by every legacy broker endpoint handler that was flipped to 410
+    in Plan 04. Emits a structured deprecation log line for monitoring +
+    a machine-actionable body so Claude-in-conversation can auto-route to
+    the new /extract/{op} + /save/{op} endpoints.
+
+    Args:
+        operation: The Pattern 3a operation name (e.g., "contract-analysis",
+            "quote-extraction", "solicitation-draft", "recommendation-draft").
+
+    Raises:
+        HTTPException(410): Always.
+    """
+    logger.warning(
+        "deprecated_endpoint_called",
+        extra={"operation": operation, "migrated_in": "150.1"},
+    )
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "error": "endpoint_deprecated",
+            "operation": operation,
+            "replacement": (
+                f"/api/v1/broker/extract/{operation} + "
+                f"/api/v1/broker/save/{operation}"
+            ),
+            "migrated_in": "150.1",
+            "reason": (
+                "Backend no longer runs LLM calls for broker flows. Use "
+                "Pattern 3a: extract prompt + tool_schema, run inference in "
+                "Claude-in-conversation, save result."
+            ),
+        },
+    )
 
 
 @dataclass(frozen=True)
@@ -133,4 +174,8 @@ async def require_subsidy_decision(
     )
 
 
-__all__ = ["SubsidyDecision", "require_subsidy_decision"]
+__all__ = [
+    "SubsidyDecision",
+    "require_subsidy_decision",
+    "raise_endpoint_deprecated",
+]

@@ -177,7 +177,25 @@ class _MockCarrier:
 
 @pytest.fixture
 def zero_anthropic_guards(monkeypatch):
-    """Patch AsyncAnthropic bindings at all broker-engine module paths.
+    """Patch AsyncAnthropic bindings at every still-possible broker-engine path.
+
+    Phase 150.1 Plan 04 DELETED the four module-local bindings that existed in
+    Plan 02 (`contract_analyzer.anthropic`, `quote_extractor.anthropic`,
+    `solicitation_drafter.AsyncAnthropic`, `recommendation_drafter.AsyncAnthropic`).
+    Those sites no longer exist at module scope — Plan 04's source-level
+    grep-guards (`TestBrokerEnginesHaveNoAnthropicImport`) enforce that
+    they CANNOT silently reappear without test failure.
+
+    Each module-local patch below uses `raising=False` so it's a safe no-op
+    when the attribute doesn't exist (the expected Plan-04 state) and a
+    live sentinel when some future refactor re-introduces the attribute.
+    This preserves the belt-and-suspenders regression guard: either Plan 04
+    grep-guards catch the import shape, OR the sentinel catches the
+    instantiation at runtime. Double defense.
+
+    The package-level `anthropic.AsyncAnthropic` sentinel is the primary
+    runtime guard — any caller that does `anthropic.AsyncAnthropic(...)`
+    anywhere in the broker flow will trip it.
 
     Yields the sentinel dict so tests can assert call_count == 0 per site.
     """
@@ -193,35 +211,43 @@ def zero_anthropic_guards(monkeypatch):
         "package_level_belt_and_suspenders": _make_sentinel("anthropic.AsyncAnthropic"),
     }
 
-    # PACKAGE-LEVEL bindings (contract_analyzer + quote_extractor do
-    # `import anthropic` then call anthropic.AsyncAnthropic(...) — patching
-    # the .anthropic attribute on each module works because attribute
-    # lookup happens at call time).
-    monkeypatch.setattr(
-        "flywheel.engines.contract_analyzer.anthropic.AsyncAnthropic",
-        sentinels["contract_analyzer_package"],
-    )
-    monkeypatch.setattr(
-        "flywheel.engines.quote_extractor.anthropic.AsyncAnthropic",
-        sentinels["quote_extractor_package"],
-    )
+    # PACKAGE-LEVEL bindings — Plan 04 removed `import anthropic` from
+    # contract_analyzer.py + quote_extractor.py. Patch only if the attribute
+    # still exists (regression guard: if a future refactor re-introduces
+    # `import anthropic`, the patch activates automatically).
+    from flywheel.engines import contract_analyzer as _ca
+    from flywheel.engines import quote_extractor as _qe
+    from flywheel.engines import recommendation_drafter as _rd
+    from flywheel.engines import solicitation_drafter as _sd
 
-    # MODULE-LOCAL bindings (solicitation_drafter + recommendation_drafter
-    # do `from anthropic import AsyncAnthropic` at module import time;
-    # patching the package-level `anthropic.AsyncAnthropic` does NOT rebind
-    # these already-imported module-local names).
-    monkeypatch.setattr(
-        "flywheel.engines.solicitation_drafter.AsyncAnthropic",
-        sentinels["solicitation_drafter_module_local"],
-    )
-    monkeypatch.setattr(
-        "flywheel.engines.recommendation_drafter.AsyncAnthropic",
-        sentinels["recommendation_drafter_module_local"],
-    )
+    if hasattr(_ca, "anthropic") and hasattr(_ca.anthropic, "AsyncAnthropic"):
+        monkeypatch.setattr(
+            "flywheel.engines.contract_analyzer.anthropic.AsyncAnthropic",
+            sentinels["contract_analyzer_package"],
+        )
+    if hasattr(_qe, "anthropic") and hasattr(_qe.anthropic, "AsyncAnthropic"):
+        monkeypatch.setattr(
+            "flywheel.engines.quote_extractor.anthropic.AsyncAnthropic",
+            sentinels["quote_extractor_package"],
+        )
 
-    # Belt-and-suspenders: also patch the package-level anthropic module so
-    # any future call site that does `anthropic.AsyncAnthropic(...)` gets
-    # blocked too.
+    # MODULE-LOCAL bindings — Plan 04 removed the `from anthropic import
+    # AsyncAnthropic` lines from solicitation_drafter + recommendation_drafter.
+    # Patch only if the attribute still exists.
+    if hasattr(_sd, "AsyncAnthropic"):
+        monkeypatch.setattr(
+            "flywheel.engines.solicitation_drafter.AsyncAnthropic",
+            sentinels["solicitation_drafter_module_local"],
+        )
+    if hasattr(_rd, "AsyncAnthropic"):
+        monkeypatch.setattr(
+            "flywheel.engines.recommendation_drafter.AsyncAnthropic",
+            sentinels["recommendation_drafter_module_local"],
+        )
+
+    # PRIMARY runtime guard: patch the package-level `anthropic.AsyncAnthropic`.
+    # Any broker flow that tries to instantiate an Anthropic async client via
+    # the package attribute will trip this sentinel and fail loudly.
     monkeypatch.setattr(
         "anthropic.AsyncAnthropic",
         sentinels["package_level_belt_and_suspenders"],
@@ -554,3 +580,184 @@ class TestBrokerZeroAnthropicInvariant:
                 os.environ.pop("ANTHROPIC_API_KEY", None)
             else:
                 os.environ["ANTHROPIC_API_KEY"] = old_env
+
+
+# ===========================================================================
+# Phase 150.1 Plan 04 — belt-and-suspenders grep-level guards
+#
+# The module-local AsyncAnthropic sentinel patches above assert zero LLM
+# calls at RUNTIME. The classes below assert zero LLM-call SURFACE at the
+# source-code / repo-file level — a defense against future refactors that
+# might re-introduce the `import` or `AsyncAnthropic(...)` call shape
+# without triggering the monkeypatch sentinel (e.g., if someone adds a new
+# engine module without patching it here).
+#
+# Warning-7 CI enforcement: these tests live inside `src/tests/` which is
+# the directory the repo's existing pytest invocation runs on every PR.
+# If CI wiring is deferred (see SUMMARY.md), the tests still guard every
+# local developer `pytest` invocation.
+# ===========================================================================
+
+from pathlib import Path
+
+
+def _repo_root() -> Path:
+    """Locate the repo root from this test file's location.
+
+    Test file path: /repo/backend/src/tests/test_broker_zero_anthropic.py
+    So repo root = parents[3] from this file.
+    """
+    return Path(__file__).resolve().parents[3]
+
+
+class TestBrokerEnginesHaveNoAnthropicImport:
+    """Source-level invariant: broker engine files carry zero AsyncAnthropic.
+
+    Plan 04 deleted the legacy engine functions + the
+    `from anthropic import AsyncAnthropic` imports. A future refactor that
+    re-introduces either shape breaks the CC-as-Brain invariant — this test
+    class catches it at grep time (before the sentinel patches even load).
+
+    The check runs on source text, not on imported modules, because a
+    module can have `import anthropic` even when no code uses it — and
+    the invariant we care about is the literal source pattern.
+    """
+
+    ENGINE_FILES = [
+        "backend/src/flywheel/engines/contract_analyzer.py",
+        "backend/src/flywheel/engines/quote_extractor.py",
+        "backend/src/flywheel/engines/solicitation_drafter.py",
+        "backend/src/flywheel/engines/recommendation_drafter.py",
+    ]
+
+    def test_no_async_anthropic_construction(self) -> None:
+        import re
+
+        pattern = re.compile(r"AsyncAnthropic\s*\(")
+        offenders: list[str] = []
+        for rel in self.ENGINE_FILES:
+            path = _repo_root() / rel
+            text = path.read_text()
+            matches = pattern.findall(text)
+            if matches:
+                offenders.append(
+                    f"{rel}: {len(matches)} AsyncAnthropic(...) construction(s)"
+                )
+        assert not offenders, (
+            "Phase 150.1 invariant violated — backend engine files must not "
+            "construct AsyncAnthropic(...). Offenders:\n  " + "\n  ".join(offenders)
+        )
+
+    def test_no_module_local_anthropic_import(self) -> None:
+        import re
+
+        # Matches `from anthropic import ... AsyncAnthropic ...` at column 0
+        # (not in docstrings / comments).
+        pattern = re.compile(r"^from\s+anthropic\s+import\s+.*AsyncAnthropic", re.M)
+        offenders: list[str] = []
+        for rel in self.ENGINE_FILES:
+            text = (_repo_root() / rel).read_text()
+            if pattern.search(text):
+                offenders.append(rel)
+        assert not offenders, (
+            "Phase 150.1 invariant violated — `from anthropic import AsyncAnthropic` "
+            "removed from broker engines in Plan 04. Offenders:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_no_package_level_async_anthropic_attribute_access(self) -> None:
+        """Catch `anthropic.AsyncAnthropic(...)` (package-level access shape)."""
+        import re
+
+        pattern = re.compile(r"anthropic\.AsyncAnthropic\s*\(")
+        offenders: list[str] = []
+        for rel in self.ENGINE_FILES:
+            text = (_repo_root() / rel).read_text()
+            matches = pattern.findall(text)
+            if matches:
+                offenders.append(
+                    f"{rel}: {len(matches)} anthropic.AsyncAnthropic(...) call(s)"
+                )
+        assert not offenders, (
+            "Phase 150.1 invariant violated — backend engine files must not "
+            "call anthropic.AsyncAnthropic(...). Offenders:\n  "
+            + "\n  ".join(offenders)
+        )
+
+
+class TestFrontendDoesNotCallDeprecatedEndpoints:
+    """CI grep-guard (Warning-7): frontend api.ts stays off deprecated paths.
+
+    Plan 03 migrated `frontend/src/features/broker/api.ts` to the new
+    `/broker/extract/*` + `/broker/save/*` endpoints with `X-Flywheel-Skill`
+    headers (Warning-5 invariant). This test class is the enforcement hook
+    that runs inside the existing repo-level pytest invocation — so CI on
+    every PR catches any regression that sneaks a deprecated path back in.
+
+    The three tests here encode three independent truths:
+      1. No deprecated path appears in non-comment source.
+      2. X-Flywheel-Skill header is emitted on every migration call
+         (>= 4, Warning-5 minimum).
+      3. At least 4 new /extract/* paths are referenced (matches Plan 02
+         endpoint count; 4 extract calls map to the 4 user-facing broker
+         flows on the frontend — contract analysis, quote extraction,
+         solicitation drafting, recommendation drafting).
+    """
+
+    # Patterns match each deprecated path exactly; negative lookahead keeps
+    # still-live paths with shared prefix out of the match set (e.g.,
+    # `/analyze-gaps` is a separate non-LLM endpoint that remains live).
+    DEPRECATED_PATH_PATTERNS = [
+        r"/analyze(?![\-a-zA-Z])",  # matches /analyze but NOT /analyze-gaps
+        r"/quotes/[^\s\"']+/extract\b",
+        r"/draft-solicitations\b",
+        r"/draft-recommendation(?![\-a-zA-Z])",  # exact path only
+    ]
+
+    FRONTEND_API_TS = "frontend/src/features/broker/api.ts"
+
+    def _frontend_source(self) -> str:
+        return (_repo_root() / self.FRONTEND_API_TS).read_text()
+
+    def _strip_comments(self, text: str) -> str:
+        """Strip single-line `// ...` and block `/* ... */` comments."""
+        import re
+
+        # Strip block comments first (non-greedy across lines)
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+        # Strip line comments
+        text = re.sub(r"//[^\n]*", "", text)
+        return text
+
+    def test_frontend_api_ts_has_no_deprecated_paths(self) -> None:
+        import re
+
+        stripped = self._strip_comments(self._frontend_source())
+        offenders: list[str] = []
+        for pat in self.DEPRECATED_PATH_PATTERNS:
+            if re.search(pat, stripped):
+                offenders.append(pat)
+        assert not offenders, (
+            f"Phase 150.1 invariant violated — {self.FRONTEND_API_TS} must not "
+            "call deprecated broker endpoints. Offending patterns:\n  "
+            + "\n  ".join(offenders)
+        )
+
+    def test_frontend_api_ts_emits_flywheel_skill_header(self) -> None:
+        """Warning-5 invariant: X-Flywheel-Skill header on every /extract/* call."""
+        text = self._frontend_source()
+        count = text.count("X-Flywheel-Skill")
+        assert count >= 4, (
+            f"Phase 150.1 Warning-5 invariant violated — {self.FRONTEND_API_TS} "
+            f"must emit X-Flywheel-Skill on all 4+ /extract/* migration calls "
+            f"(got {count} occurrences)."
+        )
+
+    def test_frontend_api_ts_uses_new_extract_paths(self) -> None:
+        """Positive assertion: the 4 new /extract/* paths ARE present."""
+        text = self._strip_comments(self._frontend_source())
+        count = text.count("/extract/")
+        assert count >= 4, (
+            f"Phase 150.1 invariant violated — {self.FRONTEND_API_TS} must "
+            f"reference at least 4 /extract/* paths (got {count})."
+        )
