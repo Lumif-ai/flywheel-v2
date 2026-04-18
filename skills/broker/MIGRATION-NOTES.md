@@ -21,6 +21,10 @@ read-only — only the server copy remains. The authoritative skill bundles are
 served via `flywheel_fetch_skill_assets` from the `skill_assets` table, and
 the legacy local clone has been tagged `legacy-skills-final`.
 
+> Retired on 2026-04-19. Coexistence-window gate evidence: see
+> `.planning/phases/152-retirement/152-COEXISTENCE-GATE.md`. Retirement PR
+> description template: `.planning/phases/152-retirement/152-RETIREMENT-PR.md`.
+
 ## Playwright Profile — First Login After Migration Is Expected
 
 Before Phase 149, `portals/base.py` used ephemeral `chromium.launch()` with no
