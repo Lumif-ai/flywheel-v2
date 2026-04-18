@@ -23,6 +23,9 @@ dependencies:
     - pdfplumber
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # /broker:parse-policies — Extract Policy Data and Update Project Coverages
 
 Read local policy PDF files using pdfplumber, extract coverage details (carrier,

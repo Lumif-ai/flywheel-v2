@@ -22,6 +22,9 @@ context-aware: true
 web_tier: 3
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # Outbound Messenger Skill
 
 Send personalized outreach to scored leads via browser-based email and LinkedIn.

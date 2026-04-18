@@ -1,3 +1,5 @@
+> **Historical document (Phase 152 — 2026-04-19) — DEPRECATED (Phase 152 — 2026-04-19):** This migration plan is archived. The `~/.claude/skills/` delivery path has been retired; skills are now served exclusively via `flywheel_fetch_skill_assets`. Retained for historical reference only.
+
 # Skill Migration Plan: Flywheel 14 Standards Compliance (v2)
 
 > **Created:** 2026-03-13 | **Revised:** 2026-03-13 (v2.1 -- final review fixes: counts, memory path, line counts, dedup criteria, parallel guards)

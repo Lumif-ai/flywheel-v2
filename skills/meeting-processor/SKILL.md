@@ -41,6 +41,9 @@ parameters:
   input_description: "Requires a meeting UUID. Use flywheel_fetch_meetings to find meeting IDs."
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # meeting-processor
 
 You are processing meeting notes using the **flywheel-powered** meeting intelligence pipeline. Your job is to classify each meeting by type, extract structured data with deep insight analysis, write it to the context store, and produce an enriched standalone report that leverages cross-references from compounded context store data.

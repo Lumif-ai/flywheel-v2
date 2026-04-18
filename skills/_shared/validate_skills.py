@@ -20,6 +20,7 @@ import re
 import sys
 from pathlib import Path
 
+# DEPRECATED (Phase 152 — 2026-04-19): legacy ~/.claude/skills/ path; skills are served via flywheel_fetch_skill_assets. Retained for developer tooling only; no runtime impact.
 SKILLS_ROOT = Path.home() / ".claude" / "skills"
 
 # Domain keywords that should have context-aware: true

@@ -1,3 +1,5 @@
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** The `~/.claude/skills/` paths referenced throughout this file are archived read-only. Skills are now served exclusively via `flywheel_fetch_skill_assets`. Retained for historical reference only.
+
 # Broker Migration Notes — v22.0
 
 **Audience:** existing brokers running `/broker:*` commands; new broker onboarding.
@@ -14,8 +16,10 @@ backend and is fetched over MCP at skill invocation time (Phase 150+).
 - `~/.claude/skills/broker/` remains intact (git tree is NOT deleted)
 - Server-hosted copy is the authoritative source going forward
 
-**After Phase 152** (retirement), only the server copy remains. Your local
-clone will be tagged `legacy-skills-final` and archived read-only.
+**As of Phase 152 (2026-04-19)** (retirement), `~/.claude/skills/` is archived
+read-only — only the server copy remains. The authoritative skill bundles are
+served via `flywheel_fetch_skill_assets` from the `skill_assets` table, and
+the legacy local clone has been tagged `legacy-skills-final`.
 
 ## Playwright Profile — First Login After Migration Is Expected
 

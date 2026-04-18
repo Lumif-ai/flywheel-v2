@@ -18,12 +18,8 @@ A Claude Code skill that researches and scores companies as potential clients us
 - Evaluating whether a specific company is worth pursuing
 
 ## Installation
-```bash
-mkdir -p ~/.claude/skills
-unzip gtm-company-fit-analyzer.skill -d ~/.claude/skills/
-claude mcp add playwright -- npx @playwright/mcp
-# Restart Claude Code
-```
+
+This skill is delivered exclusively through the Flywheel MCP server as of Phase 152 (2026-04-19) — DEPRECATED (Phase 152 — 2026-04-19). Do not clone this directory into `~/.claude/skills/`. Claude Code fetches the authoritative bundle via `flywheel_fetch_skill_assets` on demand.
 
 ## Usage
 

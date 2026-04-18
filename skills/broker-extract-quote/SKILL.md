@@ -21,6 +21,9 @@ dependencies:
     - "~/.claude/skills/broker/field_validator.py"
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # /broker:extract-quote — Upload Carrier Quote PDF and Extract Premium Breakdown
 
 Map a carrier quote PDF to an existing quote row in the database, upload the PDF,

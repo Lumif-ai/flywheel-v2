@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# DEPRECATED (Phase 152 — 2026-04-19): This module references the legacy ~/.claude/skills/ path in its docstring/usage examples. Skills are served via flywheel_fetch_skill_assets; this local-path module is retained for developer tooling only and has no runtime impact.
 """
 Context Store Utilities — Programmatic interface to the shared context store.
 

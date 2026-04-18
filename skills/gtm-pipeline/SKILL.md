@@ -28,6 +28,9 @@ output:
 web_tier: 3
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # gtm-pipeline
 
 You are running the **flywheel-powered** bidirectional GTM pipeline. Your job is to read enriched context from the context store to personalize outreach, then write discoveries from outreach back to the context store -- closing the GTM feedback loop.
