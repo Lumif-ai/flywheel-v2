@@ -603,6 +603,7 @@ async def _resolve_bundle_chain(
 async def get_skill_assets_bundle(
     request: Request,
     skill_name: str,
+    shas_only: bool = False,
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> AssetsBundleResponse:
@@ -623,7 +624,27 @@ async def get_skill_assets_bundle(
       or tenant-excluded, same tenant-override probe.
     - `deps` lists every transitive library name (excluding the root);
       clients can use it for cache-key computation.
+
+    Query params:
+        shas_only: if True, return the response envelope (skill/deps/
+            rollup_sha + per-bundle metadata) but OMIT base64 bundle bytes
+            — each ``bundle_b64`` is the empty string. Used by Phase 151
+            cache layer to answer "is my cached SHA still current?" in a
+            single lightweight round-trip, without re-shipping bundle
+            bytes. All existing auth/tenant/module/protected gates + the
+            server-side SHA-256 re-hash still fire; the shas_only branch
+            is an early return downstream of those checks.
+
+    Headers:
+        X-Flywheel-Correlation-ID: optional 8-hex-char client-generated
+            ID. Logged as a structured ``correlation_id`` extra field on
+            every logger.info line from this handler so operators can grep
+            a single fetch (including client-side retries) across backend
+            logs. Falls back to ``"-"`` when absent; client is expected
+            to generate one via ``secrets.token_hex(4)`` on entry and
+            thread it through all retry attempts.
     """
+    cid = request.headers.get("X-Flywheel-Correlation-ID", "-")
     # ---- Root skill lookup: identical to get_skill_assets ----
     has_overrides = await db.execute(
         select(TenantSkill.skill_id)
@@ -667,6 +688,48 @@ async def get_skill_assets_bundle(
 
     # ---- Fanout: walk depends_on server-side ----
     chain = await _resolve_bundle_chain(db, skill)
+
+    # ---- shas_only early return (Phase 151 cache pre-check) ----
+    # Preserves all upstream auth/tenant/module/protected gates (already
+    # enforced above and inside _resolve_bundle_chain). Returns the same
+    # envelope shape but with EMPTY ``bundle_b64`` — clients detect the
+    # shas-only branch via the empty string and use the per-bundle
+    # ``sha256`` field for cache-coherence checks. No base64 encode, no
+    # extra bytes copied out of the DB row (memoryview touched only for
+    # already-materialized ``asset.bundle_sha256`` + ``.bundle_size_bytes``
+    # columns).
+    if shas_only:
+        sha_deps = [
+            sd.name for sd, a in chain if sd.name != skill.name and a is not None
+        ]
+        sha_rollup = hashlib.sha256(
+            "\n".join(
+                f"{sd.name}:{a.bundle_sha256}" for sd, a in chain if a is not None
+            ).encode("ascii")
+        ).hexdigest()
+        sha_bundles = [
+            BundleEntry(
+                name=sd.name,
+                sha256=a.bundle_sha256,
+                size=a.bundle_size_bytes,
+                format=a.bundle_format,
+                version=sd.version,
+                updated_at=a.updated_at,
+                bundle_b64="",  # EMPTY — signals shas-only; client treats "" as "no bytes"
+            )
+            for sd, a in chain if a is not None
+        ]
+        logger.info(
+            "assets_bundle_fetch tenant=%s root=%s chain=%s rollup_sha=%s shas_only=true",
+            user.tenant_id, skill.name, [b.name for b in sha_bundles], sha_rollup[:12],
+            extra={"correlation_id": cid},
+        )
+        return AssetsBundleResponse(
+            skill=skill.name,
+            deps=sha_deps,
+            rollup_sha=sha_rollup,
+            bundles=sha_bundles,
+        )
 
     # ---- Build response bundles with server-side SHA re-hash ----
     bundles: list[BundleEntry] = []
@@ -721,8 +784,9 @@ async def get_skill_assets_bundle(
     deps = [skill_def.name for skill_def, _ in chain if skill_def.name != skill.name]
 
     logger.info(
-        "assets_bundle_fetch tenant=%s root=%s chain=%s rollup_sha=%s",
+        "assets_bundle_fetch tenant=%s root=%s chain=%s rollup_sha=%s shas_only=false",
         user.tenant_id, skill.name, [b.name for b in bundles], rollup_sha[:12],
+        extra={"correlation_id": cid},
     )
 
     return AssetsBundleResponse(

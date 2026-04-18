@@ -1052,6 +1052,188 @@ class TestAssetBundleEndpoint:
         assert "bundle_b64" not in body
         assert real_sha not in body["message"]  # real hash stays in logs, not response
 
+    # ---------------------------------------------------------------
+    # Phase 151 Plan 01: ?shas_only=true query param + correlation-id
+    # ---------------------------------------------------------------
+
+    def test_shas_only_returns_empty_bundle_b64(self, client):
+        """shas_only=true branch: full envelope, empty bundle_b64, zero base64 bytes."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        consumer = MockSkillDefinition(
+            name="broker-parse-contract",
+            protected=False,
+            depends_on=["broker"],
+        )
+        library = MockSkillDefinition(
+            name="broker",
+            protected=False,
+            depends_on=[],
+        )
+        lib_bundle, lib_sha = _build_test_bundle()
+        lib_asset = MockSkillAsset(
+            skill_id=library.id,
+            bundle=lib_bundle,
+            bundle_sha256=lib_sha,
+            bundle_size_bytes=len(lib_bundle),
+        )
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),        # override probe
+            MockResult(value=consumer),    # root lookup
+            MockResult(value=library),     # dep lookup
+            MockResult(value=lib_asset),   # library asset (topo)
+            MockResult(value=None),        # consumer asset: none
+        ])
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get(
+            "/api/v1/skills/broker-parse-contract/assets/bundle?shas_only=true"
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["skill"] == "broker-parse-contract"
+        assert body["deps"] == ["broker"]
+        assert len(body["bundles"]) == 1
+        # Per-bundle metadata still present.
+        assert body["bundles"][0]["name"] == "broker"
+        assert body["bundles"][0]["sha256"] == lib_sha
+        assert body["bundles"][0]["size"] == len(lib_bundle)
+        # Bundle bytes EMPTY — signals shas-only branch to client.
+        assert body["bundles"][0]["bundle_b64"] == ""
+
+    def test_shas_only_matches_full_fetch_shas(self, client):
+        """shas_only SHAs byte-match the full-fetch SHAs for the same chain."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        consumer = MockSkillDefinition(
+            name="broker-parse-contract",
+            depends_on=["broker"],
+        )
+        library = MockSkillDefinition(name="broker")
+        lib_bundle, lib_sha = _build_test_bundle()
+        lib_asset = MockSkillAsset(
+            skill_id=library.id,
+            bundle=lib_bundle,
+            bundle_sha256=lib_sha,
+            bundle_size_bytes=len(lib_bundle),
+        )
+
+        def _side_effects():
+            return [
+                MockResult(value=None),
+                MockResult(value=consumer),
+                MockResult(value=library),
+                MockResult(value=lib_asset),
+                MockResult(value=None),
+            ]
+
+        app.dependency_overrides[require_tenant] = lambda: user
+
+        # Full fetch first.
+        mock_db_full = _mock_db(execute_side_effects=_side_effects())
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db_full
+        r_full = client.get("/api/v1/skills/broker-parse-contract/assets/bundle")
+        assert r_full.status_code == 200
+        full_body = r_full.json()
+
+        # shas_only fetch.
+        mock_db_sha = _mock_db(execute_side_effects=_side_effects())
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db_sha
+        r_sha = client.get(
+            "/api/v1/skills/broker-parse-contract/assets/bundle?shas_only=true"
+        )
+        assert r_sha.status_code == 200
+        sha_body = r_sha.json()
+
+        # Per-bundle SHAs identical.
+        assert len(full_body["bundles"]) == len(sha_body["bundles"])
+        full_shas = {b["name"]: b["sha256"] for b in full_body["bundles"]}
+        sha_shas = {b["name"]: b["sha256"] for b in sha_body["bundles"]}
+        assert full_shas == sha_shas
+        # Rollup sha matches too.
+        assert full_body["rollup_sha"] == sha_body["rollup_sha"]
+        # And deps identical.
+        assert full_body["deps"] == sha_body["deps"]
+
+    def test_shas_only_still_enforces_protected(self, client):
+        """Protected root -> 403 on shas_only=true (no bypass of security gate)."""
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        consumer = MockSkillDefinition(
+            name="company-intel",
+            protected=True,
+            depends_on=[],
+        )
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),
+            MockResult(value=consumer),
+            # Walker must NOT run for protected root — 403 short-circuits.
+        ])
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        resp = client.get(
+            "/api/v1/skills/company-intel/assets/bundle?shas_only=true"
+        )
+        assert resp.status_code == 403
+        # Only 2 execute calls — protected gate fires before fanout walk
+        # AND before shas_only branch. Security invariant intact.
+        assert mock_db.execute.await_count == 2
+
+    def test_asset_bundle_logs_correlation_id_when_header_present(self, client, caplog):
+        """X-Flywheel-Correlation-ID request header -> logged as structured extra."""
+        import logging
+        from flywheel.middleware.rate_limit import limiter
+        limiter.reset()
+
+        user = _make_user()
+        consumer = MockSkillDefinition(
+            name="broker-parse-contract",
+            depends_on=["broker"],
+        )
+        library = MockSkillDefinition(name="broker")
+        lib_bundle, lib_sha = _build_test_bundle()
+        lib_asset = MockSkillAsset(
+            skill_id=library.id,
+            bundle=lib_bundle,
+            bundle_sha256=lib_sha,
+            bundle_size_bytes=len(lib_bundle),
+        )
+        mock_db = _mock_db(execute_side_effects=[
+            MockResult(value=None),
+            MockResult(value=consumer),
+            MockResult(value=library),
+            MockResult(value=lib_asset),
+            MockResult(value=None),
+        ])
+        app.dependency_overrides[require_tenant] = lambda: user
+        app.dependency_overrides[get_tenant_db] = lambda: mock_db
+
+        with caplog.at_level(logging.INFO, logger="flywheel.api.skills"):
+            resp = client.get(
+                "/api/v1/skills/broker-parse-contract/assets/bundle",
+                headers={"X-Flywheel-Correlation-ID": "deadbeef"},
+            )
+        assert resp.status_code == 200
+        # At least one LogRecord from this handler must carry correlation_id="deadbeef"
+        # as a structured field (not just substring-match inside message).
+        matching = [
+            r for r in caplog.records
+            if getattr(r, "correlation_id", None) == "deadbeef"
+            and "assets_bundle_fetch" in r.getMessage()
+        ]
+        assert matching, (
+            "Expected a LogRecord with correlation_id='deadbeef' structured extra; "
+            f"saw {[(r.name, r.getMessage(), getattr(r, 'correlation_id', '<missing>')) for r in caplog.records]}"
+        )
+
     def test_rate_limit(self, client):
         """11 rapid requests from same user -> 429 within 15 attempts."""
         from flywheel.middleware.rate_limit import limiter
