@@ -526,8 +526,14 @@ async def execute_run(run: SkillRun) -> None:
             # on user's CC subscription) — this is the platform architecture.
             # Landing here for a non-onboarding skill means the skill was invoked
             # server-side (cron/web) instead of via CC — fail fast.
+            #
+            # Phase 150.1: allowlist sourced from settings.subsidy_allowed_skills
+            # (single source of truth in backend/src/flywheel/config.py). The
+            # separate web-exec path at _execute_web_run (line ~3273) is ALREADY
+            # BYOK-gated — it receives api_key from the request and does not hit
+            # this allowlist fallback. This gate only tightens the subsidy path.
             from flywheel.config import settings
-            if run.skill_name in ("company-intel", "meeting-prep") and settings.flywheel_subsidy_api_key:
+            if run.skill_name in settings.subsidy_allowed_skills and settings.flywheel_subsidy_api_key:
                 api_key = settings.flywheel_subsidy_api_key
             else:
                 raise ValueError(

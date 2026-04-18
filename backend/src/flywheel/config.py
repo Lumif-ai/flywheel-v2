@@ -34,6 +34,14 @@ class Settings(BaseSettings):
     # Subsidized API key for anonymous onboarding (~$0.50/trial)
     flywheel_subsidy_api_key: str = ""
 
+    # CC-as-Brain subsidy allowlist (Phase 150.1).
+    # Single source of truth for which skills can use flywheel_subsidy_api_key.
+    # Per Phase 150.1 CONTEXT.md: meeting-prep was removed from the allowlist on
+    # 2026-04-18. Any non-allowlisted skill that lacks a caller-supplied api_key
+    # is fail-closed (403 / ValueError) by skill_executor and _enforcement.py.
+    # Changes here are git-tracked, deploy-required, and auditable.
+    subsidy_allowed_skills: set[str] = {"company-intel"}
+
     # Email (Resend)
     resend_api_key: str = ""  # empty = email disabled, log instead
     email_domain: str = "lumif.ai"  # verified domain in Resend
