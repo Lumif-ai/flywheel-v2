@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-fill-portal
-version: "1.1"
+version: "1.2"
 web_tier: 3
 description: Show a data preview for portal submission and delegate portal fill execution to portals/mapfre.py
 context-aware: true

@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-extract-quote
-version: "1.1"
+version: "1.2"
 web_tier: 3
 description: Map a carrier quote PDF to an existing quote row, upload the PDF, trigger async extraction, poll until done, and report premium breakdown with critical exclusions
 context-aware: true
@@ -178,9 +178,14 @@ for f in files:
     print(f"  - {f.get('filename', f.get('id', 'unknown'))}")
 ```
 
-## Step 6: Trigger Async Extraction
+## Step 6: Extract Quote via Pattern 3a (Claude-in-conversation)
 
-Call the backend extract endpoint to start async quote extraction for the selected quote:
+v1.2 (Phase 150.1) has THIS conversation run the quote-text extraction using
+the prompt + tool_schema the backend returns. The backend owns prompt
+assembly, quote-row lookup, PDF retrieval, and persistence; it does NOT
+call Anthropic.
+
+### 6a. Fetch extraction prompt + quote PDFs
 
 ```python
 import sys, os
@@ -189,48 +194,67 @@ import api_client
 
 QUOTE_ID = "<selected-quote-id>"
 
-print(f"Triggering extraction for quote {QUOTE_ID}...")
-trigger = api_client.run(api_client.post(f"quotes/{QUOTE_ID}/extract"))
-print(f"Extraction triggered: {trigger.get('status', 'accepted')}")
-print("Polling for completion...")
+extract = api_client.run(api_client.extract_quote_extraction(QUOTE_ID))
+# extract = {prompt, tool_schema, documents, metadata}
+# documents = quote PDFs attached to this quote row.
+print(f"  prompt: {len(extract['prompt'])} chars")
+print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+print(f"  documents: {len(extract['documents'])} quote PDF(s)")
+print(f"  tool_schema_version: {extract['metadata']['tool_schema_version']}")
 ```
 
-The backend returns 202 Accepted. Proceed immediately to polling.
+### 6b. Analyze inline using the returned prompt + tool_schema
 
-## Step 7: Poll for Completion
+**YOU (Claude) now run the extraction.** For each document in
+`extract["documents"]`, decode `pdf_base64` and attach via the Anthropic
+document content-block protocol. Use `extract["prompt"]` as the system
+message and `extract["tool_schema"]` as the single `tools=` entry.
 
-Poll GET /broker/projects/{project_id}/quotes every 2 seconds until the selected quote
-status changes to "extracted" or "error". Maximum 30 polls (60 seconds).
+Expected tool-use output keys (from `extract_quote_terms` schema):
+`carrier_name`, `quote_date` (ISO date or null), `quote_reference` (string
+or null), `currency` (ISO 4217), `total_premium` (number), `line_items`
+(list of coverage-level premium rows).
+
+### 6c. Persist the extraction
+
+The backend's `persist_quote_extraction` helper writes the quote row, builds
+the exclusion cross-check against the project's MSA contract requirements,
+and populates `critical_exclusions` — no client-side work needed.
 
 ```python
-import sys, os, time
+import sys, os
 sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
 import api_client
 
-PROJECT_ID = "<validated-project-id>"
 QUOTE_ID = "<selected-quote-id>"
-MAX_POLLS = 30
 
-target = None
-for i in range(MAX_POLLS):
-    result = api_client.run(api_client.get(f"projects/{PROJECT_ID}/quotes"))
-    quotes = result.get("quotes", [])
-    target = next((q for q in quotes if q["id"] == QUOTE_ID), None)
-    if target and target.get("status") == "extracted":
-        print(f"Extraction completed after {(i+1)*2} seconds.")
-        break
-    if target and target.get("status") == "error":
-        print(f"ERROR: Extraction failed for quote {QUOTE_ID}")
-        print(f"  Reason: {target.get('extraction_error', 'unknown')}")
-        break
-    print(f"  Waiting for extraction... ({i+1}/{MAX_POLLS})")
-    time.sleep(2)
-else:
-    print("ERROR: Extraction timed out after 60 seconds")
-    print("Check backend logs for quote", QUOTE_ID)
+analysis = {
+    "carrier_name": "",                      # from tool_use.input.carrier_name
+    "quote_date": None,
+    "quote_reference": None,
+    "currency": "USD",
+    "total_premium": 0.0,
+    "line_items": [],
+    "tool_schema_version": extract["metadata"]["tool_schema_version"],
+}
+
+save_result = api_client.run(api_client.save_quote_extraction(QUOTE_ID, analysis))
+print(f"Saved quote {QUOTE_ID}: status={save_result.get('status')}")
 ```
 
-If extraction failed or timed out, report the error and stop. Do not proceed to reporting.
+### Why this is different from v1.1
+
+v1.1 called `/quotes/{id}/extract` which ran Anthropic server-side with the
+backend's subsidy key, then persisted the result. The broker had to poll
+`/projects/{id}/quotes` for up to 60 seconds waiting for completion. v1.2
+returns the SAME prompt + SAME tool_schema + SAME PDFs and has THIS
+conversation's Claude run the extraction, so the flow is synchronous (no
+polling) and the backend cost is zero LLM calls. Details in
+`skills/broker/MIGRATION-NOTES.md`.
+
+## Step 7 [REMOVED in v1.2]
+
+Polling is gone — Pattern 3a is synchronous. Proceed to Step 8.
 
 ## Step 8: Print Extraction Results
 

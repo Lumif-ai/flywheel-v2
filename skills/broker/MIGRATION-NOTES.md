@@ -84,3 +84,85 @@ python3 scripts/seed_skills.py --verbose             # commit
 ```
 
 Idempotent (content-addressed); re-seeding is safe.
+
+## v1.1 → v1.2 (2026-04-18, Phase 150.1 — CC-as-Brain Enforcement)
+
+**What changed:**
+- `api_client.py` gained 10 new Pattern 3a methods: 5 `extract_*` + 5 `save_*`
+  pairs for `contract-analysis`, `policy-extraction`, `quote-extraction`,
+  `solicitation-draft`, and `recommendation-draft`. Existing `post` / `get` /
+  `patch` / `upload_file` / `run` helpers preserved unchanged; `post` / `get` /
+  `patch` gained an optional `extra_headers=` kwarg used by the Pattern 3a
+  helpers to emit `X-Flywheel-Skill: <skill-name>` on every request.
+- `skills/broker/SKILL.md` version bumped 1.0 → 1.2 (skipped 1.1 — this
+  library was not separately versioned in Phase 149; the jump aligns with
+  the consumer-skill 1.1 → 1.2 step).
+- All 10 `skills/broker-*/SKILL.md` consumer files bumped 1.1 → 1.2.
+- 6 of the 10 consumers had their "analyze" step rewritten to Pattern 3a:
+  `broker-parse-contract`, `broker-parse-policies`, `broker-extract-quote`,
+  `broker-draft-emails`, `broker-compare-quotes`, `broker-draft-recommendation`.
+  Each rewrite includes a "Why this is different from v1.1" epilogue
+  explaining the compute-boundary shift.
+
+**Behavior change for the library consumer:**
+- Previously, `broker_api.post("projects/{id}/analyze", {})` triggered a
+  server-side Anthropic call against the backend's subsidy key (the
+  backend-pays LLM-billing leak). Now the analysis runs in THIS conversation
+  (Claude-in-conversation): `extract_contract_analysis(project_id)` →
+  inline tool-use analysis against the returned prompt + schema →
+  `save_contract_analysis(project_id, analysis)` persists.
+- Backend still owns prompt assembly, tool_schema, PDF retrieval, and
+  persistence — only the LLM call itself moves client-side.
+- Net latency: slightly higher on the Claude-in-conversation leg (one extra
+  round-trip vs. the old server-side polling pattern), but correctness and
+  billing profile are unchanged; backend cost = zero LLM calls per run.
+
+**BYOK wire format:** every Pattern 3a helper accepts an optional `api_key=`
+kwarg and forwards it via the JSON request body (locked in Plan 01
+`_enforcement.py`'s body-double-read dependency). Non-allowlisted skills
+(all broker-*) without caller-supplied `api_key` will receive a 403
+`subsidy_not_allowed` — this is intentional.
+
+**Frontend migration branch chosen (Blocker-3 provenance):**
+- **Branch P3 (warm + Claude Code handoff)** was taken on 2026-04-18.
+  Pre-flight grep confirmed `POST /skills/runs` EXISTS
+  (backend/src/flywheel/api/skills.py:741), which initially looked like
+  Branch P1 territory. However, every broker-* skill has `web_tier=3` in its
+  SKILL.md frontmatter, and the `start_run` handler rejects `web_tier=3`
+  skills with HTTP 422 ("requires the local Claude Code agent. Run it
+  locally with the corresponding /skill command in Claude Code"). A
+  warm+enqueue flow would therefore succeed on the warm step but always fail
+  on the enqueue step for broker-* — a silent-degradation trap explicitly
+  forbidden by the Blocker-3 invariant.
+- Frontend therefore migrated to a **warm + Claude Code handoff** pattern:
+  each of the 4 call sites (`triggerAnalysis`, `draftSolicitations`,
+  `extractQuote`, `draftRecommendation`) warms the corresponding
+  `/broker/extract/{op}` endpoint with the `X-Flywheel-Skill` header (proving
+  reachability + subsidy enforcement + BYOK wire format) and on mutation
+  success opens a `ClaudeCommandModal`
+  (`frontend/src/features/broker/components/shared/ClaudeCommandModal.tsx`)
+  pre-filled with the correct `/broker:*` slash command and
+  copy-to-clipboard affordance. The full Pattern 3a flow runs via the
+  corresponding `/broker:*` skill in the user's local Claude Code.
+- Handoff mapping per button:
+  - `useAnalyzeProject` → `/broker:parse-contract <project_id>`
+  - `useExtractQuote` → `/broker:extract-quote <project_id>`
+  - `useDraftSolicitations` → `/broker:draft-emails <project_id>`
+  - `useDraftRecommendation` → `/broker:draft-recommendation <project_id>`
+- Every call site carries a `TODO(150.2)` comment indicating the follow-up
+  work: ship a web_tier-safe broker enqueue path (e.g. a background job
+  runner that invokes the same Pattern 3a helpers server-side) and swap
+  these callers from warm + handoff to warm + enqueue.
+
+**New bundle SHA-256:** `60cb34a0e32ef96b3d1aae8f9ac94c1ab5eda9ece33a8b37fe5fb655ee78ce46` (9283 bytes, re-seeded 2026-04-18)
+Previous (Phase 149-02) SHA: `217ebdc1c28416e94104845a7ac0d2e49e71fe77caa60531934d05f2be17a33f` (7239 bytes)
+Size delta: +2044 bytes (new Pattern 3a helpers in `api_client.py`).
+
+**Byte-determinism invariant preserved:** the seed pipeline still uses Phase
+147's `ZipInfo(date_time=(1980,1,1,0,0,0))` + sorted alphabetical entry walk
++ `external_attr=0o644 << 16`. Re-running `scripts/seed_skills.py --dry-run`
+MUST produce the same SHA as the capture above.
+
+**MCP tool clients** — no action required. `flywheel_fetch_skill_assets`
+returns the authoritative current bundle by name; cached copies with old SHA
+are replaced automatically on next fetch (cache is content-addressed by SHA).

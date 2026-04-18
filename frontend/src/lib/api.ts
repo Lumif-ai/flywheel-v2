@@ -51,8 +51,12 @@ export const api = {
       : path
     return request<T>(url)
   },
-  post: <T>(path: string, body?: unknown) =>
-    request<T>(path, { method: 'POST', body: body ? JSON.stringify(body) : undefined }),
+  post: <T>(path: string, body?: unknown, opts?: { headers?: Record<string, string> }) =>
+    request<T>(path, {
+      method: 'POST',
+      body: body ? JSON.stringify(body) : undefined,
+      ...(opts?.headers ? { headers: opts.headers } : {}),
+    }),
   patch: <T>(path: string, body?: unknown) =>
     request<T>(path, { method: 'PATCH', body: body ? JSON.stringify(body) : undefined }),
   put: <T>(path: string, body?: unknown) =>

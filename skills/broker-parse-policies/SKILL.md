@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-parse-policies
-version: "1.1"
+version: "1.2"
 web_tier: 3
 description: Extract coverage data from local policy PDFs using pdfplumber, match to project coverages, and PATCH current limits and carriers
 context-aware: true
@@ -112,48 +112,38 @@ for c in coverages:
           f"current: {c.get('current_limit', 'None')}")
 ```
 
-## Step 4: Extract Text from Each Policy PDF
+## Step 4: Upload Policy PDFs to the Project
 
-For each PDF file, extract all text using pdfplumber and print the first 2000
-characters so you can read the policy terms:
+Pattern 3a (v1.2) moves policy extraction onto the backend-authoritative flow.
+Upload each PDF to the project's coverage zone so the backend can return them
+(base64-encoded) from `extract/policy-extraction` in Step 5:
 
 ```python
 import sys, os
 sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import pdfplumber
+import api_client
 
+PROJECT_ID = "<validated-project-id>"
 PDF_PATHS = ["<validated-path-1>", "<validated-path-2>"]  # from Step 2
 
-policy_texts = {}
 for pdf_path in PDF_PATHS:
-    print(f"\n{'='*60}")
-    print(f"Extracting text from: {os.path.basename(pdf_path)}")
-    print('='*60)
-    with pdfplumber.open(pdf_path) as pdf:
-        text = "\n".join(page.extract_text() or "" for page in pdf.pages)
-    policy_texts[pdf_path] = text
-    print(f"\n--- Extracted text from {os.path.basename(pdf_path)} ---")
-    print(text[:2000])  # Show first 2000 chars for context
-    if len(text) > 2000:
-        print(f"... [{len(text) - 2000} more characters not shown]")
+    print(f"Uploading {os.path.basename(pdf_path)}...")
+    result = api_client.run(api_client.upload_file(PROJECT_ID, pdf_path))
+    # upload_file stores files with document_type='requirements' by default;
+    # the broker can reclassify to 'coverage' via the UI or PATCH endpoint.
+    print(f"  stored: {len(result.get('files', []))} file(s)")
 ```
 
-## Step 5: Identify Coverage Details from Extracted Text
+(If the broker already uploaded these PDFs via the UI, skip this and
+continue — the extract endpoint reads every coverage-zone PDF on the project.)
 
-**You (Claude) will now read the text blocks printed above and extract policy terms.**
-Do not call an API for this — analyze the text directly.
+## Step 5: Extract Policy Data via Pattern 3a (Claude-in-conversation)
 
-For each policy PDF, identify:
-- **current_carrier** — The insurance company name (e.g. "AXA", "MAPFRE", "Zurich")
-- **coverage_type** — The type of coverage (use the taxonomy alias_map built below)
-- **current_limit** — The policy limit as a number (e.g. 1000000 for 1,000,000)
-- **current_policy_number** — The policy number string (may be absent)
+v1.2 runs policy extraction in THIS conversation using the prompt +
+tool_schema the backend returns. The backend owns prompt assembly, taxonomy
+load, PDF retrieval, and persistence; it does NOT call Anthropic.
 
-### Load Coverage Taxonomy from API
-
-Before matching, fetch the canonical coverage types with their aliases from the
-taxonomy API. This replaces any hardcoded translation maps and supports all
-languages automatically:
+### 5a. Fetch extraction prompt + coverage-zone PDFs
 
 ```python
 import sys, os
@@ -162,49 +152,32 @@ import api_client
 
 PROJECT_ID = "<validated-project-id>"
 
-# Get project details to determine country and line of business
-project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
-country = project.get("country_code", "")
-lob = project.get("line_of_business", "")
-
-# Fetch canonical coverage types with aliases for this market
-params = []
-if country:
-    params.append(f"country={country}")
-if lob:
-    params.append(f"lob={lob}")
-query = "&".join(params)
-taxonomy = api_client.run(api_client.get(f"coverage-types?{query}"))
-
-# Build a lookup: alias (lowered) → canonical coverage_type key
-alias_map = {}
-for ct in taxonomy.get("coverage_types", []):
-    key = ct["key"]
-    alias_map[key.lower()] = key
-    alias_map[ct.get("display_name", "").lower()] = key
-    for lang, aliases in ct.get("aliases", {}).items():
-        for alias in aliases:
-            alias_map[alias.lower()] = key
-
-print(f"Loaded {len(taxonomy.get('items', []))} coverage types with {len(alias_map)} aliases")
+extract = api_client.run(api_client.extract_policy_extraction(PROJECT_ID))
+# extract = {prompt, tool_schema, documents, metadata}
+# documents is restricted to document_type='coverage' (COIs, policy summaries).
+print(f"  prompt: {len(extract['prompt'])} chars")
+print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+print(f"  documents: {len(extract['documents'])} coverage-zone PDF(s)")
+print(f"  tool_schema_version: {extract['metadata']['tool_schema_version']}")
 ```
 
-Use `alias_map` to match coverage names found in the PDF text (lowered) to
-canonical keys. The aliases include contract-language terms (e.g. Spanish,
-Portuguese names) so they will match policy documents in any supported language.
+### 5b. Analyze inline using the returned prompt + tool_schema
 
-If a coverage name from the PDF does not match any alias, use your best judgment
-based on context. If you cannot determine the coverage type, skip the file and
-note it as unmatched.
+**YOU (Claude) now run the extraction.** For each document in
+`extract["documents"]`, decode `pdf_base64` and attach via the Anthropic
+document content-block protocol. Use `extract["prompt"]` as the system
+message and `extract["tool_schema"]` as the single `tools=` entry.
 
-## Step 6: Match Coverages and PATCH Records
+Expected tool-use output keys (from `extract_current_policies` schema):
+`documents` (list of `{file_id, filename, policies: [...]}`), `policies`
+(flat list with `coverage_type_key`, `raw_coverage_name`, `current_carrier`,
+`current_limit`, `current_policy_number`), `total_policies_found` (int).
 
-For each identified coverage, find the matching record in the project's coverages list
-(from Step 3) and PATCH it with the extracted data.
+The backend's persistence helper handles coverage-taxonomy alias matching
+and PATCH of each matched `BrokerCoverage` row — the old client-side
+alias_map + PATCH loop is no longer needed.
 
-Match strategy:
-1. Exact match on coverage_type (case-insensitive)
-2. If no exact match, try contains match (e.g. "Liability" matches "General Liability")
+### 5c. Persist the extraction
 
 ```python
 import sys, os
@@ -213,69 +186,35 @@ import api_client
 
 PROJECT_ID = "<validated-project-id>"
 
-# These values come from your inline reading of the PDF text in Step 5.
-# Replace with actual extracted values per PDF.
-extracted_policies = [
-    {
-        "pdf_path": "<path>",
-        "coverage_type": "<english-coverage-type>",  # canonical key from taxonomy
-        "current_carrier": "<carrier-name>",
-        "current_limit": 0,           # number
-        "current_policy_number": None  # string or None
-    }
-    # ... one entry per identified coverage
-]
+# Build analysis dict from the tool_use block captured in 5b.
+analysis = {
+    "documents": [],                        # from tool_use.input.documents
+    "policies": [],                         # from tool_use.input.policies
+    "total_policies_found": 0,
+    "tool_schema_version": extract["metadata"]["tool_schema_version"],
+}
 
-project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
-coverages = project.get("coverages", [])
-
-updated_count = 0
-unmatched_pdfs = []
-
-for policy in extracted_policies:
-    target_type = policy["coverage_type"].lower()
-    match = None
-
-    # Try exact match first
-    for c in coverages:
-        if c.get("coverage_type", "").lower() == target_type:
-            match = c
-            break
-
-    # Try contains match
-    if not match:
-        for c in coverages:
-            if target_type in c.get("coverage_type", "").lower() or \
-               c.get("coverage_type", "").lower() in target_type:
-                match = c
-                break
-
-    if not match:
-        print(f"  WARNING: No matching coverage found for '{policy['coverage_type']}'")
-        unmatched_pdfs.append(policy["pdf_path"])
-        continue
-
-    coverage_id = match["id"]
-    coverage_type = match["coverage_type"]
-
-    result = api_client.run(api_client.patch(
-        f"coverages/{coverage_id}",
-        {
-            "current_limit": policy["current_limit"],
-            "current_carrier": policy["current_carrier"],
-            "current_policy_number": policy["current_policy_number"]
-        }
-    ))
-    print(f"  Updated {coverage_type}: limit={policy['current_limit']:,}, "
-          f"carrier={policy['current_carrier']}")
-    updated_count += 1
-
-print(f"\nResult: {updated_count} coverage(s) updated out of {len(coverages)} total.")
-if unmatched_pdfs:
-    print(f"\nUnmatched files ({len(unmatched_pdfs)}):")
-    for path in unmatched_pdfs:
-        print(f"  - {os.path.basename(path)}")
+save_result = api_client.run(api_client.save_policy_extraction(PROJECT_ID, analysis))
+print(f"Saved: {save_result.get('policies_extracted', 0)} policies, "
+      f"{save_result.get('rows_updated', 0)} coverage row(s) updated")
+if save_result.get("orphans"):
+    print(f"  orphans (no matching coverage row): {len(save_result['orphans'])}")
+    for orphan in save_result["orphans"]:
+        print(f"    - {orphan}")
 ```
+
+### Why this is different from v1.1
+
+v1.1 had THIS skill open the PDFs locally with `pdfplumber`, build a
+hardcoded alias_map client-side, and PATCH each coverage row individually.
+That worked but split truth across the client (alias_map) and backend
+(coverage rows), and the text-only extraction missed structured data hidden
+in table layouts. v1.2 keeps truth on the backend — the extract endpoint
+returns the rendered prompt + full PDFs to Claude, Claude analyzes them with
+the same tool_schema the old server-side path used, and the save endpoint
+runs alias matching + PATCH atomically in one transaction. Zero LLM calls on
+the backend; fewer roundtrips; no client-side alias drift. Details in
+`skills/broker/MIGRATION-NOTES.md`.
 
 ## Step 7: Memory Update
 

@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-gap-analysis
-version: "1.1"
+version: "1.2"
 web_tier: 3
 description: Call the analyze-gaps endpoint and print a coverage gap summary table
 context-aware: true

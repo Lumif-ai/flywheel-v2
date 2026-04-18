@@ -1,7 +1,7 @@
 ---
 public: true
 name: broker-parse-contract
-version: "1.1"
+version: "1.2"
 web_tier: 3
 description: Upload MSA contract PDF and trigger backend async extraction of coverage requirements
 context-aware: true
@@ -102,9 +102,14 @@ for f in files:
     print(f"  - {f.get('filename', f.get('id', 'unknown'))}")
 ```
 
-## Step 4: Trigger Async Analysis
+## Step 4: Analyze Contract via Pattern 3a (Claude-in-conversation)
 
-Call the backend analyze endpoint to start async extraction:
+In v1.2 (Phase 150.1), contract analysis runs **in THIS conversation** —
+YOU (Claude) do the extraction using the prompt + tool_schema the backend
+returns. The backend owns prompt assembly, PDF retrieval, and persistence;
+it does NOT call Anthropic. This closes the subsidy-billing leak.
+
+### 4a. Fetch extraction prompt + documents from the backend
 
 ```python
 import sys, os
@@ -113,46 +118,79 @@ import api_client
 
 PROJECT_ID = "<validated-project-id>"
 
-print(f"Triggering contract analysis for project {PROJECT_ID}...")
-response = api_client.run(api_client.post(f"projects/{PROJECT_ID}/analyze"))
-print(f"Analysis triggered. Status: {response.get('status', 'accepted')}")
-print("Polling for completion...")
+print(f"Fetching extraction prompt + documents for project {PROJECT_ID}...")
+extract = api_client.run(api_client.extract_contract_analysis(PROJECT_ID))
+# extract = {
+#     "prompt": str,                    # fully-rendered extraction prompt (system message)
+#     "tool_schema": dict,              # Anthropic tool-use schema (name, description, input_schema)
+#     "documents": list[DocumentRef],   # [{file_id, filename, pdf_base64, document_type}]
+#     "metadata": dict                  # {project_id, currency, language, ..., tool_schema_version}
+# }
+print(f"  prompt: {len(extract['prompt'])} chars")
+print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+print(f"  documents: {len(extract['documents'])} PDF(s)")
+print(f"  tool_schema_version: {extract['metadata']['tool_schema_version']}")
 ```
 
-The backend returns 202 Accepted. Proceed immediately to polling.
+### 4b. Analyze the contract inline using the returned prompt + tool_schema
 
-## Step 5: Poll for Completion
+**YOU (Claude) now run the analysis.** Do NOT shell out to another API — the
+whole point of Pattern 3a is that THIS conversation's reasoning replaces the
+deprecated server-side `/analyze` call:
 
-Poll GET /broker/projects/{project_id} every 2 seconds until analysis_status is
-"completed" or "failed". Maximum 30 polls (60 seconds).
+1. Use `extract["prompt"]` as your system message (or first-user-message) for
+   this analysis.
+2. Use `extract["tool_schema"]` as the single entry in your `tools=` parameter.
+3. For each entry in `extract["documents"]`, decode `pdf_base64` and attach
+   via the Anthropic document content-block protocol:
+   `{"type": "document", "source": {"type": "base64", "media_type": "application/pdf", "data": <pdf_base64>}}`
+4. Request a tool-use completion and capture the `tool_use` block's `input`
+   dict. It MUST match the tool_schema.input_schema (enforced by backend
+   Pydantic validation in Step 4c).
+
+Expected tool-use output keys (from `extract_coverage_requirements` schema):
+`coverages` (list), `contract_language` (one of en/es/pt/other), `contract_summary`,
+`total_coverages_found` (int), `primary_contract_filename`, `misrouted_documents` (list).
+
+### 4c. Persist the analysis via save_contract_analysis
 
 ```python
-import sys, os, time
+import sys, os
 sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
 import api_client
 
 PROJECT_ID = "<validated-project-id>"
-MAX_POLLS = 30
 
-project = None
-for i in range(MAX_POLLS):
-    project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
-    status = project.get("analysis_status")
-    if status == "completed":
-        print(f"Analysis completed after {(i+1)*2} seconds.")
-        break
-    if status == "failed":
-        print(f"ERROR: Contract analysis failed")
-        print(f"  Reason: {project.get('analysis_error', 'unknown')}")
-        break
-    print(f"  Waiting for analysis... ({i+1}/{MAX_POLLS})")
-    time.sleep(2)
-else:
-    print("ERROR: Analysis timed out after 60 seconds")
-    print("Check backend logs for project", PROJECT_ID)
+# Build analysis dict from the tool_use block captured in 4b.
+# Replace placeholder values with what YOU extracted from the PDFs above.
+analysis = {
+    "coverages": [],                         # from tool_use.input.coverages
+    "contract_language": "es",               # en|es|pt|other
+    "contract_summary": "",                  # 1-2 paragraph executive summary
+    "total_coverages_found": 0,
+    "primary_contract_filename": "",
+    "misrouted_documents": [],
+    "tool_schema_version": extract["metadata"]["tool_schema_version"],
+}
+
+print(f"Persisting analysis for project {PROJECT_ID}...")
+save_result = api_client.run(api_client.save_contract_analysis(PROJECT_ID, analysis))
+print(f"Saved: {save_result.get('coverages_saved', 0)} coverage(s); "
+      f"status={save_result.get('status')}")
 ```
 
-If analysis failed or timed out, report the error and stop. Do not proceed to summary.
+### Why this is different from v1.1
+
+v1.1 triggered a server-side `/analyze` endpoint that called Anthropic with
+the backend-owned subsidy key (the backend-pays billing leak). v1.2 returns
+the SAME prompt + SAME tool_schema + SAME PDFs and has THIS conversation's
+Claude run the analysis. Backend cost = zero LLM calls. Same outputs, new
+compute boundary. See `skills/broker/MIGRATION-NOTES.md` for the full rationale.
+
+## Step 5 [REMOVED in v1.2]
+
+Polling is gone — Pattern 3a is synchronous. The analysis completes in Step 4b
+(inline) and is persisted in Step 4c. Skip straight to Step 6.
 
 ## Step 6: Print Coverage Summary
 

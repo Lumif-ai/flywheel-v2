@@ -1,9 +1,9 @@
 ---
 public: true
 name: broker-draft-recommendation
-version: "1.1"
+version: "1.2"
 web_tier: 3
-description: Pre-check comparison data, call POST /draft-recommendation, and display the recommendation narrative with recommended carrier highlighted
+description: Pre-check comparison data, draft the recommendation narrative via Pattern 3a (extract_recommendation_draft → Claude-inline → save_recommendation_draft), and display the narrative with recommended carrier highlighted
 context-aware: true
 triggers:
   - /broker:draft-recommendation
@@ -133,9 +133,14 @@ if answer.lower().strip() not in ("yes", "y"):
     raise SystemExit(0)
 ```
 
-## Step 5: Call POST /draft-recommendation
+## Step 5: Draft Recommendation via Pattern 3a (Claude-in-conversation)
 
-Call the backend to generate and persist the recommendation narrative:
+v1.2 (Phase 150.1) runs the recommendation-narrative drafting in THIS
+conversation using the prompt + tool_schema the backend returns. The backend
+owns prompt assembly (comparison summary + project context + taxonomy) and
+persistence; it does NOT call Anthropic.
+
+### 5a. Fetch prompt + tool_schema + context
 
 ```python
 import sys, os
@@ -145,18 +150,61 @@ import api_client
 PROJECT_ID = "<validated-project-id>"
 RECIPIENT_EMAIL = "<validated-recipient-email-or-None>"
 
-body = {}
-if RECIPIENT_EMAIL:
-    body["recipient_email"] = RECIPIENT_EMAIL
+print(f"Fetching recommendation prompt for project {PROJECT_ID}...")
+extract = api_client.run(api_client.extract_recommendation_draft(PROJECT_ID))
+# extract = {prompt, tool_schema, documents, metadata}
+print(f"  prompt: {len(extract['prompt'])} chars")
+print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+print(f"  tool_schema_version: {extract['metadata']['tool_schema_version']}")
+```
 
-print(f"Generating recommendation for project {PROJECT_ID}...")
-result = api_client.run(api_client.post(
-    f"projects/{PROJECT_ID}/draft-recommendation",
-    body
-))
+### 5b. Analyze inline using the returned prompt + tool_schema
+
+**YOU (Claude) now draft the recommendation narrative.** Use
+`extract["prompt"]` as the system message — it contains the full comparison
+summary, project context, and narrative guidelines — and
+`extract["tool_schema"]` as the single `tools=` entry. If
+`extract["documents"]` has attachments (supporting policy PDFs), decode
+`pdf_base64` and attach via the Anthropic document content-block protocol.
+
+Expected tool-use output keys (from `draft_recommendation_email` schema):
+`subject` (str), `body_html` (str, rich client-facing narrative),
+`recipient_email` (optional — override the Step 2 input if the prompt
+recommends a different stakeholder).
+
+### 5c. Persist the draft
+
+```python
+import sys, os
+sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
+import api_client
+
+PROJECT_ID = "<validated-project-id>"
+RECIPIENT_EMAIL = "<validated-recipient-email-or-None>"
+
+analysis = {
+    "subject": "",                                       # from tool_use.input.subject
+    "body_html": "",                                     # from tool_use.input.body_html
+    "tool_schema_version": extract["metadata"]["tool_schema_version"],
+}
+if RECIPIENT_EMAIL:
+    analysis["recipient_email"] = RECIPIENT_EMAIL
+
+print(f"Persisting recommendation draft for project {PROJECT_ID}...")
+result = api_client.run(api_client.save_recommendation_draft(PROJECT_ID, analysis))
 
 rec = result.get("recommendation", result)
 ```
+
+### Why this is different from v1.1
+
+v1.1 called `POST /projects/{id}/draft-recommendation` which ran Anthropic
+server-side with the backend's subsidy key to generate the narrative, then
+persisted. v1.2 returns the SAME prompt (comparison summary, project
+context, narrative guidelines) + SAME tool_schema and has THIS conversation
+write the narrative. Same recommendation row, same subject + body_html
+shape, backend cost = zero LLM calls. Details in
+`skills/broker/MIGRATION-NOTES.md`.
 
 ## Step 6: Display the Recommendation
 
