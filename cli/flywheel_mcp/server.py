@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 
@@ -10,8 +11,10 @@ import mcp.types as mt
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
 from fastmcp.tools.tool import ToolResult
+from fastmcp.utilities.types import File
 
 from flywheel_mcp.api_client import FlywheelAPIError, FlywheelClient
+from flywheel_mcp.bundle import BundleError
 
 # --------------------------------------------------------------------------
 # Logging (stderr -- MCP protocol uses stdout)
@@ -335,6 +338,65 @@ def flywheel_fetch_skill_prompt(skill_name: str) -> str:
         return str(exc)
     except Exception as exc:
         return f"Error fetching skill prompt: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_fetch_skill_assets(name: str) -> ToolResult:
+    """Fetch a skill's Python bundle + all transitive library bundles.
+
+    Returns a ToolResult containing one File(format="zip") per bundle (in
+    topological order: libraries first, consumer last) plus structured_content
+    metadata with per-bundle SHA-256 hashes for client-side integrity
+    verification.
+
+    Use with ``flywheel_mcp.bundle.materialize_skill_bundle(name)`` context
+    manager to extract + verify + import from the bundle safely. Do NOT
+    extract the raw bytes directly — the helper enforces SHA verification and
+    path-traversal protection.
+
+    Surfaces bundle-delivery errors (integrity/security/fetch) as a single
+    TextContent block so Claude sees a clean actionable message instead of a
+    Python traceback. Set ``FLYWHEEL_DEBUG=1`` to retain the underlying
+    exception detail.
+    """
+    # NOTE: Return type is ToolResult, NOT the CONTEXT-locked
+    # ``tuple[dict, list[File]]`` — FastMCP does not support tuple returns
+    # (verified against installed fastmcp source; see Phase 150 RESEARCH
+    # Pitfall 5). structured_content is the sanctioned envelope for
+    # metadata (SHAs live here, not as File attributes — see Pitfall 4).
+    try:
+        client = FlywheelClient()
+        metadata, bundles = client.fetch_skill_assets_bundle(name)
+    except BundleError as exc:
+        # Clean user-facing error (no traceback). FLYWHEEL_DEBUG=1 still
+        # surfaces full detail via the MCP server stderr log.
+        if os.environ.get("FLYWHEEL_DEBUG"):
+            logger.exception("flywheel_fetch_skill_assets failed for %s", name)
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+    except FlywheelAPIError as exc:
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+
+    files = [
+        File(
+            data=bundle_bytes,
+            format="zip",
+            name=f"{skill_name}.zip",
+        )
+        for (skill_name, _sha, bundle_bytes) in bundles
+    ]
+    return ToolResult(
+        content=files,
+        structured_content={
+            "skill": metadata["skill"],
+            "deps": metadata["deps"],
+            "rollup_sha": metadata["rollup_sha"],
+            "shas": {sname: sha for (sname, sha, _b) in bundles},
+        },
+    )
 
 
 # --------------------------------------------------------------------------
