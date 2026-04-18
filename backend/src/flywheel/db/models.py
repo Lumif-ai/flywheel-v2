@@ -843,6 +843,12 @@ class SkillDefinition(Base):
     tags: Mapped[list[str]] = mapped_column(
         ARRAY(Text), server_default=text("'{}'::text[]")
     )
+    # Phase 150 Plan 01 — consumer skills name the library skills whose bundles
+    # they need at runtime (single-level fanout today, Phase 147 enforces).
+    # ARRAY(Text) not JSONB to avoid the ".append on JSONB-bound list" gotcha.
+    depends_on: Mapped[list[str]] = mapped_column(
+        ARRAY(Text), server_default=text("'{}'::text[]")
+    )
     enabled: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("true")
     )

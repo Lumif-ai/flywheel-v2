@@ -77,6 +77,11 @@ _DEFAULT_SKILLS_DIR = os.path.join(
 )
 
 # Fields used to detect whether a row has changed
+# NB: _CHANGE_FIELDS controls SeedResult accounting (added/updated/unchanged).
+# The actual DB write (Step 3 at end of per-skill loop) runs ON CONFLICT DO
+# UPDATE unconditionally — every field, including depends_on, is written on
+# every seed. _CHANGE_FIELDS is informational only. Adding new fields here is
+# safe but mainly improves the --verbose log signal for operators.
 _CHANGE_FIELDS = ("version", "description", "web_tier", "system_prompt")
 
 
@@ -652,6 +657,9 @@ async def seed_skills(
             "contract_writes": skill.contract_writes,
             "engine_module": skill.engine_module,
             "tags": skill.tags,
+            # Phase 150 Plan 01: persist depends_on so Phase 150 fanout endpoint
+            # can walk the dep graph server-side without re-parsing SKILL.md.
+            "depends_on": skill.depends_on,
             "token_budget": skill.token_budget,
             "parameters": skill.parameters,
             "enabled": skill.enabled,
@@ -669,6 +677,7 @@ async def seed_skills(
                 "contract_writes": stmt.excluded.contract_writes,
                 "engine_module": stmt.excluded.engine_module,
                 "tags": stmt.excluded.tags,
+                "depends_on": stmt.excluded.depends_on,
                 "token_budget": stmt.excluded.token_budget,
                 "parameters": stmt.excluded.parameters,
                 "enabled": stmt.excluded.enabled,

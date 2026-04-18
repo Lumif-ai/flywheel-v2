@@ -22,6 +22,8 @@
 - ✅ **v18.0 Broker Data Model v2** — Phases 129–132 (shipped 2026-04-15)
 - ✅ **v19.0 Broker Redesign** — Phases 133–139 (shipped 2026-04-15)
 - ✅ **v20.0 Coverage Taxonomy & Multi-Currency Limits** — Phase 140 (shipped 2026-04-16)
+- **v21.0 Document Viewer** — Phases 141–145 (active)
+- **v22.0 Skill Platform Consolidation** — Phases 146–152 (active, parallel to v21.0)
 
 ## Phases
 
@@ -268,6 +270,18 @@
 
 - [x] **Phase 140: Coverage Taxonomy** — DB migration, AI extraction, carrier matching, frontend constants, skill updates
 
+---
+
+### v21.0 Document Viewer (Active)
+
+**Milestone Goal:** Replace the excerpt-based Analysis tab with a full document viewer that renders uploaded PDFs inline, auto-converts DOCX/XLSX to PDF, supports click-to-navigate from requirement cards to clause highlights, and multi-document tab switching.
+
+- [ ] **Phase 141: Frontend PDF Viewer** — react-pdf setup, CORS verification, FullDocumentViewer component, page nav, zoom, excerpt fallback
+- [ ] **Phase 142: Backend Conversion Pipeline** — DB migration, rendition columns, document_conversion service, rendition endpoint, PDF backfill
+- [ ] **Phase 143: Click-to-Navigate + Highlight** — source_excerpt required in schema, clause click wiring, page scroll, text highlight, toast fallbacks, active card state
+- [ ] **Phase 144: Multi-Document Tabs + Card Filtering** — document tab bar, tab switching, card filtering by source_document_id, "All Documents" option, auto-switch on cross-doc click, conversion status per tab
+
+
 ## Phase Details
 
 ### Phase 140: Coverage Taxonomy
@@ -289,6 +303,65 @@ Plans:
 - [ ] 140-02-PLAN.md — AI extraction engine (dynamic taxonomy prompt, updated tool schema, new type creation, alias learning)
 - [ ] 140-03-PLAN.md — API endpoint (GET /coverage-types) + carrier matching rewrite + quote passthrough
 - [ ] 140-04-PLAN.md — Frontend constants (single source of truth) + TypeScript type + skill updates
+
+
+
+### Phase 141: Frontend PDF Viewer
+**Goal**: Brokers can see the full uploaded PDF rendered inline in the Analysis tab left panel with page navigation and zoom, replacing the excerpt-only view for projects with uploaded documents
+**Depends on**: v20.0 complete
+**Requirements**: VIEW-01, VIEW-02, VIEW-03, VIEW-04, INFRA-01, INFRA-02
+**Spec**: SPEC-DOCUMENT-VIEWER.md (Phase 1a)
+**Success Criteria** (what must be TRUE):
+  1. Opening a project with an uploaded PDF shows the full document rendered inline in the Analysis tab left panel (not just text excerpts)
+  2. Broker can navigate between pages using prev/next buttons and jump to a specific page number
+  3. Broker can change zoom level between fit-width, 75%, 100%, and 125%
+  4. Projects without uploaded documents fall back to the existing excerpt-based view with no errors
+  5. Supabase signed URLs are fetchable from the frontend via JavaScript fetch() without CORS errors
+**Plans**: 2 plans
+Plans:
+- [ ] 141-01-PLAN.md -- Install react-pdf, configure worker, create API function and TanStack Query hook
+- [ ] 141-02-PLAN.md -- Build FullDocumentViewer component, wire into AnalysisTab with fallback
+
+### Phase 142: Backend Conversion Pipeline
+**Goal**: DOCX and XLSX documents uploaded to broker projects are automatically converted to PDF server-side and renderable inline, with conversion status tracked and existing PDFs backfilled for immediate rendering
+**Depends on**: Phase 141 (frontend viewer must exist to render converted PDFs)
+**Requirements**: CONV-01, CONV-02, CONV-03, CONV-04, CONV-05, INFRA-03, INFRA-04
+**Spec**: SPEC-DOCUMENT-VIEWER.md (Phase 1b)
+**Success Criteria** (what must be TRUE):
+  1. Uploading a DOCX file to a broker project results in an auto-converted PDF rendition that renders inline in the viewer within seconds
+  2. Uploading an XLSX file to a broker project results in an auto-converted PDF rendition that renders inline in the viewer
+  3. Each uploaded file shows its conversion status (pending/ready/failed/not_applicable) and failed conversions display a download link instead of a blank panel
+  4. All previously uploaded PDF files have rendition_path backfilled so they render immediately without re-upload
+  5. GET /api/v1/files/{file_id}/rendition returns a signed URL for the PDF rendition with correct status
+**Plans**: TBD
+
+### Phase 143: Click-to-Navigate + Highlight
+**Goal**: Clicking a requirement card's clause link scrolls the PDF viewer to the correct page and highlights the referenced text, with graceful fallbacks for missing page numbers, missing excerpts, and scanned PDFs
+**Depends on**: Phase 141 (PDF viewer with page control), Phase 142 (rendition endpoint)
+**Requirements**: NAV-01, NAV-02, NAV-03, NAV-04, NAV-05, NAV-06, INFRA-05
+**Spec**: SPEC-DOCUMENT-VIEWER.md (Phase 2)
+**Success Criteria** (what must be TRUE):
+  1. Clicking a requirement card's clause link scrolls the PDF viewer to the page containing that clause
+  2. The referenced clause text is highlighted in yellow on the target page, and the highlight clears after 5 seconds or when the user scrolls away
+  3. When source_page is missing but source_excerpt exists, the viewer searches all pages and scrolls to the first match
+  4. When both source_page and source_excerpt are missing, a toast displays "Clause not linked" and no scroll occurs
+  5. The clicked requirement card shows an active state with a coral left border, and only one card is active at a time
+**Plans**: 3 plans
+- [ ] 143-01-PLAN.md — Backend data plumbing: emit source_document_id in serializers, require source_excerpt in extraction schema, resolve filename→UUID in analyzer, add frontend types
+- [ ] 143-02-PLAN.md — Viewer API + click-to-navigate: lift state into AnalysisTab, controlled-props on FullDocumentViewer, clause click handler with tab-switch + page-jump + active card (NAV-06) + toast fallback (NAV-05)
+- [ ] 143-03-PLAN.md — Highlight rendering + search + decay: customTextRenderer, onRenderTextLayerSuccess scroll, 5s timer + IntersectionObserver scroll-away (NAV-03), all-pages search (NAV-04), Spanish accent handling, XSS escape
+
+### Phase 144: Multi-Document Tabs + Card Filtering
+**Goal**: Brokers can switch between all uploaded documents for a project using tabs, with requirement cards automatically filtering to show only coverages from the active document, and cross-document navigation working seamlessly
+**Depends on**: Phase 143 (clause navigation must work before adding multi-doc switching)
+**Requirements**: MULTI-01, MULTI-02, MULTI-03, MULTI-04, MULTI-05, MULTI-06
+**Spec**: SPEC-DOCUMENT-VIEWER.md (Phase 3)
+**Success Criteria** (what must be TRUE):
+  1. Projects with multiple uploaded documents show a tab bar allowing the broker to switch between documents; single-document projects hide the tab bar
+  2. Switching document tabs filters the requirement cards panel to show only coverages extracted from the active document
+  3. An "All Documents" option shows all coverages unfiltered regardless of source document
+  4. Clicking a requirement card that belongs to a different document auto-switches the viewer to that document's tab before scrolling to the clause
+  5. Each document tab shows a conversion status indicator (ready/pending/failed) so the broker knows which documents are viewable
 
 
 ---
@@ -429,7 +502,7 @@ Plans:
 
 ## Progress
 
-**Execution Order:** 1 → ... → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139
+**Execution Order:** 1 → ... → 140 → 141 → 142 → 143 → 144
 
 | Phase | Milestone | Plans Complete | Status | Completed |
 |-------|-----------|----------------|--------|-----------|
@@ -534,6 +607,156 @@ Plans:
 | 138. Workflow Frontend B | v19.0 | 0/4 | Not started | - |
 | 139. Polish | v19.0 | 2/2 | Complete | 2026-04-15 |
 | 140. Coverage Taxonomy | v20.0 | 4/4 | Complete | 2026-04-16 |
+| 141. Frontend PDF Viewer | v21.0 | 0/0 | Not started | - |
+| 142. Backend Conversion Pipeline | v21.0 | 0/0 | Not started | - |
+| 143. Click-to-Navigate + Highlight | v21.0 | 0/3 | Not started | - |
+| 144. Multi-Document Tabs + Card Filtering | v21.0 | 0/0 | Not started | - |
+| 146. Schema Foundation | v22.0 | 2/2 | Complete | 2026-04-17 |
+| 147. Seed Pipeline Extension | v22.0 | 1/1 | Complete | 2026-04-17 |
+| 148. Backend Asset Endpoint | v22.0 | 1/1 | Complete | 2026-04-17 |
+| 149. Broker Scripts Migration | v22.0 | 2/2 | Complete | 2026-04-18 |
+| 150. MCP Tool + Unpack Helper | v22.0 | 0/0 | Not started | - |
+| 151. Broker Dogfood + Resilience | v22.0 | 0/0 | Not started | - |
+| 152. Retirement | v22.0 | 0/0 | Not started | - |
+
+### Phase 145: Stage 1 intake correctness: typed upload and gap completion
+
+**Goal:** A broker who uploads an MSA + current policies and clicks "Analyze Documents with Claude" sees the Coverage tab populated with accurate gap status pills (Covered / Insufficient / Missing) — no "Unknown" rows, no manual gap-analyze button, no silent misclassification.
+
+**Depends on:** Phase 144
+
+**Success Criteria** (what must be TRUE):
+  1. OverviewTab renders two labeled upload zones: "Requirements" (MSA, surety annexes) and "Current coverage & supplements" (COIs, in-force policies); file cards show zone provenance
+  2. Upload endpoint persists `document_type` ('requirements' | 'coverage') to `project.metadata.documents[].document_type`; existing docs backfill gracefully
+  3. `contract_analyzer.analyze_contract` dispatches extraction by `document_type` (no mid-pipeline inference); existing prompt guard at `contract_analyzer.py:185-191` preserved as safety net
+  4. New current-policies extraction pass populates `current_limit / current_carrier / current_policy_number / current_expiry` on matched `ProjectCoverage` rows (match by normalized `coverage_type_key`); mirrored prompt guard refuses requirements/quote-letter extraction in this pass
+  5. `detect_gaps()` runs inline at the end of `analyze_contract` — every `ProjectCoverage` row has a non-NULL `gap_status` after analysis completes; Coverage tab pills show real status, never "Unknown"
+  6. Orphan policies (coverage extracted but no matching requirement) are written to `project.metadata.orphan_policies[]` with `{coverage_type_key, carrier, policy_number, limit_amount, source_document_filename}` — no silent data loss
+  7. `document_misrouted` flag surfaced to frontend as a soft warning chip on the file card with a one-click move-to-other-zone action
+  8. Skills updated (parse-contract.md, parse-policies.md, process-project.md) to fan out deterministically by `document_type`
+
+**Out of scope:**
+- Quote letter extraction at intake (Stage 3 — separate phase)
+- Orphan policies UI surface beyond metadata (flag-only for now)
+- Renewal/version detection for policies
+- Soft-delete/cascade for file removal
+
+**Plans:** 4 plans
+
+- [ ] 145-01-PLAN.md — Backend: upload endpoint accepts document_type Form field + PATCH /documents/{file_id} for zone-move
+- [ ] 145-02-PLAN.md — Backend: POLICY_EXTRACTION_TOOL + extract_current_policies pass + orphan handling + document_type dispatch in analyze_contract
+- [ ] 145-03-PLAN.md — Backend: inline detect_gaps at end of analyze_contract + misrouted flag persistence on metadata.documents[]
+- [ ] 145-04-PLAN.md — Frontend: two-zone OverviewTab + misrouted chip + centralize DocumentEntry + skill doc updates (checkpoint)
+
+---
+
+### v22.0 Skill Platform Consolidation (Active)
+
+**Milestone Goal:** Finish the "Claude Code as brain" architecture by hosting all skill Python assets (helpers, portal scripts, shared modules) in the Flywheel backend alongside prompts, delivered on-demand via MCP and executed ephemerally so nothing persists on user disk. Retires the legacy `~/.claude/skills/` git repo as a distribution channel.
+
+**Parallel to v21.0:** No code dependency. v22.0 proceeds independently of the document viewer track.
+
+**Security note:** Ed25519 bundle signing is deferred to v23+ as a pre-multi-tenant-GA gate. v22.0 ships SHA-256 integrity over authenticated HTTPS, which is the minimum viable gate for the internal dogfood window (3 users, first-party backend).
+
+- [x] **Phase 146: Schema Foundation** — `skill_assets` table + `SkillAsset` ORM + Alembic migration via PgBouncer per-statement pattern (shipped 2026-04-17, 2 plans, 5/5 SCs verified)
+- [x] **Phase 147: Seed Pipeline Extension** — `assets:` and `depends_on:` frontmatter contract; `_build_bundle()` helper; SHA-256 idempotent upsert; library skills (`_shared`, `gtm-shared`) seeded with `enabled=false` (shipped 2026-04-17, 1 plan, 5/5 SCs verified)
+- [x] **Phase 148: Backend Asset Endpoint** — `GET /api/v1/skills/{name}/assets` with tenant auth + module gating + protected-skill 403 + rate limit (shipped 2026-04-17, 1 plan, 5/5 SCs verified)
+- [x] **Phase 149: Broker Scripts Migration** — move broker + shared scripts into `flywheel-v2/skills/`; Playwright state paths rewritten to `~/.flywheel/broker/portals/<carrier>`; `assets:`/`depends_on:` stanzas on every SKILL.md
+- [ ] **Phase 150: MCP Tool + Unpack Helper** — `flywheel_fetch_skill_assets` MCP tool + `FlywheelClient.fetch_skill_assets()` + `bundle.materialize_skill_bundle()` with path-traversal guard, SHA-256 verify, and `TemporaryDirectory` lifecycle
+- [ ] **Phase 151: Broker Dogfood + Resilience** — first live end-to-end `/broker:parse-contract` via server-fetched assets; offline last-known-good cache; distinct error taxonomy; `flywheel_refresh_skills` cache-buster; p99 latency SLOs
+- [ ] **Phase 152: Retirement** — archive `~/.claude/skills/`; drop git-clone step from install flow; codebase-wide grep for legacy paths returns zero; gated by coexistence-window telemetry
+
+## Phase Details
+
+### Phase 146: Schema Foundation
+**Goal**: The `skill_assets` table is live in the production database with the right shape, the `SkillAsset` ORM is wired to `SkillDefinition`, and the Alembic migration is survivable on Supabase PgBouncer so every subsequent phase has a reliable place to upsert bundles
+**Depends on**: v20.0 complete (v21.0 runs in parallel; no code dependency)
+**Requirements**: ASSET-01, ASSET-02, ASSET-03, ASSET-04
+**Success Criteria** (what must be TRUE):
+  1. `SELECT count(*) FROM skill_assets` returns `0` (not an error) from a fresh psql shell against production Supabase after migration runs
+  2. Inserting and selecting a bytea round-trips correctly with the computed SHA-256 and size fields matching the payload
+  3. Deleting a `skill_definitions` row cascades and removes its `skill_assets` row (FK ON DELETE CASCADE observable via a manual test row)
+  4. A second insert with the same `skill_id` is rejected by the unique index; `bundle_sha256` has its own index visible in `pg_indexes`
+  5. `alembic current` reports revision `064_skill_assets_table` and the migration is idempotent (re-running `alembic upgrade head` is a no-op, never a failure)
+**Plans**: 2 plans
+  - [ ] 146-01-PLAN.md — Create migration file, apply script, and SkillAsset ORM class (wave 1)
+  - [ ] 146-02-PLAN.md — Apply migration to Supabase + verify 5 success criteria + regression test (wave 2)
+
+### Phase 147: Seed Pipeline Extension
+**Goal**: Running `flywheel db seed` against the repo's `skills/` directory produces an idempotent set of `skill_assets` rows — every SKILL.md with an `assets:` stanza has its zipped bundle in the DB, shared modules are seeded as library skills, and unchanged bundles skip DB writes on re-seed
+**Depends on**: Phase 146 (skill_assets table must exist to upsert into)
+**Requirements**: PUBLISH-01, PUBLISH-02, PUBLISH-03, PUBLISH-04, PUBLISH-05, PUBLISH-06
+**Success Criteria** (what must be TRUE):
+  1. Seeding a skill with `assets: ['*.py', 'portals/*.py']` in its SKILL.md produces a valid DEFLATE zip in `skill_assets.bundle` whose entries match the globbed files exactly
+  2. Re-running the seed with no file changes emits a "skipped (sha256 match)" log line for every skill and performs zero DB writes to `skill_assets`
+  3. `_shared/` and `gtm-shared/` appear in `skill_definitions` with `enabled=false` and `tags @> ARRAY['library']`; `SKIP_DIRS` contains only `{"_archived"}` in the seed source
+  4. Seeding a skill whose `depends_on:` lists an unknown library name fails the whole seed run with a named, actionable error (not a silent skip)
+  5. On any successful seed of a given skill, `skill_assets` is updated BEFORE `skill_definitions.system_prompt` (verified by log ordering + transaction semantics) so the prompt never references a missing bundle version
+**Plans**: 1 plan
+  - [ ] 147-01-PLAN.md — Extend seed.py with _build_bundle + assets/depends_on parsing + two-pass validation + three-step per-skill write sequence; author _shared & gtm-shared SKILL.md stubs; write test_seed_bundles.py covering all 5 SCs (wave 1)
+
+### Phase 148: Backend Asset Endpoint
+**Goal**: A tenant-authenticated HTTP client can fetch a skill's zipped bundle from the backend with the same auth + module gating as the existing prompt endpoint, protected skills are refused, and rate limits prevent abuse — all before any MCP tool is wired up
+**Depends on**: Phase 147 (bundles must exist in DB to serve)
+**Requirements**: DELIVER-01, DELIVER-02, DELIVER-03, DELIVER-06
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/v1/skills/broker-parse-contract/assets` with a valid tenant JWT returns 200 with JSON body `{bundle_b64, sha256, size, format: "zip"}` and the base64-decoded bytes unzip cleanly
+  2. The same endpoint called without auth returns 401; called by a tenant lacking access to the skill (via `tenant_skills` parity with `get_skill_prompt`) returns 404; called for a non-existent skill returns 404
+  3. A skill with `protected=true` (e.g. `company-intel`) returns 403 from the assets endpoint — server-side-execution skills do NOT ship their code to the client
+  4. An 11th request within a minute from the same tenant returns 429 (rate limit `10/minute` matches `get_skill_prompt`)
+  5. Tenant-override branch parity: if a tenant has a tenant-specific override row for a skill, the assets endpoint respects the same override resolution as `api/skills.py:296-322` (regression test passes)
+**Plans**: 1 plan
+  - [ ] 148-01-PLAN.md — Add GET /api/v1/skills/{name}/assets handler + SkillAssetsResponse model + TestAssetEndpoint integration tests (wave 1)
+
+### Phase 149: Broker Scripts Migration
+**Goal**: All broker Python content and shared helpers live in `flywheel-v2/skills/` with SKILL.md manifests that declare their bundles, every portal script resolves Playwright profile state via `~/.flywheel/broker/portals/<carrier>` (not `__file__`-relative), and a seed run populates `skill_assets` with the real broker bundle — the content is ready, but the CC-side fetch is NOT yet wired
+**Depends on**: Phase 147 (seed pipeline must accept `assets:`/`depends_on:`), Phase 148 (endpoint exists for future verification)
+**Requirements**: MIGRATE-01, MIGRATE-02, MIGRATE-03, MIGRATE-04, MIGRATE-06
+**Success Criteria** (what must be TRUE):
+  1. `flywheel-v2/skills/broker/`, `flywheel-v2/skills/_shared/`, and `flywheel-v2/skills/gtm-shared/` contain the migrated Python files; originals in `~/.claude/skills/` remain intact (coexistence, not deletion)
+  2. Every broker portal script declares `STATE_DIR = Path.home() / ".flywheel" / "broker" / "portals" / "<carrier>"` at the top, with zero remaining `__file__`-relative or `expanduser("~/.claude/skills/...")` references inside any portal script (codebase grep returns clean)
+  3. Every migrated SKILL.md frontmatter has an `assets:` list; broker skills that use shared helpers additionally declare `depends_on:` pointing to the seeded library skill names
+  4. `flywheel db seed` produces `skill_assets` rows for every broker skill AND for `_shared` / `gtm-shared` library skills; size and SHA-256 are logged
+  5. A broker whose portal profile pre-existed at the old path keeps their authenticated session after migration (either via pre-migration copy or a one-time re-auth with clear messaging); no portal user is silently logged out without explanation
+**Plans**: 2 plans
+  - [ ] 149-01-PLAN.md — Create broker library skill + copy Python files + rewrite base.py/mapfre.py (persistent context + STATE_DIR) + add assets/depends_on frontmatter to 10 broker-* skills + populate gtm-shared + grep-guard + local dry-run (wave 1, autonomous)
+  - [ ] 149-02-PLAN.md — Prod seed dry-run + operator approval checkpoint + real prod seed + SQL verification + MIGRATION-NOTES.md (wave 2, has checkpoint)
+
+### Phase 150: MCP Tool + Unpack Helper
+**Goal**: Claude Code can call `flywheel_fetch_skill_assets(skill_name)` over MCP, receive a binary zip, verify its SHA-256, extract it to an ephemeral temp directory with path-traversal protection, and import a function from it — exercising the full fetch-verify-extract pipeline end-to-end for the first time against real broker content
+**Depends on**: Phase 148 (backend endpoint), Phase 149 (real broker content in DB)
+**Requirements**: DELIVER-04, DELIVER-05, EXEC-01, EXEC-02, EXEC-03, EXEC-04, EXEC-05, RESILIENCE-01
+**Success Criteria** (what must be TRUE):
+  1. Invoking `flywheel_fetch_skill_assets("broker-parse-contract")` from a live Claude Code MCP session returns a `fastmcp.utilities.types.File(format="zip")` whose bytes extract into a usable directory tree
+  2. `materialize_skill_bundle(bundle_bytes, expected_sha256)` creates a temp dir, verifies SHA-256 matches before unzipping, rejects any zip entry whose resolved path escapes the temp root, and auto-deletes the dir when the context manager exits — verified by a unit test with a malicious `../etc/passwd` entry in the zip
+  3. Tampering with any byte of the bundle (post-fetch) causes the client to raise `BundleIntegrityError` with a message naming the skill and both hashes, and refuses to `extractall` — no silent fallback to exec
+  4. A skill whose SKILL.md has `depends_on: ["_shared"]` gets both the consumer bundle AND the `_shared` library bundle fetched and extracted into the same temp dir such that `import context_utils` resolves after `sys.path` insertion
+  5. After the context manager exits, `os.path.exists(temp_dir_path)` is `False` and no bundle bytes remain anywhere on user disk under `/tmp/` or `~/.cache/` from this fetch
+**Plans**: TBD
+
+### Phase 151: Broker Dogfood + Resilience
+**Goal**: `/broker:parse-contract` runs successfully end-to-end against a machine with `~/.claude/skills/broker/` absent or renamed, an offline last-known-good cache keeps skills usable during transient backend outages, every failure class produces a distinct human-actionable error, and measured fetch latency meets SLOs against the real ngrok + Supabase baseline
+**Depends on**: Phase 150 (MCP fetch+exec chain must work)
+**Requirements**: MIGRATE-05, RESILIENCE-02, RESILIENCE-03, RESILIENCE-04, RESILIENCE-05
+**Success Criteria** (what must be TRUE):
+  1. On a machine with `~/.claude/skills/broker/` renamed to `.broker.bak`, `/broker:parse-contract` on a real MSA PDF runs to completion, extracts coverages, and writes them via the API — purely via server-fetched assets
+  2. After a successful fetch, a second invocation with the backend unreachable (simulated by blocking ngrok) still runs from the `~/.cache/flywheel/skills/<sha256>/` cache within its TTL; the user sees a "using cached bundle" log line, not a crash
+  3. Each failure class surfaces a distinct user-facing error string: 401 ("run `flywheel login`"), 403 ("module not licensed"), 404 ("skill name typo"), 503 ("backend down"), checksum mismatch ("bundle integrity failure"), offline+expired-cache ("no network and cache expired") — no JSON-RPC `-32603` leaks to the user
+  4. `flywheel_refresh_skills` MCP tool force-re-fetches every bundle bypassing the cache; after calling it, a tampered cache entry is replaced with the authoritative bytes from the backend
+  5. Measured against live ngrok + Supabase: p99 first-fetch latency (cold cache, 160 KB broker bundle) is under 500 ms; p99 cached-fetch latency is under 50 ms; numbers recorded in a phase artifact for future regression
+**Plans**: TBD
+
+### Phase 152: Retirement
+**Goal**: The legacy `~/.claude/skills/` distribution channel is archived read-only, the install flow delivers skills exclusively via MCP, the codebase has zero hardcoded references to the old path, and the cutover is gated by telemetry confirming every active tenant has already exercised the server-hosted path during the coexistence window
+**Depends on**: Phase 151 (dogfood + resilience must be stable in production for the coexistence window)
+**Requirements**: RETIRE-01, RETIRE-02, RETIRE-03, RETIRE-04, RETIRE-05
+**Success Criteria** (what must be TRUE):
+  1. The legacy `~/.claude/skills/` git repo has a `legacy-skills-final` tag and is archived read-only on its remote; a fresh install no longer clones it
+  2. `setup-claude-code` (or the current install command) completes successfully without performing any `git clone` of a skills repo; only MCP server registration remains
+  3. Codebase-wide grep (`backend/`, `cli/`, `skills/`, docs) for `~/.claude/skills/`, `expanduser("~/.claude")`, and `Path.home() / ".claude"` returns zero hits outside explicit legacy-compat paths documented in the retirement plan
+  4. User-facing README and CLAUDE.md templates contain no instructions to `git pull` or manually manage `~/.claude/skills/`; the only documented skill delivery mechanism is MCP
+  5. Retirement PR only merges after telemetry from Phase 151 confirms every active tenant has successfully fetched at least one bundle from `skill_assets` during the coexistence window — the coexistence-window gate is explicit and auditable in the PR description
+**Plans**: TBD
 
 ---
 *Roadmap created: 2026-03-24*
@@ -557,3 +780,5 @@ Plans:
 *v17.0 milestone added: 2026-04-14 — Broker Frontend (7 phases, 16 plans)*
 *v18.0 milestone added: 2026-04-14 — Broker Data Model v2 (4 phases, 50 requirements)*
 *v19.0 milestone added: 2026-04-15 — Broker Redesign (7 phases, 82 requirements)*
+*v21.0 milestone added: 2026-04-16 — Document Viewer (4 phases, 26 requirements)*
+*v22.0 milestone added: 2026-04-17 — Skill Platform Consolidation (7 phases, 37 requirements)*

@@ -17,8 +17,10 @@ from __future__ import annotations
 import asyncio
 import base64
 import datetime
+import hashlib
 import json
 import logging
+from graphlib import CycleError, TopologicalSorter
 from typing import Any
 from uuid import UUID
 
@@ -76,6 +78,50 @@ class SkillAssetsResponse(BaseModel):
     format: str = "zip"
     version: str | None = None
     updated_at: datetime.datetime | None = None
+
+
+class BundleEntry(BaseModel):
+    """One bundle in a fanout response (GET /skills/{name}/assets/bundle).
+
+    bundle_b64 ships the bundle bytes VERBATIM from skill_assets.bundle as a
+    base64 string (standard alphabet). Phase 147 guarantees byte-determinism
+    of the stored bundle; Phase 150 preserves that invariant end-to-end by
+    NOT re-serializing on the read path. Clients independently recompute
+    SHA-256 on the decoded bytes and compare to the `sha256` field for
+    defense-in-depth against in-transit corruption.
+    """
+
+    name: str
+    sha256: str
+    size: int
+    format: str = "zip"
+    version: str | None = None
+    updated_at: datetime.datetime | None = None
+    bundle_b64: str
+
+
+class AssetsBundleResponse(BaseModel):
+    """GET /skills/{name}/assets/bundle response — consumer + transitive libs.
+
+    `bundles` is in TOPOLOGICAL order (graphlib semantics): deepest dependency
+    FIRST, consumer LAST. The consumer skill may be absent from `bundles` if
+    it declared `assets: []` in SKILL.md (prompt-only consumer with no Python
+    bundle to ship). See Phase 147 contract.
+
+    `deps` names every dependency resolved during the fanout walk, excluding
+    the root skill itself. Derived from `bundles` (all bundle.name values
+    except the root) when the consumer has its own bundle, or from the full
+    bundle list when the consumer is bundle-less.
+
+    `rollup_sha` = sha256 over the ordered "<name>:<sha256>" lines joined by
+    \\n. Enables constant-time equality checks on the whole response for
+    future cache layers (Phase 152) without hashing every individual bundle.
+    """
+
+    skill: str
+    deps: list[str]
+    rollup_sha: str
+    bundles: list[BundleEntry]
 
 
 class AttributionEntry(BaseModel):
@@ -456,6 +502,234 @@ async def get_skill_assets(
         format=asset.bundle_format,
         version=skill.version,
         updated_at=asset.updated_at,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Helper: dependency-graph walker for /assets/bundle fanout
+# ---------------------------------------------------------------------------
+
+
+async def _resolve_bundle_chain(
+    db: AsyncSession,
+    root_skill: SkillDefinition,
+) -> list[tuple[SkillDefinition, SkillAsset | None]]:
+    """Walk `depends_on` unlimited depth with cycle guard.
+
+    Returns `(skill, asset)` tuples in TOPOLOGICAL order (deepest-first per
+    `graphlib.TopologicalSorter`). A tuple's `asset` is None when the skill
+    declared `assets: []` at seed time (no SkillAsset row exists) — the
+    handler is responsible for filtering those from the response `bundles`
+    list while still honoring them in `deps`.
+
+    Raises:
+        HTTPException 403: any skill in the chain is protected.
+        HTTPException 500: missing library dep (catalog corruption), cycle
+            in depends_on.
+
+    CRITICAL: library-skill lookups intentionally DROP the `enabled=True`
+    filter. Phase 147 seeds libraries (`broker`, `_shared`, `gtm-shared`)
+    with `enabled=false` so they are not directly invokable via /skills/,
+    but the fanout path must still resolve them transitively. Do NOT
+    "fix" this by re-adding the filter — it would 404 every broker consumer.
+    """
+    ts: TopologicalSorter[str] = TopologicalSorter()
+    visited: dict[str, SkillDefinition] = {root_skill.name: root_skill}
+
+    # BFS-collect every reachable skill.
+    frontier: list[SkillDefinition] = [root_skill]
+    while frontier:
+        skill = frontier.pop()
+        deps = list(skill.depends_on or [])
+        ts.add(skill.name, *deps)
+        for dep_name in deps:
+            if dep_name in visited:
+                continue
+            # NB: NO `SkillDefinition.enabled == True` filter here.
+            # Libraries are seeded enabled=false (Phase 147 decision).
+            dep_result = await db.execute(
+                select(SkillDefinition).where(SkillDefinition.name == dep_name)
+            )
+            dep_skill = dep_result.scalar_one_or_none()
+            if dep_skill is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=(
+                        f"Skill '{skill.name}' depends_on='{dep_name}' but "
+                        "library skill not found — catalog corruption "
+                        "(operator incident)."
+                    ),
+                )
+            if dep_skill.protected:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail=(
+                        f"Skill '{skill.name}' depends on protected skill "
+                        f"'{dep_name}' — assets cannot be shipped."
+                    ),
+                )
+            visited[dep_name] = dep_skill
+            frontier.append(dep_skill)
+
+    # Topological order (raises CycleError on circular dependency graph).
+    try:
+        ordered_names = list(ts.static_order())
+    except CycleError as e:
+        # e.args = ("nodes are in a cycle", [list-of-nodes-forming-cycle])
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cycle in depends_on: {e.args[1]}",
+        ) from e
+
+    # Fetch SkillAsset row for each skill (None if skill declared assets:[]).
+    chain: list[tuple[SkillDefinition, SkillAsset | None]] = []
+    for skill_name in ordered_names:
+        skill_def = visited[skill_name]
+        asset_result = await db.execute(
+            select(SkillAsset).where(SkillAsset.skill_id == skill_def.id)
+        )
+        asset = asset_result.scalar_one_or_none()
+        chain.append((skill_def, asset))
+    return chain
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/{skill_name}/assets/bundle -- Fanout endpoint (Phase 150 Plan 01)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/{skill_name}/assets/bundle", response_model=AssetsBundleResponse)
+@limiter.limit("10/minute")
+async def get_skill_assets_bundle(
+    request: Request,
+    skill_name: str,
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> AssetsBundleResponse:
+    """Return consumer + transitive library bundles in topological order.
+
+    Companion to `get_skill_assets` for Phase 150 MCP fanout. One request
+    returns every bundle a consumer needs to execute, in a form the client
+    can verify end-to-end:
+
+    - Server-side SHA-256 re-hash: for each bundle, recompute the digest of
+      the stored bytes and compare against `skill_assets.bundle_sha256`.
+      Mismatch -> 500 (operator-level incident indicating DB/storage
+      corruption; never ship tampered bytes silently).
+    - Topological order: `bundles` is library-first, consumer-last. Clients
+      can `sys.path.insert(0, ...)` each extracted directory in order.
+    - Root auth parity with `get_skill_assets`: 401 missing auth, 403 if the
+      root OR any transitive dep is protected, 404 if the root is unknown
+      or tenant-excluded, same tenant-override probe.
+    - `deps` lists every transitive library name (excluding the root);
+      clients can use it for cache-key computation.
+    """
+    # ---- Root skill lookup: identical to get_skill_assets ----
+    has_overrides = await db.execute(
+        select(TenantSkill.skill_id)
+        .where(TenantSkill.tenant_id == user.tenant_id)
+        .limit(1)
+    )
+    if has_overrides.scalar_one_or_none() is not None:
+        stmt = (
+            select(SkillDefinition)
+            .join(TenantSkill, TenantSkill.skill_id == SkillDefinition.id)
+            .where(
+                TenantSkill.tenant_id == user.tenant_id,
+                TenantSkill.enabled == True,  # noqa: E712
+                SkillDefinition.enabled == True,  # noqa: E712
+                SkillDefinition.name == skill_name,
+            )
+        )
+    else:
+        stmt = (
+            select(SkillDefinition)
+            .where(
+                SkillDefinition.enabled == True,  # noqa: E712
+                SkillDefinition.name == skill_name,
+            )
+        )
+    result = await db.execute(stmt)
+    skill = result.scalar_one_or_none()
+
+    if skill is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Skill '{skill_name}' not found or not available for this tenant",
+        )
+
+    # ---- Protected-root short-circuit ----
+    if skill.protected:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This skill executes server-side; assets are not distributed to clients.",
+        )
+
+    # ---- Fanout: walk depends_on server-side ----
+    chain = await _resolve_bundle_chain(db, skill)
+
+    # ---- Build response bundles with server-side SHA re-hash ----
+    bundles: list[BundleEntry] = []
+    for skill_def, asset in chain:
+        if asset is None:
+            # Skill declared assets:[] — no SkillAsset row. Resolved in chain
+            # for dep-graph completeness but NOT emitted as an empty bundle
+            # (would break Phase 147 byte-identity invariant).
+            continue
+
+        raw_bytes = bytes(asset.bundle)  # memoryview-safe (asyncpg quirk)
+
+        # Server-side pre-ship SHA re-hash (defense-in-depth).
+        actual_sha = hashlib.sha256(raw_bytes).hexdigest()
+        if actual_sha != asset.bundle_sha256:
+            logger.error(
+                "bundle_integrity_failed tenant=%s root=%s offending=%s "
+                "stored_sha=%s recomputed_sha=%s size=%d "
+                "(DB/storage corruption — operator incident)",
+                user.tenant_id, skill.name, skill_def.name,
+                asset.bundle_sha256, actual_sha, len(raw_bytes),
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=(
+                    f"Bundle integrity check failed for '{skill_def.name}' "
+                    "on server (DB/storage corruption signal — operator "
+                    "incident logged)."
+                ),
+            )
+
+        bundles.append(
+            BundleEntry(
+                name=skill_def.name,
+                sha256=asset.bundle_sha256,
+                size=asset.bundle_size_bytes,
+                format=asset.bundle_format,
+                version=skill_def.version,
+                updated_at=asset.updated_at,
+                bundle_b64=base64.b64encode(raw_bytes).decode("ascii"),
+            )
+        )
+
+    # ---- Compute rollup_sha over ordered (name,sha) pairs ----
+    rollup_sha = hashlib.sha256(
+        "\n".join(f"{b.name}:{b.sha256}" for b in bundles).encode("ascii")
+    ).hexdigest()
+
+    # ---- Compute deps: all resolved dep names minus the root ----
+    # Derived from the chain (which may include skills with no asset row)
+    # so deps is accurate even when the consumer itself has assets:[].
+    deps = [skill_def.name for skill_def, _ in chain if skill_def.name != skill.name]
+
+    logger.info(
+        "assets_bundle_fetch tenant=%s root=%s chain=%s rollup_sha=%s",
+        user.tenant_id, skill.name, [b.name for b in bundles], rollup_sha[:12],
+    )
+
+    return AssetsBundleResponse(
+        skill=skill.name,
+        deps=deps,
+        rollup_sha=rollup_sha,
+        bundles=bundles,
     )
 
 
