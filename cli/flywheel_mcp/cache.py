@@ -269,10 +269,16 @@ class BundleCache:
                     changed = True
             if changed:
                 self._save_index(index)
+            # Phase 151 Plan 02: raise with locked user-facing copy from
+            # flywheel_mcp.errors. Deferred import avoids a top-of-module
+            # cycle (errors.py is a leaf module but kept lazy for symmetry
+            # with bundle.py imports below).
+            from flywheel_mcp.errors import ERR_CHECKSUM_TEMPLATE
             raise BundleIntegrityError(
                 skill_name=skill_name_hint,
                 expected_sha=expected_sha,
                 actual_sha=actual_sha,
+                reason=ERR_CHECKSUM_TEMPLATE.format(skill=skill_name_hint),
             )
         return bundle_bytes, meta
 
@@ -581,19 +587,24 @@ class BundleCache:
         Returns:
             :class:`RefreshResult` with counts + per-skill status dicts.
 
-        Tamper handling:
-            If a load during refresh raises
-            :class:`~flywheel_mcp.bundle.BundleIntegrityError`, the dir
-            has already been auto-deleted by the loader. We log a stderr
-            line (``cache_entry_tampered: ...``), increment
-            ``tampered_count``, and refetch authoritative bytes via the
-            injected fetcher.
+        Tamper auto-heal (Phase 151 Plan 02 SC4):
+            Before calling the fetcher, we attempt to load + SHA-validate
+            the cached bundle. If validation raises
+            :class:`~flywheel_mcp.bundle.BundleIntegrityError`, the
+            ``<sha>/`` dir has already been auto-deleted by the loader.
+            We log a stderr line (``cache_entry_tampered: skill=...
+            old_sha=... authoritative_sha=... correlation_id=...``),
+            increment ``tampered_count``, and then still call the fetcher
+            to repopulate authoritative bytes (auto-heal).
         """
         # Import deferred so non-refresh code paths don't pay for it.
         from flywheel_mcp.bundle import BundleIntegrityError
 
         index = self._load_index()
-        target_names = [name] if name is not None else list(index.keys())
+        if name is not None:
+            target_names = [name]
+        else:
+            target_names = list(index.keys())
         result = RefreshResult()
 
         for skill_name in target_names:
@@ -602,15 +613,38 @@ class BundleCache:
             if entry is not None:
                 old_sha = entry.get("root_sha", "")
 
+            # -----  Pre-refresh tamper detection (SC4).
+            # Loading the cached bundle recomputes SHA-256. On mismatch
+            # the loader auto-deletes the <sha>/ dir + drops the index
+            # entry and raises BundleIntegrityError; we log + auto-heal.
+            tampered = False
+            authoritative_sha_hint = ""
+            try:
+                self._load_entry_from_index(skill_name)
+            except BundleIntegrityError as exc:
+                tampered = True
+                authoritative_sha_hint = exc.actual_sha
+                correlation_id = getattr(exc, "correlation_id", "") or "-"
+                sys.stderr.write(
+                    f"cache_entry_tampered: skill={skill_name} "
+                    f"old_sha={exc.expected_sha} "
+                    f"authoritative_sha={exc.actual_sha} "
+                    f"correlation_id={correlation_id}\n"
+                )
+                result.tampered_count += 1
+
+            # -----  Always hit the network on refresh (tampered OR not).
             try:
                 metadata, bundles = fetcher(skill_name, bypass_cache=True)
             except BundleIntegrityError as exc:
-                # Shouldn't happen — fetcher pulls from network, not cache.
-                # Still: handle defensively to avoid crashing the whole loop.
+                # Defensive: fetcher pulls from network, not cache; this
+                # path means the network bytes themselves failed SHA
+                # validation downstream (e.g. in materialize_skill_bundle).
+                # We still log the auto-heal line for forensic continuity.
                 sys.stderr.write(
                     f"cache_entry_tampered: skill={skill_name} "
-                    f"old_sha={exc.expected_sha[:12]}... "
-                    f"authoritative_sha={exc.actual_sha[:12]}... "
+                    f"old_sha={exc.expected_sha} "
+                    f"authoritative_sha={exc.actual_sha} "
                     f"correlation_id={getattr(exc, 'correlation_id', '-')}\n"
                 )
                 result.tampered_count += 1
@@ -620,7 +654,9 @@ class BundleCache:
                 )
                 continue
             except Exception as exc:
-                # Network / backend failure — record and move on.
+                # Network / backend failure — record per-skill and move on.
+                # Without this, a single offline skill would crash the whole
+                # refresh loop (bad UX; user wants to see which skills healed).
                 result.per_skill.append(
                     {"name": skill_name, "old_sha": old_sha,
                      "new_sha": "", "status": f"error: {exc}"}
@@ -632,9 +668,14 @@ class BundleCache:
                 skill_name, metadata, bundles, correlation_id=correlation_id
             )
             new_sha = metadata.get("rollup_sha", "")
-            status = "refetched" if old_sha and old_sha != new_sha else (
-                "unchanged" if old_sha == new_sha else "new"
-            )
+            if tampered:
+                status = "tampered-healed"
+            elif old_sha and old_sha != new_sha:
+                status = "refreshed"
+            elif old_sha == new_sha:
+                status = "unchanged"
+            else:
+                status = "new"
             result.refetched += 1
             result.per_skill.append(
                 {"name": skill_name, "old_sha": old_sha,

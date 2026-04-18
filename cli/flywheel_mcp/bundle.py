@@ -70,19 +70,35 @@ class BundleIntegrityError(BundleError):
     Raised by :func:`materialize_skill_bundle` BEFORE any extraction
     occurs — protects against zip bombs and malformed archives by
     refusing to let :class:`zipfile.ZipFile` touch tampered bytes.
+
+    Phase 151 Plan 02 added the keyword-only ``reason`` override so raise
+    sites (cache + api_client) can plug in the locked user-facing copy from
+    :mod:`flywheel_mcp.errors` (``ERR_CHECKSUM_TEMPLATE``) without forcing
+    the materializer to import the error-copy module. Default preserves the
+    prior Phase 150 shape + diagnostic SHA tail for operator forensics.
     """
 
-    def __init__(self, skill_name: str, expected_sha: str, actual_sha: str):
+    def __init__(
+        self,
+        skill_name: str,
+        expected_sha: str,
+        actual_sha: str,
+        *,
+        reason: str | None = None,
+    ):
         self.skill_name = skill_name
         self.expected_sha = expected_sha
         self.actual_sha = actual_sha
-        super().__init__(
-            f"Bundle integrity check failed for {skill_name}. "
-            f"Run `flywheel refresh-skills` to re-fetch, or contact support "
-            f"if this persists. "
-            f"(expected sha256={expected_sha[:12]}..., "
-            f"got sha256={actual_sha[:12]}...)"
-        )
+        if reason is None:
+            reason = (
+                f"Bundle integrity check failed for {skill_name}. "
+                f"Run `flywheel refresh-skills` to re-fetch, or contact support "
+                f"if this persists. "
+                f"(expected sha256={expected_sha[:12]}..., "
+                f"got sha256={actual_sha[:12]}...)"
+            )
+        self.reason = reason
+        super().__init__(reason)
 
 
 class BundleSecurityError(BundleError):

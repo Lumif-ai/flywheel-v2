@@ -261,6 +261,14 @@ class FlywheelClient:
             BundleIntegrityError,
         )
         from flywheel_mcp.cache import BundleCache
+        from flywheel_mcp.errors import (
+            ERR_401,
+            ERR_403,
+            ERR_404_TEMPLATE,
+            ERR_503_RETRY_TEMPLATE,
+            ERR_503_TERMINAL,
+            ERR_OFFLINE_EXPIRED,
+        )
 
         correlation_id = correlation_id or secrets.token_hex(4)
 
@@ -302,11 +310,23 @@ class FlywheelClient:
 
         def _do_get() -> httpx.Response:
             """Execute the GET with 3x backoff. Raises BundleFetchError on
-            exhausted retries. Threads correlation_id header on every attempt."""
+            exhausted retries. Threads correlation_id header on every attempt.
+
+            Phase 151 Plan 02: emits the locked ``ERR_503_RETRY_TEMPLATE``
+            stderr line BEFORE each pre-retry sleep so the user sees the
+            backoff progress in real time. On terminal exhaustion raises
+            ``BundleFetchError`` with ``ERR_503_TERMINAL`` as reason.
+            """
             delays = [0.0, 0.5, 1.0, 2.0]
             last_exc: BundleFetchError | None = None
             for delay in delays:
                 if delay > 0:
+                    # Surface the backoff to the user BEFORE sleeping so
+                    # they see "Retrying in 0.5s..." then the pause, not
+                    # a silent gap followed by a stale status.
+                    sys.stderr.write(
+                        ERR_503_RETRY_TEMPLATE.format(delay=delay) + "\n"
+                    )
                     time.sleep(delay)
                 try:
                     resp = self._client.get(path, headers=headers)
@@ -319,13 +339,12 @@ class FlywheelClient:
                     last_exc = BundleFetchError(
                         name,
                         resp.status_code,
-                        f"Flywheel backend returned {resp.status_code}. "
-                        f"Retry in a moment.",
+                        f"Flywheel backend returned {resp.status_code}.",
                     )
                     continue
                 return resp
-            assert last_exc is not None
-            raise last_exc
+            # Terminal exhaustion — surface the locked user-facing copy.
+            raise BundleFetchError(name, None, ERR_503_TERMINAL) from last_exc
 
         def _serve_cached_with_warn() -> tuple[dict, list[tuple[str, str, bytes]]] | None:
             """Try to serve a stale cache entry after network failure.
@@ -370,11 +389,7 @@ class FlywheelClient:
             ):
                 raise BundleCacheError(
                     skill_name=name,
-                    reason=(
-                        "Cached bundle expired (>24h) and backend unreachable. "
-                        "Connect to network and retry, or run "
-                        "`flywheel refresh-skills` when online."
-                    ),
+                    reason=ERR_OFFLINE_EXPIRED,
                 ) from exc
             raise
 
@@ -390,25 +405,15 @@ class FlywheelClient:
                 raise exc
             if resp.status_code == 401:
                 clear_credentials()
-                raise BundleFetchError(
-                    name,
-                    401,
-                    "Session expired. Run `flywheel login` and retry.",
-                )
+                raise BundleFetchError(name, 401, ERR_401)
 
-        # -----  Terminal errors — map to BundleFetchError with actionable
-        # messages matching Phase 148 + Plan 01 contract.
+        # -----  Terminal errors — map to BundleFetchError with locked
+        # user-facing copy from flywheel_mcp.errors (Phase 151 Plan 02).
         if resp.status_code == 403:
-            raise BundleFetchError(
-                name,
-                403,
-                "This skill runs server-side only and does not ship assets.",
-            )
+            raise BundleFetchError(name, 403, ERR_403)
         if resp.status_code == 404:
             raise BundleFetchError(
-                name,
-                404,
-                f"Skill '{name}' not found. Check the skill name for typos.",
+                name, 404, ERR_404_TEMPLATE.format(name=name)
             )
         if resp.status_code >= 400:
             body = ""

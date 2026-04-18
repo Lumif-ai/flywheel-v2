@@ -399,6 +399,91 @@ def flywheel_fetch_skill_assets(name: str) -> ToolResult:
     )
 
 
+@mcp.tool(output_schema=None)
+def flywheel_refresh_skills(name: str | None = None) -> ToolResult:
+    """Force-refresh cached skill bundles from the Flywheel backend.
+
+    Without ``name``: walk every entry in the cache index, re-fetch each
+    via ``FlywheelClient.fetch_skill_assets_bundle(bypass_cache=True)``,
+    and auto-heal any cached entries that fail SHA-256 validation on load
+    (tamper detection — see Phase 151 SC4).
+
+    With ``name``: refresh only that skill + its transitive dep chain
+    (Phase 147 single-level fanout means depth 1 today).
+
+    Tampered-cache auto-heal:
+        If loading a cached bundle raises ``BundleIntegrityError``, the
+        ``<sha>/`` dir is auto-deleted by the cache layer and this tool
+        refetches authoritative bytes from the backend. A ``cache_entry_tampered``
+        line is emitted to stderr with ``old_sha``, ``authoritative_sha``, and
+        ``correlation_id`` for forensic tracing.
+
+    Returns:
+        ``ToolResult`` with ``structured_content`` of shape::
+
+            {
+                "evicted": int,     # entries removed (tampered + LRU)
+                "refetched": int,   # entries successfully re-fetched
+                "tampered": int,    # tamper-auto-heal events
+                "per_skill": list[dict],  # [{name, old_sha, new_sha, status}, ...]
+            }
+
+    Use this when:
+        - A broker/* (or any skill) bundle reports checksum failure
+        - You've been offline and want to warm the cache before a demo
+        - You want to verify the cache matches prod authoritative bytes
+    """
+    # Deferred imports: keeps the top-of-module import graph clean and
+    # matches the pattern used by ``flywheel_fetch_skill_assets``.
+    from flywheel_mcp.cache import BundleCache
+
+    try:
+        client = FlywheelClient()
+        cache = BundleCache()
+
+        # Inject the fetcher callable (not a client instance) to preserve the
+        # cache-module-doesn't-know-about-FlywheelClient invariant (Plan 01
+        # Decision — avoids the circular dep between cache.py and api_client.py).
+        def _fetcher(skill_name: str, *, bypass_cache: bool = True):
+            return client.fetch_skill_assets_bundle(
+                skill_name, bypass_cache=bypass_cache
+            )
+
+        result = cache.refresh(name=name, fetcher=_fetcher)
+
+        # Human-readable stderr summary per CONTEXT §refresh UX.
+        if name is None:
+            sys.stderr.write(
+                f"OK: Refreshed {result.refetched} skills "
+                f"({result.evicted} evicted, "
+                f"{result.tampered_count} tampered-auto-healed).\n"
+            )
+        else:
+            sys.stderr.write(f"OK: Refreshed {name}.\n")
+
+        return ToolResult(
+            structured_content={
+                "evicted": result.evicted,
+                "refetched": result.refetched,
+                "tampered": result.tampered_count,
+                "per_skill": result.per_skill,
+            }
+        )
+    except BundleError as exc:
+        # Same clean-error contract as flywheel_fetch_skill_assets.
+        if os.environ.get("FLYWHEEL_DEBUG"):
+            logger.exception(
+                "flywheel_refresh_skills failed for name=%s", name
+            )
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+    except FlywheelAPIError as exc:
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+
+
 # --------------------------------------------------------------------------
 # Data Read Tools — Meetings (MCP-03, MCP-04)
 # --------------------------------------------------------------------------
