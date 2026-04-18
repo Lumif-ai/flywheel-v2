@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -495,4 +496,169 @@ async def approve_send_solicitation(
         "status": draft.status,
         "sent_at": now.isoformat(),
         "sent_to": draft.sent_to_email,
+    }
+
+
+# ===========================================================================
+# Phase 150.1 Plan 02 — Pattern 3a extract/save endpoint pair for solicitation-draft.
+#
+# Replaces backend env-var-leak AsyncAnthropic() at solicitation_drafter.py:135.
+# Blocker-2 invariant: BOTH endpoints carry require_subsidy_decision.
+# ===========================================================================
+
+
+class ExtractSolicitationDraftBody(BaseModel):
+    project_id: UUID
+    carrier_config_id: UUID
+    api_key: str | None = None  # BYOK per _enforcement.py
+
+
+class ExtractSolicitationDraftResponse(BaseModel):
+    prompt: str
+    tool_schema: dict
+    documents: list[dict]
+    metadata: dict
+
+
+class SaveSolicitationDraftBody(BaseModel):
+    project_id: UUID
+    carrier_config_id: UUID
+    tool_schema_version: str = "1.0"
+    api_key: str | None = None
+    subject: str
+    body_html: str
+
+
+@solicitations_router.post(
+    "/extract/solicitation-draft",
+    response_model=ExtractSolicitationDraftResponse,
+)
+async def extract_solicitation_draft(
+    body: ExtractSolicitationDraftBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),
+) -> ExtractSolicitationDraftResponse:
+    """Return {prompt, tool_schema, documents, metadata} for solicitation drafting."""
+    from flywheel.engines.solicitation_drafter import (
+        SOLICITATION_TOOL,
+        build_solicitation_prompt,
+    )
+
+    project_result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    carrier_result = await db.execute(
+        select(CarrierConfig).where(
+            CarrierConfig.id == body.carrier_config_id,
+            CarrierConfig.tenant_id == user.tenant_id,
+            CarrierConfig.is_active.is_(True),
+        )
+    )
+    carrier = carrier_result.scalar_one_or_none()
+    if carrier is None:
+        raise HTTPException(status_code=404, detail="Carrier not found or inactive")
+
+    # Load coverages for prompt rendering.
+    cov_result = await db.execute(
+        select(ProjectCoverage).where(
+            ProjectCoverage.broker_project_id == body.project_id
+        )
+    )
+    coverages_list = [_coverage_to_dict(c) for c in cov_result.scalars().all()]
+
+    # Load primary submissions email (same helper as legacy endpoint).
+    contact_emails = await _load_carrier_contacts(
+        db, user.tenant_id, [body.carrier_config_id]
+    )
+    carrier_email = contact_emails.get(body.carrier_config_id)
+
+    project_dict = _project_to_dict(project)
+    carrier_dict = _carrier_to_dict(carrier, email=carrier_email)
+    language = project.language or "en"
+
+    prompt = build_solicitation_prompt(
+        project_dict, carrier_dict, coverages_list, [], language
+    )
+
+    return ExtractSolicitationDraftResponse(
+        prompt=prompt,
+        tool_schema=SOLICITATION_TOOL,
+        documents=[],  # solicitation drafting needs no PDFs attached
+        metadata={
+            "project_id": str(project.id),
+            "carrier_config_id": str(carrier.id),
+            "carrier_name": carrier.carrier_name,
+            "carrier_email": carrier_email,
+            "language": language,
+            "coverage_count": len(coverages_list),
+            "tool_schema_version": "1.0",
+        },
+    )
+
+
+@solicitations_router.post("/save/solicitation-draft")
+async def save_solicitation_draft(
+    body: SaveSolicitationDraftBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),  # Blocker-2: MANDATORY
+):
+    """Persist Claude's solicitation-draft tool_use output."""
+    if body.tool_schema_version != "1.0":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"tool_schema_version mismatch: got {body.tool_schema_version}, "
+                f"expected 1.0"
+            ),
+        )
+
+    from flywheel.engines.solicitation_drafter import persist_solicitation_draft
+
+    # Verify project and carrier ownership.
+    project_result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Look up carrier primary submissions email for sent_to_email field.
+    contact_emails = await _load_carrier_contacts(
+        db, user.tenant_id, [body.carrier_config_id]
+    )
+    carrier_email = contact_emails.get(body.carrier_config_id)
+
+    draft = await persist_solicitation_draft(
+        db,
+        user.tenant_id,
+        body.project_id,
+        body.carrier_config_id,
+        tool_use_output={"subject": body.subject, "body_html": body.body_html},
+        sent_to_email=carrier_email,
+        created_by_user_id=user.sub,
+    )
+    await db.commit()
+    await db.refresh(draft)
+
+    return {
+        "solicitation_draft_id": str(draft.id),
+        "project_id": str(body.project_id),
+        "carrier_config_id": str(body.carrier_config_id),
+        "subject": draft.subject,
+        "status": draft.status,
+        "sent_to_email": draft.sent_to_email,
     }

@@ -5,15 +5,33 @@ Generates a client-facing recommendation email from quote comparison results
 using Claude. Takes plain dicts (not ORM objects) so it can be tested
 independently without a database.
 
+Phase 150.1 Plan 02 — This module now exposes Pattern 3a public helpers
+(`build_recommendation_prompt`, `RECOMMENDATION_TOOL`,
+`persist_recommendation_draft`) for the /extract/recommendation-draft +
+/save/recommendation-draft endpoints. The legacy
+`draft_recommendation_email` function (which instantiates AsyncAnthropic via
+the `from anthropic import AsyncAnthropic` module-local binding) is
+untouched — Plan 04 removes it. Tests MUST patch
+`flywheel.engines.recommendation_drafter.AsyncAnthropic` (module-local
+path), not `anthropic.AsyncAnthropic` (package path), to cover this shape.
+
 Functions:
   draft_recommendation_email(project, comparison, summary, language)
-    -> {"subject": str, "body_html": str}
+    -> {"subject": str, "body_html": str}    (legacy; Plan 04 removes)
+  build_recommendation_prompt(...) -> str    (Pattern 3a public helper)
+  persist_recommendation_draft(...) -> BrokerRecommendation  (save endpoint)
 """
+
+from __future__ import annotations
 
 import json
 import logging
+from datetime import datetime, timezone
+from uuid import UUID
 
 from anthropic import AsyncAnthropic
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -183,3 +201,127 @@ async def draft_recommendation_email(
         body_html = f"<p>{response_text}</p>"
 
     return {"subject": subject, "body_html": body_html}
+
+
+# ---------------------------------------------------------------------------
+# Phase 150.1 Plan 02 — Pattern 3a public helpers for extract/save endpoints.
+# ---------------------------------------------------------------------------
+
+
+# Public alias — Pattern 3a prompt builder.
+build_recommendation_prompt = _build_recommendation_prompt
+
+
+# Anthropic tool schema for structured recommendation-draft generation.
+RECOMMENDATION_TOOL = {
+    "name": "draft_recommendation_email",
+    "description": (
+        "Generate a professional insurance recommendation email from broker "
+        "to client presenting quote comparison results. Returns structured "
+        "{subject, body_html}."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "subject": {
+                "type": "string",
+                "description": (
+                    "Email subject line (concise, professional, "
+                    "mentions the project name)."
+                ),
+            },
+            "body_html": {
+                "type": "string",
+                "description": (
+                    "Email body as HTML content tags only "
+                    "(use <p>, <ul>, <li>, <strong>, <table>, <h3> — no <html>/<head>/<body>)."
+                ),
+            },
+        },
+        "required": ["subject", "body_html"],
+    },
+}
+
+
+async def persist_recommendation_draft(
+    db: AsyncSession,
+    tenant_id: UUID,
+    project_id: UUID,
+    tool_use_output: dict,
+    recipient_email: str | None = None,
+    created_by_user_id: UUID | None = None,
+):
+    """Persist Claude's recommendation-draft tool_use output as a BrokerRecommendation row.
+
+    Args:
+        db: Async SQLAlchemy session.
+        tenant_id: Tenant UUID.
+        project_id: BrokerProject UUID.
+        tool_use_output: Dict matching RECOMMENDATION_TOOL.input_schema —
+            {subject: str, body_html: str}.
+        recipient_email: Optional — the email address the recommendation
+            will be sent to.
+        created_by_user_id: Optional — the user who triggered the save.
+
+    Returns:
+        BrokerRecommendation ORM instance (flushed, not committed).
+    """
+    from flywheel.db.models import (
+        BrokerActivity,
+        BrokerProject,
+        BrokerRecommendation,
+    )
+
+    subject = tool_use_output.get("subject", "") or ""
+    body_html = tool_use_output.get("body_html", "") or ""
+
+    # Load project for status transition.
+    project_result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise ValueError(
+            f"BrokerProject not found for persist_recommendation_draft: "
+            f"project_id={project_id} tenant_id={tenant_id}"
+        )
+
+    # Status transition if project is at quotes_complete.
+    if project.status == "quotes_complete":
+        from flywheel.api.broker._shared import validate_transition
+
+        validate_transition(
+            project.status, "recommended", client_id=project.client_id
+        )
+        project.status = "recommended"
+        project.updated_at = datetime.now(timezone.utc)
+
+    recommendation = BrokerRecommendation(
+        tenant_id=tenant_id,
+        broker_project_id=project_id,
+        subject=subject,
+        body=body_html,
+        recipient_email=recipient_email,
+        status="draft",
+        created_by_user_id=created_by_user_id,
+    )
+    db.add(recommendation)
+
+    activity = BrokerActivity(
+        tenant_id=tenant_id,
+        broker_project_id=project_id,
+        activity_type="recommendation_drafted",
+        actor_type="system",
+        description=f"AI recommendation drafted (CC-as-Brain) for {project.name}",
+        metadata_={
+            "recipient": recipient_email,
+            "model": "claude-in-conversation",
+        },
+    )
+    db.add(activity)
+    await db.flush()
+    return recommendation

@@ -1579,3 +1579,486 @@ async def analyze_contract(
             )
 
         return {"status": "failed", "error": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 150.1 Plan 02 — public helpers + persist_* functions for the
+# Pattern 3a extract/save endpoint pairs.
+#
+# Legacy functions (analyze_contract, extract_current_policies) remain
+# untouched for the existing /analyze endpoint. Plan 04 will rename them to
+# `_legacy` and eventually delete the AsyncAnthropic call sites entirely.
+#
+# The public helpers below are what api/broker/projects.py's new
+# /extract/{op} + /save/{op} endpoints import and call. They never
+# instantiate AsyncAnthropic — they only assemble prompts (extract side) or
+# persist Claude's tool_use output (save side).
+# ---------------------------------------------------------------------------
+
+
+# Public alias for the taxonomy loader — used by extract endpoints.
+load_taxonomy = _load_taxonomy
+
+
+async def persist_contract_analysis(
+    db: AsyncSession,
+    tenant_id: UUID,
+    project_id: UUID,
+    tool_use_output: dict,
+    input_filenames: list[str] | None = None,
+) -> dict:
+    """Persist Claude's contract-analysis tool_use output.
+
+    This function is called by the `POST /save/contract-analysis` endpoint
+    with Claude's in-conversation tool-use output (the shape declared by
+    EXTRACTION_TOOL.input_schema). It replicates the post-LLM persistence
+    logic from `analyze_contract` (lines ~1285-1530) but does NOT call
+    Claude — the AI analysis happens in the Claude-in-conversation flow.
+
+    Args:
+        db: Async SQLAlchemy session (caller manages transaction).
+        tenant_id: Tenant UUID.
+        project_id: BrokerProject UUID.
+        tool_use_output: Dict matching EXTRACTION_TOOL.input_schema —
+            {coverages, contract_language, contract_summary,
+             total_coverages_found, primary_contract_filename,
+             misrouted_documents}.
+        input_filenames: Filenames of the requirements PDFs the extract
+            endpoint returned in `documents`. Used to map Claude's
+            `source_document_filename` outputs back to file_ids. Optional;
+            if omitted, source_document_id backfill is skipped.
+
+    Returns:
+        {
+            "status": "completed",
+            "coverages_saved": int,
+            "contract_language": str,
+            "contract_summary": str,
+            "misrouted_by_file_id": dict,
+            "primary_contract_filename": str | None,
+        }
+    """
+    # Load project for currency/tenant context + write-back fields.
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == tenant_id,
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise ValueError(
+            f"BrokerProject not found for persist_contract_analysis: "
+            f"project_id={project_id} tenant_id={tenant_id}"
+        )
+
+    # Clear prior AI-extracted coverages (same pattern as analyze_contract).
+    from sqlalchemy import delete
+
+    delete_stmt = delete(ProjectCoverage).where(
+        ProjectCoverage.broker_project_id == project_id,
+        ProjectCoverage.tenant_id == tenant_id,
+        ProjectCoverage.source == "ai_extraction",
+        ProjectCoverage.is_manual_override.is_(False),
+    )
+    await db.execute(delete_stmt)
+    await db.flush()
+
+    # Reset prior misrouted flags on all documents before re-applying.
+    pre_meta = dict(project.metadata_) if project.metadata_ else {}
+    pre_docs = list(pre_meta.get("documents", []))
+    reset_docs: list[dict] = []
+    for d in pre_docs:
+        if isinstance(d, dict) and "misrouted" in d:
+            clean = dict(d)
+            clean.pop("misrouted", None)
+            reset_docs.append(clean)
+        else:
+            reset_docs.append(d)
+    pre_meta["documents"] = reset_docs
+    project.metadata_ = pre_meta
+    await db.flush()
+
+    # Build filename->file_id map from project.metadata_.documents (so we
+    # don't require the caller to pass input_filenames — but honor it if
+    # supplied for precision).
+    pdf_by_name: dict[str, UUID] = {}
+    for d in (pre_meta.get("documents") or []):
+        if not isinstance(d, dict):
+            continue
+        fname = d.get("name") or d.get("filename")
+        fid = d.get("file_id")
+        if fname and fid:
+            try:
+                pdf_by_name[fname] = UUID(fid) if isinstance(fid, str) else fid
+            except (ValueError, TypeError):
+                continue
+
+    coverages = tool_use_output.get("coverages", []) or []
+    contract_language = tool_use_output.get("contract_language", "es")
+    contract_summary = tool_use_output.get("contract_summary", "")
+    primary_filename = (tool_use_output.get("primary_contract_filename") or "").strip()
+
+    # Backfill project.source_document_id from Claude's primary-contract pick.
+    if primary_filename:
+        matched_id = pdf_by_name.get(primary_filename)
+        if matched_id is None:
+            # Case-insensitive fallback
+            for fname, fid in pdf_by_name.items():
+                if fname.lower() == primary_filename.lower():
+                    matched_id = fid
+                    break
+        if matched_id is not None:
+            project.source_document_id = matched_id
+
+    # Insert ProjectCoverage rows for every extracted coverage.
+    coverages_saved = 0
+    for cov in coverages:
+        if not isinstance(cov, dict) or not cov.get("coverage_type_key"):
+            continue
+        coverage = await _process_extracted_coverage(
+            cov, project, db, contract_language, pdf_by_name
+        )
+        db.add(coverage)
+        coverages_saved += 1
+
+    # Build misrouted_by_file_id map from requirements-pass misrouted docs.
+    req_misrouted: dict[str, dict] = {}
+    req_filename_to_file_id = {fname: str(fid) for fname, fid in pdf_by_name.items()}
+    for entry in tool_use_output.get("misrouted_documents", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        fname = (entry.get("source_document_filename") or "").strip()
+        fid_str = req_filename_to_file_id.get(fname)
+        if not fid_str:
+            # case-insensitive fallback
+            for real_fname, real_fid in pdf_by_name.items():
+                if real_fname.lower() == fname.lower():
+                    fid_str = str(real_fid)
+                    break
+        if fid_str:
+            req_misrouted[fid_str] = {
+                "reason": entry.get("reason", "Document routing mismatch"),
+                "detected_type": entry.get("detected_type", "unknown"),
+            }
+
+    # Persist misrouted flags back onto project.metadata_.documents[i].
+    if req_misrouted:
+        post_meta = dict(project.metadata_) if project.metadata_ else {}
+        post_docs = list(post_meta.get("documents", []))
+        updated_docs: list[dict] = []
+        for d in post_docs:
+            fid = d.get("file_id") if isinstance(d, dict) else None
+            if fid and fid in req_misrouted:
+                new_doc = dict(d)
+                new_doc["misrouted"] = {
+                    "reason": req_misrouted[fid].get("reason", "Document routing mismatch"),
+                    "detected_type": req_misrouted[fid].get("detected_type", "unknown"),
+                }
+                updated_docs.append(new_doc)
+            else:
+                updated_docs.append(d)
+        post_meta["documents"] = updated_docs
+        project.metadata_ = post_meta
+        await db.flush()
+
+    # Status transition + language update (mirrors analyze_contract).
+    if coverages_saved and project.status != "gaps_identified":
+        from flywheel.api.broker._shared import validate_transition
+
+        validate_transition(
+            project.status, "gaps_identified", client_id=project.client_id
+        )
+        project.status = "gaps_identified"
+
+    if contract_language and contract_language in ("en", "es", "pt"):
+        project.language = contract_language
+
+    # Write contract_summary + contract_language into metadata_
+    project_meta = dict(project.metadata_) if project.metadata_ else {}
+    project_meta["contract_summary"] = contract_summary
+    project_meta["contract_language"] = contract_language
+    project_meta["analysis_model"] = "claude-in-conversation"
+    project.metadata_ = project_meta
+
+    project.analysis_status = "completed"
+    project.analysis_completed_at = datetime.now(timezone.utc)
+
+    await db.flush()
+
+    # Inline gap detection — every ProjectCoverage row gets a non-NULL
+    # gap_status before the caller commits.
+    cov_reload = await db.execute(
+        select(ProjectCoverage)
+        .where(ProjectCoverage.broker_project_id == project_id)
+        .order_by(ProjectCoverage.created_at)
+    )
+    all_coverages = cov_reload.scalars().all()
+    coverage_dicts = [
+        {
+            "id": str(c.id),
+            "required_limit": float(c.required_limit)
+            if c.required_limit is not None
+            else None,
+            "current_limit": float(c.current_limit)
+            if c.current_limit is not None
+            else None,
+            "is_manual_override": c.is_manual_override,
+        }
+        for c in all_coverages
+    ]
+    gap_results = detect_gaps(coverage_dicts)
+    gap_summary = summarize_gaps(gap_results)
+    result_by_id = {r["id"]: r for r in gap_results}
+    for cov_orm in all_coverages:
+        updated = result_by_id.get(str(cov_orm.id))
+        if updated is None:
+            continue
+        if "gap_status" in updated:
+            cov_orm.gap_status = updated.get("gap_status")
+        if "gap_amount" in updated:
+            cov_orm.gap_amount = updated.get("gap_amount")
+    await db.flush()
+
+    # Log BrokerActivity for the save
+    activity = BrokerActivity(
+        tenant_id=tenant_id,
+        broker_project_id=project_id,
+        activity_type="analysis_completed",
+        actor_type="system",
+        description=(
+            f"Contract analysis persisted (CC-as-Brain): "
+            f"{coverages_saved} coverage requirements saved"
+        ),
+        metadata_={
+            "coverages_found": coverages_saved,
+            "language": contract_language,
+            "model": "claude-in-conversation",
+            "misrouted_count": len(req_misrouted),
+            "gap_summary": gap_summary,
+        },
+    )
+    db.add(activity)
+    await db.flush()
+
+    return {
+        "status": "completed",
+        "coverages_saved": coverages_saved,
+        "contract_language": contract_language,
+        "contract_summary": contract_summary,
+        "misrouted_by_file_id": req_misrouted,
+        "primary_contract_filename": primary_filename or None,
+        "gap_summary": gap_summary,
+    }
+
+
+async def persist_policy_extraction(
+    db: AsyncSession,
+    tenant_id: UUID,
+    project_id: UUID,
+    tool_use_output: dict,
+    input_filenames: list[str] | None = None,
+) -> dict:
+    """Persist Claude's policy-extraction tool_use output.
+
+    Called by `POST /save/policy-extraction` with Claude's tool-use output
+    matching POLICY_EXTRACTION_TOOL.input_schema. Replicates the post-LLM
+    persistence logic from `extract_current_policies` (the current_*
+    field writes + orphan bookkeeping + misrouted flag persistence) without
+    invoking Claude.
+
+    Args:
+        db: Async SQLAlchemy session.
+        tenant_id: Tenant UUID.
+        project_id: BrokerProject UUID.
+        tool_use_output: Dict matching POLICY_EXTRACTION_TOOL.input_schema —
+            {documents: [{source_document_filename, document_misrouted,
+                          misrouted_reason, detected_type}],
+             policies: [{coverage_type_key, carrier, policy_number,
+                         limit_amount, limit_currency, expiry_date,
+                         source_document_filename, confidence_score}],
+             total_policies_found: int}.
+        input_filenames: Filenames of the policy PDFs (coverage-zone docs).
+
+    Returns:
+        {
+            "status": "completed",
+            "policies_extracted": int,
+            "rows_updated": int,
+            "orphans": list[dict],
+            "misrouted_by_file_id": dict,
+        }
+    """
+    # Load project for tenant check + metadata access.
+    project_result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == tenant_id,
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise ValueError(
+            f"BrokerProject not found for persist_policy_extraction: "
+            f"project_id={project_id} tenant_id={tenant_id}"
+        )
+
+    # Build filename->file_id map from project.metadata_.documents
+    pdf_by_name: dict[str, str] = {}
+    for d in (project.metadata_ or {}).get("documents", []) or []:
+        if not isinstance(d, dict):
+            continue
+        fname = d.get("name") or d.get("filename")
+        fid = d.get("file_id")
+        if fname and fid:
+            pdf_by_name[fname] = str(fid)
+
+    # Extract misrouted flags from the `documents` array of tool output.
+    misrouted: dict[str, dict] = {}
+    for doc_entry in tool_use_output.get("documents", []) or []:
+        if not isinstance(doc_entry, dict):
+            continue
+        if not doc_entry.get("document_misrouted"):
+            continue
+        fname = (doc_entry.get("source_document_filename") or "").strip()
+        fid_str = pdf_by_name.get(fname)
+        if not fid_str:
+            for real_fname, real_fid in pdf_by_name.items():
+                if real_fname.lower() == fname.lower():
+                    fid_str = real_fid
+                    break
+        if fid_str:
+            misrouted[fid_str] = {
+                "reason": doc_entry.get(
+                    "misrouted_reason",
+                    "Document does not appear to be a current policy",
+                ),
+                "detected_type": doc_entry.get("detected_type", "unknown"),
+            }
+
+    # Load existing ProjectCoverage rows for key-based matching.
+    cov_result = await db.execute(
+        select(ProjectCoverage).where(
+            ProjectCoverage.broker_project_id == project_id,
+            ProjectCoverage.tenant_id == tenant_id,
+        )
+    )
+    existing_coverages = cov_result.scalars().all()
+    coverage_by_key = {
+        _normalize_coverage_key(c.coverage_type_key): c
+        for c in existing_coverages
+        if c.coverage_type_key
+    }
+
+    policies = tool_use_output.get("policies", []) or []
+    rows_updated = 0
+    orphans: list[dict] = []
+    for policy in policies:
+        if not isinstance(policy, dict):
+            continue
+        norm_key = _normalize_coverage_key(policy.get("coverage_type_key"))
+        if not norm_key:
+            continue
+        match = coverage_by_key.get(norm_key)
+        if match is None:
+            orphans.append(
+                {
+                    "coverage_type_key": policy.get("coverage_type_key"),
+                    "carrier": policy.get("carrier"),
+                    "policy_number": policy.get("policy_number"),
+                    "limit_amount": policy.get("limit_amount"),
+                    "source_document_filename": policy.get(
+                        "source_document_filename"
+                    ),
+                }
+            )
+            continue
+        if match.is_manual_override:
+            continue
+
+        # Write current_* fields.
+        limit_amount = policy.get("limit_amount")
+        if limit_amount is not None:
+            try:
+                match.current_limit = Decimal(str(limit_amount))
+            except (InvalidOperation, TypeError, ValueError):
+                pass
+        if policy.get("carrier"):
+            match.current_carrier = policy["carrier"]
+        if policy.get("policy_number"):
+            match.current_policy_number = policy["policy_number"]
+        expiry = policy.get("expiry_date")
+        if expiry:
+            try:
+                match.current_expiry = date.fromisoformat(str(expiry))
+            except (ValueError, TypeError):
+                pass
+        rows_updated += 1
+
+    # Persist misrouted flags onto project.metadata_.documents[i].
+    if misrouted:
+        post_meta = dict(project.metadata_) if project.metadata_ else {}
+        post_docs = list(post_meta.get("documents", []))
+        updated_docs: list[dict] = []
+        for d in post_docs:
+            fid = d.get("file_id") if isinstance(d, dict) else None
+            if fid and fid in misrouted:
+                new_doc = dict(d)
+                new_doc["misrouted"] = {
+                    "reason": misrouted[fid]["reason"],
+                    "detected_type": misrouted[fid]["detected_type"],
+                }
+                updated_docs.append(new_doc)
+            else:
+                updated_docs.append(d)
+        post_meta["documents"] = updated_docs
+        project.metadata_ = post_meta
+
+    # Persist orphans + re-run gap detection so current_limit changes are
+    # reflected in gap_status.
+    project_meta = dict(project.metadata_) if project.metadata_ else {}
+    project_meta["orphan_policies"] = orphans
+    project.metadata_ = project_meta
+    await db.flush()
+
+    # Inline gap detection pass on reloaded coverages.
+    cov_reload = await db.execute(
+        select(ProjectCoverage)
+        .where(ProjectCoverage.broker_project_id == project_id)
+        .order_by(ProjectCoverage.created_at)
+    )
+    all_coverages = cov_reload.scalars().all()
+    coverage_dicts = [
+        {
+            "id": str(c.id),
+            "required_limit": float(c.required_limit)
+            if c.required_limit is not None
+            else None,
+            "current_limit": float(c.current_limit)
+            if c.current_limit is not None
+            else None,
+            "is_manual_override": c.is_manual_override,
+        }
+        for c in all_coverages
+    ]
+    gap_results = detect_gaps(coverage_dicts)
+    gap_summary = summarize_gaps(gap_results)
+    result_by_id = {r["id"]: r for r in gap_results}
+    for cov_orm in all_coverages:
+        updated = result_by_id.get(str(cov_orm.id))
+        if updated is None:
+            continue
+        if "gap_status" in updated:
+            cov_orm.gap_status = updated.get("gap_status")
+        if "gap_amount" in updated:
+            cov_orm.gap_amount = updated.get("gap_amount")
+    await db.flush()
+
+    return {
+        "status": "completed",
+        "policies_extracted": len(policies),
+        "rows_updated": rows_updated,
+        "orphans": orphans,
+        "misrouted_by_file_id": misrouted,
+        "gap_summary": gap_summary,
+    }

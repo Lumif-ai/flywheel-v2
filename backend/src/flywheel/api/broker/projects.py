@@ -38,6 +38,7 @@ from sqlalchemy import exists, func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -1903,4 +1904,389 @@ async def batch_create_coverages(
     return {
         "items": [_coverage_to_dict(c) for c in created],
         "created": len(created),
+    }
+
+
+# ===========================================================================
+# Phase 150.1 Plan 02 — Pattern 3a extract/save endpoint pairs.
+#
+# These 4 endpoints replace the backend-side Anthropic LLM calls that
+# contract_analyzer.py makes in /analyze (which stays live; Plan 04 flips
+# it to 410). Each endpoint:
+#   1. /extract/{op}  -- returns {prompt, tool_schema, documents, metadata}
+#      so Claude-in-conversation can invoke tool_use itself.
+#   2. /save/{op}     -- accepts Claude's tool_use output (verbatim against
+#      *_TOOL.input_schema) and persists via persist_*() engine helpers.
+#
+# Blocker-2 invariant: EVERY endpoint below (extract AND save) carries the
+# three Depends — require_module + get_tenant_db + require_subsidy_decision.
+# Save endpoints don't call Anthropic, but uniform enforcement prevents
+# regressions + pattern drift.
+# ===========================================================================
+
+
+# ---------------------------------------------------------------------------
+# Pydantic models for contract-analysis pair
+# ---------------------------------------------------------------------------
+
+
+class ExtractContractAnalysisBody(BaseModel):
+    project_id: UUID
+    # BYOK body field — Plan 01 _enforcement.py declares wire format as body-based.
+    api_key: str | None = None
+
+
+class DocumentRef(BaseModel):
+    file_id: str
+    filename: str
+    pdf_base64: str
+    document_type: str
+
+
+class ExtractContractAnalysisResponse(BaseModel):
+    prompt: str
+    tool_schema: dict
+    documents: list[DocumentRef]
+    metadata: dict
+
+
+class CoverageInput(BaseModel):
+    coverage_type_key: str
+    is_new_type: bool = False
+    new_type_display_names: dict | None = None
+    raw_coverage_name: str
+    suggested_alias: str | None = None
+    description: str = ""
+    limit_amount: float | str | None = None
+    limit_currency: str | None = None
+    deductible: str | None = None
+    category: str
+    confidence_score: float = 0.5
+    contract_clause: str | None = None
+    source_excerpt: str
+    source_page: int | None = None
+    source_document_filename: str
+
+
+class MisroutedDocumentInput(BaseModel):
+    source_document_filename: str
+    detected_type: str
+    reason: str | None = None
+
+
+class SaveContractAnalysisBody(BaseModel):
+    project_id: UUID
+    tool_schema_version: str = "1.0"
+    api_key: str | None = None  # BYOK per _enforcement.py
+    # Shape mirrors EXTRACTION_TOOL.input_schema (the authoritative contract).
+    coverages: list[CoverageInput]
+    contract_language: Literal["en", "es", "pt", "other"] = "es"
+    contract_summary: str = ""
+    total_coverages_found: int
+    primary_contract_filename: str = ""
+    misrouted_documents: list[MisroutedDocumentInput] = []
+
+
+class ExtractPolicyExtractionBody(BaseModel):
+    project_id: UUID
+    api_key: str | None = None
+
+
+class PolicyInput(BaseModel):
+    coverage_type_key: str
+    raw_coverage_name: str | None = None
+    category: str | None = None
+    carrier: str | None = None
+    policy_number: str | None = None
+    limit_amount: float | None = None
+    limit_currency: str | None = None
+    expiry_date: str | None = None
+    source_document_filename: str
+    confidence_score: float | None = None
+
+
+class PolicyDocumentInput(BaseModel):
+    source_document_filename: str
+    document_misrouted: bool = False
+    misrouted_reason: str | None = None
+    detected_type: str | None = None
+
+
+class SavePolicyExtractionBody(BaseModel):
+    project_id: UUID
+    tool_schema_version: str = "1.0"
+    api_key: str | None = None
+    documents: list[PolicyDocumentInput]
+    policies: list[PolicyInput]
+    total_policies_found: int
+
+
+# ---------------------------------------------------------------------------
+# Shared helper — render PDFs for an extract response
+# ---------------------------------------------------------------------------
+
+
+async def _extract_project_documents(
+    session: AsyncSession, project: BrokerProject, tenant_id: UUID, document_type_filter: str | None = None
+) -> list[DocumentRef]:
+    """Fetch project PDFs from storage and render them as DocumentRef list.
+
+    If document_type_filter is set, only PDFs matching that document_type
+    are included. Otherwise all PDFs (requirements + coverage) are returned.
+    """
+    import base64
+
+    pdfs = await _get_project_pdfs(session, project, tenant_id)
+    out: list[DocumentRef] = []
+    for fid, fname, content, dt in pdfs:
+        if document_type_filter and dt != document_type_filter:
+            continue
+        out.append(
+            DocumentRef(
+                file_id=str(fid),
+                filename=fname,
+                pdf_base64=base64.standard_b64encode(content).decode("utf-8"),
+                document_type=dt,
+            )
+        )
+    return out
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/extract/contract-analysis
+# ---------------------------------------------------------------------------
+
+
+@projects_router.post(
+    "/extract/contract-analysis",
+    response_model=ExtractContractAnalysisResponse,
+)
+async def extract_contract_analysis(
+    body: ExtractContractAnalysisBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),
+) -> ExtractContractAnalysisResponse:
+    """Return {prompt, tool_schema, documents, metadata} for contract analysis.
+
+    Pattern 3a: Claude-in-conversation uses the returned prompt + tool_schema
+    to analyze the provided PDFs locally, then POSTs tool-use output to
+    /save/contract-analysis for persistence. Zero backend LLM calls.
+    """
+    from flywheel.engines.contract_analyzer import (
+        EXTRACTION_TOOL,
+        build_extraction_prompt,
+        load_taxonomy,
+    )
+
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    taxonomy = await load_taxonomy(
+        db, project.country_code or "", project.line_of_business or ""
+    )
+
+    prompt = build_extraction_prompt(taxonomy, project.currency or "USD")
+
+    documents = await _extract_project_documents(
+        db, project, user.tenant_id, document_type_filter="requirements"
+    )
+
+    return ExtractContractAnalysisResponse(
+        prompt=prompt,
+        tool_schema=EXTRACTION_TOOL,
+        documents=documents,
+        metadata={
+            "project_id": str(project.id),
+            "currency": project.currency,
+            "language": project.language,
+            "country_code": project.country_code,
+            "line_of_business": project.line_of_business,
+            "taxonomy_count": len(taxonomy),
+            "tool_schema_version": "1.0",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/save/contract-analysis
+# ---------------------------------------------------------------------------
+
+
+@projects_router.post("/save/contract-analysis")
+async def save_contract_analysis(
+    body: SaveContractAnalysisBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),  # Blocker-2: MANDATORY
+):
+    """Persist Claude's contract-analysis tool_use output.
+
+    Blocker-2 invariant: require_subsidy_decision is enforced here despite
+    this endpoint making zero LLM calls. Keeps truth-table enforcement
+    uniform across every new broker endpoint.
+    """
+    if body.tool_schema_version != "1.0":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"tool_schema_version mismatch: got {body.tool_schema_version}, "
+                f"expected 1.0"
+            ),
+        )
+
+    from flywheel.engines.contract_analyzer import persist_contract_analysis
+
+    # Verify project ownership before handing off to the persistence helper.
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    tool_use_output = body.model_dump(
+        exclude={"project_id", "tool_schema_version", "api_key"}
+    )
+
+    persist_result = await persist_contract_analysis(
+        db, user.tenant_id, body.project_id, tool_use_output
+    )
+    await db.commit()
+
+    return {
+        "project_id": str(body.project_id),
+        "coverages_saved": persist_result.get("coverages_saved", 0),
+        "contract_language": persist_result.get("contract_language"),
+        "misrouted_by_file_id": persist_result.get("misrouted_by_file_id", {}),
+        "gap_summary": persist_result.get("gap_summary", {}),
+        "status": "completed",
+    }
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/extract/policy-extraction
+# ---------------------------------------------------------------------------
+
+
+@projects_router.post(
+    "/extract/policy-extraction",
+    response_model=ExtractContractAnalysisResponse,
+)
+async def extract_policy_extraction(
+    body: ExtractPolicyExtractionBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),
+) -> ExtractContractAnalysisResponse:
+    """Return {prompt, tool_schema, documents, metadata} for policy extraction.
+
+    Document selection: coverage-zone PDFs only (COIs, policy summaries).
+    """
+    from flywheel.engines.contract_analyzer import (
+        POLICY_EXTRACTION_TOOL,
+        build_policy_extraction_prompt,
+        load_taxonomy,
+    )
+
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    taxonomy = await load_taxonomy(
+        db, project.country_code or "", project.line_of_business or ""
+    )
+
+    prompt = build_policy_extraction_prompt(taxonomy, project.currency or "USD")
+
+    documents = await _extract_project_documents(
+        db, project, user.tenant_id, document_type_filter="coverage"
+    )
+
+    return ExtractContractAnalysisResponse(
+        prompt=prompt,
+        tool_schema=POLICY_EXTRACTION_TOOL,
+        documents=documents,
+        metadata={
+            "project_id": str(project.id),
+            "currency": project.currency,
+            "language": project.language,
+            "country_code": project.country_code,
+            "line_of_business": project.line_of_business,
+            "taxonomy_count": len(taxonomy),
+            "tool_schema_version": "1.0",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /broker/save/policy-extraction
+# ---------------------------------------------------------------------------
+
+
+@projects_router.post("/save/policy-extraction")
+async def save_policy_extraction(
+    body: SavePolicyExtractionBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),  # Blocker-2: MANDATORY
+):
+    """Persist Claude's policy-extraction tool_use output."""
+    if body.tool_schema_version != "1.0":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"tool_schema_version mismatch: got {body.tool_schema_version}, "
+                f"expected 1.0"
+            ),
+        )
+
+    from flywheel.engines.contract_analyzer import persist_policy_extraction
+
+    result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    tool_use_output = body.model_dump(
+        exclude={"project_id", "tool_schema_version", "api_key"}
+    )
+
+    persist_result = await persist_policy_extraction(
+        db, user.tenant_id, body.project_id, tool_use_output
+    )
+    await db.commit()
+
+    return {
+        "project_id": str(body.project_id),
+        "policies_extracted": persist_result.get("policies_extracted", 0),
+        "rows_updated": persist_result.get("rows_updated", 0),
+        "orphans": persist_result.get("orphans", []),
+        "misrouted_by_file_id": persist_result.get("misrouted_by_file_id", {}),
+        "status": "completed",
     }

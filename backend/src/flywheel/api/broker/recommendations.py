@@ -17,6 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flywheel.api.broker._enforcement import SubsidyDecision, require_subsidy_decision
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -383,4 +384,152 @@ async def approve_send_recommendation(
         "sent_at": now.isoformat(),
         "document_id": str(doc.id),
         "recommendation_id": str(rec.id),
+    }
+
+
+# ===========================================================================
+# Phase 150.1 Plan 02 — Pattern 3a extract/save endpoint pair for recommendation-draft.
+#
+# Replaces backend env-var-leak AsyncAnthropic() at recommendation_drafter.py:153.
+# Blocker-2 invariant: BOTH endpoints carry require_subsidy_decision.
+# ===========================================================================
+
+
+class ExtractRecommendationDraftBody(BaseModel):
+    project_id: UUID
+    api_key: str | None = None
+
+
+class ExtractRecommendationDraftResponse(BaseModel):
+    prompt: str
+    tool_schema: dict
+    documents: list[dict]
+    metadata: dict
+
+
+class SaveRecommendationDraftBody(BaseModel):
+    project_id: UUID
+    tool_schema_version: str = "1.0"
+    api_key: str | None = None
+    subject: str
+    body_html: str
+    recipient_email: str | None = None
+
+
+@recommendations_router.post(
+    "/extract/recommendation-draft",
+    response_model=ExtractRecommendationDraftResponse,
+)
+async def extract_recommendation_draft(
+    body: ExtractRecommendationDraftBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),
+) -> ExtractRecommendationDraftResponse:
+    """Return {prompt, tool_schema, documents, metadata} for recommendation drafting."""
+    from flywheel.engines.quote_comparator import compare_quotes, summarize_comparison
+    from flywheel.engines.recommendation_drafter import (
+        RECOMMENDATION_TOOL,
+        build_recommendation_prompt,
+    )
+
+    project_result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == body.project_id,
+            BrokerProject.tenant_id == user.tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+
+    # Load coverages + quotes.
+    cov_result = await db.execute(
+        select(ProjectCoverage).where(
+            ProjectCoverage.broker_project_id == body.project_id
+        )
+    )
+    coverages = cov_result.scalars().all()
+    coverage_dicts = [_coverage_to_dict(c) for c in coverages]
+
+    quote_result = await db.execute(
+        select(CarrierQuote).where(
+            CarrierQuote.broker_project_id == body.project_id,
+            CarrierQuote.status.in_(("extracted", "reviewed", "selected")),
+        )
+    )
+    quotes = quote_result.scalars().all()
+    quote_dicts = [_quote_to_dict(q) for q in quotes]
+
+    project_dict = {
+        "id": str(project.id),
+        "name": project.name,
+        "project_type": project.project_type,
+        "description": project.description,
+        "contract_value": float(project.contract_value)
+        if project.contract_value is not None
+        else None,
+        "currency": project.currency,
+        "location": project.location,
+        "language": project.language,
+        "status": project.status,
+    }
+    language = project.language or "en"
+    comparison = compare_quotes(coverage_dicts, quote_dicts)
+    summary = summarize_comparison(comparison)
+
+    prompt = build_recommendation_prompt(project_dict, comparison, summary, language)
+
+    return ExtractRecommendationDraftResponse(
+        prompt=prompt,
+        tool_schema=RECOMMENDATION_TOOL,
+        documents=[],
+        metadata={
+            "project_id": str(project.id),
+            "num_quotes": len(quote_dicts),
+            "num_coverages": len(coverage_dicts),
+            "language": language,
+            "comparison_summary": summary,
+            "tool_schema_version": "1.0",
+        },
+    )
+
+
+@recommendations_router.post("/save/recommendation-draft")
+async def save_recommendation_draft(
+    body: SaveRecommendationDraftBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),  # Blocker-2: MANDATORY
+):
+    """Persist Claude's recommendation-draft tool_use output."""
+    if body.tool_schema_version != "1.0":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"tool_schema_version mismatch: got {body.tool_schema_version}, "
+                f"expected 1.0"
+            ),
+        )
+
+    from flywheel.engines.recommendation_drafter import persist_recommendation_draft
+
+    rec = await persist_recommendation_draft(
+        db,
+        user.tenant_id,
+        body.project_id,
+        tool_use_output={"subject": body.subject, "body_html": body.body_html},
+        recipient_email=body.recipient_email,
+        created_by_user_id=user.sub,
+    )
+    await db.commit()
+    await db.refresh(rec)
+
+    return {
+        "recommendation_id": str(rec.id),
+        "project_id": str(body.project_id),
+        "subject": rec.subject,
+        "status": rec.status,
+        "recipient_email": rec.recipient_email,
     }

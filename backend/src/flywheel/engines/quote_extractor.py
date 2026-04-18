@@ -259,6 +259,29 @@ def _format_project_coverages_for_prompt(project_coverages: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Public alias (Plan 02 — Pattern 3a) — extract endpoints import this.
+format_project_coverages_for_prompt = _format_project_coverages_for_prompt
+
+
+def build_quote_extraction_prompt(project_coverages: list[dict]) -> str:
+    """Render the full quote-extraction system prompt.
+
+    Phase 150.1 Plan 02 — Pattern 3a public helper. Used by the
+    `POST /extract/quote-extraction` endpoint to return the fully-rendered
+    prompt so Claude-in-conversation can invoke it with the PDF.
+
+    Args:
+        project_coverages: List of ProjectCoverage dicts with keys
+            id, coverage_type, category, required_limit.
+
+    Returns:
+        Fully rendered system prompt string (ready to send with the PDF).
+    """
+    return EXTRACTION_SYSTEM_PROMPT.format(
+        project_coverages=_format_project_coverages_for_prompt(project_coverages)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Main entry point
 # ---------------------------------------------------------------------------
@@ -588,3 +611,197 @@ async def extract_quote(
             )
 
         return {"status": "error", "message": str(exc)}
+
+
+# ---------------------------------------------------------------------------
+# Phase 150.1 Plan 02 — public persistence helper for Pattern 3a save endpoint.
+#
+# The legacy `extract_quote` function above is untouched. The save endpoint
+# calls `persist_quote_extraction` with Claude's tool_use output shaped as
+# QUOTE_EXTRACTION_TOOL.input_schema; no AsyncAnthropic involvement.
+# ---------------------------------------------------------------------------
+
+
+async def persist_quote_extraction(
+    db: AsyncSession,
+    tenant_id: UUID,
+    quote_id: UUID,
+    tool_use_output: dict,
+    project_coverages: list[dict] | None = None,
+) -> dict:
+    """Persist Claude's quote-extraction tool_use output.
+
+    Mirrors the post-LLM persistence logic in `extract_quote` (lines ~388-500)
+    without calling Anthropic. Creates/updates CarrierQuote rows for each
+    line item, detects critical exclusions, logs BrokerActivity.
+
+    Args:
+        db: Async SQLAlchemy session (caller manages transaction).
+        tenant_id: Tenant UUID.
+        quote_id: CarrierQuote UUID — identifies the row to update (first
+            line item writes to this row; additional line items create new
+            CarrierQuote rows in the same project).
+        tool_use_output: Dict matching QUOTE_EXTRACTION_TOOL.input_schema.
+        project_coverages: Optional — if the caller has already loaded them.
+            If None, the function loads them from the project linked to
+            this quote.
+
+    Returns:
+        {
+            "status": "extracted",
+            "line_items_extracted": int,
+            "carrier_name": str,
+            "critical_exclusions_found": int,
+            "line_items": list[dict],
+        }
+    """
+    result = await db.execute(
+        select(CarrierQuote).where(
+            CarrierQuote.id == quote_id,
+            CarrierQuote.tenant_id == tenant_id,
+        )
+    )
+    quote = result.scalar_one_or_none()
+    if quote is None:
+        raise ValueError(
+            f"CarrierQuote not found for persist_quote_extraction: "
+            f"quote_id={quote_id} tenant_id={tenant_id}"
+        )
+
+    # Load project coverages if caller didn't supply them.
+    if project_coverages is None:
+        cov_result = await db.execute(
+            select(ProjectCoverage).where(
+                ProjectCoverage.broker_project_id == quote.broker_project_id
+            )
+        )
+        project_coverages = [
+            {
+                "id": str(c.id),
+                "coverage_type": c.coverage_type,
+                "coverage_type_key": c.coverage_type_key,
+                "category": c.category,
+                "required_limit": float(c.required_limit)
+                if c.required_limit is not None
+                else None,
+            }
+            for c in cov_result.scalars().all()
+        ]
+
+    line_items = tool_use_output.get("line_items", []) or []
+    carrier_name = tool_use_output.get("carrier_name", "Unknown")
+    critical_exclusions_found = 0
+    quotes_updated: list[dict] = []
+
+    # Update the original quote row with top-level metadata.
+    quote.carrier_name = carrier_name
+
+    for idx, item in enumerate(line_items):
+        if not isinstance(item, dict):
+            continue
+        coverage_type = item.get("coverage_type", "")
+        matched_coverage = _match_coverage(coverage_type, project_coverages)
+
+        if idx == 0:
+            target_quote = quote
+        else:
+            target_quote = CarrierQuote(
+                tenant_id=tenant_id,
+                broker_project_id=quote.broker_project_id,
+                carrier_config_id=quote.carrier_config_id,
+                carrier_name=carrier_name,
+                source_hash=f"{quote.source_hash or 'cc-brain'}:{idx}",
+                source=quote.source,
+                import_source=quote.import_source,
+            )
+            db.add(target_quote)
+
+        if matched_coverage:
+            mid = matched_coverage["id"]
+            target_quote.coverage_id = UUID(mid) if isinstance(mid, str) else mid
+
+        target_quote.premium = item.get("premium")
+        target_quote.deductible = item.get("deductible")
+        target_quote.limit_amount = item.get("limit_amount")
+        target_quote.coinsurance = item.get("coinsurance")
+        target_quote.term_months = item.get("term_months")
+        target_quote.confidence = item.get("confidence", "medium")
+
+        validity_str = item.get("validity_date")
+        if validity_str:
+            try:
+                from datetime import date as date_type
+
+                target_quote.validity_date = date_type.fromisoformat(
+                    str(validity_str)[:10]
+                )
+            except (ValueError, TypeError):
+                pass
+
+        target_quote.exclusions = item.get("exclusions", []) or []
+        target_quote.conditions = item.get("conditions", []) or []
+        target_quote.endorsements = item.get("endorsements", []) or []
+
+        critical_exclusions = item.get("critical_exclusions", []) or []
+        if critical_exclusions:
+            target_quote.has_critical_exclusion = True
+            details = "; ".join(
+                f"{ce.get('exclusion', '')} "
+                f"(conflicts with {ce.get('conflicts_with', '')}: "
+                f"{ce.get('reason', '')})"
+                for ce in critical_exclusions
+                if isinstance(ce, dict)
+            )
+            target_quote.critical_exclusion_detail = details
+            critical_exclusions_found += len(critical_exclusions)
+        else:
+            target_quote.has_critical_exclusion = False
+
+        target_quote.status = "extracted"
+        target_quote.received_at = datetime.now(timezone.utc)
+
+        quotes_updated.append(
+            {
+                "coverage_type": coverage_type,
+                "premium": item.get("premium"),
+                "has_critical_exclusion": bool(critical_exclusions),
+                "confidence": item.get("confidence", "medium"),
+            }
+        )
+
+    await db.flush()
+
+    # Log BrokerActivity.
+    activity = BrokerActivity(
+        tenant_id=tenant_id,
+        broker_project_id=quote.broker_project_id,
+        activity_type="quote_extracted",
+        actor_type="system",
+        description=(
+            f"Quote extracted (CC-as-Brain) from {carrier_name}: "
+            f"{len(quotes_updated)} coverage lines, "
+            f"{critical_exclusions_found} critical exclusions"
+        ),
+        metadata_={
+            "carrier_name": carrier_name,
+            "line_items_extracted": len(quotes_updated),
+            "critical_exclusions_found": critical_exclusions_found,
+            "model": "claude-in-conversation",
+            "quote_reference": tool_use_output.get("quote_reference"),
+            "currency": tool_use_output.get("currency"),
+            "total_premium": tool_use_output.get("total_premium"),
+        },
+    )
+    db.add(activity)
+    await db.flush()
+
+    return {
+        "status": "extracted",
+        "line_items_extracted": len(quotes_updated),
+        "carrier_name": carrier_name,
+        "critical_exclusions_found": critical_exclusions_found,
+        "line_items": quotes_updated,
+        "quote_reference": tool_use_output.get("quote_reference"),
+        "currency": tool_use_output.get("currency"),
+        "total_premium": tool_use_output.get("total_premium"),
+    }
