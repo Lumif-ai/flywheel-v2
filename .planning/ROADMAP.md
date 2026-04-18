@@ -24,6 +24,7 @@
 - ✅ **v20.0 Coverage Taxonomy & Multi-Currency Limits** — Phase 140 (shipped 2026-04-16)
 - **v21.0 Document Viewer** — Phases 141–145 (active)
 - **v22.0 Skill Platform Consolidation** — Phases 146–152 (active, parallel to v21.0)
+- **v23.0 Project Primitive Platform** — Phases 153–156 (planned)
 
 ## Phases
 
@@ -618,6 +619,10 @@ Plans:
 | 150. MCP Tool + Unpack Helper | v22.0 | 0/0 | Not started | - |
 | 151. Broker Dogfood + Resilience | v22.0 | 0/0 | Not started | - |
 | 152. Retirement | v22.0 | 0/0 | Not started | - |
+| 153. Platform Project Schema | v23.0 | 0/0 | Not started | - |
+| 154. BrokerProject Composition + Backfill | v23.0 | 0/0 | Not started | - |
+| 155. Context Store Backfill via Entity Join | v23.0 | 0/0 | Not started | - |
+| 156. CC Project Integration + Pinning | v23.0 | 0/0 | Not started | - |
 
 ### Phase 145: Stage 1 intake correctness: typed upload and gap completion
 
@@ -662,9 +667,11 @@ Plans:
 - [x] **Phase 147: Seed Pipeline Extension** — `assets:` and `depends_on:` frontmatter contract; `_build_bundle()` helper; SHA-256 idempotent upsert; library skills (`_shared`, `gtm-shared`) seeded with `enabled=false` (shipped 2026-04-17, 1 plan, 5/5 SCs verified)
 - [x] **Phase 148: Backend Asset Endpoint** — `GET /api/v1/skills/{name}/assets` with tenant auth + module gating + protected-skill 403 + rate limit (shipped 2026-04-17, 1 plan, 5/5 SCs verified)
 - [x] **Phase 149: Broker Scripts Migration** — move broker + shared scripts into `flywheel-v2/skills/`; Playwright state paths rewritten to `~/.flywheel/broker/portals/<carrier>`; `assets:`/`depends_on:` stanzas on every SKILL.md
-- [ ] **Phase 150: MCP Tool + Unpack Helper** — `flywheel_fetch_skill_assets` MCP tool + `FlywheelClient.fetch_skill_assets()` + `bundle.materialize_skill_bundle()` with path-traversal guard, SHA-256 verify, and `TemporaryDirectory` lifecycle
-- [ ] **Phase 151: Broker Dogfood + Resilience** — first live end-to-end `/broker:parse-contract` via server-fetched assets; offline last-known-good cache; distinct error taxonomy; `flywheel_refresh_skills` cache-buster; p99 latency SLOs
-- [ ] **Phase 152: Retirement** — archive `~/.claude/skills/`; drop git-clone step from install flow; codebase-wide grep for legacy paths returns zero; gated by coexistence-window telemetry
+- [x] **Phase 150: MCP Tool + Unpack Helper** — `flywheel_fetch_skill_assets` MCP tool + `FlywheelClient.fetch_skill_assets()` + `bundle.materialize_skill_bundle()` with path-traversal guard, SHA-256 verify, and `TemporaryDirectory` lifecycle (shipped 2026-04-18, 3 plans, 5/5 SCs verified)
+- [x] **Phase 150.1: CC-as-Brain Enforcement** (INSERTED) — audit all backend LLM call sites, extend CC-as-Brain enforcement beyond `company-intel`+`meeting-prep`, route analysis to Pattern 3a (Python returns raw data → Claude-in-conversation analyzes) to close the backend-pays billing leak before Phase 151 dogfood (shipped 2026-04-18, 4 plans, 8/8 SCs verified, net −4223 LOC)
+- [x] **Phase 151: Broker Dogfood + Resilience** (human_needed — DOGFOOD-RUNBOOK.md pending user execution) — first live end-to-end `/broker:parse-contract` via server-fetched assets; offline last-known-good cache; distinct error taxonomy; `flywheel_refresh_skills` cache-buster; p99 latency SLOs (shipped 2026-04-18, 4 plans, SC1-4 verified by automated tests, SC5 warm PASSED 0.46ms/cold FAILED 4049ms vs 500ms SLO — cold miss accepted, budgeted as Phase 151.1)
+- [ ] **Phase 151.1: Backend Handler Latency Profiling + Cold SLO** (INSERTED) — profile `get_skill_assets_bundle` backend handler (Supabase query fan-out, base64 encode cost, N+1 patterns), measure same-region deploy vs ngrok tunnel, decide whether 500ms cold p99 SLO is achievable or needs amendment
+- [x] **Phase 152: Retirement** (human_needed — coexistence-window gate + retirement-PR merge pending user execution) — deprecation banners on 18 legacy SKILL.md + 7 shared-engine Python files; `legacy-skills-final` tag pushed to both remotes; install flow verified clean; root README MCP-only delivery block; coexistence-window runbook + retirement-PR template written (shipped 2026-04-19, 4 plans, SC1-4 verified by automated checks, SC5 gate runbook ready for user execution)
 
 ## Phase Details
 
@@ -732,7 +739,41 @@ Plans:
   3. Tampering with any byte of the bundle (post-fetch) causes the client to raise `BundleIntegrityError` with a message naming the skill and both hashes, and refuses to `extractall` — no silent fallback to exec
   4. A skill whose SKILL.md has `depends_on: ["_shared"]` gets both the consumer bundle AND the `_shared` library bundle fetched and extracted into the same temp dir such that `import context_utils` resolves after `sys.path` insertion
   5. After the context manager exits, `os.path.exists(temp_dir_path)` is `False` and no bundle bytes remain anywhere on user disk under `/tmp/` or `~/.cache/` from this fetch
-**Plans**: TBD
+**Plans**: 3 plans
+Plans:
+- [ ] 150-01-PLAN.md — Backend: persist depends_on column + fanout endpoint with topological walker + server-side dual SHA check (wave 1, destructive DB gate)
+- [ ] 150-02-PLAN.md — Client: materialize_skill_bundle context manager + full exception taxonomy + path-traversal guard + 14 unit tests (wave 2)
+- [ ] 150-03-PLAN.md — MCP tool registration with ToolResult + live E2E smoke against prod broker bundle proving all 5 SCs (wave 3)
+
+### Phase 150.1: CC-as-Brain Enforcement (INSERTED)
+
+<<<<<<< Updated upstream
+**Goal:** [Urgent work - to be planned]
+**Depends on:** Phase 150
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 150.1 to break down)
+=======
+**Goal**: Backend makes zero AsyncAnthropic instantiations during broker flows; SUBSIDY_ALLOWED_SKILLS shrinks to `{company-intel}`; 4 legacy broker endpoints return 410 Gone; 5 new Pattern 3a extract/save endpoint pairs go live (contract-analysis, policy-extraction, quote-extraction, solicitation-draft, recommendation-draft); broker library bundle re-seeded at v1.2 with new SHA; frontend migrated off deprecated paths — all before Phase 151 Broker Dogfood.
+**Depends on**: Phase 150
+**Requirements**: None assigned (URGENT inserted phase — requirements inferred from CONTEXT decisions)
+**Success Criteria** (what must be TRUE):
+  1. `grep -rn 'AsyncAnthropic(' backend/src/flywheel/engines/{contract_analyzer,quote_extractor,solicitation_drafter,recommendation_drafter}.py` returns ZERO matches post-Plan 04
+  2. `settings.subsidy_allowed_skills == {'company-intel'}` in `backend/src/flywheel/config.py` — single source of truth, imported by `skill_executor.py` allowlist gate
+  3. All 4 legacy broker endpoints (/analyze, /quotes/{id}/extract, /draft-solicitations, /draft-recommendation) return HTTP 410 with body `{error: 'endpoint_deprecated', operation, replacement, migrated_in: '150.1'}`
+  4. 5 new extract/save endpoint pairs are registered (OpenAPI enumeration): `/api/v1/broker/{extract,save}/{contract-analysis,policy-extraction,quote-extraction,solicitation-draft,recommendation-draft}` — each with `Depends(require_subsidy_decision)`
+  5. Broker library bundle SHA-256 changed from Phase 149's `217ebdc1...` to new v1.2 SHA (captured + documented in MIGRATION-NOTES.md); all 10 broker-* consumer SKILL.md rows on prod at `version: 1.2`
+  6. `frontend/src/features/broker/api.ts` grep for deprecated paths returns zero live references (CI-enforced via test_broker_zero_anthropic.py::TestFrontendDoesNotCallDeprecatedEndpoints)
+  7. `test_broker_zero_anthropic.py` passes — sentinel call_count == 0 across all 10 extract/save flows + env-var leak smoke test
+  8. `meeting-prep` prod 30-day SkillRun count documented in 150.1-01-AUDIT.md; user aware of anonymous onboarding breaking change
+**Plans**: 4 plans (strictly sequential, one per wave — no parallelism)
+Plans:
+- [ ] 150.1-01-PLAN.md — Enforcement Foundation: SUBSIDY_ALLOWED_SKILLS constant + require_subsidy_decision dep + skill_executor refactor + 15-site audit freeze + meeting-prep blast-radius query + body-double-read POC (wave 1, autonomous)
+- [ ] 150.1-02-PLAN.md — Pattern 3a Endpoints: 5 extract/save pairs + 4 engine refactors (expose prompt builders + persist_* helpers) + zero-Anthropic regression test with module-local AsyncAnthropic patches (wave 2, autonomous)
+- [ ] 150.1-03-PLAN.md — Library v1.2 + Frontend Migration: api_client.py rewrite + 10 broker-* SKILL.md bumps + 6 Pattern 3a step rewrites + frontend/api.ts migration + destructive prod re-seed (wave 3, NOT autonomous — Phase 149-02 approval gate)
+- [ ] 150.1-04-PLAN.md — 410 Cutover + Cleanup: flip 4 legacy endpoints to 410 Gone + DELETE legacy engine functions + AsyncAnthropic call sites + `from anthropic import AsyncAnthropic` imports + grep-guard CI tests (wave 4, autonomous)
+>>>>>>> Stashed changes
 
 ### Phase 151: Broker Dogfood + Resilience
 **Goal**: `/broker:parse-contract` runs successfully end-to-end against a machine with `~/.claude/skills/broker/` absent or renamed, an offline last-known-good cache keeps skills usable during transient backend outages, every failure class produces a distinct human-actionable error, and measured fetch latency meets SLOs against the real ngrok + Supabase baseline
@@ -744,7 +785,21 @@ Plans:
   3. Each failure class surfaces a distinct user-facing error string: 401 ("run `flywheel login`"), 403 ("module not licensed"), 404 ("skill name typo"), 503 ("backend down"), checksum mismatch ("bundle integrity failure"), offline+expired-cache ("no network and cache expired") — no JSON-RPC `-32603` leaks to the user
   4. `flywheel_refresh_skills` MCP tool force-re-fetches every bundle bypassing the cache; after calling it, a tampered cache entry is replaced with the authoritative bytes from the backend
   5. Measured against live ngrok + Supabase: p99 first-fetch latency (cold cache, 160 KB broker bundle) is under 500 ms; p99 cached-fetch latency is under 50 ms; numbers recorded in a phase artifact for future regression
-**Plans**: TBD
+**Plans**: 4 plans (strictly sequential — each wave depends on the prior)
+Plans:
+- [ ] 151-01-PLAN.md — Backend shas_only query param + correlation-id logging + cli/flywheel_mcp/cache.py BundleCache module + FlywheelClient cache integration + hermetic unit tests (wave 1, autonomous)
+- [ ] 151-02-PLAN.md — errors.py with 6 locked user-facing messages + flywheel_refresh_skills MCP tool registration + tamper auto-heal + regression tests asserting byte-exact error copy + offline-simulation tests (wave 2, autonomous)
+- [ ] 151-03-PLAN.md — scripts/dogfood_harness.py 5-step programmatic probe + --offline-sim flag + DOGFOOD-RUNBOOK.md user-executable runbook for SC1+SC2 live evidence (wave 3, autonomous)
+- [ ] 151-04-PLAN.md — scripts/measure_latency.py 100-cold + 100-warm batch with statistics.quantiles + SLO gate (p99 cold <500ms, p99 warm <50ms) + 151-LATENCY.md regression baseline artifact (wave 4, autonomous)
+
+### Phase 151.1: Backend Handler Latency Profiling + Cold SLO (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Depends on:** Phase 151
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd:plan-phase 151.1 to break down)
 
 ### Phase 152: Retirement
 **Goal**: The legacy `~/.claude/skills/` distribution channel is archived read-only, the install flow delivers skills exclusively via MCP, the codebase has zero hardcoded references to the old path, and the cutover is gated by telemetry confirming every active tenant has already exercised the server-hosted path during the coexistence window
@@ -756,6 +811,81 @@ Plans:
   3. Codebase-wide grep (`backend/`, `cli/`, `skills/`, docs) for `~/.claude/skills/`, `expanduser("~/.claude")`, and `Path.home() / ".claude"` returns zero hits outside explicit legacy-compat paths documented in the retirement plan
   4. User-facing README and CLAUDE.md templates contain no instructions to `git pull` or manually manage `~/.claude/skills/`; the only documented skill delivery mechanism is MCP
   5. Retirement PR only merges after telemetry from Phase 151 confirms every active tenant has successfully fetched at least one bundle from `skill_assets` during the coexistence window — the coexistence-window gate is explicit and auditable in the PR description
+**Plans**: TBD
+
+---
+
+### v23.0 Project Primitive Platform (Planned)
+
+**Milestone goal**: Ship a platform-level `Project` scoping primitive that every Flywheel module (broker, GTM, meetings) uses to partition context, documents, skill runs, meetings, and tasks — without breaking the live broker module and without building PM-specific capabilities.
+
+**Concept inputs**: `CONCEPT-BRIEF-PM-MODULE.md` §6 "Project as a Platform Primitive", `ADVISORY-PROJECT-SCOPING.md`, `PM-MODULE-DECISION.md` (PM module itself is deferred; this milestone ships platform infrastructure only)
+
+**Query contract (applies to all phases):** Every project-scoped skill query uses `project_id = :current OR project_id IN (:pinned_shared_ids) OR project_id IS NULL`. NULL is reserved for genuinely orphan / multi-entity / pre-routing entries. Shared content (playbooks, templates, strategy) lives in regular `projects` rows that users pin — there is NO synthetic "default" or "shared" project sentinel. See ADR (to be authored in Phase 156) for the full contract.
+
+**Pre-flight for Phase 154:** Validate the 3 broker-grain flip conditions against real production data before the backfill commits — renewal rate, concurrent-unrelated-placement count, per-placement compliance needs. If any condition flips, re-plan the grain.
+
+---
+
+### Phase 153: Platform Project Schema
+
+**Goal**: The `projects` table is live in production with nullable `project_id` FKs on `context_entries`, `documents`, `skill_runs`, `meetings`, `tasks`; MCP tools accept an optional `project_id` parameter with NULL-default backwards compatibility; any write that passes `project_id` persists it, any read that omits `project_id` behaves identically to pre-migration.
+**Depends on**: v22.0 complete (no code dependency on v21.0 / v22.0 tracks)
+**Success Criteria** (what must be TRUE):
+  1. `SELECT count(*) FROM projects` returns `0` (not an error) against production Supabase after migration; nullable `project_id` FKs exist on all 5 tables (`context_entries`, `documents`, `skill_runs`, `meetings`, `tasks`) per `information_schema.columns` verification
+  2. All 5 new partial indexes exist and each uses `WHERE project_id IS NOT NULL`: `idx_context_project`, `idx_documents_project`, `idx_skill_runs_project`, `idx_meetings_project`, `idx_tasks_project`
+  3. `alembic current` reports the new revision; `alembic upgrade head` is idempotent (re-run is a no-op); migration applies cleanly via Supabase per-statement-commit pattern per global CLAUDE.md (multi-DDL single transaction is NOT used)
+  4. `flywheel_read_context`, `flywheel_write_context`, `flywheel_save_document`, `flywheel_run_skill` accept optional `project_id` parameter with NULL default; the existing regression suite passes unchanged — any caller that omits the parameter sees identical behavior to pre-migration
+  5. Backend exposes CRUD endpoints: `POST /api/v1/projects`, `GET /api/v1/projects`, `GET /api/v1/projects/{id}`, `PATCH /api/v1/projects/{id}/archive`; auth + tenant isolation match existing API conventions (`401` unauthenticated, `404` cross-tenant lookup — no existence leak)
+**Plans**: TBD
+
+---
+
+### Phase 154: BrokerProject Composition + Backfill
+
+**Goal**: Every existing `broker_client` has a matching platform `projects` row; every `broker_projects.project_id` is populated via its `client_id`; broker engines, APIs, and frontend continue to operate with zero behavioral change on day 1 — the broker domain model is preserved (composition, not subsumption).
+**Depends on**: Phase 153 (platform `projects` table must exist)
+**Success Criteria** (what must be TRUE):
+  1. `broker_projects` has a nullable `project_id UUID REFERENCES projects(id)` column; partial index `idx_broker_projects_platform_project` exists with `WHERE project_id IS NOT NULL`
+  2. For every `broker_client` row in production, exactly one `projects` row exists with matching `tenant_id`, `name`, a slug derived from `normalized_name`, `metadata.source = 'broker_client'`, and `metadata.broker_client_id` matching the source client; backfill script is idempotent (re-run produces zero diff)
+  3. For every `broker_projects` row, `project_id` is populated matching the parent client's platform project; each platform project sourced from a `broker_client` has `metadata.broker_project_ids[]` populated with the list of its placement UUIDs
+  4. Regression suite on broker APIs (`api/broker/*.py`) passes unchanged; broker engines (`contract_analyzer.py`, `quote_extractor.py`, `submission_builder.py`, `followup_drafter.py`, `context_store_writer.py`) run unchanged — zero code modifications to broker engines in this phase
+  5. Broker frontend (BrokerProjectsPage, ProjectPipelineGrid, BrokerProjectDetail, BrokerClientDetailPage) renders identically before and after backfill; Playwright smoke test confirms no visual or behavioral diff
+**Plans**: TBD
+
+---
+
+### Phase 155: Context Store Backfill via Entity Join
+
+**Goal**: Existing context entries, documents, meetings, and tasks are retroactively assigned to their correct platform project via the existing `context_entity_entries` join table; single-entity matches are project-scoped; multi-entity and orphan entries remain NULL (true orphan semantics preserved); playbook-/template-looking entries are NOT auto-routed (user migrates intentionally in Phase 156 after pinning exists); the backfill is auditable and reversible.
+**Depends on**: Phase 153 (FKs exist), Phase 154 (broker-sourced projects exist so broker-linked context entries have assignment targets)
+**Backfill exclusions (stay NULL for now, migrate intentionally later via Phase 156 pinning):**
+  - Entries with `file_name` in known playbook/template/strategy conventions (list defined during planning)
+  - Entries tagged `visibility='global'` or with `source` indicating template/playbook origin
+  - These are intentional shared content and should be placed by the user into explicit named shared projects (e.g., "Lumif.ai Playbooks"), not force-assigned now
+
+**Success Criteria** (what must be TRUE):
+  1. Backfill produces a `backfill-review.csv` listing every context entry that would receive a `project_id`, with columns `entry_id, current_project_id, proposed_project_id, matched_entity_name, matched_entity_type, confidence`; the script refuses to commit UPDATEs until an operator-approval flag is passed explicitly (checkpoint)
+  2. After commit against production: `SELECT count(*) FROM context_entries WHERE project_id IS NOT NULL` equals at least 80% of the count of entries that link to exactly one `company` or `broker_client` entity via `context_entity_entries` AND are NOT in the exclusion list; the exact numbers and exclusion count are recorded in a phase artifact `backfill-summary.md`
+  3. Context entries linked to a `broker_project` entity in `context_entity_entries` resolve to their parent client-level platform project AND stamp `metadata->>'broker_project_id'` with the placement UUID (verified by sampling 20 rows across the most-active broker clients)
+  4. Multi-entity entries (linked to 2+ `company` / `broker_client` entities) stay `NULL`; orphan entries (no entity link) stay `NULL`; entries matched by the playbook/template exclusion rules stay `NULL`; the backfill summary log reports all three counts explicitly — NULL is a first-class outcome, not silent skip
+  5. Rollback path verified in staging before prod commit: a single query restores pre-backfill state cleanly for each of `context_entries`, `documents`, `meetings`, `tasks` (backfill writes a sentinel `metadata->>'backfilled_at'` so rollback is precise); staging rollback test result linked in phase artifact
+**Plans**: TBD
+
+---
+
+### Phase 156: CC Project Integration + Pinning
+
+**Goal**: A Flywheel user in Claude Code can set the active project explicitly via `/project switch <slug>`, have it inferred automatically from a working-directory marker or recent meeting context, keep it sticky across the session, pin projects as "always-included shared brain" for cross-project content (playbooks, strategy, templates), and move entries between projects without re-running classification — making the project primitive usable in conversation, not just queryable in the DB.
+**Depends on**: Phase 153 (MCP tools accept `project_id`), Phase 155 (real projects exist and orphan semantics are clean)
+**New ADR**: Authors `docs/adr/NNN-project-scoping-query-contract.md` documenting the `project_id = :current OR project_id IN (:pinned) OR project_id IS NULL` contract, the semantics of each clause, and the non-subsumption design (no synthetic default project) — so future skill authors don't reintroduce the conflation between "shared" and "orphan."
+
+**Success Criteria** (what must be TRUE):
+  1. `/project switch <slug>` in Claude Code sets the active project for the session; subsequent MCP calls (`flywheel_read_context`, `flywheel_write_context`, `flywheel_save_document`, `flywheel_run_skill`) receive the resolved `project_id` without re-prompting; `/project current` and `/project list` show accurate state; `/project switch` with an invalid slug returns a helpful error listing available slugs
+  2. On session start with no explicit project set, CC reads `.flywheel/project` marker file in the working directory; if absent, infers from the dominant company entity in this week's meetings; displays a single one-line confirmation ("Scoping to **{name}** — ok? (y / `/project switch <other>`)"); proceeds on silence after the first turn; the inference path is logged
+  3. `/project pin <slug>` and `/project unpin <slug>` slash commands manage a per-user list of pinned "always-included" projects; `/project current` output lists the active project AND the pinned set; every project-scoped skill query resolves `project_id = :current OR project_id IN (:pinned) OR project_id IS NULL` by default; opting out requires an explicit `include_shared=False` parameter
+  4. "Move entries" bulk action is exposed (CC slash command and/or MCP tool) accepting entry IDs + target project slug; shows a preview count before commit; UPDATE is transactional; a single `undo` within the session restores the prior `project_id` values using a session-scoped journal
+  5. ADR `docs/adr/NNN-project-scoping-query-contract.md` exists, defines the three clauses, documents why NULL is reserved for orphans (not shared content), and is linked from the platform-level README and the skill-authoring guide; regression tests cover all three query clauses plus the `include_shared=False` opt-out
 **Plans**: TBD
 
 ---
@@ -782,3 +912,4 @@ Plans:
 *v19.0 milestone added: 2026-04-15 — Broker Redesign (7 phases, 82 requirements)*
 *v21.0 milestone added: 2026-04-16 — Document Viewer (4 phases, 26 requirements)*
 *v22.0 milestone added: 2026-04-17 — Skill Platform Consolidation (7 phases, 37 requirements)*
+*v23.0 milestone added: 2026-04-18 — Project Primitive Platform (4 phases)*
