@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import base64
 import os
+import time
 
 import httpx
 
@@ -149,6 +151,142 @@ class FlywheelClient:
     def fetch_skill_prompt(self, skill_name: str) -> dict:
         """GET /api/v1/skills/{skill_name}/prompt -- get rendered prompt for a skill."""
         return self._request("get", f"/api/v1/skills/{skill_name}/prompt")
+
+    def fetch_skill_assets_bundle(
+        self, name: str
+    ) -> tuple[dict, list[tuple[str, str, bytes]]]:
+        """GET /api/v1/skills/{name}/assets/bundle -- Phase 150 fanout fetch.
+
+        Walks ``depends_on`` server-side and returns consumer + transitive
+        library bundles in topological order (deepest dep first, consumer
+        last; consumers with ``assets=[]`` are absent from the bundles list
+        but still present in ``deps``).
+
+        Retry policy:
+            - 3x exponential backoff (0.5s, 1s, 2s) on network errors
+              (:class:`httpx.RequestError`) and 5xx responses.
+            - 401: one-shot token refresh via
+              :meth:`_ensure_token`; if still-401 after refresh,
+              credentials are cleared and :class:`BundleFetchError` is
+              raised with a ``flywheel login`` hint.
+            - 403/404: raise :class:`BundleFetchError` immediately (no
+              retry, terminal errors).
+
+        Returns:
+            (metadata, bundles) where
+
+            - ``metadata`` is ``{"skill": str, "deps": list[str],
+              "rollup_sha": str}``.
+            - ``bundles`` is ``[(skill_name, sha256_hex, raw_bundle_bytes),
+              ...]`` in topological order. Bytes are verbatim from the DB
+              (Phase 147 byte-determinism preserved end-to-end). SHA is
+              NOT verified here — the materializer re-hashes on receipt.
+
+        Raises:
+            BundleFetchError: HTTP/transport failure that exhausts the
+                retry budget, or terminal 401/403/404/other-4xx.
+        """
+        # Deferred import: bundle.py defines BundleFetchError and will
+        # import FlywheelClient lazily from its context manager.
+        from flywheel_mcp.bundle import BundleFetchError
+
+        path = f"/api/v1/skills/{name}/assets/bundle"
+
+        def _do_get() -> httpx.Response | None:
+            """Execute the GET with 3x backoff. Return response on
+            non-retryable status, None if caller should do 401 refresh.
+            Raises BundleFetchError if retries exhausted."""
+            # Schedule: immediate, then 0.5s, 1.0s, 2.0s -> 4 attempts total
+            # but only 3 retries after the first try. Matches RESEARCH.md
+            # policy ("3x exp backoff").
+            delays = [0.0, 0.5, 1.0, 2.0]
+            last_exc: BundleFetchError | None = None
+            for delay in delays:
+                if delay > 0:
+                    time.sleep(delay)
+                try:
+                    resp = self._client.get(path)
+                except httpx.RequestError as exc:
+                    last_exc = BundleFetchError(
+                        name, None, f"Network error reaching Flywheel: {exc}"
+                    )
+                    continue
+                if resp.status_code >= 500:
+                    last_exc = BundleFetchError(
+                        name,
+                        resp.status_code,
+                        f"Flywheel backend returned {resp.status_code}. "
+                        f"Retry in a moment.",
+                    )
+                    continue
+                return resp
+            # Exhausted retries.
+            assert last_exc is not None  # loop always populates on failure
+            raise last_exc
+
+        self._ensure_token()
+        resp = _do_get()
+
+        # -----  One-shot 401 refresh (Pitfall 9: no recursion, no loop).
+        if resp.status_code == 401:
+            # get_token() in _ensure_token auto-refreshes near-expiry. If
+            # we're still 401 after that, credentials are genuinely
+            # invalid — force refresh once more via a new get_token call,
+            # then retry exactly one more time.
+            self._ensure_token()
+            resp = _do_get()
+            if resp.status_code == 401:
+                clear_credentials()
+                raise BundleFetchError(
+                    name,
+                    401,
+                    "Session expired. Run `flywheel login` and retry.",
+                )
+
+        # -----  Terminal errors — map to BundleFetchError with actionable
+        # messages matching Phase 148 + Plan 01 contract.
+        if resp.status_code == 403:
+            raise BundleFetchError(
+                name,
+                403,
+                "This skill runs server-side only and does not ship assets.",
+            )
+        if resp.status_code == 404:
+            raise BundleFetchError(
+                name,
+                404,
+                f"Skill '{name}' not found. Check the skill name for typos.",
+            )
+        if resp.status_code >= 400:
+            # Generic 4xx we didn't special-case (e.g. 429 rate limit).
+            body = ""
+            try:
+                body = resp.text[:200]
+            except Exception:
+                pass
+            raise BundleFetchError(
+                name,
+                resp.status_code,
+                f"Flywheel API error: {body or 'no body'}",
+            )
+
+        # -----  Success: parse per-bundle entries.
+        body = resp.json()
+        bundles: list[tuple[str, str, bytes]] = []
+        for entry in body.get("bundles", []):
+            bundles.append(
+                (
+                    entry["name"],
+                    entry["sha256"],
+                    base64.b64decode(entry["bundle_b64"]),
+                )
+            )
+        metadata = {
+            "skill": body["skill"],
+            "deps": body.get("deps", []),
+            "rollup_sha": body.get("rollup_sha", ""),
+        }
+        return metadata, bundles
 
     def fetch_meetings(
         self, time: str | None = None, processing_status: str | None = None,
