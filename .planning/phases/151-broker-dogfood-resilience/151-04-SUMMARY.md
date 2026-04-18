@@ -13,16 +13,17 @@ requires:
   - phase: 150-mcp-tool-unpack-helper
     provides: fetch_skill_assets_bundle baseline signature
 provides:
-  - .planning/phases/151-broker-dogfood-resilience/scripts/measure_latency.py — 425-LOC stdlib-only latency measurement script with 100 cold subprocess + 100 warm in-process methodology, statistics.quantiles(n=100) indices 49/94/98 for p50/p95/p99, SLO assertion gate (p99 cold < 500 ms, p99 warm < 50 ms), rate-limit-aware cold loop (≥6.5 s inter-iteration pacing + exponential back-off on HTTP 429), subprocess PYTHONPATH injection, repo-root auto-detection via parents[3], 120 s per-call timeout, pretty markdown rendering with cold/warm stats tables + raw sample <details> blocks
-  - .planning/phases/151-broker-dogfood-resilience/151-LATENCY.md — 88-line regression-baseline artifact with metadata block (timestamp, backend URL, git commit SHA, skill, bundle size 9283 bytes + ROADMAP SC5 160KB discrepancy callout), SLO Results table (cold FAIL/warm PASS), Cold + Warm stats tables (p50/p95/p99/mean/stddev/min/max/n), raw 100-sample arrays in <details> blocks, Regression Protocol section
+  - .planning/phases/151-broker-dogfood-resilience/scripts/measure_latency.py — stdlib-only latency measurement script (~515 LOC post-correction); 100 cold same-process/fresh-client/cleared-cache/bypass_cache=True iterations (Methodology v2, 2026-04-18 correction from subprocess-per-call v1) + 100 warm in-process iterations; statistics.quantiles(n=100) indices 49/94/98 for p50/p95/p99; SLO assertion gate (p99 cold < 500 ms, p99 warm < 50 ms); rate-limit-aware cold loop (≥6.5 s inter-iteration pacing + exponential back-off on HTTP 429); repo-root auto-detection via parents[3]; pretty markdown rendering with Methodology v2 section, cold/warm stats tables, raw sample <details> blocks, archived v1 results <details> block
+  - .planning/phases/151-broker-dogfood-resilience/151-LATENCY.md — regression-baseline artifact with metadata block (timestamp, backend URL, git commit SHA, skill, bundle size 9283 bytes + ROADMAP SC5 160KB discrepancy callout, methodology flag v2), Methodology v2 section with cost-included/excluded table + surprise-finding callout, SLO Results table with component-cost breakdown + 4 follow-up options, Cold + Warm stats tables (p50/p95/p99/mean/stddev/min/max/n), raw 100-sample arrays in <details>, archived v1 subprocess-methodology results in <details>, Regression Protocol section
   - Regression gate: future phases modifying fetch_skill_assets_bundle, cache.py, or backend skills endpoint MUST re-run measure_latency.py and compare p99 against this baseline; p99 regressions > 20% block release
 affects: [151-verify (phase-level human gate will read LATENCY.md + DOGFOOD-RUNBOOK.md together as SC5 + SC1 + SC2 evidence pack), 152-skill-retirement (install-flow rewrite will likely re-baseline against leaner bundle sizes)]
 
 # Tech tracking
 tech-stack:
-  added: []  # stdlib-only (argparse, os, shutil, statistics, subprocess, sys, time, pathlib, typing) — zero new deps, matches CONTEXT mandate
+  added: []  # stdlib-only (argparse, os, shutil, statistics, subprocess for git, sys, time, pathlib, typing) — zero new deps, matches CONTEXT mandate
   patterns:
-    - 100-run subprocess-per-call cold methodology (true socket/SSL/httpx cold start + cache wipe per iteration) vs 100-run same-process warm methodology (cache primed, back-to-back calls)
+    - Methodology v2 cold loop (2026-04-18 correction): 100-run same-process + fresh FlywheelClient per call + cleared disk cache + bypass_cache=True -- measures the per-call cost real MCP tool users pay (long-lived interpreter, warm imports, cold connection pool). Archived v1 used subprocess-per-call which inflated every sample by ~1.5 s of Python interpreter boot + import cost; user approved Option A to re-measure.
+    - 100-run same-process warm methodology (unchanged): cache primed, back-to-back calls, measures disk-cache SHA-validate cost
     - statistics.quantiles(values, n=100) — stdlib 99 cut points; indices 49/94/98 = p50/p95/p99 exactly
     - SLO-gate-as-exit-code pattern (exit 1 on violation unless --no-assert-slo; makes the script a regression gate future phases can wire into CI)
     - Bundle-size probe via FlywheelClient().fetch_skill_assets_bundle() sum of bundle bytes — programmatic, not hard-coded, so metadata auto-updates if bundle ever changes
@@ -168,14 +169,16 @@ Per `commit_strategy=per-plan`: ONE atomic commit for both tasks.
 
 ## Issues Encountered
 
-- **SLO VIOLATION: p99 cold = 3279.64 ms >> 500 ms SLO (6.5x over)** — this is the plan's primary finding. Root-cause breakdown (from the 100-sample distribution):
-  - ~**1.5 s** Python interpreter + httpx import startup (subprocess spawn + `import httpx` + `from flywheel_mcp.api_client import FlywheelClient` on cold imports)
-  - ~**0.3-0.5 s** TLS handshake to ngrok edge (geographic RTT dominates)
-  - ~**0.2-0.4 s** actual server-side bundle build + transfer
-  - ~**0.1 s** response deserialization + cache write
-  - **Net: ~1.7-2.0 s baseline; p99 tail reflects GC + occasional ngrok edge slow-path**
+- **SLO VIOLATION (v1 methodology): p99 cold = 3279.64 ms >> 500 ms SLO (6.5x over)** — original finding. Root-cause breakdown attributed ~1.5 s to Python-boot overhead baked into every subprocess call, implying the real fetch budget was closer to SLO.
 
-  The cold SLO as written (500 ms) assumed near-localhost RTT + warm-ish interpreter. On the real dev-machine + ngrok + geographic-distance topology, that budget is physically impossible without either: (a) moving the backend closer (local container / regional CDN), (b) pre-warming the Python runtime (persistent MCP server), or (c) amending the SLO via ROADMAP revision. **Phase-verify should decide which.** This plan surfaces the data; it does not prescribe a fix.
+- **SLO VIOLATION (v2 methodology, post-hoc correction): p99 cold = 4048.91 ms >> 500 ms SLO (8.1x over)** — corrected measurement. The Python-boot attribution was disproven: with interpreter warm + imports cached (matching real MCP tool usage), the fetch path itself is 1.6-4.0 s. Root-cause breakdown shifted:
+  - ~**0.04 s** TCP + TLS handshake (confirmed via raw ``curl --time_connect/appconnect``: 15 ms + 17 ms on this link)
+  - ~**1.3 s** backend time-to-first-byte (confirmed via raw ``curl /api/v1/health`` which is a trivial endpoint and still takes 1.3 s — this is ngrok tunnel + Supabase handler latency, not CLI code)
+  - ~**0.3-0.7 s** additional Supabase round-trips inside ``get_skill_assets_bundle`` (fanout walk, skill lookup, bundle assembly)
+  - ~**0.05 s** response transfer + cache write (small, 9283 B payload)
+  - **Net: ~1.7-2.0 s median; p99 tail reaches 4 s from ngrok free-tier variance**
+
+  The cold SLO as written (500 ms) is unreachable on this topology -- not because of the CLI or Python, but because of ngrok + the backend itself. **Phase-verify decides:** (a) measure against a same-region deploy to separate topology from code, (b) profile the backend handler for round-trip count, (c) add HTTP/2 client-reuse methodology bucket, or (d) amend ROADMAP SC5 to document accepted cold SLO on tunnelled dev topology. This plan (post-correction) surfaces honest data; it does not prescribe a fix.
 
 - **Warm SLO PASSES with enormous margin** — p99 warm = 0.40 ms vs 50 ms threshold = 125x under budget. Content-addressed disk cache + SHA validation is effectively free. Phase 151 Plan 01's cache implementation is clearly correct under load.
 
@@ -207,22 +210,97 @@ None for this plan's scope. Phase-verify (after this commit lands) will:
 - Programmatic bundle-size probe — auto-updates size metadata without hard-coded numbers to rot
 - Rate-limit-aware pacing pattern — applicable to any future endpoint-rate-limited benchmark
 
-## Self-Check: PASSED
+## Methodology Correction (post-hoc, 2026-04-18)
 
-- `.planning/phases/151-broker-dogfood-resilience/scripts/measure_latency.py` exists: FOUND (425 LOC, executable)
-- `.planning/phases/151-broker-dogfood-resilience/151-LATENCY.md` exists: FOUND (88 LOC, cold+warm tables + SLO verdict + raw samples)
+**Original Plan 04 methodology chose by Research §Latency Test
+Methodology recommendation.** Research recommended subprocess-per-call
+for "true socket + SSL + httpx.Client cold start." Plan 04 implemented
+that faithfully and executed the 100+100 run.
+
+**User flagged the methodology after reviewing v1 results:** subprocess
+spawn adds ~1.5 s of Python interpreter boot + ``import httpx`` +
+``from flywheel_mcp.api_client import FlywheelClient`` to every "cold"
+sample. That's overhead real MCP tool users do NOT pay per call -- the
+MCP server is a long-running process, the interpreter is warm, the
+imports are cached. Subprocess methodology measured the wrong thing.
+
+**User approved Option A (re-measure with same-process methodology)**
+after reviewing the initial numbers + root-cause breakdown.
+
+**v2 methodology:** same Python process, fresh ``FlywheelClient()`` +
+wiped disk cache + ``bypass_cache=True`` per call. Measures only what
+the user actually pays on a cold-cache fetch: fresh httpx.Client +
+TCP/TLS handshake + server bundle build + SHA verify + cache write.
+
+**v2 results (100 cold + 100 warm, same live ngrok + Supabase
+backend, same 9283 B bundle):**
+
+| Gate | v1 p99 | v2 p99 | Threshold | v2 Status |
+|---|---|---|---|---|
+| Cold | 3279.64 ms | 4048.91 ms | < 500 ms | FAIL (8.1x over) |
+| Warm | 0.4000 ms | 0.4602 ms | < 50 ms | PASS (109x under) |
+
+**Surprise finding:** v2 cold p99 is WORSE than v1 (4049 vs 3280 ms).
+Removing the Python-boot confound revealed that the network+server
+path itself is genuinely 1.7-2.0 s median on this topology -- v1 and
+v2 landed in similar p99 ranges for different reasons. Raw
+``curl /api/v1/health`` measures 1.3 s time-to-first-byte with only
+42 ms for TCP+TLS, confirming the backend (ngrok tunnel + Supabase
+round-trips inside the handler) is where the SLO budget goes. Python
+startup was masking but not causing the FAIL.
+
+**SLO verdict under v2 methodology:** Cold FAIL is now honest +
+actionable. Follow-up options (phase-verify decides):
+
+1. Measure against a same-region deploy (bypass ngrok) to separate
+   topology cost from code cost
+2. Profile the backend handler for round-trip count to Supabase
+3. Add an "HTTP/2 connection reuse" third methodology bucket if the
+   MCP-tool real experience reuses httpx.Client across calls
+4. Amend ROADMAP SC5 to document accepted cold SLO on tunnelled dev
+   topology (do NOT silently tune the threshold in the script)
+
+**Warm SLO unchanged** -- both methodologies serve from cache after
+priming, and both pass 100x+ under budget. Plan 01's cache is
+effectively free.
+
+## Follow-up Commit
+
+Post-hoc methodology correction shipped as a single follow-up commit
+on top of ``be52bdf``. Changes:
+
+- ``scripts/measure_latency.py`` cold loop rewritten from
+  subprocess-per-call to same-process/fresh-client/cleared-cache/
+  bypass_cache=True; module docstring + Cold Cache section header +
+  main() stderr message updated to Methodology v2; rendered markdown
+  now includes a "Methodology v2" section explaining the swap + a
+  "Surprise finding" callout + an archived v1 results ``<details>``
+  block for audit trail
+- ``151-LATENCY.md`` re-rendered with v2 100+100 run data + an SLO
+  Verdict Analysis section (component-cost breakdown + 4 follow-up
+  options)
+- This summary (``151-04-SUMMARY.md``) extended with this
+  "Methodology Correction" section
+
+Commit is on top of ``be52bdf`` (the original plan commit); original
+plan scope + 2 deviations + audit trail preserved above.
+
+## Self-Check: PASSED (v1 + v2 post-correction)
+
+- `.planning/phases/151-broker-dogfood-resilience/scripts/measure_latency.py` exists: FOUND (526 LOC post-correction, executable)
+- `.planning/phases/151-broker-dogfood-resilience/151-LATENCY.md` exists: FOUND (215 LOC post-correction, v2 tables + SLO verdict analysis + v1 archived results + raw samples)
 - `.planning/phases/151-broker-dogfood-resilience/151-04-SUMMARY.md` exists: FOUND (this file)
 - Script parses clean: VERIFIED via `python -c "import ast; ast.parse(...)"`
 - Script --help shows all 4 flags (`--n`, `--skill`, `--no-assert-slo`, `--out`): VERIFIED
 - Script uses `statistics.quantiles`: VERIFIED (2 occurrences)
-- Script has `SLO_P99_COLD_MS = 500` literal: VERIFIED (2 occurrences — constant + error message)
+- Script has `SLO_P99_COLD_MS = 500` literal: VERIFIED (1 occurrence)
 - Script has `SLO_P99_WARM_MS = 50` literal: VERIFIED (1 occurrence)
-- LATENCY.md has `^| p99` rows: VERIFIED (2 — cold + warm)
-- LATENCY.md has `Git commit:` metadata: VERIFIED (1 line, SHA `272abca`)
+- LATENCY.md has `Methodology v2`: VERIFIED (2 occurrences)
 - LATENCY.md notes 9283 B vs ROADMAP 160KB: VERIFIED (3 occurrences of "9283" + "17x smaller")
-- LATENCY.md cold p99 = 3279.64 ms / warm p99 = 0.4000 ms: VERIFIED
-- SLO verdict: Cold FAIL (3279.64 ms >= 500 ms) / Warm PASS (0.4000 ms < 50 ms): VERIFIED
-- Commit exists with all 3 files: PENDING (will be verified post-commit)
+- LATENCY.md cold p99 = 4048.91 ms (v2) / warm p99 = 0.4602 ms (v2): VERIFIED
+- LATENCY.md archives v1 p99 = 3279.64 ms (cold) / 0.4000 ms (warm) in <details> block: VERIFIED
+- SLO verdict: Cold FAIL (4048.91 ms >= 500 ms, 8.1x over) / Warm PASS (0.4602 ms < 50 ms, 109x under): VERIFIED
+- Follow-up commit landed post-correction: PENDING (will be verified post-commit)
 
 ---
 *Phase: 151-broker-dogfood-resilience*
