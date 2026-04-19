@@ -1,0 +1,63 @@
+# Mapfre Portal Field Map
+#
+# IMPORTANT: All CSS selectors below are PLACEHOLDERS.
+# Real selectors must be discovered by inspecting the live Mapfre portal.
+# Instructions: Open DevTools, right-click each field, "Inspect", copy selector.
+# Update each PLACEHOLDER_* value with the real CSS selector.
+#
+# Contract: Scripts NEVER click submit -- only fill fields.
+# Last updated: 2026-04-15 (initial scaffold)
+
+carrier: mapfre
+portal_url: "https://portal.mapfre.com.mx"  # PLACEHOLDER: update with real URL
+
+fields:
+  # Project / Policy details
+  project_name:
+    selector: "#PLACEHOLDER_project_name"       # PLACEHOLDER: e.g. "#policy-name" or "input[name='nombre']"
+    type: text
+    source: project.name
+
+  policy_start_date:
+    selector: "#PLACEHOLDER_policy_start_date"  # PLACEHOLDER
+    type: text
+    source: project.start_date
+
+  policy_end_date:
+    selector: "#PLACEHOLDER_policy_end_date"    # PLACEHOLDER
+    type: text
+    source: project.end_date
+
+  # Insured / Client details
+  insured_name:
+    selector: "#PLACEHOLDER_insured_name"       # PLACEHOLDER
+    type: text
+    source: project.client_name
+
+  insured_rfc:
+    selector: "#PLACEHOLDER_insured_rfc"        # PLACEHOLDER: RFC (Mexican tax ID)
+    type: text
+    source: project.client_rfc
+
+  # Coverage details (from first coverage record)
+  coverage_type:
+    selector: "#PLACEHOLDER_coverage_type"      # PLACEHOLDER: may be <select>
+    type: select
+    source: coverages[0].coverage_type
+
+  sum_insured:
+    selector: "#PLACEHOLDER_sum_insured"        # PLACEHOLDER
+    type: text
+    source: coverages[0].sum_insured
+
+  premium_amount:
+    selector: "#PLACEHOLDER_premium_amount"     # PLACEHOLDER
+    type: text
+    source: coverages[0].premium
+
+# Notes for broker when updating selectors:
+# 1. Log into the Mapfre portal manually
+# 2. Open browser DevTools (F12)
+# 3. For each field above, right-click -> Inspect -> copy the CSS selector
+# 4. Replace the PLACEHOLDER_* values
+# 5. Test with a sample project using /broker:fill-portal
