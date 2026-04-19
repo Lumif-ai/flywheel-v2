@@ -15,9 +15,8 @@ tags:
 assets: []
 depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -31,10 +30,8 @@ which coverages are missing, insufficient, adequate, or excessive.
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import httpx
 
 missing = []
@@ -59,11 +56,8 @@ Ask the user for:
 Validate using field_validator:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 PROJECT_ID = "<user-provided-project-id>"
 PROJECT_ID = field_validator.validate_uuid(PROJECT_ID, "PROJECT_ID")
 print(f"Validated: project_id={PROJECT_ID}")
@@ -72,10 +66,8 @@ print(f"Validated: project_id={PROJECT_ID}")
 ## Step 3: Call analyze-gaps Endpoint
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 print(f"Running gap analysis for project {PROJECT_ID}...")
@@ -94,10 +86,8 @@ Print each coverage's gap status with color-coded text labels:
 - **EXCESS** — current_limit exceeds required_limit
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 result = api_client.run(api_client.post(f"projects/{PROJECT_ID}/analyze-gaps"))
@@ -157,16 +147,24 @@ else:
 
 ## Step 5: Memory Update
 
-After analysis, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Gap Analysis History
-- Project {PROJECT_ID}: gap analysis run on {today's date}
-  - MISSING: {count}
-  - INSUFFICIENT: {count}
-  - ADEQUATE: {count}
-  - EXCESS: {count}
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## gap-analysis -- {today}\n"
+        "- Project {PROJECT_ID}: {n_gaps} gaps identified across {n_coverages} coverages\n"
+    ),
+)
 ```
 
-Done. The gap analysis is complete. To resolve gaps, use `/broker:fill-portal` to
-submit quotes to carrier portals.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

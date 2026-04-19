@@ -22,8 +22,8 @@ dependencies:
     - broker-select-carriers
     - broker-fill-portal
     - broker-draft-emails
-  files:
-    - "~/.claude/skills/broker/api_client.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -88,7 +88,7 @@ Execute:
 
 ```
 Now executing Step 1: parse-contract.
-Follow the instructions in ~/.claude/skills/broker/steps/parse-contract.md
+Invoke the `/broker:parse-contract` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id} and PDF_PATH={contract_pdf}.
 ```
 
@@ -104,7 +104,7 @@ If POLICY_PDFS were provided (not `skip`):
 
 ```
 Now executing Step 2: parse-policies.
-Follow the instructions in ~/.claude/skills/broker/steps/parse-policies.md
+Invoke the `/broker:parse-policies` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id} with policy PDFs: {policy_pdfs}.
 ```
 
@@ -125,7 +125,7 @@ Execute:
 
 ```
 Now executing Step 3: gap-analysis.
-Follow the instructions in ~/.claude/skills/broker/steps/gap-analysis.md
+Invoke the `/broker:gap-analysis` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id}.
 ```
 
@@ -144,7 +144,7 @@ Execute:
 
 ```
 Now executing Step 4: select-carriers.
-Follow the instructions in ~/.claude/skills/broker/steps/select-carriers.md
+Invoke the `/broker:select-carriers` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id}.
 ```
 
@@ -161,7 +161,7 @@ If `portal_carrier_ids` is non-empty:
 ```
 PIPELINE PAUSE — Step 5: fill-portal requires an interactive browser session.
 
-Follow the instructions in ~/.claude/skills/broker/steps/fill-portal.md
+Invoke the `/broker:fill-portal` skill (router dispatches via MCP fetch)
 for each portal carrier listed in the routing plan above.
 
 This step cannot be automated. You must:
@@ -202,7 +202,7 @@ Execute:
 
 ```
 Now executing Step 6: draft-emails.
-Follow the instructions in ~/.claude/skills/broker/steps/draft-emails.md
+Invoke the `/broker:draft-emails` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id} with CARRIER_CONFIG_IDS={email_carrier_config_ids}.
 ```
 
@@ -234,12 +234,26 @@ Next step: Wait for carrier responses, then run /broker:compare-quotes
 
 ## Memory Update (Standard 1)
 
-After pipeline completion, append to `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## process-project -- {today}\n"
+        "- Project {PROJECT_ID}: pipeline executed end-to-end -- {n_stages}/6 stages completed for project {PROJECT_ID}\n"
+    ),
+)
 ```
-[{date}] process-project pipeline completed for project {project_id}.
-Steps: {completed_count}/6. Portal submissions: {portal_count}. Email drafts: {email_count}.
-```
+
+Do NOT append to any local file -- the context store is the durable home for skill memory.
 
 ---
 

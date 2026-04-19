@@ -16,9 +16,8 @@ tags:
 assets: []
 depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/portals/mapfre.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -28,7 +27,7 @@ dependencies:
 
 Show a preview of the project data that will be submitted, confirm with the
 broker, then delegate the actual Playwright portal automation to
-`~/.claude/skills/broker/portals/mapfre.py`.
+`flywheel.broker.portals.mapfre`.
 
 > **NOTE: This step requires an interactive browser session (headless=False).**
 > It will pause for the broker to manually log in to the carrier portal.
@@ -37,10 +36,8 @@ broker, then delegate the actual Playwright portal automation to
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 missing = []
 # Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
 creds_file = os.path.expanduser("~/.flywheel/credentials.json")
@@ -52,10 +49,10 @@ try:
 except ImportError:
     missing.append("playwright (run: pip install playwright && playwright install chromium)")
 
-mapfre_path = os.path.expanduser("~/.claude/skills/broker/portals/mapfre.py")
-if not os.path.exists(mapfre_path):
-    missing.append(f"portals/mapfre.py not found at {mapfre_path}")
-
+# Namespace probe: flywheel-ai ships the mapfre portal as a pip module
+from importlib.util import find_spec as _find_spec
+if _find_spec("flywheel.broker.portals.mapfre") is None:
+    missing.append("flywheel.broker.portals.mapfre (run: pip install --upgrade flywheel-ai)")
 if missing:
     raise RuntimeError(
         f"Missing required dependencies: {', '.join(missing)}\n"
@@ -63,7 +60,7 @@ if missing:
     )
 
 print("OK: All dependencies satisfied.")
-print(f"mapfre.py found at: {mapfre_path}")
+print("mapfre portal importable: flywheel.broker.portals.mapfre")
 ```
 
 If anything fails, stop and report the missing dependency. Do not proceed.
@@ -76,10 +73,8 @@ Ask the user for:
   > "Which carrier portal are you filling? (Currently supported: Mapfre)"
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import field_validator
-
+import os
+from flywheel.broker import field_validator
 PROJECT_ID = "<user-provided-project-id>"
 PROJECT_ID = field_validator.validate_uuid(PROJECT_ID, "PROJECT_ID")
 
@@ -92,10 +87,8 @@ print(f"Validated: project_id={PROJECT_ID}, carrier={CARRIER}")
 Retrieve the project data that will be submitted to the portal:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
@@ -139,7 +132,7 @@ Wait for the broker's response.
 
 When the broker confirms, instruct:
 
-> "Now follow the instructions in `~/.claude/skills/broker/portals/mapfre.py`.
+> "Now follow the instructions in `flywheel.broker.portals.mapfre`.
 > Read that file and execute it for PROJECT_ID = {PROJECT_ID}."
 
 This delegates all Playwright automation to the Phase 134 implementation.
@@ -166,14 +159,24 @@ for the remaining email-submission carriers.
 
 ## Step 7: Memory Update
 
-Update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Portal Fill History
-- Project {PROJECT_ID}: Mapfre portal filled on {today's date}
-  - Client: {client_name}
-  - Coverages submitted: {count}
-  - Screenshot: /tmp/mapfre_filled_{timestamp}.png
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## fill-portal -- {today}\n"
+        "- Project {PROJECT_ID}: {carrier} portal filled for project {PROJECT_ID} ({n_coverages} coverages)\n"
+    ),
+)
 ```
 
-Done. Portal fill complete.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

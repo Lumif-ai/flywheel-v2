@@ -16,11 +16,9 @@ tags:
 assets: []
 depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
   python_packages:
     - pdfplumber
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -39,10 +37,8 @@ API for text extraction — analyze the pdfplumber output directly.
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import pdfplumber
 import httpx
 
@@ -68,11 +64,8 @@ Ask the user for:
 Validate inputs:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 PROJECT_ID = "<user-provided-project-id>"
 PDF_PATHS_RAW = "<comma-separated-pdf-paths>"
 
@@ -99,10 +92,8 @@ for p in validated_paths:
 ## Step 3: Fetch Existing Project Coverages
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
@@ -122,10 +113,8 @@ Upload each PDF to the project's coverage zone so the backend can return them
 (base64-encoded) from `extract/policy-extraction` in Step 5:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 PDF_PATHS = ["<validated-path-1>", "<validated-path-2>"]  # from Step 2
 
@@ -149,10 +138,8 @@ load, PDF retrieval, and persistence; it does NOT call Anthropic.
 ### 5a. Fetch extraction prompt + coverage-zone PDFs
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 extract = api_client.run(api_client.extract_policy_extraction(PROJECT_ID))
@@ -183,10 +170,8 @@ alias_map + PATCH loop is no longer needed.
 ### 5c. Persist the extraction
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 # Build analysis dict from the tool_use block captured in 5b.
@@ -221,14 +206,24 @@ the backend; fewer roundtrips; no client-side alias drift. Details in
 
 ## Step 7: Memory Update
 
-After processing, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Policy Parse History
-- Project {PROJECT_ID}: {updated_count} coverages updated from {len(PDF_PATHS)} PDFs on {today's date}
-  - Files processed: {comma-separated filenames}
-  - Unmatched: {unmatched_pdfs if any}
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## parse-policies -- {today}\n"
+        "- Project {PROJECT_ID}: {n_policies} policies parsed for project {PROJECT_ID}\n"
+    ),
+)
 ```
 
-Done. Policy data has been extracted and pushed to the project. Run `/broker:gap-analysis`
-next to see the current gap status with updated coverage limits.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

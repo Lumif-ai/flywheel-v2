@@ -16,9 +16,8 @@ tags:
 assets: []
 depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -34,11 +33,8 @@ poll until complete, and print a summary of extracted coverage requirements.
 Run this block to verify the environment is ready:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 # Check auth + dependencies
 missing = []
 # Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
@@ -66,11 +62,8 @@ Ask the user for:
 Validate both inputs using field_validator:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 # Replace with actual user-provided values
 PROJECT_ID = "<user-provided-project-id>"
 PDF_PATH = "<user-provided-pdf-path>"
@@ -88,11 +81,8 @@ If validation fails, show the error and ask the user to correct the input. Do no
 Upload the contract PDF to the project's document store:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 PROJECT_ID = "<validated-project-id>"
 PDF_PATH = "<validated-pdf-path>"
 
@@ -114,10 +104,8 @@ it does NOT call Anthropic. This closes the subsidy-billing leak.
 ### 4a. Fetch extraction prompt + documents from the backend
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 print(f"Fetching extraction prompt + documents for project {PROJECT_ID}...")
@@ -157,10 +145,8 @@ Expected tool-use output keys (from `extract_coverage_requirements` schema):
 ### 4c. Persist the analysis via save_contract_analysis
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 # Build analysis dict from the tool_use block captured in 4b.
@@ -199,10 +185,8 @@ Polling is gone — Pattern 3a is synchronous. The analysis completes in Step 4b
 Read project.coverages from the completed project and print a summary table.
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 project = api_client.run(api_client.get(f"projects/{PROJECT_ID}"))
@@ -241,18 +225,24 @@ else:
 
 ## Step 7: Memory Update
 
-After successful extraction, update your memory:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-Update `~/.claude/skills/broker/auto-memory/broker.md` (or create it if absent).
-Add a note:
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
 
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## parse-contract -- {today}\n"
+        "- Project {PROJECT_ID}: {n_coverages} coverages, insurance={n_insurance}, surety={n_surety}\n"
+    ),
+)
 ```
-## Contract Parse History
-- Project {PROJECT_ID}: {len(coverages)} coverages extracted on {today's date}
-  - Insurance types: {insurance_count}
-  - Surety types: {surety_count}
-```
 
-Done. The contract has been uploaded, analyzed, and coverage requirements are now
-stored in the project. Run `/broker:parse-policies` next to load existing policy PDFs
-and match them against these requirements.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

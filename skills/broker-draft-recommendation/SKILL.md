@@ -15,9 +15,8 @@ tags:
 assets: []
 depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -31,10 +30,8 @@ a client recommendation narrative with the recommended carrier highlighted.
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import httpx
 
 missing = []
@@ -61,11 +58,8 @@ Ask the user for:
 Validate PROJECT_ID using field_validator:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 # Replace with actual user-provided values
 PROJECT_ID = "<user-provided-project-id>"
 RECIPIENT_EMAIL = "<user-provided-email-or-blank>"
@@ -87,10 +81,8 @@ Fetch the comparison data to confirm all quotes are extracted and ready before g
 the recommendation narrative:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 print(f"Fetching comparison data for project {PROJECT_ID}...")
@@ -145,10 +137,8 @@ persistence; it does NOT call Anthropic.
 ### 5a. Fetch prompt + tool_schema + context
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 RECIPIENT_EMAIL = "<validated-recipient-email-or-None>"
 
@@ -177,10 +167,8 @@ recommends a different stakeholder).
 ### 5c. Persist the draft
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 RECIPIENT_EMAIL = "<validated-recipient-email-or-None>"
 
@@ -211,10 +199,8 @@ shape, backend cost = zero LLM calls. Details in
 ## Step 6: Display the Recommendation
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 # result already fetched in Step 5
@@ -262,16 +248,24 @@ if RECIPIENT_EMAIL:
 
 ## Step 7: Memory Update
 
-After successful recommendation, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Draft Recommendation History
-- Project {PROJECT_ID}: recommendation drafted on {today's date}
-  - Recommended carrier: {recommended_carrier}
-  - Recipient email: {RECIPIENT_EMAIL or 'none'}
-  - Recommendation ID: {rec_id}
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## draft-recommendation -- {today}\n"
+        "- Project {PROJECT_ID}: recommendation drafted ranking {n_quotes} quotes for project {PROJECT_ID}\n"
+    ),
+)
 ```
 
-Done. The recommendation narrative has been generated and saved to the database.
-View the full draft in the Flywheel web app. Share the recommendation with the client
-by sending the draft from the project's recommendation tab.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

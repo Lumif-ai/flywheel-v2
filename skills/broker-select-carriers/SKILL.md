@@ -15,9 +15,8 @@ tags:
 assets: []
 depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
 
 > **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
@@ -32,10 +31,8 @@ confirmation before proceeding to the next pipeline step.
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import httpx
 
 missing = []
@@ -67,10 +64,8 @@ Ask the user for:
 Validate using field_validator:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import field_validator
-
+import os
+from flywheel.broker import field_validator
 PROJECT_ID = "<user-provided-project-id>"
 PROJECT_ID = field_validator.validate_uuid(PROJECT_ID, "PROJECT_ID")
 print(f"Validated: project_id={PROJECT_ID}")
@@ -79,10 +74,8 @@ print(f"Validated: project_id={PROJECT_ID}")
 ## Step 3: Call carrier-matches Endpoint
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 print(f"Fetching carrier matches for project {PROJECT_ID}...")
@@ -105,10 +98,8 @@ print(f"Routing split: {len(portal_carriers)} portal | {len(email_carriers)} ema
 Print the full routing plan in this format:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 result = api_client.run(api_client.get(f"projects/{PROJECT_ID}/carrier-matches"))
@@ -196,17 +187,24 @@ Wait for the broker's response before continuing.
 
 ## Step 8: Memory Update
 
-After confirmation, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Carrier Selection History
-- Project {PROJECT_ID}: carrier-matches fetched on {today's date}
-  - Portal: {count} carrier(s) — {names}
-  - Email: {count} carrier(s)
-  - email_carrier_config_ids: [{ids}]
-  - Broker confirmed routing plan: yes
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## select-carriers -- {today}\n"
+        "- Project {PROJECT_ID}: selected {n_carriers} carriers ({n_portal} portal, {n_email} email) for project {PROJECT_ID}\n"
+    ),
+)
 ```
 
-Done. Carrier routing plan confirmed.
-To submit via portal: use `/broker:fill-portal`.
-To create email drafts: use `/broker:draft-emails` with the carrier_config_ids printed above.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+
