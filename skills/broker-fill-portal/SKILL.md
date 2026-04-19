@@ -42,10 +42,10 @@ sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
 import api_client
 
 missing = []
-if not os.environ.get("FLYWHEEL_API_URL"):
-    missing.append("FLYWHEEL_API_URL")
-if not os.environ.get("FLYWHEEL_API_TOKEN"):
-    missing.append("FLYWHEEL_API_TOKEN")
+# Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
+creds_file = os.path.expanduser("~/.flywheel/credentials.json")
+if not os.path.exists(creds_file):
+    missing.append("~/.flywheel/credentials.json (run: flywheel login)")
 
 try:
     import playwright

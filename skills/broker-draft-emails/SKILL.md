@@ -47,10 +47,10 @@ import field_validator
 import httpx
 
 missing = []
-if not os.environ.get("FLYWHEEL_API_URL"):
-    missing.append("FLYWHEEL_API_URL")
-if not os.environ.get("FLYWHEEL_API_TOKEN"):
-    missing.append("FLYWHEEL_API_TOKEN")
+# Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
+creds_file = os.path.expanduser("~/.flywheel/credentials.json")
+if not os.path.exists(creds_file):
+    missing.append("~/.flywheel/credentials.json (run: flywheel login)")
 try:
     import httpx
 except ImportError:
@@ -58,8 +58,8 @@ except ImportError:
 
 if missing:
     raise RuntimeError(
-        f"Missing required dependencies: {', '.join(missing)}\n"
-        "Run: export FLYWHEEL_API_URL=https://... && export FLYWHEEL_API_TOKEN=<jwt>"
+        f"Missing dependencies: {', '.join(missing)}\n"
+        "If auth is missing, run: flywheel login"
     )
 
 print("OK: All dependencies satisfied.")
