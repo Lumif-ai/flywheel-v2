@@ -54,6 +54,7 @@ from flywheel.api.meetings import router as meetings_router
 from flywheel.api.tasks import router as tasks_router
 from flywheel.config import settings
 from flywheel.middleware.rate_limit import limiter
+from flywheel.middleware.timing import TimingMiddleware
 
 
 @asynccontextmanager
@@ -163,6 +164,13 @@ def create_app() -> FastAPI:
         version="0.1.0",
         lifespan=lifespan,
     )
+
+    # Per-request timing + DB-roundtrip profiling (Phase 151.1).
+    # Register FIRST so LIFO middleware order puts it INNERMOST on
+    # request — measures handler + DB time only, excluding GZip / CORS /
+    # security-header overhead. See flywheel.middleware.timing module
+    # docstring + Phase 151.1 research §5 Pattern 1 / Pitfall 4.
+    app.add_middleware(TimingMiddleware)
 
     # Security headers
     @app.middleware("http")
