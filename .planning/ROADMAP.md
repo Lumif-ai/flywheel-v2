@@ -670,7 +670,7 @@ Plans:
 - [x] **Phase 150: MCP Tool + Unpack Helper** — `flywheel_fetch_skill_assets` MCP tool + `FlywheelClient.fetch_skill_assets()` + `bundle.materialize_skill_bundle()` with path-traversal guard, SHA-256 verify, and `TemporaryDirectory` lifecycle (shipped 2026-04-18, 3 plans, 5/5 SCs verified)
 - [x] **Phase 150.1: CC-as-Brain Enforcement** (INSERTED) — audit all backend LLM call sites, extend CC-as-Brain enforcement beyond `company-intel`+`meeting-prep`, route analysis to Pattern 3a (Python returns raw data → Claude-in-conversation analyzes) to close the backend-pays billing leak before Phase 151 dogfood (shipped 2026-04-18, 4 plans, 8/8 SCs verified, net −4223 LOC)
 - [x] **Phase 151: Broker Dogfood + Resilience** (human_needed — DOGFOOD-RUNBOOK.md pending user execution) — first live end-to-end `/broker:parse-contract` via server-fetched assets; offline last-known-good cache; distinct error taxonomy; `flywheel_refresh_skills` cache-buster; p99 latency SLOs (shipped 2026-04-18, 4 plans, SC1-4 verified by automated tests, SC5 warm PASSED 0.46ms/cold FAILED 4049ms vs 500ms SLO — cold miss accepted, budgeted as Phase 151.1)
-- [ ] **Phase 151.1: Backend Handler Latency Profiling + Cold SLO** (INSERTED) — profile `get_skill_assets_bundle` backend handler (Supabase query fan-out, base64 encode cost, N+1 patterns), measure same-region deploy vs ngrok tunnel, decide whether 500ms cold p99 SLO is achievable or needs amendment
+- [x] **Phase 151.1: Backend Handler Latency Profiling + Cold SLO** (human_needed — Plan 04 Task 4 checkpoint pending user sign-off on SLO AMEND vs KEEP) — profiled `get_skill_assets_bundle` (db_count=8 deterministic N+1 in `_resolve_bundle_chain`, ~900ms first-query connection setup, ~1200ms ngrok tunnel p99 tail), measured same-region cold p99 = 4578ms (9× over 500ms SLO even without ngrok), AMEND recommended to topology-aware thresholds (3500ms ngrok / 1500ms same-region) with remediation roadmap — OR — KEEP 500ms with 4 named follow-up phases (user's call at checkpoint); regression test asserts `db_count <= 10` on bundle handler; warm p99 unchanged at 0.247ms (shipped 2026-04-20, 4 plans, TimingMiddleware + /ping baseline + measurement campaign + SLO-DECISION.md delivered)
 - [x] **Phase 152: Retirement** (human_needed — coexistence-window gate + retirement-PR merge pending user execution) — deprecation banners on 18 legacy SKILL.md + 7 shared-engine Python files; `legacy-skills-final` tag pushed to both remotes; install flow verified clean; root README MCP-only delivery block; coexistence-window runbook + retirement-PR template written (shipped 2026-04-19, 4 plans, SC1-4 verified by automated checks, SC5 gate runbook ready for user execution)
 
 ## Phase Details
@@ -784,7 +784,7 @@ Plans:
   2. After a successful fetch, a second invocation with the backend unreachable (simulated by blocking ngrok) still runs from the `~/.cache/flywheel/skills/<sha256>/` cache within its TTL; the user sees a "using cached bundle" log line, not a crash
   3. Each failure class surfaces a distinct user-facing error string: 401 ("run `flywheel login`"), 403 ("module not licensed"), 404 ("skill name typo"), 503 ("backend down"), checksum mismatch ("bundle integrity failure"), offline+expired-cache ("no network and cache expired") — no JSON-RPC `-32603` leaks to the user
   4. `flywheel_refresh_skills` MCP tool force-re-fetches every bundle bypassing the cache; after calling it, a tampered cache entry is replaced with the authoritative bytes from the backend
-  5. Measured against live ngrok + Supabase: p99 first-fetch latency (cold cache, 160 KB broker bundle) is under 500 ms; p99 cached-fetch latency is under 50 ms; numbers recorded in a phase artifact for future regression
+  5. Measured against live ngrok + Supabase: p99 first-fetch latency (cold cache, 160 KB broker bundle) is under 500 ms; p99 cached-fetch latency is under 50 ms; numbers recorded in a phase artifact for future regression. [Validated 2026-04-20 via Phase 151.1 — real bundle is 9.3 KB (17× smaller than estimate); cold p99 measured 4049 ms (ngrok) / 4578 ms (same-region, no ngrok) — demonstrably unachievable on current topology without a 4-item remediation stack (batch `_resolve_bundle_chain` + same-region deploy + session-mode PgBouncer + backend LRU). SLO stance is documented in `.planning/phases/151.1-backend-handler-latency-profiling-cold-slo/151.1-SLO-DECISION.md`; final SC5 wording amendment OR "keep 500 ms + commit to full remediation" locks at Plan 04 Task 4 checkpoint (user call).]
 **Plans**: 4 plans (strictly sequential — each wave depends on the prior)
 Plans:
 - [ ] 151-01-PLAN.md — Backend shas_only query param + correlation-id logging + cli/flywheel_mcp/cache.py BundleCache module + FlywheelClient cache integration + hermetic unit tests (wave 1, autonomous)
@@ -794,12 +794,25 @@ Plans:
 
 ### Phase 151.1: Backend Handler Latency Profiling + Cold SLO (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Depends on:** Phase 151
-**Plans:** 0 plans
+**Goal**: Add per-handler latency instrumentation (pure-ASGI middleware + SQLAlchemy event hooks + ContextVar) to the Flywheel backend, identify where the cold-fetch budget is spent inside `get_skill_assets_bundle` + its tenant-session prelude + `_resolve_bundle_chain`, measure ngrok vs same-region topologies to quantify tunnel vs Supabase-RT vs handler-code cost separately, and decide with data whether the 500 ms cold p99 SLO is achievable or must be amended — unblocking Phase 151's UAT gate.
+**Depends on**: Phase 151 (SC1-SC4 verified; SC5 pending this phase's SLO decision artifact)
+**Requirements**: None assigned (INSERTED — requirements inferred from `151-LATENCY.md`'s cold FAIL + Phase 151 Next Steps)
+**Success Criteria** (what must be TRUE):
+  1. TimingMiddleware (pure ASGI) installed; every request emits `request_complete` log line with route, method, status, duration_ms, db_count, db_total_ms, cold, correlation_id
+  2. SQLAlchemy before/after_cursor_execute hooks count DB roundtrips per request via ContextVar; concurrent-request isolation verified by unit test
+  3. `X-Flywheel-Cache-State: cold` sentinel header observable end-to-end — `measure_latency.py` emits it, backend log lines filter cleanly on `cold=True/False`
+  4. Warm p99 has NOT regressed (< 50 ms post-instrumentation; Phase 151's regression gate stays green — measured 0.247 ms p99 in 151.1-PROFILE.md §5)
+  5. `151.1-PROFILE.md` contains per-handler p50/p95/p99 + db_count + db_total_ms on ngrok topology; identifies the dominant cost layer (ngrok tunnel / Supabase RT / handler code)
+  6. `151.1-SAMEREGION.md` compares ngrok vs local→Supabase p99; cost-layer decomposition explicit; local→local-Postgres deferred per plan fallback rule (sandbox blocker documented)
+  7. `151.1-SLO-DECISION.md` stakes a decisive position (KEEP 500 ms + remediation plan OR AMEND to topology-aware thresholds + rationale); Phase 151 UAT gate unblocked
+  8. Regression test asserts `db_count <= 10` for `get_skill_assets_bundle` (calibrated from PROFILE measured deterministic mean of 8 + 2-roundtrip headroom)
+**Plans**: 4 plans
 
 Plans:
-- [ ] TBD (run /gsd:plan-phase 151.1 to break down)
+- [x] 151.1-01-PLAN.md — TimingMiddleware (pure ASGI) + SQLAlchemy before/after_cursor_execute hooks + ContextVar plumbing + unit tests (wave 1, autonomous)
+- [x] 151.1-02-PLAN.md — /ping clean-baseline endpoint + measure_latency.py X-Flywheel-Cache-State sentinel + third /ping bucket + ping zero-DB test (wave 1, autonomous, parallel to 151.1-01)
+- [x] 151.1-03-PLAN.md — Measurement campaign: ngrok per-handler profile + same-region comparison (local→Supabase; local→local-Postgres deferred) + extract_profile.py log parser (wave 2, autonomous)
+- [x] 151.1-04-PLAN.md — 151.1-SLO-DECISION.md (AMEND recommended; KEEP surfaced as alt) + `test_bundle_handler_db_count.py` regression test + ROADMAP SC5 cross-ref + Phase 151 UAT unblock (wave 3, NOT autonomous — checkpoint:human-verify for SLO commitment sign-off)
 
 ### Phase 152: Retirement
 **Goal**: The legacy `~/.claude/skills/` distribution channel is archived read-only, the install flow delivers skills exclusively via MCP, the codebase has zero hardcoded references to the old path, and the cutover is gated by telemetry confirming every active tenant has already exercised the server-hosted path during the coexistence window
@@ -826,6 +839,18 @@ Plans:
 **Pre-flight for Phase 154:** Validate the 3 broker-grain flip conditions against real production data before the backfill commits — renewal rate, concurrent-unrelated-placement count, per-placement compliance needs. If any condition flips, re-plan the grain.
 
 ---
+
+### Phase 152.1: Router → MCP-fetch migration + local mirror removal (INSERTED) ✓ 2026-04-19
+
+**Goal:** Local `~/.claude/skills/broker/` mirror is reduced to a single thin MCP-fetch router SKILL.md; all 11 broker triggers dispatch via `flywheel_fetch_skill_prompt` against Supabase-delivered bodies; shared Python helpers rehomed into a pip-published `flywheel.broker` submodule of `flywheel-ai` 0.4.0; auto-memory routing migrated to Supabase context store. Acceptance bar: zero ImportError / zero 410 Gone across 11 triggers, `/broker:process-project` and `/broker:compare-quotes` pipelines complete end-to-end with mirror absent, `FLYWHEEL_SKILL_SOURCE=local` produces designed "mirror removed" error.
+**Depends on:** Phase 152
+**Plans:** 3 plans
+**Status:** COMPLETE (17/20 must-haves auto-verified; 4 pipeline-gate items deferred to fresh-session runtime validation, fix-forward per CONTEXT.md)
+
+Plans:
+- [x] 152.1-01-PLAN.md — `flywheel.broker` PEP 420 namespace package + `flywheel-ai` 0.4.0 published to PyPI (commit `a62b65e`)
+- [x] 152.1-02-PLAN.md — 10 `skills/broker-*/SKILL.md` bodies rewritten (dot-form pip imports + `flywheel_write_context` memory) + `skill_assets` re-seeded (commit `839a4ab`)
+- [x] 152.1-03-PLAN.md — Router template + `flywheel setup-claude-code` loader + `verify_broker_mcp.py` + mirror deleted (commit `f7c85e6`)
 
 ### Phase 153: Platform Project Schema
 
