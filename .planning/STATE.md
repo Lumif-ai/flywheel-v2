@@ -78,7 +78,7 @@ v21.0 Document Viewer has one open loop: Phase 145 Plan 04 Task 4 human-verify c
 | Phase 151.1 P01 | 4min | 3 tasks | 4 files |
 | 151.1-backend-handler-latency-profiling-cold-slo | 02 | 4m | 3 | 3 | ec060d4 |
 | 151.1-backend-handler-latency-profiling-cold-slo | 03 | 25m | 2 | 3 | cded013 |
-| 151.1-backend-handler-latency-profiling-cold-slo | 04 | 20m | 3 auto + 1 checkpoint | 4 | TBD (pre-checkpoint) |
+| 151.1-backend-handler-latency-profiling-cold-slo | 04 | 20m | 3 auto + 1 checkpoint | 4 | ee37b52 |
 
 ## Accumulated Context
 
