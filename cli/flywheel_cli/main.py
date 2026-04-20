@@ -759,7 +759,44 @@ def setup_claude_code() -> None:
             "[yellow]  Run 'flywheel setup-claude-code' again or manually copy the template.[/yellow]"
         )
 
-    # 7. Summary
+    # 7. Install broker router SKILL.md (Phase 152.1 — MCP-fetch dispatcher)
+    console.print("[bold]Installing broker router SKILL.md...[/bold]")
+    try:
+        from importlib import resources as _res
+
+        try:
+            _tpl_path = _res.files("flywheel.broker.templates").joinpath("router-SKILL.md")
+            _tpl_body = _tpl_path.read_text(encoding="utf-8")
+        except (ModuleNotFoundError, FileNotFoundError) as _exc:
+            console.print(
+                f"[yellow]  WARN[/yellow] broker router template not found in flywheel-ai "
+                f"package ({_exc}). Upgrade via `pip install --upgrade 'flywheel-ai>=0.4.0'` "
+                f"and re-run setup-claude-code."
+            )
+            _tpl_body = None
+
+        if _tpl_body:
+            _broker_router = Path.home() / ".claude" / "skills" / "broker" / "SKILL.md"
+            _broker_router.parent.mkdir(parents=True, exist_ok=True)
+            if (
+                _broker_router.exists()
+                and "flywheel_fetch_skill_prompt"
+                in _broker_router.read_text(encoding="utf-8")
+            ):
+                console.print(f"[dim]  skipped (up-to-date) {_broker_router}[/dim]")
+            else:
+                _broker_router.write_text(_tpl_body, encoding="utf-8")
+                console.print(
+                    f"[green]  Broker router installed at {_broker_router}[/green]"
+                )
+    except Exception as exc:
+        console.print(f"[red]  Failed to install broker router:[/red] {exc}")
+        console.print(
+            "[yellow]  ⚠ /broker:* triggers will not dispatch without the router.[/yellow]\n"
+            "[yellow]  Re-run 'flywheel setup-claude-code' after upgrading flywheel-ai.[/yellow]"
+        )
+
+    # 8. Summary
     if claude_md_ok:
         claude_md_status = (
             "  [bold]CLAUDE.md[/bold] (routing rules)\n"
