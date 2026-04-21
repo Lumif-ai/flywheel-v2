@@ -305,8 +305,10 @@ def flywheel_fetch_skills() -> str:
             contract_reads = ", ".join(s.get("contract_reads", []))
             contract_writes = ", ".join(s.get("contract_writes", []))
             input_req = s.get("input_requirements", "")
+            cc_exec = s.get("cc_executable", False)
+            exec_label = "in-context" if cc_exec else "server-side"
             skill_info = (
-                f"**{name}** [{category}]\n"
+                f"**{name}** [{category}] ({exec_label})\n"
                 f"  {description}\n"
                 f"  Triggers: {triggers}\n"
                 f"  Reads: {contract_reads} | Writes: {contract_writes}"
@@ -327,7 +329,7 @@ def flywheel_fetch_skill_prompt(skill_name: str) -> str:
     """Load the full execution instructions for a Flywheel skill by name. Returns the system prompt that you should follow to execute the skill. Call this after identifying which skill to run via flywheel_fetch_skills. The prompt contains step-by-step instructions, output format, and quality criteria."""
     try:
         client = FlywheelClient()
-        result = client.fetch_skill_prompt(skill_name)
+        result = client.fetch_skill_prompt(skill_name, mode="mcp")
         system_prompt = result.get("system_prompt", "")
 
         if not system_prompt:

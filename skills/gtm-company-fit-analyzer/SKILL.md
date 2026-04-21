@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: gtm-company-fit-analyzer
 description: >
   [GTM Stack — parallel execution, data integrity, backup.] Use this skill to research companies and score them as potential clients, partners, or

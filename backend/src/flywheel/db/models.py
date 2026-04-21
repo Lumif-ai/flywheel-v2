@@ -855,6 +855,11 @@ class SkillDefinition(Base):
     protected: Mapped[bool] = mapped_column(
         Boolean, nullable=False, server_default=text("false")
     )
+    # Phase 153: distinguishes skills that can run in-context (cc_executable=true)
+    # vs those requiring server-side execution. Orthogonal to `protected`.
+    cc_executable: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("false")
+    )
     token_budget: Mapped[int | None] = mapped_column(Integer)
     created_at: Mapped[datetime.datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=text("now()")

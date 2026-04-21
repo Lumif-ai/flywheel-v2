@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: meeting-processor
 version: "2.3"
 description: >

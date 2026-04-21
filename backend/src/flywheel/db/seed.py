@@ -107,6 +107,7 @@ class SkillData:
     parameters: dict = field(default_factory=dict)
     enabled: bool = True
     protected: bool = False
+    cc_executable: bool = False
     # Phase 147: asset bundling + dependency declaration
     assets: list[str] = field(default_factory=list)        # glob patterns from frontmatter, e.g. ['*.py', 'portals/*.py']
     depends_on: list[str] = field(default_factory=list)    # library skill names, e.g. ['_shared']
@@ -353,6 +354,9 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
         if data.get("public") is True:
             protected = False
 
+        # Phase 153: cc_executable flag — distinguishes in-context vs server-side skills
+        cc_executable = bool(data.get("cc_executable", False))
+
         # Phase 147: parse assets: and depends_on: (both optional lists)
         raw_assets = data.get("assets") or []
         if not isinstance(raw_assets, list):
@@ -394,6 +398,7 @@ def scan_skills(skills_dir: str) -> tuple[list[SkillData], list[str]]:
                 parameters=parameters,
                 enabled=enabled,
                 protected=protected,
+                cc_executable=cc_executable,
                 # Phase 147 additions:
                 assets=assets,
                 depends_on=depends_on,
@@ -664,6 +669,7 @@ async def seed_skills(
             "parameters": skill.parameters,
             "enabled": skill.enabled,
             "protected": skill.protected,
+            "cc_executable": skill.cc_executable,
         }
         stmt = pg_insert(SkillDefinition).values(**values)
         stmt = stmt.on_conflict_do_update(
@@ -682,6 +688,7 @@ async def seed_skills(
                 "parameters": stmt.excluded.parameters,
                 "enabled": stmt.excluded.enabled,
                 "protected": stmt.excluded.protected,
+                "cc_executable": stmt.excluded.cc_executable,
                 "updated_at": func.now(),
             },
         )

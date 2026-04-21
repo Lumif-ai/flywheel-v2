@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: broker-extract-quote
 version: "1.2"
 web_tier: 3

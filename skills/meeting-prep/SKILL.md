@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: meeting-prep
 version: "4.1"
 description: >

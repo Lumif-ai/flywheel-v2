@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: broker-parse-policies
 version: "1.2"
 web_tier: 3

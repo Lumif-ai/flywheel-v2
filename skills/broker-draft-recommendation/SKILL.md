@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: broker-draft-recommendation
 version: "1.2"
 web_tier: 3

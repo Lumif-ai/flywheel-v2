@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: gtm-pipeline
 version: "2.1"
 description: >

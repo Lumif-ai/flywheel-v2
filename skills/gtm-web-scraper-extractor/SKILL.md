@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: gtm-web-scraper-extractor
 description: >
   [GTM Stack — parallel multi-term scraping, encoding validation.] Use this skill to extract structured data (contacts, alumni, attendees, leads, listings, etc.)

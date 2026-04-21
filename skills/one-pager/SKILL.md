@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: one-pager
 version: "1.0"
 context-aware: true

@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: gtm-outbound-messenger
 version: "2.0"
 description: >

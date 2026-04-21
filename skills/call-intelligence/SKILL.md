@@ -1,5 +1,6 @@
 ---
 public: true
+cc_executable: true
 name: call-intelligence
 version: "1.0"
 description: >

@@ -25,6 +25,7 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel
 from sqlalchemy import func, select
@@ -38,6 +39,7 @@ from flywheel.auth.jwt import TokenPayload, decode_jwt
 from flywheel.db.models import ContextEntry, SkillAsset, SkillDefinition, SkillRun, TenantSkill, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit, limiter
+from flywheel.services.prompt_normalizer import normalize_for_mcp
 
 logger = logging.getLogger(__name__)
 
@@ -235,6 +237,7 @@ async def _get_available_skills_db(db: AsyncSession, tenant_id: UUID) -> list[di
             "input_requirements": (sd.parameters or {}).get("input_description", ""),
             "input_schema": (sd.parameters or {}).get("input_schema"),
             "triggers": (sd.parameters or {}).get("triggers", []),
+            "cc_executable": sd.cc_executable,
         }
         for sd in rows
     ]
@@ -350,6 +353,7 @@ ORCHESTRATOR_STUB_TEMPLATE = (
 async def get_skill_prompt(
     request: Request,
     skill_name: str,
+    mode: str | None = Query(None, description="Set to 'mcp' for normalized tool names"),
     user: TokenPayload = Depends(require_tenant),
     db: AsyncSession = Depends(get_tenant_db),
 ) -> dict[str, Any]:
@@ -395,8 +399,8 @@ async def get_skill_prompt(
         )
 
     logger.info(
-        "prompt_fetch tenant=%s skill=%s user=%s protected=%s",
-        user.tenant_id, skill_name, user.sub, skill.protected,
+        "prompt_fetch tenant=%s skill=%s user=%s protected=%s mode=%s",
+        user.tenant_id, skill_name, user.sub, skill.protected, mode,
     )
 
     if skill.protected:
@@ -406,7 +410,10 @@ async def get_skill_prompt(
             "protected": True,
         }
 
-    return {"skill_name": skill.name, "system_prompt": skill.system_prompt}
+    raw_prompt = skill.system_prompt
+    if mode == "mcp":
+        raw_prompt = normalize_for_mcp(raw_prompt)
+    return {"skill_name": skill.name, "system_prompt": raw_prompt}
 
 
 @router.get("/{skill_name}/assets", response_model=SkillAssetsResponse)
