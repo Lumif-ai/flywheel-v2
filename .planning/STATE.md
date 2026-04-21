@@ -11,11 +11,11 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 
 Milestone: v23.0 In-Context Skill Execution
 Phase: 156 of 157 (Telemetry + Migration Cutover)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-04-21 -- Completed 156-01 (telemetry table + MCP redirect)
+Plan: 2 of 2 in current phase
+Status: Phase 156 Complete
+Last activity: 2026-04-21 -- Completed 156-02 (in-context completion reporting + parity verification)
 
-Progress: [████░░░░░░] 40%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -42,6 +42,8 @@ Progress: [████░░░░░░] 40%
 | Phase 154 P03 | 73s | 2 tasks | 2 files |
 | Phase 155 P01 | 122s | 2 tasks | 2 files |
 | Phase 155 P02 | 112 | 2 tasks | 2 files |
+| Phase 155 P03 | 135 | 2 tasks | 3 files |
+| Phase 156 P02 | 101s | 1 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -55,8 +57,10 @@ Recent decisions affecting current work:
 - [Phase 153]: Validate skill tools AFTER normalization (not raw prompts) to test what API serves
 - [Phase 154]: Used row_number() window function for top-5 entries per file in single query for preamble endpoint
 - [Phase 156]: Fire-and-forget telemetry with double try/except in MCP tool; metadata_ column alias for JSONB (matching ContextAuditLog pattern)
+- [Phase 156-02]: Parity uses set overlap (not byte-identical) for context file comparison; NEEDS_DATA expected initially
 - [Phase 155-01]: LeadMessage has no send_after; outreach filtered by status='drafted' instead. Data gather pattern: _cap_response(data, max_chars) with progressive list truncation.
 - [Phase 155]: Extended timeout (60s) on gather_company_data for external site crawling; section-header formatting for Claude readability
+- [Phase 155]: Category B skills reference gather tools for MCP mode; flywheel-ritual created as active skill from archived flywheel
 
 ### Prior Milestone Context
 
@@ -81,5 +85,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-21
-Stopped at: Completed 156-01-PLAN.md
+Stopped at: Completed 156-02-PLAN.md (in-context completion reporting + parity verification)
 Resume file: None
