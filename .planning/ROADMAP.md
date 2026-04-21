@@ -24,7 +24,7 @@
 - ✅ **v20.0 Coverage Taxonomy & Multi-Currency Limits** — Phase 140 (shipped 2026-04-16)
 - **v21.0 Document Viewer** — Phases 141–145 (active)
 - **v22.0 Skill Platform Consolidation** — Phases 146–152 (active, parallel to v21.0)
-- **v23.0 Project Primitive Platform** — Phases 153–156 (planned)
+- **v23.0 In-Context Skill Execution** — Phases 153–157 (planned)
 
 ## Phases
 
@@ -334,7 +334,12 @@ Plans:
   3. Each uploaded file shows its conversion status (pending/ready/failed/not_applicable) and failed conversions display a download link instead of a blank panel
   4. All previously uploaded PDF files have rendition_path backfilled so they render immediately without re-upload
   5. GET /api/v1/files/{file_id}/rendition returns a signed URL for the PDF rendition with correct status
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
 
 ### Phase 143: Click-to-Navigate + Highlight
 **Goal**: Clicking a requirement card's clause link scrolls the PDF viewer to the correct page and highlights the referenced text, with graceful fallbacks for missing page numbers, missing excerpts, and scanned PDFs
@@ -619,10 +624,11 @@ Plans:
 | 150. MCP Tool + Unpack Helper | v22.0 | 0/0 | Not started | - |
 | 151. Broker Dogfood + Resilience | v22.0 | 0/0 | Not started | - |
 | 152. Retirement | v22.0 | 0/0 | Not started | - |
-| 153. Platform Project Schema | v23.0 | 0/0 | Not started | - |
-| 154. BrokerProject Composition + Backfill | v23.0 | 0/0 | Not started | - |
-| 155. Context Store Backfill via Entity Join | v23.0 | 0/0 | Not started | - |
-| 156. CC Project Integration + Pinning | v23.0 | 0/0 | Not started | - |
+| 153. Prompt Normalization + Schema | v23.0 | 0/3 | Planning | - |
+| 154. Core MCP Tools — Routing + Context Warming | v23.0 | 0/0 | Not started | - |
+| 155. Composite Data Tools — Engine-Backed Skills | v23.0 | 0/0 | Not started | - |
+| 156. Telemetry + Migration Cutover | v23.0 | 0/0 | Not started | - |
+| 157. Desktop Integration | v23.0 | 0/0 | Not started | - |
 
 ### Phase 145: Stage 1 intake correctness: typed upload and gap completion
 
@@ -792,7 +798,7 @@ Plans:
 - [ ] 151-03-PLAN.md — scripts/dogfood_harness.py 5-step programmatic probe + --offline-sim flag + DOGFOOD-RUNBOOK.md user-executable runbook for SC1+SC2 live evidence (wave 3, autonomous)
 - [ ] 151-04-PLAN.md — scripts/measure_latency.py 100-cold + 100-warm batch with statistics.quantiles + SLO gate (p99 cold <500ms, p99 warm <50ms) + 151-LATENCY.md regression baseline artifact (wave 4, autonomous)
 
-### Phase 151.1: Backend Handler Latency Profiling + Cold SLO (INSERTED)
+### Phase 151.1: Backend Handler Latency Profiling + Cold SLO (INSERTED) [COMPLETE 2026-04-20]
 
 **Goal**: Add per-handler latency instrumentation (pure-ASGI middleware + SQLAlchemy event hooks + ContextVar) to the Flywheel backend, identify where the cold-fetch budget is spent inside `get_skill_assets_bundle` + its tenant-session prelude + `_resolve_bundle_chain`, measure ngrok vs same-region topologies to quantify tunnel vs Supabase-RT vs handler-code cost separately, and decide with data whether the 500 ms cold p99 SLO is achievable or must be amended — unblocking Phase 151's UAT gate.
 **Depends on**: Phase 151 (SC1-SC4 verified; SC5 pending this phase's SLO decision artifact)
@@ -824,21 +830,105 @@ Plans:
   3. Codebase-wide grep (`backend/`, `cli/`, `skills/`, docs) for `~/.claude/skills/`, `expanduser("~/.claude")`, and `Path.home() / ".claude"` returns zero hits outside explicit legacy-compat paths documented in the retirement plan
   4. User-facing README and CLAUDE.md templates contain no instructions to `git pull` or manually manage `~/.claude/skills/`; the only documented skill delivery mechanism is MCP
   5. Retirement PR only merges after telemetry from Phase 151 confirms every active tenant has successfully fetched at least one bundle from `skill_assets` during the coexistence window — the coexistence-window gate is explicit and auditable in the PR description
-**Plans**: TBD
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
 
 ---
 
-### v23.0 Project Primitive Platform (Planned)
+### v23.0 In-Context Skill Execution (Planned)
 
-**Milestone goal**: Ship a platform-level `Project` scoping primitive that every Flywheel module (broker, GTM, meetings) uses to partition context, documents, skill runs, meetings, and tasks — without breaking the live broker module and without building PM-specific capabilities.
+**Milestone goal**: Eliminate server-side LLM spend for CLI/Desktop callers by migrating skills from `flywheel_run_skill` (backend Sonnet loop on subsidy key) to `flywheel_fetch_skill_prompt` + in-context execution (user's Claude subscription). Normalize all skill prompts to use MCP tool names, build data-gathering MCP tools for engine-backed skills, add intent-matching `flywheel_route_skill` tool, and unblock Claude Desktop as a distribution channel.
 
-**Concept inputs**: `CONCEPT-BRIEF-PM-MODULE.md` §6 "Project as a Platform Primitive", `ADVISORY-PROJECT-SCOPING.md`, `PM-MODULE-DECISION.md` (PM module itself is deferred; this milestone ships platform infrastructure only)
+**Research inputs**: `research/SUMMARY.md` (tool name mapping, 5-phase structure, pitfalls C1-C4)
 
-**Query contract (applies to all phases):** Every project-scoped skill query uses `project_id = :current OR project_id IN (:pinned_shared_ids) OR project_id IS NULL`. NULL is reserved for genuinely orphan / multi-entity / pre-routing entries. Shared content (playbooks, templates, strategy) lives in regular `projects` rows that users pin — there is NO synthetic "default" or "shared" project sentinel. See ADR (to be authored in Phase 156) for the full contract.
-
-**Pre-flight for Phase 154:** Validate the 3 broker-grain flip conditions against real production data before the backfill commits — renewal rate, concurrent-unrelated-placement count, per-placement compliance needs. If any condition flips, re-plan the grain.
+**Phase dependencies**: 153 -> 154 -> {155, 156 parallel} -> 157
 
 ---
+
+### Phase 153: Prompt Normalization + Schema
+**Goal**: Every cc_executable skill prompt served via `?mode=mcp` contains only MCP/client-native tool names — zero references to server-side tool names or deprecated lead tools — and a CI-runnable validator enforces this going forward
+**Depends on**: v22.0 complete (Phase 152 shipped)
+**Requirements**: NORM-01, NORM-02, NORM-03, NORM-04, NORM-05, META-01, META-02, META-03, META-04
+**Success Criteria** (what must be TRUE):
+  1. `GET /api/v1/skills/company-intel/prompt?mode=mcp` returns a prompt where every tool reference is an MCP/client-native name (flywheel_read_context, flywheel_write_context, WebSearch, etc.) — no `context_read`, `context_write`, `web_search`, `web_fetch`, `file_write` references survive
+  2. `GET /api/v1/skills/company-intel/prompt` (no mode param) returns the original raw prompt unchanged — backward compatibility for web UI callers is preserved
+  3. `flywheel_fetch_skills` MCP tool response includes `cc_executable: true` for all 18 Category A skills and `cc_executable: false` for Category B/C skills — clients can filter the skill list by executability
+  4. Running `python3 scripts/validate_skill_tools.py` against all skill prompts exits 0 — any prompt referencing a tool name not in the MCP/client-native vocabulary fails the check with a specific error message naming the offending tool and skill
+  5. Zero references to `flywheel_list_leads`, `flywheel_upsert_lead`, or `flywheel_add_lead_contact` exist in any skill prompt served by the API — all replaced with pipeline equivalents
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+
+### Phase 154: Core MCP Tools — Routing + Context Warming
+**Goal**: Claude Code and Desktop users can discover the right skill for any intent via a single MCP tool call, and warm their context window with a snapshot of the user's intelligence at session start — without hooks, local files, or CLAUDE.md
+**Depends on**: Phase 153 (normalized prompts must exist for route responses to be useful)
+**Requirements**: ROUTE-01, ROUTE-02, ROUTE-03, ROUTE-04, WARM-01, WARM-02, WARM-03, WARM-04
+**Success Criteria** (what must be TRUE):
+  1. Calling `flywheel_route_skill(intent="prepare for my meeting with Acme tomorrow")` returns the meeting-prep skill's full MCP-normalized prompt ready for in-context execution — no further tool calls needed to start executing the skill
+  2. When no skill matches with sufficient confidence (e.g., `flywheel_route_skill(intent="make me a sandwich")`), the response includes a top-3 candidate list with names and descriptions so the user/Claude can choose or refine
+  3. Calling `flywheel_warm_context()` returns a context store snapshot (catalog of context files + recent high-value entries) capped at 8k characters — suitable for injecting at conversation start without blowing up the context window
+  4. Both `flywheel_route_skill` and `flywheel_warm_context` work identically for Claude Code and Claude Desktop callers — no dependency on hooks, CLAUDE.md, skill-router SKILL.md, or local filesystem
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+
+### Phase 155: Composite Data Tools — Engine-Backed Skills
+**Goal**: Category B skills (company-intel, meeting-processor, meeting-prep, flywheel-ritual) can run entirely in-context by calling purpose-built MCP data-gathering tools that return structured data without any Anthropic API calls on the server
+**Depends on**: Phase 154 (routing infrastructure must exist so data tools are discoverable)
+**Requirements**: DATA-01, DATA-02, DATA-03, DATA-04, DATA-05
+**Success Criteria** (what must be TRUE):
+  1. `flywheel_gather_company_data(url="https://acme.com")` returns structured JSON (name, description, team, funding, tech stack, etc.) from the httpx crawler — the backend makes zero Anthropic API calls during this operation
+  2. `flywheel_gather_meeting_context(meeting_id=<uuid>)` returns transcript text, attendee list, linked pipeline entries, and prior context store entries for that company — all in one response under 16k characters
+  3. `flywheel_gather_briefing_sources()` returns recent meetings, pipeline stage changes, overdue tasks, and context highlights — everything the daily brief skill needs to synthesize, without any server-side LLM call
+  4. All three gather tools cap their response at a configurable limit (default 16k chars) and return a `truncated: true` flag when the cap is hit — no silent context window overflow
+  5. The company-intel skill prompt (served with `?mode=mcp`) instructs Claude to call `flywheel_gather_company_data` and then synthesize in-context, rather than invoking the server-side engine — and produces equivalent context store writes
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+
+### Phase 156: Telemetry + Migration Cutover
+**Goal**: Server-side skill execution is redirected for CLI/Desktop callers to in-context execution, with telemetry tracking adoption and parity verification confirming that in-context writes match server-side quality
+**Depends on**: Phase 154 (routing + warming must be live); can run parallel with Phase 155
+**Requirements**: CUT-01, CUT-02, CUT-03, CUT-04
+**Success Criteria** (what must be TRUE):
+  1. A CLI/Desktop caller invoking `flywheel_run_skill(name="company-intel")` for a cc_executable skill receives a redirect message instructing them to use `flywheel_fetch_skill_prompt` instead — the server does NOT execute the skill on the subsidy key
+  2. A web UI caller invoking `flywheel_run_skill(name="company-intel")` via the API continues to execute server-side with `_execute_with_tools` exactly as before — zero behavioral change for web callers
+  3. Skill execution telemetry shows per-invocation path (server-side vs in-context) with daily aggregation queryable via SQL — the operator can see adoption rates per skill and per caller type
+  4. Context store writes from in-context execution of at least 5 representative skills (company-intel, meeting-prep, sales-collateral, one-pager, investor-update) match the quality/format of server-side writes — verified by diffing context file outputs for the same inputs
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+
+### Phase 157: Desktop Integration
+**Goal**: Claude Desktop users can install, discover, and execute Flywheel skills without any Claude Code-specific infrastructure — no hooks, no CLAUDE.md, no skill-router SKILL.md, no local skills directory
+**Depends on**: Phase 155 (data tools needed for Category B skills), Phase 156 (cutover must be live so run_skill redirects work)
+**Requirements**: DESK-01, DESK-02, DESK-03
+**Success Criteria** (what must be TRUE):
+  1. Running `flywheel desktop-setup` generates a valid `claude_desktop_config.json` with the Flywheel MCP server entry pointing to the installed `flywheel-mcp` binary — the user can copy-paste the config and restart Desktop to connect
+  2. Desktop Project instructions template provides behavioral rules equivalent to CLAUDE.md Flywheel sections (use flywheel_warm_context at session start, use flywheel_route_skill for skill discovery, save outputs via flywheel_save_document) — a Desktop user gets the same workflow as a Claude Code user
+  3. A Desktop user with zero Claude Code infrastructure can say "prepare for my meeting with Acme" and Desktop will route to the meeting-prep skill, gather context, and produce a briefing — end-to-end skill execution via MCP only
+**Plans**: 3 plans
+
+Plans:
+- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
+- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
+- [ ] 153-03-PLAN.md — CI validation script + run against all skills
 
 ### Phase 152.1: Router → MCP-fetch migration + local mirror removal (INSERTED) ✓ 2026-04-19
 
@@ -852,68 +942,6 @@ Plans:
 - [x] 152.1-02-PLAN.md — 10 `skills/broker-*/SKILL.md` bodies rewritten (dot-form pip imports + `flywheel_write_context` memory) + `skill_assets` re-seeded (commit `839a4ab`)
 - [x] 152.1-03-PLAN.md — Router template + `flywheel setup-claude-code` loader + `verify_broker_mcp.py` + mirror deleted (commit `f7c85e6`)
 
-### Phase 153: Platform Project Schema
-
-**Goal**: The `projects` table is live in production with nullable `project_id` FKs on `context_entries`, `documents`, `skill_runs`, `meetings`, `tasks`; MCP tools accept an optional `project_id` parameter with NULL-default backwards compatibility; any write that passes `project_id` persists it, any read that omits `project_id` behaves identically to pre-migration.
-**Depends on**: v22.0 complete (no code dependency on v21.0 / v22.0 tracks)
-**Success Criteria** (what must be TRUE):
-  1. `SELECT count(*) FROM projects` returns `0` (not an error) against production Supabase after migration; nullable `project_id` FKs exist on all 5 tables (`context_entries`, `documents`, `skill_runs`, `meetings`, `tasks`) per `information_schema.columns` verification
-  2. All 5 new partial indexes exist and each uses `WHERE project_id IS NOT NULL`: `idx_context_project`, `idx_documents_project`, `idx_skill_runs_project`, `idx_meetings_project`, `idx_tasks_project`
-  3. `alembic current` reports the new revision; `alembic upgrade head` is idempotent (re-run is a no-op); migration applies cleanly via Supabase per-statement-commit pattern per global CLAUDE.md (multi-DDL single transaction is NOT used)
-  4. `flywheel_read_context`, `flywheel_write_context`, `flywheel_save_document`, `flywheel_run_skill` accept optional `project_id` parameter with NULL default; the existing regression suite passes unchanged — any caller that omits the parameter sees identical behavior to pre-migration
-  5. Backend exposes CRUD endpoints: `POST /api/v1/projects`, `GET /api/v1/projects`, `GET /api/v1/projects/{id}`, `PATCH /api/v1/projects/{id}/archive`; auth + tenant isolation match existing API conventions (`401` unauthenticated, `404` cross-tenant lookup — no existence leak)
-**Plans**: TBD
-
----
-
-### Phase 154: BrokerProject Composition + Backfill
-
-**Goal**: Every existing `broker_client` has a matching platform `projects` row; every `broker_projects.project_id` is populated via its `client_id`; broker engines, APIs, and frontend continue to operate with zero behavioral change on day 1 — the broker domain model is preserved (composition, not subsumption).
-**Depends on**: Phase 153 (platform `projects` table must exist)
-**Success Criteria** (what must be TRUE):
-  1. `broker_projects` has a nullable `project_id UUID REFERENCES projects(id)` column; partial index `idx_broker_projects_platform_project` exists with `WHERE project_id IS NOT NULL`
-  2. For every `broker_client` row in production, exactly one `projects` row exists with matching `tenant_id`, `name`, a slug derived from `normalized_name`, `metadata.source = 'broker_client'`, and `metadata.broker_client_id` matching the source client; backfill script is idempotent (re-run produces zero diff)
-  3. For every `broker_projects` row, `project_id` is populated matching the parent client's platform project; each platform project sourced from a `broker_client` has `metadata.broker_project_ids[]` populated with the list of its placement UUIDs
-  4. Regression suite on broker APIs (`api/broker/*.py`) passes unchanged; broker engines (`contract_analyzer.py`, `quote_extractor.py`, `submission_builder.py`, `followup_drafter.py`, `context_store_writer.py`) run unchanged — zero code modifications to broker engines in this phase
-  5. Broker frontend (BrokerProjectsPage, ProjectPipelineGrid, BrokerProjectDetail, BrokerClientDetailPage) renders identically before and after backfill; Playwright smoke test confirms no visual or behavioral diff
-**Plans**: TBD
-
----
-
-### Phase 155: Context Store Backfill via Entity Join
-
-**Goal**: Existing context entries, documents, meetings, and tasks are retroactively assigned to their correct platform project via the existing `context_entity_entries` join table; single-entity matches are project-scoped; multi-entity and orphan entries remain NULL (true orphan semantics preserved); playbook-/template-looking entries are NOT auto-routed (user migrates intentionally in Phase 156 after pinning exists); the backfill is auditable and reversible.
-**Depends on**: Phase 153 (FKs exist), Phase 154 (broker-sourced projects exist so broker-linked context entries have assignment targets)
-**Backfill exclusions (stay NULL for now, migrate intentionally later via Phase 156 pinning):**
-  - Entries with `file_name` in known playbook/template/strategy conventions (list defined during planning)
-  - Entries tagged `visibility='global'` or with `source` indicating template/playbook origin
-  - These are intentional shared content and should be placed by the user into explicit named shared projects (e.g., "Lumif.ai Playbooks"), not force-assigned now
-
-**Success Criteria** (what must be TRUE):
-  1. Backfill produces a `backfill-review.csv` listing every context entry that would receive a `project_id`, with columns `entry_id, current_project_id, proposed_project_id, matched_entity_name, matched_entity_type, confidence`; the script refuses to commit UPDATEs until an operator-approval flag is passed explicitly (checkpoint)
-  2. After commit against production: `SELECT count(*) FROM context_entries WHERE project_id IS NOT NULL` equals at least 80% of the count of entries that link to exactly one `company` or `broker_client` entity via `context_entity_entries` AND are NOT in the exclusion list; the exact numbers and exclusion count are recorded in a phase artifact `backfill-summary.md`
-  3. Context entries linked to a `broker_project` entity in `context_entity_entries` resolve to their parent client-level platform project AND stamp `metadata->>'broker_project_id'` with the placement UUID (verified by sampling 20 rows across the most-active broker clients)
-  4. Multi-entity entries (linked to 2+ `company` / `broker_client` entities) stay `NULL`; orphan entries (no entity link) stay `NULL`; entries matched by the playbook/template exclusion rules stay `NULL`; the backfill summary log reports all three counts explicitly — NULL is a first-class outcome, not silent skip
-  5. Rollback path verified in staging before prod commit: a single query restores pre-backfill state cleanly for each of `context_entries`, `documents`, `meetings`, `tasks` (backfill writes a sentinel `metadata->>'backfilled_at'` so rollback is precise); staging rollback test result linked in phase artifact
-**Plans**: TBD
-
----
-
-### Phase 156: CC Project Integration + Pinning
-
-**Goal**: A Flywheel user in Claude Code can set the active project explicitly via `/project switch <slug>`, have it inferred automatically from a working-directory marker or recent meeting context, keep it sticky across the session, pin projects as "always-included shared brain" for cross-project content (playbooks, strategy, templates), and move entries between projects without re-running classification — making the project primitive usable in conversation, not just queryable in the DB.
-**Depends on**: Phase 153 (MCP tools accept `project_id`), Phase 155 (real projects exist and orphan semantics are clean)
-**New ADR**: Authors `docs/adr/NNN-project-scoping-query-contract.md` documenting the `project_id = :current OR project_id IN (:pinned) OR project_id IS NULL` contract, the semantics of each clause, and the non-subsumption design (no synthetic default project) — so future skill authors don't reintroduce the conflation between "shared" and "orphan."
-
-**Success Criteria** (what must be TRUE):
-  1. `/project switch <slug>` in Claude Code sets the active project for the session; subsequent MCP calls (`flywheel_read_context`, `flywheel_write_context`, `flywheel_save_document`, `flywheel_run_skill`) receive the resolved `project_id` without re-prompting; `/project current` and `/project list` show accurate state; `/project switch` with an invalid slug returns a helpful error listing available slugs
-  2. On session start with no explicit project set, CC reads `.flywheel/project` marker file in the working directory; if absent, infers from the dominant company entity in this week's meetings; displays a single one-line confirmation ("Scoping to **{name}** — ok? (y / `/project switch <other>`)"); proceeds on silence after the first turn; the inference path is logged
-  3. `/project pin <slug>` and `/project unpin <slug>` slash commands manage a per-user list of pinned "always-included" projects; `/project current` output lists the active project AND the pinned set; every project-scoped skill query resolves `project_id = :current OR project_id IN (:pinned) OR project_id IS NULL` by default; opting out requires an explicit `include_shared=False` parameter
-  4. "Move entries" bulk action is exposed (CC slash command and/or MCP tool) accepting entry IDs + target project slug; shows a preview count before commit; UPDATE is transactional; a single `undo` within the session restores the prior `project_id` values using a session-scoped journal
-  5. ADR `docs/adr/NNN-project-scoping-query-contract.md` exists, defines the three clauses, documents why NULL is reserved for orphans (not shared content), and is linked from the platform-level README and the skill-authoring guide; regression tests cover all three query clauses plus the `include_shared=False` opt-out
-**Plans**: TBD
-
----
 *Roadmap created: 2026-03-24*
 *v2.0 milestone added: 2026-03-26*
 *v2.0 shipped: 2026-03-27*
@@ -937,4 +965,4 @@ Plans:
 *v19.0 milestone added: 2026-04-15 — Broker Redesign (7 phases, 82 requirements)*
 *v21.0 milestone added: 2026-04-16 — Document Viewer (4 phases, 26 requirements)*
 *v22.0 milestone added: 2026-04-17 — Skill Platform Consolidation (7 phases, 37 requirements)*
-*v23.0 milestone added: 2026-04-18 — Project Primitive Platform (4 phases)*
+*v23.0 milestone replaced: 2026-04-21 — In-Context Skill Execution (5 phases, 29 requirements)*
