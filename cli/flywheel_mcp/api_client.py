@@ -153,9 +153,12 @@ class FlywheelClient:
         """GET /api/v1/skills/ -- list all available skills."""
         return self._request("get", "/api/v1/skills/")
 
-    def fetch_skill_prompt(self, skill_name: str) -> dict:
+    def fetch_skill_prompt(self, skill_name: str, mode: str | None = None) -> dict:
         """GET /api/v1/skills/{skill_name}/prompt -- get rendered prompt for a skill."""
-        return self._request("get", f"/api/v1/skills/{skill_name}/prompt")
+        url = f"/api/v1/skills/{skill_name}/prompt"
+        if mode:
+            url += f"?mode={mode}"
+        return self._request("get", url)
 
     @staticmethod
     def _has_any_cache_trace(cache, name: str) -> bool:
