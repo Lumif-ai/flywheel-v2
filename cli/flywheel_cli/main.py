@@ -834,6 +834,168 @@ def setup_claude_code() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Setup Claude Desktop (MCP config + project instructions)
+# ---------------------------------------------------------------------------
+
+
+DESKTOP_PROJECT_INSTRUCTIONS = """\
+# Flywheel Integration
+
+## Session Start
+At the beginning of every conversation, call flywheel_warm_context to load
+your business context snapshot. This gives you awareness of recent meetings,
+pipeline activity, and stored knowledge.
+
+## Skill Routing
+When the user asks to perform a business task (meeting prep, company research,
+daily briefing, document generation, outreach, etc.):
+1. Call flywheel_route_skill with the user's intent as free text.
+2. If a skill matches, follow the returned prompt instructions exactly.
+3. If no match, fall back to general Claude capabilities.
+
+Do NOT attempt to guess or hardcode skill names -- always route through
+flywheel_route_skill.
+
+## Context Store
+IMPORTANT: Business intelligence discovered during ANY conversation must be
+saved to Flywheel via flywheel_write_context.
+
+Business intelligence includes: contacts, company details, competitive intel,
+pain points, positioning insights, pricing signals, market signals, meeting
+outcomes, deal context, relationship notes.
+
+- Before writing, call flywheel_read_context to check for existing entries
+  and enrich rather than duplicate.
+- Non-business data (code, personal notes, scratch work) stays in local files.
+
+## Output
+- Save deliverables (documents, briefings, reports, collateral) via
+  flywheel_save_document so they appear in the Flywheel library.
+- Save meeting summaries via flywheel_save_meeting_summary.
+"""
+
+
+@cli.command("desktop-setup")
+def desktop_setup() -> None:
+    """Register Flywheel MCP server with Claude Desktop and generate project instructions."""
+    import os
+    import platform
+    import sys
+
+    # 1. Resolve flywheel-mcp binary
+    mcp_path = shutil.which("flywheel-mcp")
+    if not mcp_path:
+        console.print(
+            "[red]flywheel-mcp not found on PATH. "
+            "Install with: uv tool install flywheel-ai[/red]"
+        )
+        raise SystemExit(1)
+
+    # 2. Check auth state
+    if not is_logged_in():
+        console.print(
+            "[yellow]Not logged in. Run `flywheel login` first -- "
+            "MCP tools will fail without authentication.[/yellow]"
+        )
+
+    # 3. Read/create Claude Desktop config
+    system = platform.system()
+    if system == "Darwin":
+        config_path = (
+            Path.home() / "Library" / "Application Support" / "Claude"
+            / "claude_desktop_config.json"
+        )
+    elif system == "Windows":
+        config_path = (
+            Path(os.environ.get("APPDATA", ""))
+            / "Claude"
+            / "claude_desktop_config.json"
+        )
+    else:
+        raise click.ClickException(
+            "Claude Desktop is only available on macOS and Windows."
+        )
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            console.print(
+                f"[yellow]Warning: existing config at {config_path} is not valid JSON. "
+                "Starting fresh.[/yellow]"
+            )
+            config = {}
+    else:
+        config = {}
+
+    # 4. Merge Flywheel MCP entry (preserves other mcpServers)
+    config.setdefault("mcpServers", {})["flywheel"] = {
+        "command": mcp_path,
+        "args": [],
+    }
+    console.print(f"[green]  Flywheel MCP configured (stdio): {mcp_path}[/green]")
+
+    # 5. Add Granola MCP entry (via mcp-remote for Desktop)
+    config["mcpServers"]["granola"] = {
+        "command": "npx",
+        "args": ["-y", "@anthropic/mcp-remote@latest", "https://mcp.granola.ai/mcp"],
+    }
+    console.print("[green]  Granola MCP configured (via mcp-remote)[/green]")
+
+    # 6. Write config back
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    console.print(f"[green]Config written to {config_path}[/green]")
+
+    # 7. Generate project instructions template
+    instructions_path = FLYWHEEL_DIR / "desktop-project-instructions.md"
+    instructions_path.parent.mkdir(parents=True, exist_ok=True)
+    instructions_path.write_text(DESKTOP_PROJECT_INSTRUCTIONS)
+    console.print(
+        f"[green]Project instructions written to {instructions_path}[/green]"
+    )
+
+    # 8. Clipboard copy attempt (macOS only)
+    clipboard_ok = False
+    try:
+        cp_result = subprocess.run(
+            ["pbcopy"],
+            input=DESKTOP_PROJECT_INSTRUCTIONS,
+            text=True,
+            capture_output=True,
+        )
+        if cp_result.returncode == 0:
+            console.print("[green]Copied project instructions to clipboard[/green]")
+            clipboard_ok = True
+    except FileNotFoundError:
+        pass  # pbcopy not available, skip silently
+
+    # 9. Print summary panel
+    clipboard_note = (
+        "  [green]Project instructions copied to clipboard -- paste into Claude Desktop.[/green]\n\n"
+        if clipboard_ok
+        else ""
+    )
+    console.print(
+        Panel(
+            "[bold]MCP servers configured for Claude Desktop:[/bold]\n\n"
+            "  [bold]flywheel[/bold] (stdio)\n"
+            f"    - command: {mcp_path}\n\n"
+            "  [bold]granola[/bold] (via mcp-remote)\n"
+            "    - Granola meeting transcripts\n\n"
+            f"[bold]Project instructions:[/bold] {instructions_path}\n\n"
+            + clipboard_note +
+            "[dim]Paste the project instructions into Claude Desktop: "
+            "Settings > Project > Instructions[/dim]\n\n"
+            "[dim]Restart Claude Desktop to activate.[/dim]",
+            title="Desktop Setup Complete",
+            border_style="green",
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
 # Upgrade
 # ---------------------------------------------------------------------------
 
