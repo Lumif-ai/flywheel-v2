@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 ## Current Position
 
 Milestone: v23.0 In-Context Skill Execution
-Phase: 156 of 157 (Telemetry + Migration Cutover)
-Plan: 2 of 2 in current phase
-Status: Phase 156 Complete
-Last activity: 2026-04-21 -- Completed 156-02 (in-context completion reporting + parity verification)
+Phase: 157 of 157 (Desktop Integration)
+Plan: 1 of 2 in current phase
+Status: Executing Phase 157
+Last activity: 2026-04-21 -- Completed 157-01 (desktop-setup CLI command)
 
-Progress: [██████░░░░] 60%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -35,6 +35,7 @@ Progress: [██████░░░░] 60%
 - Trend: Accelerating
 
 *Updated after each plan completion*
+| Phase 157 P01 | 112s | 2 tasks | 1 files |
 | Phase 153 P01 | 490 | 2 tasks | 4 files |
 | Phase 153 P03 | 99 | 2 tasks | 1 files |
 | Phase 154 P01 | 78s | 2 tasks | 1 files |
@@ -61,6 +62,7 @@ Recent decisions affecting current work:
 - [Phase 155-01]: LeadMessage has no send_after; outreach filtered by status='drafted' instead. Data gather pattern: _cap_response(data, max_chars) with progressive list truncation.
 - [Phase 155]: Extended timeout (60s) on gather_company_data for external site crawling; section-header formatting for Claude readability
 - [Phase 155]: Category B skills reference gather tools for MCP mode; flywheel-ritual created as active skill from archived flywheel
+- [Phase 157]: Desktop config uses setdefault merge to preserve existing mcpServers; Granola via npx mcp-remote (Desktop lacks native HTTP MCP); auth warning non-blocking
 
 ### Prior Milestone Context
 
@@ -85,5 +87,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-21
-Stopped at: Completed 156-02-PLAN.md (in-context completion reporting + parity verification)
+Stopped at: Completed 157-01-PLAN.md (desktop-setup CLI command)
 Resume file: None
