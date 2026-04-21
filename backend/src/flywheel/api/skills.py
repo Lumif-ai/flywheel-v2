@@ -320,6 +320,88 @@ def _validate_input_data(data: dict, schema: dict) -> str | None:
 
 
 # ---------------------------------------------------------------------------
+# Skill routing: token-overlap matching
+# ---------------------------------------------------------------------------
+
+
+def _score_skill_match(intent: str, skill: dict) -> float:
+    """Score how well *intent* matches a single *skill* dict.
+
+    Returns a float 0.0-1.0:
+    - Exact trigger substring match -> 1.0
+    - Token overlap with triggers -> up to 0.8
+    - Token overlap with description -> up to 0.3
+    - Multi-word trigger bonus: +0.1 (capped at 0.95)
+    """
+    intent_lower = intent.lower()
+    triggers: list[str] = skill.get("triggers", [])
+
+    # --- Exact substring match (highest priority) ---
+    for trigger in triggers:
+        if trigger.lower() in intent_lower:
+            return 1.0
+
+    # --- Token overlap ---
+    intent_tokens = set(_re.findall(r"\w+", intent_lower))
+    if not intent_tokens:
+        return 0.0
+
+    # Collect trigger tokens and check multi-word bonus eligibility
+    trigger_tokens: set[str] = set()
+    multi_word_bonus = False
+    for trigger in triggers:
+        t_lower = trigger.lower()
+        words = _re.findall(r"\w+", t_lower)
+        trigger_tokens.update(words)
+        # Multi-word trigger bonus: if trigger has 2+ words and 2+ appear in intent
+        if len(words) >= 2:
+            overlap_count = sum(1 for w in words if w in intent_tokens)
+            if overlap_count >= 2:
+                multi_word_bonus = True
+
+    trigger_score = len(intent_tokens & trigger_tokens) / max(len(intent_tokens), 1) * 0.8
+
+    # Apply multi-word bonus
+    if multi_word_bonus:
+        trigger_score = min(trigger_score + 0.1, 0.95)
+
+    # Description token overlap
+    desc_tokens = set(_re.findall(r"\w+", (skill.get("description", "")).lower()))
+    desc_score = len(intent_tokens & desc_tokens) / max(len(intent_tokens), 1) * 0.3
+
+    return max(trigger_score, desc_score)
+
+
+def _route_skills(intent: str, skills: list[dict]) -> dict:
+    """Score all *skills* against *intent* and return match or candidates.
+
+    Returns:
+        {"match": skill_dict | None, "confidence": float, "candidates": [...]}
+    """
+    scored: list[tuple[dict, float]] = []
+    for skill in skills:
+        score = _score_skill_match(intent, skill)
+        if score > 0:
+            scored.append((skill, score))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+
+    if scored and scored[0][1] >= 0.6:
+        return {
+            "match": scored[0][0],
+            "confidence": scored[0][1],
+            "candidates": [],
+        }
+
+    # No confident match -- return top 3 candidates
+    return {
+        "match": None,
+        "confidence": 0,
+        "candidates": scored[:3],
+    }
+
+
+# ---------------------------------------------------------------------------
 # GET /skills -- List available skills
 # ---------------------------------------------------------------------------
 
@@ -331,6 +413,74 @@ async def list_skills(
 ) -> dict[str, Any]:
     """Return available skills from DB, scoped to tenant."""
     return {"items": await _get_available_skills_db(db, user.tenant_id)}
+
+
+# ---------------------------------------------------------------------------
+# GET /skills/route -- Intent-to-skill routing (MCP)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/route")
+async def route_skill(
+    intent: str = Query(..., min_length=1, description="Free-text intent to match"),
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Route a free-text intent to the best-matching skill.
+
+    Returns either a confident match (with MCP-normalized prompt) or a
+    top-3 candidate list when confidence is below the 0.6 threshold.
+    Only ``cc_executable=True`` skills are considered.
+    """
+    skills = await _get_available_skills_db(db, user.tenant_id)
+    cc_skills = [s for s in skills if s.get("cc_executable")]
+    result = _route_skills(intent, cc_skills)
+
+    logger.info(
+        "skill_route tenant=%s intent=%s matched=%s",
+        user.tenant_id,
+        intent[:80],
+        result["match"]["name"] if result["match"] else "none",
+    )
+
+    if result["match"] is not None:
+        matched_skill = result["match"]
+        # Fetch full skill from DB to get system_prompt
+        skill_row = await db.execute(
+            select(SkillDefinition).where(
+                SkillDefinition.name == matched_skill["name"],
+                SkillDefinition.enabled == True,  # noqa: E712
+            )
+        )
+        skill_def = skill_row.scalar_one_or_none()
+        normalized_prompt = (
+            normalize_for_mcp(skill_def.system_prompt) if skill_def else None
+        )
+        return {
+            "matched": True,
+            "skill": {
+                "name": matched_skill["name"],
+                "description": matched_skill.get("description", ""),
+                "triggers": matched_skill.get("triggers", []),
+            },
+            "confidence": round(result["confidence"], 2),
+            "prompt": normalized_prompt,
+        }
+
+    # No confident match -- return top-3 candidates
+    candidates = [
+        {
+            "name": c["name"],
+            "description": c.get("description", ""),
+            "score": round(score, 2),
+        }
+        for c, score in result["candidates"][:3]
+    ]
+    return {
+        "matched": False,
+        "candidates": candidates,
+        "prompt": None,
+    }
 
 
 # ---------------------------------------------------------------------------
