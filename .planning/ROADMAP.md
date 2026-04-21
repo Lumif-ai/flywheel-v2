@@ -878,9 +878,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
-- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
-- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+- [ ] 154-01-PLAN.md — Backend skill routing endpoint + token-overlap matching algorithm
+- [ ] 154-02-PLAN.md — Backend context preamble endpoint (8k-capped snapshot)
+- [ ] 154-03-PLAN.md — MCP tools + API client wiring (flywheel_route_skill + flywheel_warm_context)
 
 ### Phase 155: Composite Data Tools — Engine-Backed Skills
 **Goal**: Category B skills (company-intel, meeting-processor, meeting-prep, flywheel-ritual) can run entirely in-context by calling purpose-built MCP data-gathering tools that return structured data without any Anthropic API calls on the server
@@ -895,9 +895,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
-- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
-- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+- [ ] 155-01-PLAN.md — Backend data-gathering endpoints (company-data, meeting-context, briefing-sources)
+- [ ] 155-02-PLAN.md — MCP tools + API client wiring (3 flywheel_gather_* tools)
+- [ ] 155-03-PLAN.md — Category B skill prompt updates (company-intel, meeting-prep, flywheel-ritual)
 
 ### Phase 156: Telemetry + Migration Cutover
 **Goal**: Server-side skill execution is redirected for CLI/Desktop callers to in-context execution, with telemetry tracking adoption and parity verification confirming that in-context writes match server-side quality
@@ -908,12 +908,11 @@ Plans:
   2. A web UI caller invoking `flywheel_run_skill(name="company-intel")` via the API continues to execute server-side with `_execute_with_tools` exactly as before — zero behavioral change for web callers
   3. Skill execution telemetry shows per-invocation path (server-side vs in-context) with daily aggregation queryable via SQL — the operator can see adoption rates per skill and per caller type
   4. Context store writes from in-context execution of at least 5 representative skills (company-intel, meeting-prep, sales-collateral, one-pager, investor-update) match the quality/format of server-side writes — verified by diffing context file outputs for the same inputs
-**Plans**: 3 plans
+**Plans**: 2 plans
 
 Plans:
-- [ ] 153-01-PLAN.md — Prompt normalizer module + API endpoint wiring + MCP client update
-- [ ] 153-02-PLAN.md — cc_executable DB column + ORM + seed pipeline + skills list API + MCP display
-- [ ] 153-03-PLAN.md — CI validation script + run against all skills
+- [ ] 156-01-PLAN.md — Telemetry table + MCP redirect logic for cc_executable skills
+- [ ] 156-02-PLAN.md — In-context completion reporting + parity verification for 5 skills
 
 ### Phase 157: Desktop Integration
 **Goal**: Claude Desktop users can install, discover, and execute Flywheel skills without any Claude Code-specific infrastructure — no hooks, no CLAUDE.md, no skill-router SKILL.md, no local skills directory
