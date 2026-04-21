@@ -566,7 +566,7 @@ def flywheel_gather_meeting_context(meeting_id: str, max_chars: int = 16384) -> 
             lines.append("")
 
         # Pipeline entry
-        pipeline = result.get("pipeline")
+        pipeline = result.get("pipeline_entry")
         if pipeline:
             lines.append("## Pipeline")
             lines.append(f"- Name: {pipeline.get('name', '?')}")
@@ -602,9 +602,9 @@ def flywheel_gather_briefing_sources(max_chars: int = 16384, days: int = 7) -> s
         result = client.gather_briefing_sources(max_chars=max_chars, days=days)
 
         meetings = result.get("meetings", [])
-        pipeline = result.get("pipeline", [])
+        pipeline = result.get("pipeline_entries", [])
         tasks = result.get("tasks", [])
-        outreach = result.get("outreach", [])
+        outreach = result.get("outreach_due", [])
 
         lines = [
             f"BRIEFING SOURCES (last {days} days)",

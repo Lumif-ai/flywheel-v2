@@ -55,6 +55,22 @@ This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/co
 
 ---
 
+## Data Gathering (MCP Mode)
+
+When running in MCP mode (in-context execution via Claude Code or Desktop), use the composite
+data-gathering tool to load meeting context in a single call:
+
+1. Call `flywheel_gather_meeting_context(meeting_id="<meeting_id>")` to load meeting data
+2. The tool returns: meeting metadata (title, date, type), attendees list, AI summary,
+   linked pipeline entry (company, stage), and related context entries — all in one response,
+   capped at 16k chars
+3. Use this data as the foundation for classification, insight extraction, and context store writes
+4. For batch processing, call the tool once per meeting_id
+
+This replaces the multi-step context pre-read when running in-context.
+
+---
+
 ## Step 0: Load Context Store
 
 Run the pre-read to snapshot existing context store data for cross-referencing:
