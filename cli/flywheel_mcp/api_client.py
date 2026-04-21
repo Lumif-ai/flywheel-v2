@@ -192,6 +192,30 @@ class FlywheelClient:
         """GET /api/v1/context/preamble -- context store snapshot for session warming."""
         return self._request("get", "/api/v1/context/preamble")
 
+    # -- Data Gather (composite endpoints) ------------------------------------
+
+    def gather_company_data(self, url: str, max_chars: int = 16384) -> dict:
+        """GET /api/v1/gather/company-data -- crawl a company website."""
+        return self._request(
+            "get", "/api/v1/gather/company-data",
+            params={"url": url, "max_chars": max_chars},
+            timeout=60.0,
+        )
+
+    def gather_meeting_context(self, meeting_id: str, max_chars: int = 16384) -> dict:
+        """GET /api/v1/gather/meeting-context/{meeting_id} -- meeting + context."""
+        return self._request(
+            "get", f"/api/v1/gather/meeting-context/{meeting_id}",
+            params={"max_chars": max_chars},
+        )
+
+    def gather_briefing_sources(self, max_chars: int = 16384, days: int = 7) -> dict:
+        """GET /api/v1/gather/briefing-sources -- all data for daily briefing."""
+        return self._request(
+            "get", "/api/v1/gather/briefing-sources",
+            params={"max_chars": max_chars, "days": days},
+        )
+
     @staticmethod
     def _has_any_cache_trace(cache, name: str) -> bool:
         """True if the cache's index knows about ``name`` (even if the

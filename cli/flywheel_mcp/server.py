@@ -483,6 +483,169 @@ def flywheel_warm_context() -> str:
 
 
 @mcp.tool(output_schema=None)
+def flywheel_gather_company_data(url: str, max_chars: int = 16384) -> str:
+    """Gather raw company data from a website URL by crawling up to 5 pages (homepage, about, pricing, products, customers). Returns structured content with metadata. No server-side LLM processing -- returns raw crawled data for in-context analysis. Use this with company-intel skill to analyze companies without server-side LLM calls."""
+    try:
+        client = FlywheelClient()
+        result = client.gather_company_data(url, max_chars=max_chars)
+
+        lines = [f"COMPANY DATA: {url}", ""]
+        pages_crawled = result.get("pages_crawled", 0)
+        lines.append(f"Pages crawled: {pages_crawled}")
+
+        if result.get("truncated"):
+            lines.append(f"NOTE: Response truncated to {max_chars} chars. Increase max_chars for full content.")
+
+        lines.append("")
+        content = result.get("content", "")
+        if content:
+            lines.append(content)
+        else:
+            lines.append("(no content returned)")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error gathering company data: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_gather_meeting_context(meeting_id: str, max_chars: int = 16384) -> str:
+    """Gather context for a specific meeting including metadata, attendees, AI summary, linked pipeline entry, and related context store entries. Returns structured data for in-context meeting prep or analysis. No server-side LLM processing."""
+    try:
+        client = FlywheelClient()
+        result = client.gather_meeting_context(meeting_id, max_chars=max_chars)
+
+        meeting = result.get("meeting", {})
+        title = meeting.get("title", "Untitled")
+        meeting_date = meeting.get("meeting_date", "unknown date")
+
+        lines = [f"## Meeting: {title}", f"Date: {meeting_date}", ""]
+
+        # Attendees
+        attendees = meeting.get("attendees", [])
+        if attendees:
+            lines.append("## Attendees")
+            for a in attendees:
+                name = a.get("name", a.get("email", "?"))
+                email = a.get("email", "")
+                lines.append(f"- {name}" + (f" ({email})" if email else ""))
+            lines.append("")
+
+        # AI Summary
+        ai_summary = meeting.get("ai_summary") or result.get("ai_summary")
+        if ai_summary:
+            lines.append("## Summary")
+            lines.append(ai_summary)
+            lines.append("")
+
+        # Pipeline entry
+        pipeline = result.get("pipeline")
+        if pipeline:
+            lines.append("## Pipeline")
+            lines.append(f"- Name: {pipeline.get('name', '?')}")
+            lines.append(f"- Stage: {pipeline.get('stage', '?')}")
+            lines.append(f"- Fit: {pipeline.get('fit_tier', '?')}")
+            lines.append("")
+
+        # Context entries
+        context_entries = result.get("context_entries", [])
+        if context_entries:
+            lines.append(f"## Context ({len(context_entries)} entries)")
+            for entry in context_entries:
+                file_name = entry.get("file_name", "?")
+                content = entry.get("content", "")
+                lines.append(f"[{file_name}] {content}")
+            lines.append("")
+
+        if result.get("truncated"):
+            lines.append(f"NOTE: Response truncated to {max_chars} chars. Increase max_chars for full content.")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error gathering meeting context: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_gather_briefing_sources(max_chars: int = 16384, days: int = 7) -> str:
+    """Gather all data sources needed for a daily briefing: recent meetings, pipeline changes, pending tasks, and outreach due. Returns structured data for in-context briefing generation. No server-side LLM processing -- the briefing synthesis happens in your context window."""
+    try:
+        client = FlywheelClient()
+        result = client.gather_briefing_sources(max_chars=max_chars, days=days)
+
+        meetings = result.get("meetings", [])
+        pipeline = result.get("pipeline", [])
+        tasks = result.get("tasks", [])
+        outreach = result.get("outreach", [])
+
+        lines = [
+            f"BRIEFING SOURCES (last {days} days)",
+            f"{len(meetings)} meetings, {len(pipeline)} pipeline entries, "
+            f"{len(tasks)} tasks, {len(outreach)} outreach due",
+            "",
+        ]
+
+        # Recent Meetings
+        lines.append("## Recent Meetings")
+        if meetings:
+            for m in meetings:
+                title = m.get("title", "Untitled")
+                date = m.get("meeting_date", "?")
+                mtype = m.get("meeting_type") or "unclassified"
+                lines.append(f"- {title} ({date}) [{mtype}]")
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        # Pipeline Activity
+        lines.append("## Pipeline Activity")
+        if pipeline:
+            for p in pipeline:
+                name = p.get("name", "?")
+                stage = p.get("stage", "?")
+                company = p.get("company") or p.get("domain") or ""
+                lines.append(f"- {name} -- {stage}" + (f" ({company})" if company else ""))
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        # Tasks
+        lines.append("## Tasks")
+        if tasks:
+            for t in tasks:
+                title = t.get("title", "Untitled")
+                status = t.get("status", "?")
+                source = t.get("source") or t.get("suggested_skill") or ""
+                lines.append(f"- {title} [{status}]" + (f" (from: {source})" if source else ""))
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        # Outreach Due
+        lines.append("## Outreach Due")
+        if outreach:
+            for o in outreach:
+                contact_name = o.get("contact_name") or o.get("name", "?")
+                subject = o.get("subject") or o.get("message_subject") or "(no subject)"
+                lines.append(f"- {contact_name}: {subject}")
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        if result.get("truncated"):
+            lines.append(f"NOTE: Response truncated to {max_chars} chars. Increase max_chars for full content.")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error gathering briefing sources: {exc}"
+
+
+@mcp.tool(output_schema=None)
 def flywheel_fetch_skill_assets(name: str) -> ToolResult:
     """Fetch a skill's Python bundle + all transitive library bundles.
 
