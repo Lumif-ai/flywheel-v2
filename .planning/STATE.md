@@ -11,9 +11,9 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 
 Milestone: v23.0 In-Context Skill Execution
 Phase: 154 of 157 (Core MCP Tools — Routing + Context Warming)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-04-21 -- Phase 153 verified (5/5 SC passed), moving to Phase 154
+Plan: 1 of 3 in current phase
+Status: Executing
+Last activity: 2026-04-21 -- Plan 154-01 complete (skill routing endpoint)
 
 Progress: [██░░░░░░░░] 20%
 
@@ -37,6 +37,7 @@ Progress: [██░░░░░░░░] 20%
 *Updated after each plan completion*
 | Phase 153 P01 | 490 | 2 tasks | 4 files |
 | Phase 153 P03 | 99 | 2 tasks | 1 files |
+| Phase 154 P01 | 78s | 2 tasks | 1 files |
 | Phase 154 P02 | 1min | 1 tasks | 1 files |
 
 ## Accumulated Context
@@ -74,5 +75,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-21
-Stopped at: Completed 153-03-PLAN.md (validate_skill_tools.py). Phase 153 complete (all 3 plans done).
+Stopped at: Completed 154-01-PLAN.md (skill routing endpoint). 2 plans remaining in Phase 154.
 Resume file: None
