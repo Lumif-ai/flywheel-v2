@@ -160,6 +160,30 @@ class FlywheelClient:
             url += f"?mode={mode}"
         return self._request("get", url)
 
+    def log_skill_telemetry(
+        self,
+        skill_name: str,
+        execution_path: str,
+        caller_type: str = "mcp",
+        metadata: dict | None = None,
+    ) -> dict:
+        """POST /api/v1/skills/telemetry -- fire-and-forget telemetry.
+
+        Failures are swallowed so telemetry never blocks skill execution.
+        """
+        body: dict = {
+            "skill_name": skill_name,
+            "execution_path": execution_path,
+            "caller_type": caller_type,
+        }
+        if metadata:
+            body["metadata"] = metadata
+        try:
+            return self._request("post", "/api/v1/skills/telemetry", json=body)
+        except Exception as exc:
+            logger.warning("Telemetry logging failed (non-blocking): %s", exc)
+            return {"status": "error"}
+
     def route_skill(self, intent: str) -> dict:
         """GET /api/v1/skills/route -- match intent to best skill."""
         return self._request("get", "/api/v1/skills/route", params={"intent": intent})

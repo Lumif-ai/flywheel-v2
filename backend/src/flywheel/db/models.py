@@ -343,6 +343,38 @@ class SkillRun(Base):
     )
 
 
+class SkillExecutionTelemetry(Base):
+    """Tracks every skill invocation (redirect or server-side) for migration
+    cutover analytics.  execution_path distinguishes how the skill ran:
+    - server_side: traditional backend execution
+    - redirect_to_in_context: MCP tool returned redirect message
+    - in_context_completed: skill finished in-context (future use)
+    """
+
+    __tablename__ = "skill_execution_telemetry"
+    __table_args__ = (
+        Index("idx_skill_telemetry_created_skill", "created_at", "skill_name"),
+    )
+
+    id: Mapped[UUID] = mapped_column(
+        primary_key=True, server_default=text("gen_random_uuid()")
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        ForeignKey("tenants.id"), nullable=False
+    )
+    skill_name: Mapped[str] = mapped_column(Text, nullable=False)
+    execution_path: Mapped[str] = mapped_column(Text, nullable=False)
+    caller_type: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'mcp'")
+    )
+    metadata_: Mapped[dict] = mapped_column(
+        "metadata", JSONB, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime.datetime] = mapped_column(
+        TIMESTAMP(timezone=True), server_default=text("now()")
+    )
+
+
 class EnrichmentCache(Base):
     __tablename__ = "enrichment_cache"
     __table_args__ = (

@@ -183,10 +183,42 @@ def flywheel_run_skill(
 
     try:
         client = FlywheelClient()
+
+        # Check if skill is cc_executable -- redirect to in-context execution
+        try:
+            skills_resp = client.fetch_skills()
+            skill_meta = next(
+                (s for s in skills_resp.get("items", []) if s["name"] == skill_name),
+                None,
+            )
+            if skill_meta and skill_meta.get("cc_executable", False):
+                # Log redirect telemetry (fire-and-forget, never blocks)
+                try:
+                    client.log_skill_telemetry(skill_name, "redirect_to_in_context")
+                except Exception:
+                    pass  # telemetry failure must not block redirect
+                return (
+                    f"REDIRECT: '{skill_name}' runs better in-context using your Claude subscription.\n\n"
+                    f"Instead of flywheel_run_skill, do this:\n"
+                    f"1. Call flywheel_fetch_skill_prompt(skill_name='{skill_name}') to get the full prompt\n"
+                    f"2. Execute the skill instructions directly in this conversation\n"
+                    f"3. Save results via flywheel_save_document and flywheel_write_context\n\n"
+                    f"This gives better results because you have full conversation context, "
+                    f"user files, and codebase access."
+                )
+        except Exception:
+            pass  # On ANY failure to check, fall through to server-side execution (safe default)
+
         result = client.start_skill_run(skill_name, input_text, input_data=parsed_input_data)
         run_id = result.get("run_id") or result.get("id")
         if not run_id:
             return f"Skill run started but no run_id returned: {result}"
+
+        # Log server-side execution telemetry
+        try:
+            client.log_skill_telemetry(skill_name, "server_side")
+        except Exception:
+            pass  # telemetry failure must not block execution
 
         # Poll with exponential backoff: 3s, 5s, 8s, then 10s intervals
         intervals = [3, 5, 8] + [10] * 57  # ~10 min total

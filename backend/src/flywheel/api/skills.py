@@ -36,7 +36,7 @@ import re as _re
 
 from flywheel.api.deps import get_tenant_db, require_tenant
 from flywheel.auth.jwt import TokenPayload, decode_jwt
-from flywheel.db.models import ContextEntry, SkillAsset, SkillDefinition, SkillRun, TenantSkill, WorkItem
+from flywheel.db.models import ContextEntry, SkillAsset, SkillDefinition, SkillExecutionTelemetry, SkillRun, TenantSkill, WorkItem
 from flywheel.db.session import get_session_factory, get_tenant_session
 from flywheel.middleware.rate_limit import check_anonymous_run_limit, check_concurrent_run_limit, limiter
 from flywheel.services.prompt_normalizer import normalize_for_mcp
@@ -49,6 +49,13 @@ router = APIRouter(prefix="/skills", tags=["skills"])
 # ---------------------------------------------------------------------------
 # Request / Response models
 # ---------------------------------------------------------------------------
+
+
+class SkillTelemetryRequest(BaseModel):
+    skill_name: str
+    execution_path: str
+    caller_type: str = "mcp"
+    metadata: dict | None = None
 
 
 class StartRunRequest(BaseModel):
@@ -1426,3 +1433,39 @@ async def get_run_trace(
         captured_at=captured_at_str,
         status="available",
     )
+
+
+# ---------------------------------------------------------------------------
+# Telemetry
+# ---------------------------------------------------------------------------
+
+VALID_EXECUTION_PATHS = {"server_side", "redirect_to_in_context", "in_context_completed"}
+
+
+@router.post("/telemetry")
+async def log_skill_telemetry(
+    body: SkillTelemetryRequest,
+    tenant: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Record a skill execution telemetry event.
+
+    Fire-and-forget from the caller side — failures here return 4xx/5xx but
+    callers are expected to swallow them silently.
+    """
+    if body.execution_path not in VALID_EXECUTION_PATHS:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"execution_path must be one of {sorted(VALID_EXECUTION_PATHS)}",
+        )
+
+    row = SkillExecutionTelemetry(
+        tenant_id=tenant.tenant_id,
+        skill_name=body.skill_name,
+        execution_path=body.execution_path,
+        caller_type=body.caller_type,
+        metadata_=body.metadata or {},
+    )
+    db.add(row)
+    await db.commit()
+    return {"status": "recorded"}
