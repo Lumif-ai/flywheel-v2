@@ -253,6 +253,31 @@ def flywheel_run_skill(
 
 
 @mcp.tool(output_schema=None)
+def flywheel_log_skill_execution(
+    skill_name: str = "",
+    status: str = "completed",
+    context_files_written: str = "",
+    documents_saved: str = "",
+) -> str:
+    """Log completion of an in-context skill execution for telemetry. Call this after executing a skill in-context (via flywheel_fetch_skill_prompt) to track adoption metrics. status: 'completed' or 'failed'. context_files_written: comma-separated list of context file names written to. documents_saved: comma-separated list of document titles saved."""
+    try:
+        client = FlywheelClient()
+        metadata = {
+            "status": status,
+            "context_files_written": [f.strip() for f in context_files_written.split(",") if f.strip()],
+            "documents_saved": [d.strip() for d in documents_saved.split(",") if d.strip()],
+        }
+        client.log_skill_telemetry(skill_name, "in_context_completed", metadata=metadata)
+        return (
+            f"Recorded: {skill_name} executed in-context ({status}). "
+            f"{len(metadata['context_files_written'])} context files, "
+            f"{len(metadata['documents_saved'])} documents."
+        )
+    except Exception as exc:
+        return f"Error logging skill execution: {exc}"
+
+
+@mcp.tool(output_schema=None)
 def flywheel_read_context(query: str) -> str:
     """Search Flywheel's business knowledge base.
 
