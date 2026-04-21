@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 ## Current Position
 
 Milestone: v23.0 In-Context Skill Execution
-Phase: 153 of 157 (Prompt Normalization + Schema)
-Plan: 3 of 3 in current phase
-Status: Phase 153 Complete
-Last activity: 2026-04-21 -- Plan 153-03 complete (validate_skill_tools.py)
+Phase: 154 of 157 (Core MCP Tools — Routing + Context Warming)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-04-21 -- Phase 153 verified (5/5 SC passed), moving to Phase 154
 
-Progress: [████░░░░░░] 20%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 
@@ -37,6 +37,7 @@ Progress: [████░░░░░░] 20%
 *Updated after each plan completion*
 | Phase 153 P01 | 490 | 2 tasks | 4 files |
 | Phase 153 P03 | 99 | 2 tasks | 1 files |
+| Phase 154 P02 | 1min | 1 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -48,6 +49,7 @@ Recent decisions affecting current work:
 - v22.0 shipped: Skill Platform Consolidation complete (Phases 146-152.1). Skills served via MCP from Supabase. Local ~/.claude/skills/ mirror retired for broker module.
 - v23.0 scope: In-Context Skill Execution replaces Project Primitive Platform (deferred). Eliminate server-side LLM spend for CLI/Desktop callers.
 - [Phase 153]: Validate skill tools AFTER normalization (not raw prompts) to test what API serves
+- [Phase 154]: Used row_number() window function for top-5 entries per file in single query for preamble endpoint
 
 ### Prior Milestone Context
 
