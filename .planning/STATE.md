@@ -10,10 +10,10 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 ## Current Position
 
 Milestone: v23.0 In-Context Skill Execution
-Phase: 155 of 157 (Composite Data Tools — Engine-Backed Skills)
-Plan: 1 of 3 in current phase
+Phase: 156 of 157 (Telemetry + Migration Cutover)
+Plan: 1 of 2 in current phase
 Status: Executing
-Last activity: 2026-04-21 -- Completed 155-01 (data-gathering endpoints)
+Last activity: 2026-04-21 -- Completed 156-01 (telemetry table + MCP redirect)
 
 Progress: [████░░░░░░] 40%
 
@@ -53,6 +53,7 @@ Recent decisions affecting current work:
 - v23.0 scope: In-Context Skill Execution replaces Project Primitive Platform (deferred). Eliminate server-side LLM spend for CLI/Desktop callers.
 - [Phase 153]: Validate skill tools AFTER normalization (not raw prompts) to test what API serves
 - [Phase 154]: Used row_number() window function for top-5 entries per file in single query for preamble endpoint
+- [Phase 156]: Fire-and-forget telemetry with double try/except in MCP tool; metadata_ column alias for JSONB (matching ContextAuditLog pattern)
 - [Phase 155-01]: LeadMessage has no send_after; outreach filtered by status='drafted' instead. Data gather pattern: _cap_response(data, max_chars) with progressive list truncation.
 
 ### Prior Milestone Context
@@ -78,5 +79,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-21
-Stopped at: Completed 155-01-PLAN.md
+Stopped at: Completed 156-01-PLAN.md
 Resume file: None
