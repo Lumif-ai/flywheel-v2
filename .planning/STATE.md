@@ -10,12 +10,12 @@ See: .planning/PROJECT.md (updated 2026-04-21)
 ## Current Position
 
 Milestone: v23.0 In-Context Skill Execution
-Phase: 154 of 157 (Core MCP Tools — Routing + Context Warming)
-Plan: 3 of 3 in current phase (COMPLETE)
-Status: Phase 154 Complete
-Last activity: 2026-04-21 -- Plan 154-03 complete (MCP tool wiring for route + preamble)
+Phase: 155 of 157 (Composite Data Tools — Engine-Backed Skills)
+Plan: 1 of 3 in current phase
+Status: Executing
+Last activity: 2026-04-21 -- Completed 155-01 (data-gathering endpoints)
 
-Progress: [██████████] 100%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -40,6 +40,7 @@ Progress: [██████████] 100%
 | Phase 154 P01 | 78s | 2 tasks | 1 files |
 | Phase 154 P02 | 1min | 1 tasks | 1 files |
 | Phase 154 P03 | 73s | 2 tasks | 2 files |
+| Phase 155 P01 | 122s | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -52,6 +53,7 @@ Recent decisions affecting current work:
 - v23.0 scope: In-Context Skill Execution replaces Project Primitive Platform (deferred). Eliminate server-side LLM spend for CLI/Desktop callers.
 - [Phase 153]: Validate skill tools AFTER normalization (not raw prompts) to test what API serves
 - [Phase 154]: Used row_number() window function for top-5 entries per file in single query for preamble endpoint
+- [Phase 155-01]: LeadMessage has no send_after; outreach filtered by status='drafted' instead. Data gather pattern: _cap_response(data, max_chars) with progressive list truncation.
 
 ### Prior Milestone Context
 
@@ -76,5 +78,5 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-04-21
-Stopped at: Completed 154-03-PLAN.md. Phase 154 complete (all 3 plans done).
+Stopped at: Completed 155-01-PLAN.md
 Resume file: None
