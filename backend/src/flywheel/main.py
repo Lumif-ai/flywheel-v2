@@ -52,6 +52,7 @@ from flywheel.api.relationships import router as relationships_router
 from flywheel.api.signals import router as signals_router
 from flywheel.api.meetings import router as meetings_router
 from flywheel.api.tasks import router as tasks_router
+from flywheel.api.gather import router as gather_router
 from flywheel.config import settings
 from flywheel.middleware.rate_limit import limiter
 from flywheel.middleware.timing import TimingMiddleware
@@ -248,6 +249,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline_router, prefix="/api/v1")
     app.include_router(leads_router, prefix="/api/v1")
     app.include_router(broker_router, prefix="/api/v1")
+    app.include_router(gather_router, prefix="/api/v1")
 
     return app
 
