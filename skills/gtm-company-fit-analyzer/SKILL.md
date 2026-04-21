@@ -1038,6 +1038,22 @@ Update memory with new preferences. Edit existing entries, never duplicate.
 |---------|------|---------|
 | 1.0 | 2026-03-13 | Pre-Flywheel baseline (existing behavior, no standard sections) |
 
+## Data Gathering (MCP Mode)
+
+When running in MCP mode (in-context execution via Claude Code or Desktop), use the composite
+data-gathering tool instead of manually crawling websites:
+
+1. Call `flywheel_gather_company_data(url="<target_company_url>")` to crawl the company website
+2. The tool returns structured crawled content from up to 5 pages (homepage, about, pricing, products, customers) as plain text, capped at 16k chars
+3. Analyze the returned content in-context to extract: company name, description, industry, team info, funding signals, tech stack, ICP indicators, pricing model
+4. Write structured findings to context store using `flywheel_write_context`
+
+This replaces the server-side `structure_intelligence()` LLM call -- all analysis happens
+in the user's context window. The crawl itself is still server-side (httpx), but synthesis
+is done by you (Claude) directly.
+
+If the tool returns `success: false`, fall back to manual web research via `WebSearch` / `WebFetch`.
+
 ## Flywheel MCP Integration
 
 When connected to the Flywheel MCP server, persist scores to the GTM leads pipeline:

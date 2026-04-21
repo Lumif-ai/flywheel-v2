@@ -41,6 +41,7 @@ Progress: [████░░░░░░] 40%
 | Phase 154 P02 | 1min | 1 tasks | 1 files |
 | Phase 154 P03 | 73s | 2 tasks | 2 files |
 | Phase 155 P01 | 122s | 2 tasks | 2 files |
+| Phase 155 P02 | 112 | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -55,6 +56,7 @@ Recent decisions affecting current work:
 - [Phase 154]: Used row_number() window function for top-5 entries per file in single query for preamble endpoint
 - [Phase 156]: Fire-and-forget telemetry with double try/except in MCP tool; metadata_ column alias for JSONB (matching ContextAuditLog pattern)
 - [Phase 155-01]: LeadMessage has no send_after; outreach filtered by status='drafted' instead. Data gather pattern: _cap_response(data, max_chars) with progressive list truncation.
+- [Phase 155]: Extended timeout (60s) on gather_company_data for external site crawling; section-header formatting for Claude readability
 
 ### Prior Milestone Context
 

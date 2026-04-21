@@ -50,6 +50,20 @@ Core pipeline: load context -> gather attendees -> detect prior history -> resea
 
 ---
 
+## Data Gathering (MCP Mode)
+
+When running in MCP mode (in-context execution via Claude Code or Desktop), use the composite
+data-gathering tool to load all meeting context in a single call:
+
+1. Call `flywheel_gather_meeting_context(meeting_id="<meeting_id>")` to load meeting data
+2. The tool returns: meeting metadata (title, date, type), attendees list, AI summary (if owner), linked pipeline entry (company, stage), and related context entries -- all in one response, capped at 16k chars
+3. Use this data to prepare the briefing in-context: identify attendees, review prior interactions, surface relevant pipeline context
+4. If the meeting has a linked pipeline entry, use it to pull additional company context via `flywheel_read_context`
+
+This replaces the server-side meeting-prep engine stages -- all orchestration and synthesis
+happens in the user's context window. The data fetch is still server-side (DB queries),
+but briefing generation is done by you (Claude) directly.
+
 ## Step 0: Verify Dependencies & Load Context Store
 
 ### 0a: Dependency Check (fail fast)
