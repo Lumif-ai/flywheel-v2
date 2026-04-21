@@ -343,6 +343,114 @@ def flywheel_fetch_skill_prompt(skill_name: str) -> str:
 
 
 @mcp.tool(output_schema=None)
+def flywheel_route_skill(intent: str) -> str:
+    """Route a natural-language intent to the best matching Flywheel skill.
+
+    Returns the skill's name, description, and full MCP-normalized prompt
+    ready for in-context execution. If no strong match, returns top-3
+    candidates for the user to choose from.
+
+    Use this at conversation start when the user expresses a goal that
+    might map to a Flywheel skill (e.g., "prepare for my meeting",
+    "draft outreach emails", "process this insurance submission").
+    """
+    try:
+        client = FlywheelClient()
+        result = client.route_skill(intent)
+
+        if result.get("matched"):
+            skill = result["skill"]
+            lines = [
+                f"MATCHED SKILL: {skill['name']}",
+                f"Description: {skill['description']}",
+                f"Confidence: {result['confidence']}",
+                "",
+                "--- SKILL PROMPT (execute in-context) ---",
+                "",
+                result.get("prompt", "(no prompt available)"),
+            ]
+            return "\n".join(lines)
+        else:
+            candidates = result.get("candidates", [])
+            if not candidates:
+                return (
+                    f"No skills matched intent: {intent!r}\n\n"
+                    "Try rephrasing or use flywheel_fetch_skills to browse all available skills."
+                )
+            lines = [
+                f"No confident match for: {intent!r}",
+                "",
+                "Top candidates (use flywheel_fetch_skill_prompt to load one):",
+                "",
+            ]
+            for i, c in enumerate(candidates, 1):
+                lines.append(f"  {i}. {c['name']} (score: {c.get('score', '?')})")
+                lines.append(f"     {c['description']}")
+                lines.append("")
+            return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error routing skill: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_warm_context() -> str:
+    """Load a snapshot of the user's Flywheel context store for session warming.
+
+    Returns a compact summary of context files (company intel, ICP profiles,
+    positioning, etc.) and their most recent entries. Call this at the start
+    of a conversation to prime your context window with the user's business
+    intelligence.
+
+    Response is capped at 8k characters to avoid context overflow.
+    """
+    try:
+        client = FlywheelClient()
+        result = client.get_context_preamble()
+
+        catalog = result.get("catalog", [])
+        snapshot = result.get("snapshot", [])
+        truncated = result.get("truncated", False)
+
+        lines = ["FLYWHEEL CONTEXT STORE SNAPSHOT", ""]
+
+        # Catalog summary
+        lines.append(f"Context files ({len(catalog)}):")
+        for f in catalog:
+            status_icon = "+" if f.get("status") != "empty" else "-"
+            lines.append(f"  [{status_icon}] {f['file_name']}: {f.get('description', '')}")
+        lines.append("")
+
+        # Recent entries
+        if snapshot:
+            lines.append(f"Recent entries ({len(snapshot)}):")
+            lines.append("")
+            current_file = None
+            for entry in snapshot:
+                if entry["file_name"] != current_file:
+                    current_file = entry["file_name"]
+                    lines.append(f"## {current_file}")
+                content = entry.get("content", "")
+                source = entry.get("source", "")
+                date = entry.get("date", "")
+                lines.append(f"  [{date}] ({source}) {content}")
+            lines.append("")
+        else:
+            lines.append("No context entries yet. Use flywheel_write_context to add intelligence.")
+            lines.append("")
+
+        if truncated:
+            lines.append("(Snapshot truncated to 8k chars -- use flywheel_read_context for full entries)")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error warming context: {exc}"
+
+
+@mcp.tool(output_schema=None)
 def flywheel_fetch_skill_assets(name: str) -> ToolResult:
     """Fetch a skill's Python bundle + all transitive library bundles.
 

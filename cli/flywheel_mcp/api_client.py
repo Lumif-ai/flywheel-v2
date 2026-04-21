@@ -160,6 +160,14 @@ class FlywheelClient:
             url += f"?mode={mode}"
         return self._request("get", url)
 
+    def route_skill(self, intent: str) -> dict:
+        """GET /api/v1/skills/route -- match intent to best skill."""
+        return self._request("get", "/api/v1/skills/route", params={"intent": intent})
+
+    def get_context_preamble(self) -> dict:
+        """GET /api/v1/context/preamble -- context store snapshot for session warming."""
+        return self._request("get", "/api/v1/context/preamble")
+
     @staticmethod
     def _has_any_cache_trace(cache, name: str) -> bool:
         """True if the cache's index knows about ``name`` (even if the
