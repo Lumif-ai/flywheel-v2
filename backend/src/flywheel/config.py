@@ -1,6 +1,8 @@
 """Environment-driven configuration using Pydantic Settings."""
 
-from pydantic import AliasChoices, Field
+from urllib.parse import quote_plus
+
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings
 
 
@@ -9,6 +11,15 @@ class Settings(BaseSettings):
 
     flywheel_backend: str = "flatfile"
     database_url: str = "postgresql+asyncpg://flywheel:flywheel@localhost:5432/flywheel"
+
+    # Individual DB parts — when DB_HOST is set, DATABASE_URL is assembled from these.
+    db_driver: str = "postgresql+asyncpg"
+    db_host: str = ""
+    db_port: int = 5432
+    db_user: str = ""
+    db_password: str = ""
+    db_name: str = ""
+
     debug: bool = True
     cors_origins: list[str] = ["http://localhost:5173"]
 
@@ -81,6 +92,16 @@ class Settings(BaseSettings):
     dismiss_threshold: int = 3  # minimum dismissals to trigger scoring signal
 
     model_config = {"env_file": ".env", "env_file_encoding": "utf-8"}
+
+    @model_validator(mode="after")
+    def _assemble_database_url(self) -> "Settings":
+        if self.db_host:
+            password = quote_plus(self.db_password)
+            self.database_url = (
+                f"{self.db_driver}://{self.db_user}:{password}"
+                f"@{self.db_host}:{self.db_port}/{self.db_name}"
+            )
+        return self
 
 
 settings = Settings()
