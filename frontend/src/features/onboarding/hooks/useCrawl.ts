@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from 'react'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import type { SSEEvent } from '@/types/events'
 
@@ -94,7 +94,7 @@ export function useCrawl() {
   // Connect SSE when crawling
   useSSE(
     state.phase === 'crawling' && state.runId
-      ? `/api/v1/skills/runs/${state.runId}/stream`
+      ? apiUrl(`/api/v1/skills/runs/${state.runId}/stream`)
       : null,
     handleCrawlEvent,
   )
@@ -114,7 +114,7 @@ export function useCrawl() {
 
   useSSE(
     state.phase === 'first_run' && state.skillRunId
-      ? `/api/v1/skills/runs/${state.skillRunId}/stream`
+      ? apiUrl(`/api/v1/skills/runs/${state.skillRunId}/stream`)
       : null,
     handleSkillEvent,
   )

@@ -1,4 +1,4 @@
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
 // Types
@@ -119,7 +119,7 @@ export async function shareDocument(id: string): Promise<ShareResponse> {
 export async function fetchSharedDocument(
   shareToken: string,
 ): Promise<DocumentDetail> {
-  const res = await fetch(`/api/v1/documents/shared/${shareToken}`)
+  const res = await fetch(apiUrl(`/api/v1/documents/shared/${shareToken}`))
   if (!res.ok) {
     const body = await res.json().catch(() => ({
       error: 'Unknown',

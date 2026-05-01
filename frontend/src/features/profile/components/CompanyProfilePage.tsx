@@ -40,7 +40,7 @@ import {
 } from '../hooks/useCompanyProfile'
 import { useProfileCrawl } from '../hooks/useProfileCrawl'
 import { LiveCrawl } from '@/features/onboarding/components/LiveCrawl'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 
 // ---------------------------------------------------------------------------
 // URL helpers
@@ -723,7 +723,7 @@ function UploadedFilesSection({
       for (const file of Array.from(files)) {
         const formData = new FormData()
         formData.append('file', file)
-        const res = await fetch('/api/v1/files/upload', {
+        const res = await fetch(apiUrl('/api/v1/files/upload'), {
           method: 'POST',
           headers: token ? { Authorization: `Bearer ${token}` } : {},
           body: formData,
@@ -864,7 +864,7 @@ function DocumentAnalyzePanel({ onRunStarted }: { onRunStarted?: (runId: string)
     try {
       const formData = new FormData(); formData.append('file', file)
       const { token } = await import('@/stores/auth').then((m) => ({ token: m.useAuthStore.getState().token }))
-      const uploadRes = await fetch('/api/v1/files/upload', { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formData })
+      const uploadRes = await fetch(apiUrl('/api/v1/files/upload'), { method: 'POST', headers: token ? { Authorization: `Bearer ${token}` } : {}, body: formData })
       if (!uploadRes.ok) throw new Error('Upload failed')
       const uploadData = (await uploadRes.json()) as { id: string }
       await linkFile.mutateAsync(uploadData.id)

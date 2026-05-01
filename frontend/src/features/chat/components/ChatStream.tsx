@@ -4,7 +4,7 @@ import { useQueryClient } from '@tanstack/react-query'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useSSE } from '@/lib/sse'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useChatStore } from '../store'
 import type { SSEEvent } from '@/types/events'
 
@@ -68,7 +68,7 @@ export function ChatStream({ runId }: ChatStreamProps) {
 
   useSSE(
     streamState.status !== 'complete' && streamState.status !== 'error'
-      ? `/api/v1/skills/runs/${runId}/stream`
+      ? apiUrl(`/api/v1/skills/runs/${runId}/stream`)
       : null,
     handleEvent,
   )

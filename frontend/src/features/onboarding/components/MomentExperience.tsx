@@ -10,7 +10,7 @@ import { useState, useCallback, useRef } from 'react'
 import { Linkedin, Calendar, ArrowRight, Building2 } from 'lucide-react'
 import { FlywheelWheel } from '@/components/ui/FlywheelWheel'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import { spacing, typography, colors } from '@/lib/design-tokens'
 import { animationClasses } from '@/lib/animations'
@@ -103,7 +103,7 @@ export function MomentExperience({ onComplete, onSkip, onBack }: MomentExperienc
       })
 
       runIdRef.current = res.run_id
-      setSseUrl(`/api/v1/onboarding/run/${res.run_id}/stream`)
+      setSseUrl(apiUrl(`/api/v1/onboarding/run/${res.run_id}/stream`))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start meeting prep')
       setPhase('input')

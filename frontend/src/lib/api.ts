@@ -1,7 +1,13 @@
 import { useAuthStore } from '@/stores/auth'
 import { useFocusStore } from '@/stores/focus'
 
-const BASE_URL = '/api/v1'
+const API_ORIGIN = (import.meta.env.VITE_API_BASE_URL ?? '').replace(/\/$/, '')
+const BASE_URL = `${API_ORIGIN}/api/v1`
+
+/** Resolve a path to an absolute API URL. Accepts '/api/v1/...' or any other absolute-on-origin path. */
+export function apiUrl(path: string): string {
+  return `${API_ORIGIN}${path}`
+}
 
 export class ApiError extends Error {
   constructor(
