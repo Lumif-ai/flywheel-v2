@@ -49,7 +49,7 @@ jobs:
             --cache-control "public, max-age=31536000, immutable" \
             --exclude "index.html" \
             --exclude "*.map"
-          aws s3 cp dist/index.html "s3://${S3_BUCKET}/index.html" \
+          aws s3 cp dist/index.html "s3://${S3_BUCKET}/flywheel-frontend/index.html" \
             --cache-control "public, max-age=0, must-revalidate" \
             --content-type "text/html"
         env:
