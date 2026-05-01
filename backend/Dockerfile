@@ -29,5 +29,11 @@ COPY alembic.ini ./
 # Install the project itself
 RUN uv sync --frozen
 
+RUN useradd --uid 10001 --create-home --shell /bin/bash app \
+    && chown -R app:app /app
+USER app
+
+ENV PATH="/app/.venv/bin:$PATH"
+
 # Railway injects PORT env var; default to 8000 for local dev
-CMD ["sh", "-c", "uv run uvicorn flywheel.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
+CMD ["sh", "-c", "uvicorn flywheel.main:app --host 0.0.0.0 --port ${PORT:-8000}"]
