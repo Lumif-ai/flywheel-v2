@@ -12,14 +12,24 @@ export function useProjectRecommendation(projectId: string) {
   })
 }
 
-export function useDraftRecommendation(projectId: string) {
+/**
+ * Phase 150.1 Plan 03 (Blocker-3 branch P3):
+ * `draftRecommendation` warms the /broker/extract/recommendation-draft
+ * endpoint but cannot complete Pattern 3a server-side (web_tier=3). `onHandoff`
+ * fires on success with the pre-filled slash command so the caller can open
+ * the ClaudeCommandModal.
+ */
+export function useDraftRecommendation(
+  projectId: string,
+  opts?: { onHandoff?: (command: string) => void },
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (recipientEmail?: string) => draftRecommendation(projectId, recipientEmail),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
       qc.invalidateQueries({ queryKey: ['broker', 'recommendations', projectId] })
-      toast.success('Recommendation draft generated')
+      opts?.onHandoff?.(`/broker:draft-recommendation ${projectId}`)
     },
     onError: () => toast.error('Failed to generate recommendation draft'),
   })

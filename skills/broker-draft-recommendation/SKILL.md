@@ -1,8 +1,10 @@
 ---
+public: true
+cc_executable: true
 name: broker-draft-recommendation
-version: "1.0"
+version: "1.2"
 web_tier: 3
-description: Pre-check comparison data, call POST /draft-recommendation, and display the recommendation narrative with recommended carrier highlighted
+description: Pre-check comparison data, draft the recommendation narrative via Pattern 3a (extract_recommendation_draft → Claude-inline → save_recommendation_draft), and display the narrative with recommended carrier highlighted
 context-aware: true
 triggers:
   - /broker:draft-recommendation
@@ -11,11 +13,15 @@ tags:
   - insurance
   - recommendation
   - quote
+assets: []
+depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
+
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
 
 # /broker:draft-recommendation — Generate Client Recommendation Narrative
 
@@ -25,23 +31,20 @@ a client recommendation narrative with the recommended carrier highlighted.
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import httpx
 
 missing = []
-if not os.environ.get("FLYWHEEL_API_URL"):
-    missing.append("FLYWHEEL_API_URL")
-if not os.environ.get("FLYWHEEL_API_TOKEN"):
-    missing.append("FLYWHEEL_API_TOKEN")
+# Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
+creds_file = os.path.expanduser("~/.flywheel/credentials.json")
+if not os.path.exists(creds_file):
+    missing.append("~/.flywheel/credentials.json (run: flywheel login)")
 if missing:
-    raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}\n"
-                       "Run: export FLYWHEEL_API_URL=https://... && export FLYWHEEL_API_TOKEN=<jwt>")
+    raise RuntimeError(f"Missing dependencies: {', '.join(missing)}\n"
+                       "If auth is missing, run: flywheel login")
 
 print("OK: All dependencies satisfied.")
-print(f"API URL: {os.environ.get('FLYWHEEL_API_URL')}")
 ```
 
 If anything fails, stop and report the missing dependency. Do not proceed.
@@ -56,11 +59,8 @@ Ask the user for:
 Validate PROJECT_ID using field_validator:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 # Replace with actual user-provided values
 PROJECT_ID = "<user-provided-project-id>"
 RECIPIENT_EMAIL = "<user-provided-email-or-blank>"
@@ -82,10 +82,8 @@ Fetch the comparison data to confirm all quotes are extracted and ready before g
 the recommendation narrative:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 print(f"Fetching comparison data for project {PROJECT_ID}...")
@@ -130,38 +128,80 @@ if answer.lower().strip() not in ("yes", "y"):
     raise SystemExit(0)
 ```
 
-## Step 5: Call POST /draft-recommendation
+## Step 5: Draft Recommendation via Pattern 3a (Claude-in-conversation)
 
-Call the backend to generate and persist the recommendation narrative:
+v1.2 (Phase 150.1) runs the recommendation-narrative drafting in THIS
+conversation using the prompt + tool_schema the backend returns. The backend
+owns prompt assembly (comparison summary + project context + taxonomy) and
+persistence; it does NOT call Anthropic.
+
+### 5a. Fetch prompt + tool_schema + context
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 RECIPIENT_EMAIL = "<validated-recipient-email-or-None>"
 
-body = {}
-if RECIPIENT_EMAIL:
-    body["recipient_email"] = RECIPIENT_EMAIL
+print(f"Fetching recommendation prompt for project {PROJECT_ID}...")
+extract = api_client.run(api_client.extract_recommendation_draft(PROJECT_ID))
+# extract = {prompt, tool_schema, documents, metadata}
+print(f"  prompt: {len(extract['prompt'])} chars")
+print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+print(f"  tool_schema_version: {extract['metadata']['tool_schema_version']}")
+```
 
-print(f"Generating recommendation for project {PROJECT_ID}...")
-result = api_client.run(api_client.post(
-    f"projects/{PROJECT_ID}/draft-recommendation",
-    body
-))
+### 5b. Analyze inline using the returned prompt + tool_schema
+
+**YOU (Claude) now draft the recommendation narrative.** Use
+`extract["prompt"]` as the system message — it contains the full comparison
+summary, project context, and narrative guidelines — and
+`extract["tool_schema"]` as the single `tools=` entry. If
+`extract["documents"]` has attachments (supporting policy PDFs), decode
+`pdf_base64` and attach via the Anthropic document content-block protocol.
+
+Expected tool-use output keys (from `draft_recommendation_email` schema):
+`subject` (str), `body_html` (str, rich client-facing narrative),
+`recipient_email` (optional — override the Step 2 input if the prompt
+recommends a different stakeholder).
+
+### 5c. Persist the draft
+
+```python
+import os
+from flywheel.broker import api_client
+PROJECT_ID = "<validated-project-id>"
+RECIPIENT_EMAIL = "<validated-recipient-email-or-None>"
+
+analysis = {
+    "subject": "",                                       # from tool_use.input.subject
+    "body_html": "",                                     # from tool_use.input.body_html
+    "tool_schema_version": extract["metadata"]["tool_schema_version"],
+}
+if RECIPIENT_EMAIL:
+    analysis["recipient_email"] = RECIPIENT_EMAIL
+
+print(f"Persisting recommendation draft for project {PROJECT_ID}...")
+result = api_client.run(api_client.save_recommendation_draft(PROJECT_ID, analysis))
 
 rec = result.get("recommendation", result)
 ```
 
+### Why this is different from v1.1
+
+v1.1 called `POST /projects/{id}/draft-recommendation` which ran Anthropic
+server-side with the backend's subsidy key to generate the narrative, then
+persisted. v1.2 returns the SAME prompt (comparison summary, project
+context, narrative guidelines) + SAME tool_schema and has THIS conversation
+write the narrative. Same recommendation row, same subject + body_html
+shape, backend cost = zero LLM calls. Details in
+`skills/broker/MIGRATION-NOTES.md`.
+
 ## Step 6: Display the Recommendation
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 # result already fetched in Step 5
@@ -209,16 +249,24 @@ if RECIPIENT_EMAIL:
 
 ## Step 7: Memory Update
 
-After successful recommendation, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Draft Recommendation History
-- Project {PROJECT_ID}: recommendation drafted on {today's date}
-  - Recommended carrier: {recommended_carrier}
-  - Recipient email: {RECIPIENT_EMAIL or 'none'}
-  - Recommendation ID: {rec_id}
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## draft-recommendation -- {today}\n"
+        "- Project {PROJECT_ID}: recommendation drafted ranking {n_quotes} quotes for project {PROJECT_ID}\n"
+    ),
+)
 ```
 
-Done. The recommendation narrative has been generated and saved to the database.
-View the full draft in the Flywheel web app. Share the recommendation with the client
-by sending the draft from the project's recommendation tab.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

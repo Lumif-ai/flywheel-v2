@@ -20,6 +20,7 @@ import type {
   CreateProjectPayload,
   DashboardStats,
   DashboardTasksResponse,
+  DocumentZoneKind,
   DraftSolicitationsResponse,
   FollowupResponse,
   GapAnalysisResponse,
@@ -66,8 +67,26 @@ export function createProject(payload: CreateProjectPayload): Promise<BrokerProj
   return api.post<BrokerProject>('/broker/projects', payload)
 }
 
+// Phase 150.1 Plan 03: migrated from deprecated POST /broker/projects/{id}/analyze
+// to Pattern 3a /broker/extract/contract-analysis. Blocker-3 branch P3 — web UI
+// cannot enqueue broker-* skills server-side because all broker-* skills are
+// web_tier=3 and POST /skills/runs returns 422 for them ("requires the local
+// Claude Code agent"). We therefore warm /extract to prove reachability +
+// X-Flywheel-Skill + BYOK enforcement, and surface an explicit extract-only
+// status. Full analysis runs in the user's local Claude Code via
+// /broker:parse-contract. See .planning/phases/150.1-cc-as-brain-enforcement/
+// 150.1-03-SUMMARY.md for the Blocker-3 pre-flight evidence.
+// TODO(150.2): when a web_tier-safe broker enqueue path ships (e.g. a
+// background job runner that invokes the same Pattern 3a helpers server-side),
+// swap this for the full warm + enqueue pattern.
 export function triggerAnalysis(projectId: string): Promise<{ status: string }> {
-  return api.post<{ status: string }>(`/broker/projects/${projectId}/analyze`)
+  return api
+    .post<{ prompt: string; tool_schema: unknown; documents: unknown[]; metadata: Record<string, unknown> }>(
+      `/broker/extract/contract-analysis`,
+      { project_id: projectId },
+      { headers: { 'X-Flywheel-Skill': 'broker-parse-contract' } },
+    )
+    .then(() => ({ status: 'extract-only' }))
 }
 
 export function analyzeGaps(projectId: string): Promise<GapAnalysisResponse> {
@@ -98,8 +117,26 @@ export function fetchProjectQuotes(projectId: string): Promise<CarrierQuote[]> {
   return api.get<CarrierQuote[]>(`/broker/projects/${projectId}/quotes`)
 }
 
+// Phase 150.1 Plan 03: migrated from deprecated
+// POST /broker/projects/{id}/draft-solicitations (which accepted a list of
+// carriers and ran Anthropic server-side) to per-carrier Pattern 3a
+// /broker/extract/solicitation-draft warming. Blocker-3 branch P3 — see
+// triggerAnalysis comment above for the web_tier=3 rationale. Each carrier's
+// draft is fetched as an extract-only payload so we can prove enforcement +
+// BYOK + X-Flywheel-Skill emission. The empirical drafts are written via
+// /broker:draft-emails in local Claude Code.
+// TODO(150.2): replace with a warm + enqueue pattern once a web_tier-safe
+// broker enqueue path ships.
 export function draftSolicitations(projectId: string, carrierConfigIds: string[]): Promise<DraftSolicitationsResponse> {
-  return api.post<DraftSolicitationsResponse>(`/broker/projects/${projectId}/draft-solicitations`, { carrier_config_ids: carrierConfigIds })
+  return Promise.all(
+    carrierConfigIds.map((cid) =>
+      api.post<{ prompt: string; tool_schema: unknown; documents: unknown[]; metadata: Record<string, unknown> }>(
+        `/broker/extract/solicitation-draft`,
+        { project_id: projectId, carrier_config_id: cid },
+        { headers: { 'X-Flywheel-Skill': 'broker-draft-emails' } },
+      ),
+    ),
+  ).then(() => ({ drafts: [], status: 'extract-only' }) as unknown as DraftSolicitationsResponse)
 }
 
 export function editSolicitationDraft(draftId: string, payload: { subject?: string; body?: string }): Promise<SolicitationDraftResponse> {
@@ -118,8 +155,20 @@ export function confirmPortalSubmission(quoteId: string): Promise<CarrierQuote> 
   return api.post<CarrierQuote>(`/broker/quotes/${quoteId}/portal-confirm`)
 }
 
-export function extractQuote(quoteId: string, force?: boolean): Promise<{ status: string }> {
-  return api.post<{ status: string }>(`/broker/quotes/${quoteId}/extract${force ? '?force=true' : ''}`)
+// Phase 150.1 Plan 03: migrated from deprecated POST /broker/quotes/{id}/extract
+// to Pattern 3a /broker/extract/quote-extraction. Blocker-3 branch P3 — see
+// triggerAnalysis comment above for the web_tier=3 rationale.
+// TODO(150.2): replace with warm + enqueue once a web_tier-safe broker enqueue
+// path ships.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function extractQuote(quoteId: string, _force?: boolean): Promise<{ status: string }> {
+  return api
+    .post<{ prompt: string; tool_schema: unknown; documents: unknown[]; metadata: Record<string, unknown> }>(
+      `/broker/extract/quote-extraction`,
+      { quote_id: quoteId },
+      { headers: { 'X-Flywheel-Skill': 'broker-extract-quote' } },
+    )
+    .then(() => ({ status: 'extract-only' }))
 }
 
 export function markQuoteReceived(quoteId: string): Promise<CarrierQuote> {
@@ -165,11 +214,24 @@ export function draftFollowups(projectId: string): Promise<FollowupResponse> {
   return api.post<FollowupResponse>(`/broker/projects/${projectId}/draft-followups`)
 }
 
-export function draftRecommendation(projectId: string, recipientEmail?: string): Promise<RecommendationDraftResponse> {
-  return api.post<RecommendationDraftResponse>(
-    `/broker/projects/${projectId}/draft-recommendation`,
-    recipientEmail ? { recipient_email: recipientEmail } : undefined
-  )
+// Phase 150.1 Plan 03: migrated from deprecated
+// POST /broker/projects/{id}/draft-recommendation to Pattern 3a
+// /broker/extract/recommendation-draft. Blocker-3 branch P3 — see
+// triggerAnalysis comment above for the web_tier=3 rationale. The recipient
+// email is not accepted by /extract (it's persisted later on /save), so we
+// drop it here and let the local broker-draft-recommendation skill forward it
+// through the save body.
+// TODO(150.2): replace with warm + enqueue once a web_tier-safe broker enqueue
+// path ships.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function draftRecommendation(projectId: string, _recipientEmail?: string): Promise<RecommendationDraftResponse> {
+  return api
+    .post<{ prompt: string; tool_schema: unknown; documents: unknown[]; metadata: Record<string, unknown> }>(
+      `/broker/extract/recommendation-draft`,
+      { project_id: projectId },
+      { headers: { 'X-Flywheel-Skill': 'broker-draft-recommendation' } },
+    )
+    .then(() => ({ recommendation: null, status: 'extract-only' }) as unknown as RecommendationDraftResponse)
 }
 
 export function editRecommendation(
@@ -260,17 +322,48 @@ export function getDocumentRendition(fileId: string): Promise<{ download_url: st
 
 export async function uploadProjectDocuments(
   projectId: string,
-  files: File[]
+  files: File[],
+  documentType: DocumentZoneKind = 'requirements',
 ): Promise<{ documents: unknown[]; total: number }> {
   const token = useAuthStore.getState().token
   const formData = new FormData()
   files.forEach((f) => formData.append('files', f))
+  // Phase 145: single scalar document_type per request (research Pitfall 4).
+  formData.append('document_type', documentType)
   const res = await fetch(apiUrl(`/api/v1/broker/projects/${projectId}/documents`), {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     // DO NOT set Content-Type — browser sets multipart/form-data boundary automatically
     body: formData,
   })
+  if (!res.ok) throw new Error(await res.text())
+  return res.json()
+}
+
+/**
+ * PATCH a single uploaded document's `document_type` (Phase 145 zone move).
+ *
+ * Backend (145-01) clears any `misrouted` flag as part of the update; caller
+ * should invalidate the `broker-project` query on success so the UI re-renders
+ * without the chip.
+ */
+export async function patchProjectDocument(
+  projectId: string,
+  fileId: string,
+  documentType: DocumentZoneKind,
+): Promise<{ file_id: string; document_type: DocumentZoneKind }> {
+  const token = useAuthStore.getState().token
+  const res = await fetch(
+    apiUrl(`/api/v1/broker/projects/${projectId}/documents/${fileId}`),
+    {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify({ document_type: documentType }),
+    },
+  )
   if (!res.ok) throw new Error(await res.text())
   return res.json()
 }

@@ -1,8 +1,10 @@
 ---
+public: true
+cc_executable: true
 name: broker-draft-emails
-version: "1.0"
+version: "1.2"
 web_tier: 3
-description: Call POST /draft-solicitations with carrier_config_ids (UUIDs) to create email solicitation drafts in the database
+description: Draft carrier solicitation emails via Pattern 3a (extract_solicitation_draft → Claude-inline → save_solicitation_draft), one per carrier_config_id, and persist to the database
 context-aware: true
 triggers:
   - /broker:draft-emails
@@ -11,17 +13,22 @@ tags:
   - insurance
   - email
   - solicitation
+assets: []
+depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
+
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
 
 # /broker:draft-emails — Create Email Solicitation Drafts
 
-Call the draft-solicitations endpoint to create email drafts for the selected
-email-submission carriers. Requires carrier_config_ids (UUIDs from the
-`/broker:select-carriers` output) — NOT carrier names.
+Draft email solicitations for the selected email-submission carriers via the
+Pattern 3a flow: for each carrier, fetch the extract prompt + tool_schema,
+analyze inline, then persist the draft. Requires carrier_config_ids (UUIDs
+from the `/broker:select-carriers` output) — NOT carrier names.
 
 > **NOTE: This endpoint requires `carrier_config_id` UUIDs (from the
 > `/carrier-matches` response), not carrier names. Using names will cause
@@ -33,17 +40,15 @@ email-submission carriers. Requires carrier_config_ids (UUIDs from the
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import httpx
 
 missing = []
-if not os.environ.get("FLYWHEEL_API_URL"):
-    missing.append("FLYWHEEL_API_URL")
-if not os.environ.get("FLYWHEEL_API_TOKEN"):
-    missing.append("FLYWHEEL_API_TOKEN")
+# Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
+creds_file = os.path.expanduser("~/.flywheel/credentials.json")
+if not os.path.exists(creds_file):
+    missing.append("~/.flywheel/credentials.json (run: flywheel login)")
 try:
     import httpx
 except ImportError:
@@ -51,8 +56,8 @@ except ImportError:
 
 if missing:
     raise RuntimeError(
-        f"Missing required dependencies: {', '.join(missing)}\n"
-        "Run: export FLYWHEEL_API_URL=https://... && export FLYWHEEL_API_TOKEN=<jwt>"
+        f"Missing dependencies: {', '.join(missing)}\n"
+        "If auth is missing, run: flywheel login"
     )
 
 print("OK: All dependencies satisfied.")
@@ -70,10 +75,8 @@ Ask the user for:
 Validate both inputs:
 
 ```python
-import sys, os, uuid
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import field_validator
-
+import os, uuid
+from flywheel.broker import field_validator
 PROJECT_ID = "<user-provided-project-id>"
 CARRIER_CONFIG_IDS_RAW = "<user-provided-comma-separated-uuids>"
 
@@ -104,45 +107,71 @@ for cid in carrier_config_ids:
     print(f"  - {cid}")
 ```
 
-## Step 3: Call draft-solicitations Endpoint
+## Step 3: Draft Solicitation Emails via Pattern 3a (one per carrier)
+
+v1.2 (Phase 150.1) drafts each solicitation email in THIS conversation using
+the prompt + tool_schema the backend returns **per carrier**. The legacy
+v1.1 endpoint accepted a list of carriers and drafted all of them
+server-side with Anthropic; v1.2 loops client-side so the backend stays
+zero-LLM.
+
+For each carrier_config_id, call `extract_solicitation_draft` → analyze
+inline → `save_solicitation_draft`.
+
+### 3a. Per-carrier: fetch prompt + tool_schema + context docs
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 carrier_config_ids = ["<uuid-1>", "<uuid-2>"]  # from validation step
 
-print(f"\nCreating solicitation drafts for project {PROJECT_ID}...")
-print(f"Carriers: {len(carrier_config_ids)} email carrier(s)")
+drafts = []
+for cid in carrier_config_ids:
+    print(f"\n--- Drafting solicitation for carrier_config_id={cid} ---")
+    extract = api_client.run(
+        api_client.extract_solicitation_draft(PROJECT_ID, cid)
+    )
+    # extract = {prompt, tool_schema, documents, metadata}
+    print(f"  prompt: {len(extract['prompt'])} chars")
+    print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+    print(f"  documents: {len(extract['documents'])} context PDF(s)")
 
-body = {"carrier_config_ids": carrier_config_ids}
-result = api_client.run(
-    api_client.post(f"projects/{PROJECT_ID}/draft-solicitations", body)
-)
+    # 3b. Analyze inline: YOU (Claude) run the drafting.
+    # Use extract["prompt"] as the system message and extract["tool_schema"]
+    # as the single tools= entry. Expected tool-use output keys (from
+    # draft_solicitation_email schema): subject (str), body_html (str).
+    #
+    # Replace these placeholders with what YOU generated for this carrier:
+    analysis = {
+        "subject": "",                                    # from tool_use.input.subject
+        "body_html": "",                                  # from tool_use.input.body_html
+        "tool_schema_version": extract["metadata"]["tool_schema_version"],
+    }
+
+    # 3c. Persist (zero LLM calls server-side).
+    save_result = api_client.run(
+        api_client.save_solicitation_draft(PROJECT_ID, cid, analysis)
+    )
+    drafts.append(save_result)
+    print(f"  saved: subject=\"{analysis['subject'][:60]}...\" "
+          f"id={save_result.get('id', save_result.get('solicitation_id', 'n/a'))}")
 ```
+
+### Why this is different from v1.1
+
+v1.1 had a single `POST /projects/{id}/draft-solicitations` endpoint that
+accepted a list of carrier_config_ids and called Anthropic server-side
+(once per carrier) with the backend's subsidy key. v1.2 returns the SAME
+prompt + SAME tool_schema per carrier and has THIS conversation's Claude
+draft each email inline, looping client-side. Net behavior identical to the
+broker: same subjects, same body_html shape, drafts saved to the same DB
+rows. Backend cost = zero LLM calls. Details in
+`skills/broker/MIGRATION-NOTES.md`.
 
 ## Step 4: Print Results
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
-PROJECT_ID = "<validated-project-id>"
-carrier_config_ids = ["<uuid-1>", "<uuid-2>"]
-
-body = {"carrier_config_ids": carrier_config_ids}
-result = api_client.run(
-    api_client.post(f"projects/{PROJECT_ID}/draft-solicitations", body)
-)
-
-# Result may contain "drafts", "solicitations", or a top-level list
-drafts = result.get("drafts", result.get("solicitations", []))
-if isinstance(result, list):
-    drafts = result
-
 print(f"\nCreated {len(drafts)} solicitation draft(s):")
 for draft in drafts:
     carrier_name = draft.get("carrier_name", draft.get("carrier", "Unknown carrier"))
@@ -154,22 +183,30 @@ for draft in drafts:
 
 if not drafts:
     print("  (no drafts returned — check the API response for details)")
-    import json
-    print("Raw response:", json.dumps(result, indent=2))
 
 print("\nDrafts saved to database. View them in the Flywheel web app under Solicitations.")
 ```
 
 ## Step 5: Memory Update
 
-After drafts are created, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Email Draft History
-- Project {PROJECT_ID}: {N} draft(s) created on {today's date}
-  - Carrier config IDs used: [{ids}]
-  - Drafts: {carrier_name_1}, {carrier_name_2}, ...
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## draft-emails -- {today}\n"
+        "- Project {PROJECT_ID}: {n_emails} emails drafted to {n_carriers} carriers for project {PROJECT_ID}\n"
+    ),
+)
 ```
 
-Done. Email solicitation drafts have been created.
-View and send them in the Flywheel web app under Solicitations.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

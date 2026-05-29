@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 import time
 
@@ -10,8 +11,10 @@ import mcp.types as mt
 from fastmcp import FastMCP
 from fastmcp.server.middleware import Middleware
 from fastmcp.tools.tool import ToolResult
+from fastmcp.utilities.types import File
 
 from flywheel_mcp.api_client import FlywheelAPIError, FlywheelClient
+from flywheel_mcp.bundle import BundleError
 
 # --------------------------------------------------------------------------
 # Logging (stderr -- MCP protocol uses stdout)
@@ -180,10 +183,42 @@ def flywheel_run_skill(
 
     try:
         client = FlywheelClient()
+
+        # Check if skill is cc_executable -- redirect to in-context execution
+        try:
+            skills_resp = client.fetch_skills()
+            skill_meta = next(
+                (s for s in skills_resp.get("items", []) if s["name"] == skill_name),
+                None,
+            )
+            if skill_meta and skill_meta.get("cc_executable", False):
+                # Log redirect telemetry (fire-and-forget, never blocks)
+                try:
+                    client.log_skill_telemetry(skill_name, "redirect_to_in_context")
+                except Exception:
+                    pass  # telemetry failure must not block redirect
+                return (
+                    f"REDIRECT: '{skill_name}' runs better in-context using your Claude subscription.\n\n"
+                    f"Instead of flywheel_run_skill, do this:\n"
+                    f"1. Call flywheel_fetch_skill_prompt(skill_name='{skill_name}') to get the full prompt\n"
+                    f"2. Execute the skill instructions directly in this conversation\n"
+                    f"3. Save results via flywheel_save_document and flywheel_write_context\n\n"
+                    f"This gives better results because you have full conversation context, "
+                    f"user files, and codebase access."
+                )
+        except Exception:
+            pass  # On ANY failure to check, fall through to server-side execution (safe default)
+
         result = client.start_skill_run(skill_name, input_text, input_data=parsed_input_data)
         run_id = result.get("run_id") or result.get("id")
         if not run_id:
             return f"Skill run started but no run_id returned: {result}"
+
+        # Log server-side execution telemetry
+        try:
+            client.log_skill_telemetry(skill_name, "server_side")
+        except Exception:
+            pass  # telemetry failure must not block execution
 
         # Poll with exponential backoff: 3s, 5s, 8s, then 10s intervals
         intervals = [3, 5, 8] + [10] * 57  # ~10 min total
@@ -215,6 +250,31 @@ def flywheel_run_skill(
         return str(exc)
     except Exception as exc:
         return f"Error running skill: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_log_skill_execution(
+    skill_name: str = "",
+    status: str = "completed",
+    context_files_written: str = "",
+    documents_saved: str = "",
+) -> str:
+    """Log completion of an in-context skill execution for telemetry. Call this after executing a skill in-context (via flywheel_fetch_skill_prompt) to track adoption metrics. status: 'completed' or 'failed'. context_files_written: comma-separated list of context file names written to. documents_saved: comma-separated list of document titles saved."""
+    try:
+        client = FlywheelClient()
+        metadata = {
+            "status": status,
+            "context_files_written": [f.strip() for f in context_files_written.split(",") if f.strip()],
+            "documents_saved": [d.strip() for d in documents_saved.split(",") if d.strip()],
+        }
+        client.log_skill_telemetry(skill_name, "in_context_completed", metadata=metadata)
+        return (
+            f"Recorded: {skill_name} executed in-context ({status}). "
+            f"{len(metadata['context_files_written'])} context files, "
+            f"{len(metadata['documents_saved'])} documents."
+        )
+    except Exception as exc:
+        return f"Error logging skill execution: {exc}"
 
 
 @mcp.tool(output_schema=None)
@@ -302,8 +362,10 @@ def flywheel_fetch_skills() -> str:
             contract_reads = ", ".join(s.get("contract_reads", []))
             contract_writes = ", ".join(s.get("contract_writes", []))
             input_req = s.get("input_requirements", "")
+            cc_exec = s.get("cc_executable", False)
+            exec_label = "in-context" if cc_exec else "server-side"
             skill_info = (
-                f"**{name}** [{category}]\n"
+                f"**{name}** [{category}] ({exec_label})\n"
                 f"  {description}\n"
                 f"  Triggers: {triggers}\n"
                 f"  Reads: {contract_reads} | Writes: {contract_writes}"
@@ -324,7 +386,7 @@ def flywheel_fetch_skill_prompt(skill_name: str) -> str:
     """Load the full execution instructions for a Flywheel skill by name. Returns the system prompt that you should follow to execute the skill. Call this after identifying which skill to run via flywheel_fetch_skills. The prompt contains step-by-step instructions, output format, and quality criteria."""
     try:
         client = FlywheelClient()
-        result = client.fetch_skill_prompt(skill_name)
+        result = client.fetch_skill_prompt(skill_name, mode="mcp")
         system_prompt = result.get("system_prompt", "")
 
         if not system_prompt:
@@ -335,6 +397,421 @@ def flywheel_fetch_skill_prompt(skill_name: str) -> str:
         return str(exc)
     except Exception as exc:
         return f"Error fetching skill prompt: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_route_skill(intent: str) -> str:
+    """Route a natural-language intent to the best matching Flywheel skill.
+
+    Returns the skill's name, description, and full MCP-normalized prompt
+    ready for in-context execution. If no strong match, returns top-3
+    candidates for the user to choose from.
+
+    Use this at conversation start when the user expresses a goal that
+    might map to a Flywheel skill (e.g., "prepare for my meeting",
+    "draft outreach emails", "process this insurance submission").
+    """
+    try:
+        client = FlywheelClient()
+        result = client.route_skill(intent)
+
+        if result.get("matched"):
+            skill = result["skill"]
+            lines = [
+                f"MATCHED SKILL: {skill['name']}",
+                f"Description: {skill['description']}",
+                f"Confidence: {result['confidence']}",
+                "",
+                "--- SKILL PROMPT (execute in-context) ---",
+                "",
+                result.get("prompt", "(no prompt available)"),
+            ]
+            return "\n".join(lines)
+        else:
+            candidates = result.get("candidates", [])
+            if not candidates:
+                return (
+                    f"No skills matched intent: {intent!r}\n\n"
+                    "Try rephrasing or use flywheel_fetch_skills to browse all available skills."
+                )
+            lines = [
+                f"No confident match for: {intent!r}",
+                "",
+                "Top candidates (use flywheel_fetch_skill_prompt to load one):",
+                "",
+            ]
+            for i, c in enumerate(candidates, 1):
+                lines.append(f"  {i}. {c['name']} (score: {c.get('score', '?')})")
+                lines.append(f"     {c['description']}")
+                lines.append("")
+            return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error routing skill: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_warm_context() -> str:
+    """Load a snapshot of the user's Flywheel context store for session warming.
+
+    Returns a compact summary of context files (company intel, ICP profiles,
+    positioning, etc.) and their most recent entries. Call this at the start
+    of a conversation to prime your context window with the user's business
+    intelligence.
+
+    Response is capped at 8k characters to avoid context overflow.
+    """
+    try:
+        client = FlywheelClient()
+        result = client.get_context_preamble()
+
+        catalog = result.get("catalog", [])
+        snapshot = result.get("snapshot", [])
+        truncated = result.get("truncated", False)
+
+        lines = ["FLYWHEEL CONTEXT STORE SNAPSHOT", ""]
+
+        # Catalog summary
+        lines.append(f"Context files ({len(catalog)}):")
+        for f in catalog:
+            status_icon = "+" if f.get("status") != "empty" else "-"
+            lines.append(f"  [{status_icon}] {f['file_name']}: {f.get('description', '')}")
+        lines.append("")
+
+        # Recent entries
+        if snapshot:
+            lines.append(f"Recent entries ({len(snapshot)}):")
+            lines.append("")
+            current_file = None
+            for entry in snapshot:
+                if entry["file_name"] != current_file:
+                    current_file = entry["file_name"]
+                    lines.append(f"## {current_file}")
+                content = entry.get("content", "")
+                source = entry.get("source", "")
+                date = entry.get("date", "")
+                lines.append(f"  [{date}] ({source}) {content}")
+            lines.append("")
+        else:
+            lines.append("No context entries yet. Use flywheel_write_context to add intelligence.")
+            lines.append("")
+
+        if truncated:
+            lines.append("(Snapshot truncated to 8k chars -- use flywheel_read_context for full entries)")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error warming context: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_gather_company_data(url: str, max_chars: int = 16384) -> str:
+    """Gather raw company data from a website URL by crawling up to 5 pages (homepage, about, pricing, products, customers). Returns structured content with metadata. No server-side LLM processing -- returns raw crawled data for in-context analysis. Use this with company-intel skill to analyze companies without server-side LLM calls."""
+    try:
+        client = FlywheelClient()
+        result = client.gather_company_data(url, max_chars=max_chars)
+
+        lines = [f"COMPANY DATA: {url}", ""]
+        pages_crawled = result.get("pages_crawled", 0)
+        lines.append(f"Pages crawled: {pages_crawled}")
+
+        if result.get("truncated"):
+            lines.append(f"NOTE: Response truncated to {max_chars} chars. Increase max_chars for full content.")
+
+        lines.append("")
+        content = result.get("content", "")
+        if content:
+            lines.append(content)
+        else:
+            lines.append("(no content returned)")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error gathering company data: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_gather_meeting_context(meeting_id: str, max_chars: int = 16384) -> str:
+    """Gather context for a specific meeting including metadata, attendees, AI summary, linked pipeline entry, and related context store entries. Returns structured data for in-context meeting prep or analysis. No server-side LLM processing."""
+    try:
+        client = FlywheelClient()
+        result = client.gather_meeting_context(meeting_id, max_chars=max_chars)
+
+        meeting = result.get("meeting", {})
+        title = meeting.get("title", "Untitled")
+        meeting_date = meeting.get("meeting_date", "unknown date")
+
+        lines = [f"## Meeting: {title}", f"Date: {meeting_date}", ""]
+
+        # Attendees
+        attendees = meeting.get("attendees", [])
+        if attendees:
+            lines.append("## Attendees")
+            for a in attendees:
+                name = a.get("name", a.get("email", "?"))
+                email = a.get("email", "")
+                lines.append(f"- {name}" + (f" ({email})" if email else ""))
+            lines.append("")
+
+        # AI Summary
+        ai_summary = meeting.get("ai_summary") or result.get("ai_summary")
+        if ai_summary:
+            lines.append("## Summary")
+            lines.append(ai_summary)
+            lines.append("")
+
+        # Pipeline entry
+        pipeline = result.get("pipeline_entry")
+        if pipeline:
+            lines.append("## Pipeline")
+            lines.append(f"- Name: {pipeline.get('name', '?')}")
+            lines.append(f"- Stage: {pipeline.get('stage', '?')}")
+            lines.append(f"- Fit: {pipeline.get('fit_tier', '?')}")
+            lines.append("")
+
+        # Context entries
+        context_entries = result.get("context_entries", [])
+        if context_entries:
+            lines.append(f"## Context ({len(context_entries)} entries)")
+            for entry in context_entries:
+                file_name = entry.get("file_name", "?")
+                content = entry.get("content", "")
+                lines.append(f"[{file_name}] {content}")
+            lines.append("")
+
+        if result.get("truncated"):
+            lines.append(f"NOTE: Response truncated to {max_chars} chars. Increase max_chars for full content.")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error gathering meeting context: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_gather_briefing_sources(max_chars: int = 16384, days: int = 7) -> str:
+    """Gather all data sources needed for a daily briefing: recent meetings, pipeline changes, pending tasks, and outreach due. Returns structured data for in-context briefing generation. No server-side LLM processing -- the briefing synthesis happens in your context window."""
+    try:
+        client = FlywheelClient()
+        result = client.gather_briefing_sources(max_chars=max_chars, days=days)
+
+        meetings = result.get("meetings", [])
+        pipeline = result.get("pipeline_entries", [])
+        tasks = result.get("tasks", [])
+        outreach = result.get("outreach_due", [])
+
+        lines = [
+            f"BRIEFING SOURCES (last {days} days)",
+            f"{len(meetings)} meetings, {len(pipeline)} pipeline entries, "
+            f"{len(tasks)} tasks, {len(outreach)} outreach due",
+            "",
+        ]
+
+        # Recent Meetings
+        lines.append("## Recent Meetings")
+        if meetings:
+            for m in meetings:
+                title = m.get("title", "Untitled")
+                date = m.get("meeting_date", "?")
+                mtype = m.get("meeting_type") or "unclassified"
+                lines.append(f"- {title} ({date}) [{mtype}]")
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        # Pipeline Activity
+        lines.append("## Pipeline Activity")
+        if pipeline:
+            for p in pipeline:
+                name = p.get("name", "?")
+                stage = p.get("stage", "?")
+                company = p.get("company") or p.get("domain") or ""
+                lines.append(f"- {name} -- {stage}" + (f" ({company})" if company else ""))
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        # Tasks
+        lines.append("## Tasks")
+        if tasks:
+            for t in tasks:
+                title = t.get("title", "Untitled")
+                status = t.get("status", "?")
+                source = t.get("source") or t.get("suggested_skill") or ""
+                lines.append(f"- {title} [{status}]" + (f" (from: {source})" if source else ""))
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        # Outreach Due
+        lines.append("## Outreach Due")
+        if outreach:
+            for o in outreach:
+                contact_name = o.get("contact_name") or o.get("name", "?")
+                subject = o.get("subject") or o.get("message_subject") or "(no subject)"
+                lines.append(f"- {contact_name}: {subject}")
+        else:
+            lines.append("(none)")
+        lines.append("")
+
+        if result.get("truncated"):
+            lines.append(f"NOTE: Response truncated to {max_chars} chars. Increase max_chars for full content.")
+
+        return "\n".join(lines)
+    except FlywheelAPIError as exc:
+        return str(exc)
+    except Exception as exc:
+        return f"Error gathering briefing sources: {exc}"
+
+
+@mcp.tool(output_schema=None)
+def flywheel_fetch_skill_assets(name: str) -> ToolResult:
+    """Fetch a skill's Python bundle + all transitive library bundles.
+
+    Returns a ToolResult containing one File(format="zip") per bundle (in
+    topological order: libraries first, consumer last) plus structured_content
+    metadata with per-bundle SHA-256 hashes for client-side integrity
+    verification.
+
+    Use with ``flywheel_mcp.bundle.materialize_skill_bundle(name)`` context
+    manager to extract + verify + import from the bundle safely. Do NOT
+    extract the raw bytes directly — the helper enforces SHA verification and
+    path-traversal protection.
+
+    Surfaces bundle-delivery errors (integrity/security/fetch) as a single
+    TextContent block so Claude sees a clean actionable message instead of a
+    Python traceback. Set ``FLYWHEEL_DEBUG=1`` to retain the underlying
+    exception detail.
+    """
+    # NOTE: Return type is ToolResult, NOT the CONTEXT-locked
+    # ``tuple[dict, list[File]]`` — FastMCP does not support tuple returns
+    # (verified against installed fastmcp source; see Phase 150 RESEARCH
+    # Pitfall 5). structured_content is the sanctioned envelope for
+    # metadata (SHAs live here, not as File attributes — see Pitfall 4).
+    try:
+        client = FlywheelClient()
+        metadata, bundles = client.fetch_skill_assets_bundle(name)
+    except BundleError as exc:
+        # Clean user-facing error (no traceback). FLYWHEEL_DEBUG=1 still
+        # surfaces full detail via the MCP server stderr log.
+        if os.environ.get("FLYWHEEL_DEBUG"):
+            logger.exception("flywheel_fetch_skill_assets failed for %s", name)
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+    except FlywheelAPIError as exc:
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+
+    files = [
+        File(
+            data=bundle_bytes,
+            format="zip",
+            name=f"{skill_name}.zip",
+        )
+        for (skill_name, _sha, bundle_bytes) in bundles
+    ]
+    return ToolResult(
+        content=files,
+        structured_content={
+            "skill": metadata["skill"],
+            "deps": metadata["deps"],
+            "rollup_sha": metadata["rollup_sha"],
+            "shas": {sname: sha for (sname, sha, _b) in bundles},
+        },
+    )
+
+
+@mcp.tool(output_schema=None)
+def flywheel_refresh_skills(name: str | None = None) -> ToolResult:
+    """Force-refresh cached skill bundles from the Flywheel backend.
+
+    Without ``name``: walk every entry in the cache index, re-fetch each
+    via ``FlywheelClient.fetch_skill_assets_bundle(bypass_cache=True)``,
+    and auto-heal any cached entries that fail SHA-256 validation on load
+    (tamper detection — see Phase 151 SC4).
+
+    With ``name``: refresh only that skill + its transitive dep chain
+    (Phase 147 single-level fanout means depth 1 today).
+
+    Tampered-cache auto-heal:
+        If loading a cached bundle raises ``BundleIntegrityError``, the
+        ``<sha>/`` dir is auto-deleted by the cache layer and this tool
+        refetches authoritative bytes from the backend. A ``cache_entry_tampered``
+        line is emitted to stderr with ``old_sha``, ``authoritative_sha``, and
+        ``correlation_id`` for forensic tracing.
+
+    Returns:
+        ``ToolResult`` with ``structured_content`` of shape::
+
+            {
+                "evicted": int,     # entries removed (tampered + LRU)
+                "refetched": int,   # entries successfully re-fetched
+                "tampered": int,    # tamper-auto-heal events
+                "per_skill": list[dict],  # [{name, old_sha, new_sha, status}, ...]
+            }
+
+    Use this when:
+        - A broker/* (or any skill) bundle reports checksum failure
+        - You've been offline and want to warm the cache before a demo
+        - You want to verify the cache matches prod authoritative bytes
+    """
+    # Deferred imports: keeps the top-of-module import graph clean and
+    # matches the pattern used by ``flywheel_fetch_skill_assets``.
+    from flywheel_mcp.cache import BundleCache
+
+    try:
+        client = FlywheelClient()
+        cache = BundleCache()
+
+        # Inject the fetcher callable (not a client instance) to preserve the
+        # cache-module-doesn't-know-about-FlywheelClient invariant (Plan 01
+        # Decision — avoids the circular dep between cache.py and api_client.py).
+        def _fetcher(skill_name: str, *, bypass_cache: bool = True):
+            return client.fetch_skill_assets_bundle(
+                skill_name, bypass_cache=bypass_cache
+            )
+
+        result = cache.refresh(name=name, fetcher=_fetcher)
+
+        # Human-readable stderr summary per CONTEXT §refresh UX.
+        if name is None:
+            sys.stderr.write(
+                f"OK: Refreshed {result.refetched} skills "
+                f"({result.evicted} evicted, "
+                f"{result.tampered_count} tampered-auto-healed).\n"
+            )
+        else:
+            sys.stderr.write(f"OK: Refreshed {name}.\n")
+
+        return ToolResult(
+            structured_content={
+                "evicted": result.evicted,
+                "refetched": result.refetched,
+                "tampered": result.tampered_count,
+                "per_skill": result.per_skill,
+            }
+        )
+    except BundleError as exc:
+        # Same clean-error contract as flywheel_fetch_skill_assets.
+        if os.environ.get("FLYWHEEL_DEBUG"):
+            logger.exception(
+                "flywheel_refresh_skills failed for name=%s", name
+            )
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
+    except FlywheelAPIError as exc:
+        return ToolResult(
+            content=[mt.TextContent(type="text", text=str(exc))],
+        )
 
 
 # --------------------------------------------------------------------------
@@ -1407,9 +1884,34 @@ def _ensure_claude_md():
         logger.warning("Failed to ensure CLAUDE.md: %s", exc)
 
 
+def _warm_token_refresh():
+    """Pre-emptively refresh token at startup so the MCP session starts fresh.
+
+    Also logs the token expiry so operators can see when it will need refresh.
+    """
+    import datetime
+
+    try:
+        from flywheel_cli.auth import get_token, load_credentials
+
+        token = get_token()  # triggers refresh if near expiry
+        creds = load_credentials()
+        if creds:
+            expires_at = creds.get("expires_at", 0)
+            expiry_str = datetime.datetime.fromtimestamp(expires_at).strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+            logger.info("Token valid until %s", expiry_str)
+        else:
+            logger.warning("No credentials found — MCP tools will fail auth")
+    except Exception as exc:
+        logger.warning("Token warm-up failed: %s", exc)
+
+
 def main():
     """Start the Flywheel MCP server with stdio transport."""
     _ensure_claude_md()
+    _warm_token_refresh()
     mcp.run(transport="stdio")
 
 

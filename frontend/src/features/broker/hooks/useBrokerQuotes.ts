@@ -35,14 +35,24 @@ export function useComparison(projectId: string, enabled: boolean) {
   })
 }
 
-export function useExtractQuote(projectId: string) {
+/**
+ * Phase 150.1 Plan 03 (Blocker-3 branch P3):
+ * `extractQuote` warms the new /broker/extract/quote-extraction endpoint but
+ * cannot complete Pattern 3a server-side (web_tier=3). `onHandoff` fires on
+ * success with the pre-filled slash command so the caller can open the
+ * ClaudeCommandModal.
+ */
+export function useExtractQuote(
+  projectId: string,
+  opts?: { onHandoff?: (command: string) => void },
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ quoteId, force }: { quoteId: string; force?: boolean }) =>
       extractQuote(quoteId, force),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
-      toast.success('Quote extraction started')
+      opts?.onHandoff?.(`/broker:extract-quote ${projectId}`)
     },
     onError: () => toast.error('Failed to start quote extraction'),
   })

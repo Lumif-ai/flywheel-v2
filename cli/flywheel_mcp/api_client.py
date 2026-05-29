@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import base64
+import logging
 import os
+import secrets
+import sys
+import time
 
 import httpx
 
 from flywheel_cli.auth import get_token, clear_credentials
 from flywheel_cli.config import get_api_url
+
+logger = logging.getLogger(__name__)
 
 
 class FlywheelAPIError(Exception):
@@ -146,9 +153,368 @@ class FlywheelClient:
         """GET /api/v1/skills/ -- list all available skills."""
         return self._request("get", "/api/v1/skills/")
 
-    def fetch_skill_prompt(self, skill_name: str) -> dict:
+    def fetch_skill_prompt(self, skill_name: str, mode: str | None = None) -> dict:
         """GET /api/v1/skills/{skill_name}/prompt -- get rendered prompt for a skill."""
-        return self._request("get", f"/api/v1/skills/{skill_name}/prompt")
+        url = f"/api/v1/skills/{skill_name}/prompt"
+        if mode:
+            url += f"?mode={mode}"
+        return self._request("get", url)
+
+    def log_skill_telemetry(
+        self,
+        skill_name: str,
+        execution_path: str,
+        caller_type: str = "mcp",
+        metadata: dict | None = None,
+    ) -> dict:
+        """POST /api/v1/skills/telemetry -- fire-and-forget telemetry.
+
+        Failures are swallowed so telemetry never blocks skill execution.
+        """
+        body: dict = {
+            "skill_name": skill_name,
+            "execution_path": execution_path,
+            "caller_type": caller_type,
+        }
+        if metadata:
+            body["metadata"] = metadata
+        try:
+            return self._request("post", "/api/v1/skills/telemetry", json=body)
+        except Exception as exc:
+            logger.warning("Telemetry logging failed (non-blocking): %s", exc)
+            return {"status": "error"}
+
+    def route_skill(self, intent: str) -> dict:
+        """GET /api/v1/skills/route -- match intent to best skill."""
+        return self._request("get", "/api/v1/skills/route", params={"intent": intent})
+
+    def get_context_preamble(self) -> dict:
+        """GET /api/v1/context/preamble -- context store snapshot for session warming."""
+        return self._request("get", "/api/v1/context/preamble")
+
+    # -- Data Gather (composite endpoints) ------------------------------------
+
+    def gather_company_data(self, url: str, max_chars: int = 16384) -> dict:
+        """GET /api/v1/gather/company-data -- crawl a company website."""
+        return self._request(
+            "get", "/api/v1/gather/company-data",
+            params={"url": url, "max_chars": max_chars},
+            timeout=60.0,
+        )
+
+    def gather_meeting_context(self, meeting_id: str, max_chars: int = 16384) -> dict:
+        """GET /api/v1/gather/meeting-context/{meeting_id} -- meeting + context."""
+        return self._request(
+            "get", f"/api/v1/gather/meeting-context/{meeting_id}",
+            params={"max_chars": max_chars},
+        )
+
+    def gather_briefing_sources(self, max_chars: int = 16384, days: int = 7) -> dict:
+        """GET /api/v1/gather/briefing-sources -- all data for daily briefing."""
+        return self._request(
+            "get", "/api/v1/gather/briefing-sources",
+            params={"max_chars": max_chars, "days": days},
+        )
+
+    @staticmethod
+    def _has_any_cache_trace(cache, name: str) -> bool:
+        """True if the cache's index knows about ``name`` (even if the
+        underlying ``<sha>/`` dir is missing or unreadable).
+
+        Used by the offline-fallback path to distinguish "we had a cached
+        bundle that's now unusable" (BundleCacheError) from "we never
+        cached this skill" (raw BundleFetchError).
+        """
+        index = cache._load_index()
+        return name in index
+
+    def _fetch_shas_only(
+        self, name: str, correlation_id: str
+    ) -> dict[str, str] | None:
+        """Single lightweight GET to ``/assets/bundle?shas_only=true``.
+
+        Returns a ``{bundle_name: sha256}`` dict on success, or ``None``
+        on any failure (network, non-200, empty body). Used by the cache
+        layer to answer "is my cached SHA still authoritative" in a single
+        round-trip without re-shipping bundle bytes.
+
+        This method deliberately does NOT retry — it's a best-effort
+        freshness probe. If it fails, the caller falls through to the full
+        fetch retry loop (which has its own 3x backoff).
+        """
+        path = f"/api/v1/skills/{name}/assets/bundle?shas_only=true"
+        headers = {"X-Flywheel-Correlation-ID": correlation_id}
+        try:
+            resp = self._client.get(path, headers=headers)
+        except httpx.RequestError:
+            return None
+        if resp.status_code != 200:
+            return None
+        try:
+            body = resp.json()
+        except Exception:
+            return None
+        shas = {entry["name"]: entry["sha256"] for entry in body.get("bundles", [])}
+        return shas or None
+
+    def fetch_skill_assets_bundle(
+        self,
+        name: str,
+        *,
+        bypass_cache: bool = False,
+        correlation_id: str | None = None,
+    ) -> tuple[dict, list[tuple[str, str, bytes]]]:
+        """GET /api/v1/skills/{name}/assets/bundle -- Phase 150 fanout +
+        Phase 151 cache + correlation-id integration.
+
+        Walks ``depends_on`` server-side and returns consumer + transitive
+        library bundles in topological order (deepest dep first, consumer
+        last; consumers with ``assets=[]`` are absent from the bundles list
+        but still present in ``deps``).
+
+        Phase 151 cache flow (when ``bypass_cache=False``):
+            1. Fresh cache hit -> return immediately (ZERO network calls).
+            2. Stale cache hit -> issue ``?shas_only=true`` pre-check.
+               If SHAs match server-side, bump TTL + serve cached bytes
+               (one network call, no bundle bytes).
+            3. Otherwise full fetch (retry loop unchanged) + repopulate
+               cache on success.
+
+        Offline fallback:
+            - Backend unreachable + fresh cache -> serve cached + stderr
+              WARN (Phase 151 SC2).
+            - Backend unreachable + stale/absent cache -> raise
+              :class:`BundleCacheError`.
+
+        Retry policy (unchanged from Phase 150):
+            - 3x exponential backoff (0.5s, 1s, 2s) on network errors
+              (:class:`httpx.RequestError`) and 5xx responses.
+            - 401: one-shot token refresh; if still-401 after refresh,
+              credentials are cleared and :class:`BundleFetchError` is
+              raised with a ``flywheel login`` hint.
+            - 403/404: raise :class:`BundleFetchError` immediately.
+
+        Args:
+            name: Root skill name.
+            bypass_cache: If True, skip both cache read AND cache write
+                (used by ``flywheel_refresh_skills``). Default False.
+            correlation_id: 8-hex-char forensic ID threaded through every
+                retry attempt as ``X-Flywheel-Correlation-ID`` header.
+                Auto-generated via ``secrets.token_hex(4)`` when None.
+
+        Returns:
+            ``(metadata, bundles)`` — same shape as Phase 150.
+
+        Raises:
+            BundleFetchError: HTTP/transport failure that exhausts the
+                retry budget, or terminal 401/403/404/other-4xx — AND
+                no fresh cache available.
+            BundleCacheError: Backend unreachable and no fresh/stale
+                cache entry to fall back on.
+        """
+        # Deferred imports — bundle.py imports FlywheelClient lazily from
+        # its context manager, so we keep the dep-graph clean.
+        from flywheel_mcp.bundle import (
+            BundleCacheError,
+            BundleFetchError,
+            BundleIntegrityError,
+        )
+        from flywheel_mcp.cache import BundleCache
+        from flywheel_mcp.errors import (
+            ERR_401,
+            ERR_403,
+            ERR_404_TEMPLATE,
+            ERR_503_RETRY_TEMPLATE,
+            ERR_503_TERMINAL,
+            ERR_OFFLINE_EXPIRED,
+        )
+
+        correlation_id = correlation_id or secrets.token_hex(4)
+
+        # -----  Cache read path ------------------------------------------------
+        cache: BundleCache | None = None
+        if not bypass_cache:
+            cache = BundleCache()
+            try:
+                fresh = cache.get_fresh(name)
+            except BundleIntegrityError as exc:
+                # Tamper found during cache load — dir already auto-deleted.
+                logger.warning(
+                    "cache_entry_tampered: skill=%s correlation_id=%s — "
+                    "falling through to full fetch",
+                    name, correlation_id,
+                    extra={"correlation_id": correlation_id},
+                )
+                fresh = None
+                # Treat the BundleIntegrityError as handled; refetch will
+                # repopulate the cache with authoritative bytes.
+                _ = exc
+            if fresh is not None:
+                return fresh.as_tuple()
+
+            # Stale cache + SHA pre-check: if server confirms our cached
+            # SHAs are authoritative, bump TTL and serve cached bytes.
+            if cache.has_stale(name):
+                server_shas = self._fetch_shas_only(name, correlation_id)
+                if server_shas is not None:
+                    if cache.extend_ttl_if_sha_match(name, server_shas):
+                        stale = cache.get_stale(name)
+                        if stale is not None:
+                            return stale.as_tuple()
+                    # SHAs mismatched — fall through to full fetch.
+
+        # -----  Full fetch with 3x retry + correlation_id header --------------
+        path = f"/api/v1/skills/{name}/assets/bundle"
+        headers = {"X-Flywheel-Correlation-ID": correlation_id}
+
+        def _do_get() -> httpx.Response:
+            """Execute the GET with 3x backoff. Raises BundleFetchError on
+            exhausted retries. Threads correlation_id header on every attempt.
+
+            Phase 151 Plan 02: emits the locked ``ERR_503_RETRY_TEMPLATE``
+            stderr line BEFORE each pre-retry sleep so the user sees the
+            backoff progress in real time. On terminal exhaustion raises
+            ``BundleFetchError`` with ``ERR_503_TERMINAL`` as reason.
+            """
+            delays = [0.0, 0.5, 1.0, 2.0]
+            last_exc: BundleFetchError | None = None
+            for delay in delays:
+                if delay > 0:
+                    # Surface the backoff to the user BEFORE sleeping so
+                    # they see "Retrying in 0.5s..." then the pause, not
+                    # a silent gap followed by a stale status.
+                    sys.stderr.write(
+                        ERR_503_RETRY_TEMPLATE.format(delay=delay) + "\n"
+                    )
+                    time.sleep(delay)
+                try:
+                    resp = self._client.get(path, headers=headers)
+                except httpx.RequestError as exc:
+                    last_exc = BundleFetchError(
+                        name, None, f"Network error reaching Flywheel: {exc}"
+                    )
+                    continue
+                if resp.status_code >= 500:
+                    last_exc = BundleFetchError(
+                        name,
+                        resp.status_code,
+                        f"Flywheel backend returned {resp.status_code}.",
+                    )
+                    continue
+                return resp
+            # Terminal exhaustion — surface the locked user-facing copy.
+            raise BundleFetchError(name, None, ERR_503_TERMINAL) from last_exc
+
+        def _serve_cached_with_warn() -> tuple[dict, list[tuple[str, str, bytes]]] | None:
+            """Try to serve a stale cache entry after network failure.
+
+            Returns a ``(metadata, bundles)`` tuple with stderr WARN emitted
+            on success, or ``None`` if no stale entry exists.
+            """
+            if bypass_cache or cache is None:
+                return None
+            try:
+                stale = cache.get_stale(name)
+            except BundleIntegrityError:
+                # Tamper during offline load — dir auto-deleted. Nothing to serve.
+                return None
+            if stale is None:
+                return None
+            sys.stderr.write(
+                f"WARN: Backend unreachable. Using cached {name} bundle "
+                f"(cached {stale.age_human} ago, {stale.ttl_remaining_human}).\n"
+            )
+            logger.warning(
+                "offline_fallback: skill=%s age=%s ttl=%s correlation_id=%s",
+                name, stale.age_human, stale.ttl_remaining_human, correlation_id,
+                extra={"correlation_id": correlation_id},
+            )
+            return stale.as_tuple()
+
+        self._ensure_token()
+        try:
+            resp = _do_get()
+        except BundleFetchError as exc:
+            # Network / 5xx exhaustion — try offline fallback.
+            fallback = _serve_cached_with_warn()
+            if fallback is not None:
+                return fallback
+            # No usable cache entry. If we have ANY trace of the skill in
+            # the cache (index entry OR stale <sha>/ dir) the user-facing
+            # signal should be BundleCacheError — the user knows they had
+            # a cache that's now unusable. Matches CONTEXT §Error taxonomy.
+            if not bypass_cache and cache is not None and self._has_any_cache_trace(
+                cache, name
+            ):
+                raise BundleCacheError(
+                    skill_name=name,
+                    reason=ERR_OFFLINE_EXPIRED,
+                ) from exc
+            raise
+
+        # -----  One-shot 401 refresh (Pitfall 9: no recursion, no loop).
+        if resp.status_code == 401:
+            self._ensure_token()
+            try:
+                resp = _do_get()
+            except BundleFetchError as exc:
+                fallback = _serve_cached_with_warn()
+                if fallback is not None:
+                    return fallback
+                raise exc
+            if resp.status_code == 401:
+                clear_credentials()
+                raise BundleFetchError(name, 401, ERR_401)
+
+        # -----  Terminal errors — map to BundleFetchError with locked
+        # user-facing copy from flywheel_mcp.errors (Phase 151 Plan 02).
+        if resp.status_code == 403:
+            raise BundleFetchError(name, 403, ERR_403)
+        if resp.status_code == 404:
+            raise BundleFetchError(
+                name, 404, ERR_404_TEMPLATE.format(name=name)
+            )
+        if resp.status_code >= 400:
+            body = ""
+            try:
+                body = resp.text[:200]
+            except Exception:
+                pass
+            raise BundleFetchError(
+                name,
+                resp.status_code,
+                f"Flywheel API error: {body or 'no body'}",
+            )
+
+        # -----  Success: parse per-bundle entries.
+        body = resp.json()
+        bundles: list[tuple[str, str, bytes]] = []
+        for entry in body.get("bundles", []):
+            bundles.append(
+                (
+                    entry["name"],
+                    entry["sha256"],
+                    base64.b64decode(entry["bundle_b64"]),
+                )
+            )
+        metadata = {
+            "skill": body["skill"],
+            "deps": body.get("deps", []),
+            "rollup_sha": body.get("rollup_sha", ""),
+        }
+
+        # -----  Cache write on success (best-effort — never fail user fetch).
+        if not bypass_cache and cache is not None and bundles:
+            try:
+                cache.put(name, metadata, bundles, correlation_id=correlation_id)
+            except Exception as exc:  # cache disk full, permission error, etc.
+                logger.warning(
+                    "cache_write_failed: skill=%s err=%s correlation_id=%s",
+                    name, exc, correlation_id,
+                    extra={"correlation_id": correlation_id},
+                )
+
+        return metadata, bundles
 
     def fetch_meetings(
         self, time: str | None = None, processing_status: str | None = None,

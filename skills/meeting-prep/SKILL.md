@@ -1,4 +1,6 @@
 ---
+public: true
+cc_executable: true
 name: meeting-prep
 version: "4.1"
 description: >
@@ -35,6 +37,9 @@ output:
 web_tier: 3
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # meeting-prep
 
 You are preparing a meeting briefing using the **flywheel-powered** meeting preparation pipeline. This skill adapts to **8 meeting types** (discovery, follow-up, investor, advisory, partnership, customer success, internal, hiring) and handles **multi-person meetings** as a first-class concept.
@@ -44,6 +49,20 @@ Core pipeline: load context -> gather attendees -> detect prior history -> resea
 **Trigger phrases:** "prep for meeting", "meeting prep", "prepare for call", "brief me on", "who am I meeting", "prepare for my meeting with", "meeting brief", or any reference to preparing for an upcoming meeting or call.
 
 ---
+
+## Data Gathering (MCP Mode)
+
+When running in MCP mode (in-context execution via Claude Code or Desktop), use the composite
+data-gathering tool to load all meeting context in a single call:
+
+1. Call `flywheel_gather_meeting_context(meeting_id="<meeting_id>")` to load meeting data
+2. The tool returns: meeting metadata (title, date, type), attendees list, AI summary (if owner), linked pipeline entry (company, stage), and related context entries -- all in one response, capped at 16k chars
+3. Use this data to prepare the briefing in-context: identify attendees, review prior interactions, surface relevant pipeline context
+4. If the meeting has a linked pipeline entry, use it to pull additional company context via `flywheel_read_context`
+
+This replaces the server-side meeting-prep engine stages -- all orchestration and synthesis
+happens in the user's context window. The data fetch is still server-side (DB queries),
+but briefing generation is done by you (Claude) directly.
 
 ## Step 0: Verify Dependencies & Load Context Store
 

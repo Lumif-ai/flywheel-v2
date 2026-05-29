@@ -17,14 +17,24 @@ export function useProjectQuotes(projectId: string) {
   })
 }
 
-export function useDraftSolicitations(projectId: string) {
+/**
+ * Phase 150.1 Plan 03 (Blocker-3 branch P3):
+ * `draftSolicitations` warms the /broker/extract/solicitation-draft endpoint
+ * per selected carrier but cannot complete Pattern 3a server-side
+ * (web_tier=3). `onHandoff` fires on success with the pre-filled slash command
+ * so the caller can open the ClaudeCommandModal.
+ */
+export function useDraftSolicitations(
+  projectId: string,
+  opts?: { onHandoff?: (command: string) => void },
+) {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (carrierConfigIds: string[]) => draftSolicitations(projectId, carrierConfigIds),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['broker', 'project-quotes', projectId] })
       qc.invalidateQueries({ queryKey: ['broker-project', projectId] })
-      toast.success('Solicitation drafts created')
+      opts?.onHandoff?.(`/broker:draft-emails ${projectId}`)
     },
     onError: () => toast.error('Failed to create solicitation drafts'),
   })

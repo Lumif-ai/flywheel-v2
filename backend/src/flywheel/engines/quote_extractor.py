@@ -1,39 +1,42 @@
 """
-quote_extractor.py - AI-powered quote PDF extraction engine.
+quote_extractor.py - Pattern 3a helpers for carrier quote extraction.
 
-Standalone async module that takes a carrier quote PDF (as bytes), sends it to
-Claude via native PDF document blocks with tool_use for guaranteed structured
-extraction of per-coverage-line quote terms.
+Phase 150.1 Plan 04 completed the CC-as-Brain migration by deleting the
+legacy `extract_quote` function (which constructed an async Anthropic
+client at runtime). Backend no longer runs any LLM call for quote
+extraction; Claude-in-conversation owns inference. The module exposes
+only Pattern 3a public helpers:
 
-This engine cross-references extracted exclusions against project coverage
-requirements to detect critical exclusions that conflict with required coverages.
+  * `QUOTE_EXTRACTION_TOOL` — Anthropic tool schema for structured extraction.
+  * `build_quote_extraction_prompt(project_coverages)`
+    → rendered prompt string for /extract/quote-extraction.
+  * `persist_quote_extraction(db, ..., tool_use_output)`
+    → persists Claude's tool_use output into CarrierQuote rows.
 
-Functions:
-  extract_quote(db, tenant_id, quote_id, pdf_content, project_coverages, api_key=None, force=False) -> dict
-    Main entry point. Orchestrates the full extraction pipeline.
+Supporting helpers (_compute_pdf_hash, _normalize_coverage_type,
+_match_coverage, _format_project_coverages_for_prompt) remain for the
+Pattern 3a flow.
+
+CC-as-Brain invariant (Phase 150.1): this module MUST NOT import or
+construct an Anthropic async client. The `test_broker_zero_anthropic.py`
+regression grep-guards enforce this at CI time.
 """
 
-import base64
 import hashlib
 import logging
 from datetime import datetime, timezone
 from uuid import UUID
 
-import anthropic
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from flywheel.config import settings
 from flywheel.db.models import BrokerActivity, CarrierQuote, ProjectCoverage
-from flywheel.engines.model_config import get_engine_model
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 logger = logging.getLogger(__name__)
-
-API_TIMEOUT = 120  # seconds
 
 EXTRACTION_SYSTEM_PROMPT = """\
 You are an expert insurance analyst specializing in carrier quote evaluation.
@@ -259,332 +262,219 @@ def _format_project_coverages_for_prompt(project_coverages: list[dict]) -> str:
     return "\n".join(lines)
 
 
+# Public alias (Plan 02 — Pattern 3a) — extract endpoints import this.
+format_project_coverages_for_prompt = _format_project_coverages_for_prompt
+
+
+def build_quote_extraction_prompt(project_coverages: list[dict]) -> str:
+    """Render the full quote-extraction system prompt.
+
+    Phase 150.1 Plan 02 — Pattern 3a public helper. Used by the
+    `POST /extract/quote-extraction` endpoint to return the fully-rendered
+    prompt so Claude-in-conversation can invoke it with the PDF.
+
+    Args:
+        project_coverages: List of ProjectCoverage dicts with keys
+            id, coverage_type, category, required_limit.
+
+    Returns:
+        Fully rendered system prompt string (ready to send with the PDF).
+    """
+    return EXTRACTION_SYSTEM_PROMPT.format(
+        project_coverages=_format_project_coverages_for_prompt(project_coverages)
+    )
+
+
 # ---------------------------------------------------------------------------
-# Main entry point
+# Phase 150.1 Plan 04 — legacy `extract_quote` DELETED.
+# Backend owns zero LLM calls for quote extraction. Claude-in-conversation
+# consumes `build_quote_extraction_prompt` + `QUOTE_EXTRACTION_TOOL`
+# (Pattern 3a). The /save/quote-extraction endpoint calls
+# `persist_quote_extraction` below with Claude's tool_use output shaped as
+# QUOTE_EXTRACTION_TOOL.input_schema — no backend LLM call involvement.
 # ---------------------------------------------------------------------------
 
 
-async def extract_quote(
+async def persist_quote_extraction(
     db: AsyncSession,
     tenant_id: UUID,
     quote_id: UUID,
-    pdf_content: bytes,
-    project_coverages: list[dict],
-    api_key: str | None = None,
-    force: bool = False,
+    tool_use_output: dict,
+    project_coverages: list[dict] | None = None,
 ) -> dict:
-    """Extract structured quote terms from a carrier quote PDF.
+    """Persist Claude's quote-extraction tool_use output.
 
-    Main entry point. Orchestrates the full pipeline:
-    1. Load CarrierQuote row, verify status
-    2. Compute SHA-256 hash for idempotency check
-    3. Build Anthropic message with PDF document block + tool_use
-    4. Parse structured extraction result
-    5. Match line items to project coverages, create/update CarrierQuote rows
-    6. Detect critical exclusions and flag them
-    7. Update quote status, log BrokerActivity
-
-    On any failure: logs error, sets extraction_error in metadata, does NOT
-    change status from "received" (allows retry). Returns error dict.
+    Mirrors the post-LLM persistence logic in `extract_quote` (lines ~388-500)
+    without calling Anthropic. Creates/updates CarrierQuote rows for each
+    line item, detects critical exclusions, logs BrokerActivity.
 
     Args:
         db: Async SQLAlchemy session (caller manages transaction).
         tenant_id: Tenant UUID.
-        quote_id: CarrierQuote UUID to extract from.
-        pdf_content: Raw PDF bytes of the carrier quote.
-        project_coverages: List of ProjectCoverage dicts with keys:
-            id, coverage_type, category, required_limit.
-        api_key: Optional explicit API key. Falls back to subsidy key.
-        force: If True, re-extract even if source_hash matches.
+        quote_id: CarrierQuote UUID — identifies the row to update (first
+            line item writes to this row; additional line items create new
+            CarrierQuote rows in the same project).
+        tool_use_output: Dict matching QUOTE_EXTRACTION_TOOL.input_schema.
+        project_coverages: Optional — if the caller has already loaded them.
+            If None, the function loads them from the project linked to
+            this quote.
 
     Returns:
-        Dict with keys: status, line_items_extracted, carrier_name,
-        critical_exclusions_found. On error: status='error', message=str.
-    """
-    try:
-        # Step 1: Load CarrierQuote, verify it exists
-        result = await db.execute(
-            select(CarrierQuote).where(
-                CarrierQuote.id == quote_id,
-                CarrierQuote.tenant_id == tenant_id,
-            )
-        )
-        quote = result.scalar_one_or_none()
-        if quote is None:
-            logger.error(
-                "CarrierQuote not found: quote_id=%s tenant_id=%s",
-                quote_id,
-                tenant_id,
-            )
-            return {"status": "error", "message": "Quote not found"}
-
-        # Step 2: SHA-256 idempotency check
-        pdf_hash = _compute_pdf_hash(pdf_content)
-        if not force and quote.source_hash == pdf_hash:
-            logger.info(
-                "Skipping extraction for quote_id=%s — source_hash matches",
-                quote_id,
-            )
-            return {
-                "status": "skipped",
-                "message": "PDF already extracted (hash matches)",
-            }
-
-        # Step 3: Build Anthropic API request
-        model = await get_engine_model(
-            db, tenant_id, "quote_extraction", "claude-opus-4-6"
-        )
-
-        effective_api_key = api_key or settings.flywheel_subsidy_api_key
-        client = anthropic.AsyncAnthropic(api_key=effective_api_key)
-        pdf_b64 = base64.standard_b64encode(pdf_content).decode("utf-8")
-
-        # Build system prompt with project coverages for critical exclusion detection
-        system_prompt = EXTRACTION_SYSTEM_PROMPT.format(
-            project_coverages=_format_project_coverages_for_prompt(
-                project_coverages
-            )
-        )
-
-        response = await client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=system_prompt,
-            tools=[QUOTE_EXTRACTION_TOOL],
-            tool_choice={"type": "tool", "name": "extract_quote_terms"},
-            messages=[
-                {
-                    "role": "user",
-                    "content": [
-                        {
-                            "type": "document",
-                            "source": {
-                                "type": "base64",
-                                "media_type": "application/pdf",
-                                "data": pdf_b64,
-                            },
-                        },
-                        {
-                            "type": "text",
-                            "text": "Extract all quote terms from this carrier quote document.",
-                        },
-                    ],
-                }
-            ],
-            timeout=API_TIMEOUT,
-        )
-
-        # Step 4: Parse tool_use response
-        tool_block = next(
-            (b for b in response.content if b.type == "tool_use"), None
-        )
-        if tool_block is None:
-            raise ValueError(
-                "Claude response did not contain a tool_use block"
-            )
-
-        extracted = tool_block.input  # Dict from tool_use
-
-        # Step 5: Process line items — match to project coverages
-        line_items = extracted.get("line_items", [])
-        carrier_name = extracted.get("carrier_name", "Unknown")
-        quotes_updated = []
-        critical_exclusions_found = 0
-
-        # Update the original quote row with carrier-level metadata
-        quote.carrier_name = carrier_name
-        quote.source_hash = pdf_hash
-
-        for idx, item in enumerate(line_items):
-            coverage_type = item.get("coverage_type", "")
-            matched_coverage = _match_coverage(coverage_type, project_coverages)
-
-            if idx == 0:
-                # Update the original quote row with the first line item
-                target_quote = quote
-            else:
-                # Create additional CarrierQuote rows for multi-coverage quotes
-                target_quote = CarrierQuote(
-                    tenant_id=tenant_id,
-                    broker_project_id=quote.broker_project_id,
-                    carrier_config_id=quote.carrier_config_id,
-                    carrier_name=carrier_name,
-                    source_hash=f"{pdf_hash}:{idx}",
-                    source=quote.source,
-                    import_source=quote.import_source,
-                )
-                db.add(target_quote)
-
-            # Set coverage link if matched
-            if matched_coverage:
-                target_quote.coverage_id = UUID(matched_coverage["id"]) if isinstance(matched_coverage["id"], str) else matched_coverage["id"]
-
-            # Set quote terms
-            target_quote.premium = item.get("premium")
-            target_quote.deductible = item.get("deductible")
-            target_quote.limit_amount = item.get("limit_amount")
-            target_quote.coinsurance = item.get("coinsurance")
-            target_quote.term_months = item.get("term_months")
-            target_quote.confidence = item.get("confidence", "medium")
-
-            # Parse validity date if provided
-            validity_str = item.get("validity_date")
-            if validity_str:
-                try:
-                    from datetime import date as date_type
-                    target_quote.validity_date = date_type.fromisoformat(
-                        validity_str[:10]
-                    )
-                except (ValueError, TypeError):
-                    pass
-
-            # Set array fields
-            target_quote.exclusions = item.get("exclusions", [])
-            target_quote.conditions = item.get("conditions", [])
-            target_quote.endorsements = item.get("endorsements", [])
-
-            # Step 6: Critical exclusion detection
-            critical_exclusions = item.get("critical_exclusions", [])
-            if critical_exclusions:
-                target_quote.has_critical_exclusion = True
-                details = "; ".join(
-                    f"{ce['exclusion']} (conflicts with {ce['conflicts_with']}: {ce['reason']})"
-                    for ce in critical_exclusions
-                )
-                target_quote.critical_exclusion_detail = details
-                critical_exclusions_found += len(critical_exclusions)
-            else:
-                target_quote.has_critical_exclusion = False
-
-            # Step 7: Update status to extracted
-            target_quote.status = "extracted"
-            target_quote.received_at = datetime.now(timezone.utc)
-
-            quotes_updated.append(
-                {
-                    "coverage_type": coverage_type,
-                    "premium": item.get("premium"),
-                    "has_critical_exclusion": bool(critical_exclusions),
-                    "confidence": item.get("confidence", "medium"),
-                }
-            )
-
-        # Update source_hash on original quote
-        quote.source_hash = pdf_hash
-
-        await db.flush()
-
-        # Step 8: Log BrokerActivity
-        activity = BrokerActivity(
-            tenant_id=tenant_id,
-            broker_project_id=quote.broker_project_id,
-            activity_type="quote_extracted",
-            actor_type="system",
-            description=(
-                f"Quote extracted from {carrier_name}: "
-                f"{len(quotes_updated)} coverage lines, "
-                f"{critical_exclusions_found} critical exclusions"
-            ),
-            metadata_={
-                "carrier_name": carrier_name,
-                "line_items_extracted": len(quotes_updated),
-                "critical_exclusions_found": critical_exclusions_found,
-                "model": model,
-                "quote_reference": extracted.get("quote_reference"),
-                "currency": extracted.get("currency"),
-                "total_premium": extracted.get("total_premium"),
-            },
-        )
-        db.add(activity)
-        await db.flush()
-
-        logger.info(
-            "Quote extraction completed for quote_id=%s tenant_id=%s: "
-            "%d line items, %d critical exclusions",
-            quote_id,
-            tenant_id,
-            len(quotes_updated),
-            critical_exclusions_found,
-        )
-
-        return {
+        {
             "status": "extracted",
-            "line_items_extracted": len(quotes_updated),
+            "line_items_extracted": int,
+            "carrier_name": str,
+            "critical_exclusions_found": int,
+            "line_items": list[dict],
+        }
+    """
+    result = await db.execute(
+        select(CarrierQuote).where(
+            CarrierQuote.id == quote_id,
+            CarrierQuote.tenant_id == tenant_id,
+        )
+    )
+    quote = result.scalar_one_or_none()
+    if quote is None:
+        raise ValueError(
+            f"CarrierQuote not found for persist_quote_extraction: "
+            f"quote_id={quote_id} tenant_id={tenant_id}"
+        )
+
+    # Load project coverages if caller didn't supply them.
+    if project_coverages is None:
+        cov_result = await db.execute(
+            select(ProjectCoverage).where(
+                ProjectCoverage.broker_project_id == quote.broker_project_id
+            )
+        )
+        project_coverages = [
+            {
+                "id": str(c.id),
+                "coverage_type": c.coverage_type,
+                "coverage_type_key": c.coverage_type_key,
+                "category": c.category,
+                "required_limit": float(c.required_limit)
+                if c.required_limit is not None
+                else None,
+            }
+            for c in cov_result.scalars().all()
+        ]
+
+    line_items = tool_use_output.get("line_items", []) or []
+    carrier_name = tool_use_output.get("carrier_name", "Unknown")
+    critical_exclusions_found = 0
+    quotes_updated: list[dict] = []
+
+    # Update the original quote row with top-level metadata.
+    quote.carrier_name = carrier_name
+
+    for idx, item in enumerate(line_items):
+        if not isinstance(item, dict):
+            continue
+        coverage_type = item.get("coverage_type", "")
+        matched_coverage = _match_coverage(coverage_type, project_coverages)
+
+        if idx == 0:
+            target_quote = quote
+        else:
+            target_quote = CarrierQuote(
+                tenant_id=tenant_id,
+                broker_project_id=quote.broker_project_id,
+                carrier_config_id=quote.carrier_config_id,
+                carrier_name=carrier_name,
+                source_hash=f"{quote.source_hash or 'cc-brain'}:{idx}",
+                source=quote.source,
+                import_source=quote.import_source,
+            )
+            db.add(target_quote)
+
+        if matched_coverage:
+            mid = matched_coverage["id"]
+            target_quote.coverage_id = UUID(mid) if isinstance(mid, str) else mid
+
+        target_quote.premium = item.get("premium")
+        target_quote.deductible = item.get("deductible")
+        target_quote.limit_amount = item.get("limit_amount")
+        target_quote.coinsurance = item.get("coinsurance")
+        target_quote.term_months = item.get("term_months")
+        target_quote.confidence = item.get("confidence", "medium")
+
+        validity_str = item.get("validity_date")
+        if validity_str:
+            try:
+                from datetime import date as date_type
+
+                target_quote.validity_date = date_type.fromisoformat(
+                    str(validity_str)[:10]
+                )
+            except (ValueError, TypeError):
+                pass
+
+        target_quote.exclusions = item.get("exclusions", []) or []
+        target_quote.conditions = item.get("conditions", []) or []
+        target_quote.endorsements = item.get("endorsements", []) or []
+
+        critical_exclusions = item.get("critical_exclusions", []) or []
+        if critical_exclusions:
+            target_quote.has_critical_exclusion = True
+            details = "; ".join(
+                f"{ce.get('exclusion', '')} "
+                f"(conflicts with {ce.get('conflicts_with', '')}: "
+                f"{ce.get('reason', '')})"
+                for ce in critical_exclusions
+                if isinstance(ce, dict)
+            )
+            target_quote.critical_exclusion_detail = details
+            critical_exclusions_found += len(critical_exclusions)
+        else:
+            target_quote.has_critical_exclusion = False
+
+        target_quote.status = "extracted"
+        target_quote.received_at = datetime.now(timezone.utc)
+
+        quotes_updated.append(
+            {
+                "coverage_type": coverage_type,
+                "premium": item.get("premium"),
+                "has_critical_exclusion": bool(critical_exclusions),
+                "confidence": item.get("confidence", "medium"),
+            }
+        )
+
+    await db.flush()
+
+    # Log BrokerActivity.
+    activity = BrokerActivity(
+        tenant_id=tenant_id,
+        broker_project_id=quote.broker_project_id,
+        activity_type="quote_extracted",
+        actor_type="system",
+        description=(
+            f"Quote extracted (CC-as-Brain) from {carrier_name}: "
+            f"{len(quotes_updated)} coverage lines, "
+            f"{critical_exclusions_found} critical exclusions"
+        ),
+        metadata_={
             "carrier_name": carrier_name,
+            "line_items_extracted": len(quotes_updated),
             "critical_exclusions_found": critical_exclusions_found,
-            "line_items": quotes_updated,
-            "quote_reference": extracted.get("quote_reference"),
-            "currency": extracted.get("currency"),
-            "total_premium": extracted.get("total_premium"),
-        }
+            "model": "claude-in-conversation",
+            "quote_reference": tool_use_output.get("quote_reference"),
+            "currency": tool_use_output.get("currency"),
+            "total_premium": tool_use_output.get("total_premium"),
+        },
+    )
+    db.add(activity)
+    await db.flush()
 
-    except anthropic.APITimeoutError:
-        logger.error(
-            "Quote extraction timed out after %ds for quote_id=%s tenant_id=%s",
-            API_TIMEOUT,
-            quote_id,
-            tenant_id,
-        )
-        # Set metadata flag but don't change status (allow retry)
-        try:
-            result = await db.execute(
-                select(CarrierQuote).where(
-                    CarrierQuote.id == quote_id,
-                    CarrierQuote.tenant_id == tenant_id,
-                )
-            )
-            q = result.scalar_one_or_none()
-            if q:
-                meta = dict(q.metadata_) if q.metadata_ else {}
-                meta["extraction_error"] = f"API timeout after {API_TIMEOUT}s"
-                meta["extraction_attempted_at"] = datetime.now(
-                    timezone.utc
-                ).isoformat()
-                q.metadata_ = meta
-                await db.flush()
-        except Exception as inner_exc:
-            logger.error(
-                "Failed to record timeout for quote_id=%s: %s",
-                quote_id,
-                inner_exc,
-            )
-
-        return {
-            "status": "error",
-            "message": f"API timeout after {API_TIMEOUT} seconds",
-        }
-
-    except Exception as exc:
-        logger.error(
-            "Quote extraction failed for quote_id=%s tenant_id=%s: %s: %s",
-            quote_id,
-            tenant_id,
-            type(exc).__name__,
-            exc,
-        )
-
-        # Set metadata flag but don't change status (allow retry)
-        try:
-            result = await db.execute(
-                select(CarrierQuote).where(
-                    CarrierQuote.id == quote_id,
-                    CarrierQuote.tenant_id == tenant_id,
-                )
-            )
-            q = result.scalar_one_or_none()
-            if q:
-                meta = dict(q.metadata_) if q.metadata_ else {}
-                meta["extraction_error"] = f"{type(exc).__name__}: {exc}"
-                meta["extraction_attempted_at"] = datetime.now(
-                    timezone.utc
-                ).isoformat()
-                q.metadata_ = meta
-                await db.flush()
-        except Exception as inner_exc:
-            logger.error(
-                "Failed to record extraction failure for quote_id=%s: %s",
-                quote_id,
-                inner_exc,
-            )
-
-        return {"status": "error", "message": str(exc)}
+    return {
+        "status": "extracted",
+        "line_items_extracted": len(quotes_updated),
+        "carrier_name": carrier_name,
+        "critical_exclusions_found": critical_exclusions_found,
+        "line_items": quotes_updated,
+        "quote_reference": tool_use_output.get("quote_reference"),
+        "currency": tool_use_output.get("currency"),
+        "total_premium": tool_use_output.get("total_premium"),
+    }

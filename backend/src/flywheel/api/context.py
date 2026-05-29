@@ -822,3 +822,88 @@ async def onboarding_cache_refresh(
         run_id=str(run.id),
         message="Refresh started",
     )
+
+
+# ---------------------------------------------------------------------------
+# GET /context/preamble — aggregated context snapshot for session warming
+# ---------------------------------------------------------------------------
+
+_PREAMBLE_CHAR_CAP = 8000
+
+
+@router.get("/preamble")
+async def get_context_preamble(
+    user: TokenPayload = Depends(require_tenant),
+    db: AsyncSession = Depends(get_tenant_db),
+) -> dict:
+    """Return a compact context store snapshot (catalog + recent entries).
+
+    Used at session start by both CC and Desktop callers for context warming.
+    Returns the catalog listing plus top-5 most recent entries per active file,
+    hard-capped at 8k characters with a truncation flag.
+    """
+    # Step 1 — Fetch catalog
+    result = await db.execute(select(ContextCatalog))
+    catalogs = result.scalars().all()
+    active_files = [c.file_name for c in catalogs if c.status != "empty"]
+    catalog_list = [
+        {"file_name": c.file_name, "description": c.description, "status": c.status}
+        for c in catalogs
+    ]
+
+    # Step 2 — Fetch top-5 recent entries per active file (window function)
+    entries: list = []
+    if active_files:
+        subq = (
+            select(
+                ContextEntry.file_name,
+                ContextEntry.content,
+                ContextEntry.source,
+                ContextEntry.date,
+                ContextEntry.confidence,
+                func.row_number()
+                .over(
+                    partition_by=ContextEntry.file_name,
+                    order_by=ContextEntry.date.desc(),
+                )
+                .label("rn"),
+            )
+            .where(
+                ContextEntry.file_name.in_(active_files),
+                ContextEntry.deleted_at.is_(None),
+            )
+            .subquery()
+        )
+        rows = await db.execute(select(subq).where(subq.c.rn <= 5))
+        entries = rows.all()
+
+    # Step 3 — Build snapshot with 8k char cap
+    snapshot: list[dict] = []
+    total_chars = 0
+    truncated = False
+
+    for file_name in active_files:
+        file_entries = [e for e in entries if e.file_name == file_name]
+        for e in file_entries:
+            entry_text = f"[{e.file_name}] ({e.source}, {e.date}) {e.content}"
+            if total_chars + len(entry_text) > _PREAMBLE_CHAR_CAP:
+                truncated = True
+                break
+            snapshot.append({
+                "file_name": e.file_name,
+                "content": (e.content or "")[:500],
+                "source": e.source,
+                "date": str(e.date),
+                "confidence": e.confidence,
+            })
+            total_chars += len(entry_text)
+        if truncated:
+            break
+
+    # Step 4 — Return
+    return {
+        "catalog": catalog_list,
+        "snapshot": snapshot,
+        "truncated": truncated,
+        "total_chars": total_chars,
+    }

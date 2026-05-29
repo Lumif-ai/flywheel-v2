@@ -1,3 +1,5 @@
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file references the legacy `~/.claude/skills/` path. Skills are now served exclusively via `flywheel_fetch_skill_assets` from the `skill_assets` table. Retained for historical reference only; runtime bundles are delivered over MCP and paths shown in this document no longer reflect the live code location.
+
 # Persona Schema Reference
 
 This document defines the schema for both **archetype** personas (generic role/industry combos) and **contact** personas (specific individuals). All persona files follow this structure.

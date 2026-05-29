@@ -20,6 +20,7 @@ from typing import Dict, List, Optional, Tuple
 # Constants
 # ---------------------------------------------------------------------------
 
+# DEPRECATED (Phase 152 — 2026-04-19): legacy ~/.claude/skills/ path; skills are served via flywheel_fetch_skill_assets. Retained for developer tooling only; no runtime impact.
 SKILLS_DIR = Path.home() / ".claude" / "skills"
 
 DEFAULT_TOKEN_BUDGET = 50000

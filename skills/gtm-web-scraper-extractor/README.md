@@ -17,17 +17,8 @@ A Claude Code skill that extracts structured data from any website into a CSV us
 - Any business or people directory
 
 ## Installation
-```bash
-# 1. Clone or download this repo
-mkdir -p ~/.claude/skills
-git clone https://github.com/Sharan0516/claude-skill-web-scraper.git ~/.claude/skills/web-scraper-extractor
 
-# 2. Add Playwright MCP
-claude mcp add playwright -- npx @playwright/mcp
-
-# 3. Restart Claude Code, then say:
-# "Set up the web scraper prerequisites"
-```
+This skill is delivered exclusively through the Flywheel MCP server as of Phase 152 (2026-04-19) — DEPRECATED (Phase 152 — 2026-04-19). Do not clone this directory into `~/.claude/skills/`. Claude Code fetches the authoritative bundle via `flywheel_fetch_skill_assets` on demand.
 
 ## Usage
 Just describe what you want in Claude Code:

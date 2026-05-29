@@ -1,4 +1,6 @@
 ---
+public: true
+cc_executable: true
 name: call-intelligence
 version: "1.0"
 description: >
@@ -28,6 +30,9 @@ output:
   - context-store-writes
 web_tier: 3
 ---
+
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
 
 # call-intelligence
 

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "flywheel-ai"
-version = "0.3.4"
+version = "0.4.0"
 description = "Flywheel CLI and MCP server — business intelligence from the terminal and Claude Code"
 readme = "README.md"
 license = "MIT"
@@ -42,4 +42,16 @@ flywheel = "flywheel_cli.main:cli"
 flywheel-mcp = "flywheel_mcp.server:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["flywheel_cli", "flywheel_mcp"]
+  packages = ["flywheel_cli", "flywheel_mcp"]
+
+[tool.hatch.build.targets.wheel.force-include]
+  "flywheel/broker" = "flywheel/broker"
+
+[tool.hatch.build]
+  include = [
+      "flywheel_cli/**/*.py",
+      "flywheel_mcp/**/*.py",
+      "flywheel/broker/**/*.py",
+      "flywheel/broker/**/*.yaml",
+      "flywheel/broker/templates/*.md",
+  ]

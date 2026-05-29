@@ -199,6 +199,25 @@ def _login_headless(email: str, password: str) -> dict:
     return resp.json()
 
 
+def _send_magic_link(email: str, redirect_uri: str, code_challenge: str) -> None:
+    """Send a magic link email via Supabase with PKCE challenge."""
+    resp = httpx.post(
+        f"{SUPABASE_URL}/auth/v1/magiclink",
+        json={
+            "email": email,
+            "code_challenge": code_challenge,
+            "code_challenge_method": "s256",
+        },
+        headers={
+            "apikey": SUPABASE_ANON_KEY,
+            "Content-Type": "application/json",
+        },
+        params={"redirect_to": redirect_uri},
+        timeout=15.0,
+    )
+    resp.raise_for_status()
+
+
 def _fetch_profile(access_token: str) -> dict:
     """Fetch user profile from the Flywheel API."""
     api_url = get_api_url()
@@ -228,8 +247,9 @@ def _save_from_token_response(data: dict) -> str:
 
 @cli.command()
 @click.option("--headless", is_flag=True, help="Use email/password instead of browser.")
-def login(headless: bool) -> None:
-    """Authenticate with Flywheel (browser PKCE or headless)."""
+@click.option("--magic-link", is_flag=True, help="Use magic link (email OTP) instead of browser.")
+def login(headless: bool, magic_link: bool) -> None:
+    """Authenticate with Flywheel (browser PKCE, headless, or magic link)."""
     if not SUPABASE_URL:
         raise click.ClickException(
             "FLYWHEEL_SUPABASE_URL not set. "
@@ -255,6 +275,52 @@ def login(headless: bool) -> None:
         console.print(
             "[dim]Note: password auth must be enabled in Supabase dashboard.[/dim]"
         )
+    elif magic_link:
+        email = click.prompt("Email")
+        verifier, challenge = _generate_pkce()
+        redirect_uri = f"http://localhost:{CALLBACK_PORT}/callback"
+
+        with console.status("Sending magic link..."):
+            try:
+                _send_magic_link(email, redirect_uri, challenge)
+            except httpx.HTTPStatusError as exc:
+                raise click.ClickException(
+                    f"Magic link failed ({exc.response.status_code}). "
+                    "Check the email address."
+                ) from exc
+
+        # Start local callback server — wait up to 120s for the user to click the link
+        _CallbackHandler.auth_code = None
+        server = HTTPServer(("127.0.0.1", CALLBACK_PORT), _CallbackHandler)
+        server.timeout = 120
+
+        console.print(
+            Panel(
+                f"Magic link sent to [bold]{email}[/bold]\n"
+                "Check your email and click the login link.\n"
+                "Waiting up to 2 minutes...",
+                title="Flywheel Magic Link Login",
+                border_style="cyan",
+            )
+        )
+
+        server.handle_request()
+        server.server_close()
+
+        code = _CallbackHandler.auth_code
+        if not code:
+            raise click.ClickException(
+                "Authentication timed out. No callback received — "
+                "check your email and try again."
+            )
+
+        with console.status("Exchanging tokens..."):
+            try:
+                data = _exchange_pkce_code(code, verifier)
+            except httpx.HTTPStatusError as exc:
+                raise click.ClickException(
+                    f"Token exchange failed ({exc.response.status_code})."
+                ) from exc
     else:
         # PKCE browser flow
         verifier, challenge = _generate_pkce()
@@ -693,7 +759,44 @@ def setup_claude_code() -> None:
             "[yellow]  Run 'flywheel setup-claude-code' again or manually copy the template.[/yellow]"
         )
 
-    # 7. Summary
+    # 7. Install broker router SKILL.md (Phase 152.1 — MCP-fetch dispatcher)
+    console.print("[bold]Installing broker router SKILL.md...[/bold]")
+    try:
+        from importlib import resources as _res
+
+        try:
+            _tpl_path = _res.files("flywheel.broker.templates").joinpath("router-SKILL.md")
+            _tpl_body = _tpl_path.read_text(encoding="utf-8")
+        except (ModuleNotFoundError, FileNotFoundError) as _exc:
+            console.print(
+                f"[yellow]  WARN[/yellow] broker router template not found in flywheel-ai "
+                f"package ({_exc}). Upgrade via `pip install --upgrade 'flywheel-ai>=0.4.0'` "
+                f"and re-run setup-claude-code."
+            )
+            _tpl_body = None
+
+        if _tpl_body:
+            _broker_router = Path.home() / ".claude" / "skills" / "broker" / "SKILL.md"
+            _broker_router.parent.mkdir(parents=True, exist_ok=True)
+            if (
+                _broker_router.exists()
+                and "flywheel_fetch_skill_prompt"
+                in _broker_router.read_text(encoding="utf-8")
+            ):
+                console.print(f"[dim]  skipped (up-to-date) {_broker_router}[/dim]")
+            else:
+                _broker_router.write_text(_tpl_body, encoding="utf-8")
+                console.print(
+                    f"[green]  Broker router installed at {_broker_router}[/green]"
+                )
+    except Exception as exc:
+        console.print(f"[red]  Failed to install broker router:[/red] {exc}")
+        console.print(
+            "[yellow]  ⚠ /broker:* triggers will not dispatch without the router.[/yellow]\n"
+            "[yellow]  Re-run 'flywheel setup-claude-code' after upgrading flywheel-ai.[/yellow]"
+        )
+
+    # 8. Summary
     if claude_md_ok:
         claude_md_status = (
             "  [bold]CLAUDE.md[/bold] (routing rules)\n"
@@ -726,6 +829,168 @@ def setup_claude_code() -> None:
             "[dim]Restart Claude Code to activate.[/dim]",
             title=panel_title,
             border_style=panel_border,
+        )
+    )
+
+
+# ---------------------------------------------------------------------------
+# Setup Claude Desktop (MCP config + project instructions)
+# ---------------------------------------------------------------------------
+
+
+DESKTOP_PROJECT_INSTRUCTIONS = """\
+# Flywheel Integration
+
+## Session Start
+At the beginning of every conversation, call flywheel_warm_context to load
+your business context snapshot. This gives you awareness of recent meetings,
+pipeline activity, and stored knowledge.
+
+## Skill Routing
+When the user asks to perform a business task (meeting prep, company research,
+daily briefing, document generation, outreach, etc.):
+1. Call flywheel_route_skill with the user's intent as free text.
+2. If a skill matches, follow the returned prompt instructions exactly.
+3. If no match, fall back to general Claude capabilities.
+
+Do NOT attempt to guess or hardcode skill names -- always route through
+flywheel_route_skill.
+
+## Context Store
+IMPORTANT: Business intelligence discovered during ANY conversation must be
+saved to Flywheel via flywheel_write_context.
+
+Business intelligence includes: contacts, company details, competitive intel,
+pain points, positioning insights, pricing signals, market signals, meeting
+outcomes, deal context, relationship notes.
+
+- Before writing, call flywheel_read_context to check for existing entries
+  and enrich rather than duplicate.
+- Non-business data (code, personal notes, scratch work) stays in local files.
+
+## Output
+- Save deliverables (documents, briefings, reports, collateral) via
+  flywheel_save_document so they appear in the Flywheel library.
+- Save meeting summaries via flywheel_save_meeting_summary.
+"""
+
+
+@cli.command("desktop-setup")
+def desktop_setup() -> None:
+    """Register Flywheel MCP server with Claude Desktop and generate project instructions."""
+    import os
+    import platform
+    import sys
+
+    # 1. Resolve flywheel-mcp binary
+    mcp_path = shutil.which("flywheel-mcp")
+    if not mcp_path:
+        console.print(
+            "[red]flywheel-mcp not found on PATH. "
+            "Install with: uv tool install flywheel-ai[/red]"
+        )
+        raise SystemExit(1)
+
+    # 2. Check auth state
+    if not is_logged_in():
+        console.print(
+            "[yellow]Not logged in. Run `flywheel login` first -- "
+            "MCP tools will fail without authentication.[/yellow]"
+        )
+
+    # 3. Read/create Claude Desktop config
+    system = platform.system()
+    if system == "Darwin":
+        config_path = (
+            Path.home() / "Library" / "Application Support" / "Claude"
+            / "claude_desktop_config.json"
+        )
+    elif system == "Windows":
+        config_path = (
+            Path(os.environ.get("APPDATA", ""))
+            / "Claude"
+            / "claude_desktop_config.json"
+        )
+    else:
+        raise click.ClickException(
+            "Claude Desktop is only available on macOS and Windows."
+        )
+
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if config_path.exists():
+        try:
+            config = json.loads(config_path.read_text())
+        except json.JSONDecodeError:
+            console.print(
+                f"[yellow]Warning: existing config at {config_path} is not valid JSON. "
+                "Starting fresh.[/yellow]"
+            )
+            config = {}
+    else:
+        config = {}
+
+    # 4. Merge Flywheel MCP entry (preserves other mcpServers)
+    config.setdefault("mcpServers", {})["flywheel"] = {
+        "command": mcp_path,
+        "args": [],
+    }
+    console.print(f"[green]  Flywheel MCP configured (stdio): {mcp_path}[/green]")
+
+    # 5. Add Granola MCP entry (via mcp-remote for Desktop)
+    config["mcpServers"]["granola"] = {
+        "command": "npx",
+        "args": ["-y", "@anthropic/mcp-remote@latest", "https://mcp.granola.ai/mcp"],
+    }
+    console.print("[green]  Granola MCP configured (via mcp-remote)[/green]")
+
+    # 6. Write config back
+    config_path.write_text(json.dumps(config, indent=2) + "\n")
+    console.print(f"[green]Config written to {config_path}[/green]")
+
+    # 7. Generate project instructions template
+    instructions_path = FLYWHEEL_DIR / "desktop-project-instructions.md"
+    instructions_path.parent.mkdir(parents=True, exist_ok=True)
+    instructions_path.write_text(DESKTOP_PROJECT_INSTRUCTIONS)
+    console.print(
+        f"[green]Project instructions written to {instructions_path}[/green]"
+    )
+
+    # 8. Clipboard copy attempt (macOS only)
+    clipboard_ok = False
+    try:
+        cp_result = subprocess.run(
+            ["pbcopy"],
+            input=DESKTOP_PROJECT_INSTRUCTIONS,
+            text=True,
+            capture_output=True,
+        )
+        if cp_result.returncode == 0:
+            console.print("[green]Copied project instructions to clipboard[/green]")
+            clipboard_ok = True
+    except FileNotFoundError:
+        pass  # pbcopy not available, skip silently
+
+    # 9. Print summary panel
+    clipboard_note = (
+        "  [green]Project instructions copied to clipboard -- paste into Claude Desktop.[/green]\n\n"
+        if clipboard_ok
+        else ""
+    )
+    console.print(
+        Panel(
+            "[bold]MCP servers configured for Claude Desktop:[/bold]\n\n"
+            "  [bold]flywheel[/bold] (stdio)\n"
+            f"    - command: {mcp_path}\n\n"
+            "  [bold]granola[/bold] (via mcp-remote)\n"
+            "    - Granola meeting transcripts\n\n"
+            f"[bold]Project instructions:[/bold] {instructions_path}\n\n"
+            + clipboard_note +
+            "[dim]Paste the project instructions into Claude Desktop: "
+            "Settings > Project > Instructions[/dim]\n\n"
+            "[dim]Restart Claude Desktop to activate.[/dim]",
+            title="Desktop Setup Complete",
+            border_style="green",
         )
     )
 

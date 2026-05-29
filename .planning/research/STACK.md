@@ -1,243 +1,258 @@
-# Technology Stack
+# Stack Research — v22.0 Skill Platform Consolidation
 
-**Project:** Broker Redesign -- Skills, Portal Automation, Frontend Polish, Claude Code Hooks
-**Researched:** 2026-04-15
+**Milestone:** Server-hosted skill Python asset delivery (subsequent milestone on existing Flywheel v2 app)
+**Researched:** 2026-04-17
+**Mode:** Ecosystem + Feasibility (narrow scope)
+**Overall confidence:** HIGH — all load-bearing claims verified against the local codebase, installed package signatures, or official docs.
 
-## Recommended Stack Additions
+---
 
-This milestone requires additions across three layers: Python backend (portal automation), frontend (AG Grid upgrade, animations), and Claude Code configuration (hooks, skills). Five specific additions are needed.
+## TL;DR (one line)
 
-### 1. Playwright (Python) -- Portal Automation
+Store skill bundles as **ZIP blobs in a new `skill_assets` table (bytea)** written by an extended `seed_skills()` pipeline, serve them via a **new `flywheel_fetch_skill_assets` MCP tool returning a `fastmcp.utilities.types.File(data=..., format="zip")`**, and extract them on the user's machine with **`tempfile.TemporaryDirectory` + `zipfile.ZipFile` (stdlib only)** — no new framework, no new Python dependencies.
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| playwright | >=1.58.0 | Carrier portal form-filling automation | Already architected in `portal_submitter.py` and `scripts/portals/mapfre_mx.py`. Codebase imports `playwright.async_api` with a `HAS_PLAYWRIGHT` guard. Not yet in `pyproject.toml` -- needs to be added as optional dependency |
+---
 
-**Current state:** The engine exists (`backend/src/flywheel/engines/portal_submitter.py`) and one carrier script exists (`backend/scripts/portals/mapfre_mx.py`). Both import Playwright but it is NOT listed in `pyproject.toml` dependencies. The engine runs locally on the broker's machine, not on the API server.
+## Stack Additions
 
-**Installation approach:** Add as optional dependency group, not core dependency. Portal scripts run on Claude Code's local machine, not the deployed API server.
+### 1. Server-side storage — `skill_assets` table (bytea) + extended seed pipeline
 
-```toml
-# In pyproject.toml [dependency-groups]
-portals = [
-    "playwright>=1.58.0",
-]
+**Recommended:** New table `skill_assets` with `bundle BYTEA NOT NULL`, one row per skill, FK to `skill_definitions(id)` with `ON DELETE CASCADE`.
+
+| Choice | Type | Version | Purpose | Why |
+|---|---|---|---|---|
+| New table `skill_assets` | PostgreSQL table | — | One-to-one with `skill_definitions`, stores the zipped bundle + metadata | Keeps `skill_definitions` narrow (one row = one lookup for MCP discovery), lets us add asset-only columns (`bundle_sha256`, `bundle_size_bytes`, `bundle_format`, `updated_at`) without bloating the skill catalog row |
+| `bundle BYTEA` column | PostgreSQL column | — | Holds the zipped skill directory | 1 GB hard limit per bytea value (PostgreSQL TOAST 30-bit size); broker skill dir is 160 KB today, all 42 .py files total 24.6K LOC ≈ well under 2 MB zipped — five orders of magnitude of headroom. `LargeBinary` column is an established Flywheel pattern (`UserAccount.api_key_encrypted`, `EmailAccount.credentials_encrypted`, portal credentials, etc.) — no new mental model for the team |
+| `bundle_sha256 TEXT` | PostgreSQL column | — | Integrity / change-detection | Lets the MCP tool send `If-None-Match` equivalent, and lets the seed pipeline skip re-uploading unchanged bundles |
+| `bundle_size_bytes INTEGER` | PostgreSQL column | — | Observability + cheap sanity gate in the fetch endpoint | — |
+| `bundle_format TEXT` default `'zip'` | PostgreSQL column | — | Future-proof (we might add `tar.gz` for larger bundles) | — |
+| `updated_at TIMESTAMPTZ` | PostgreSQL column | — | Client-side cache invalidation | — |
+
+**Why not Supabase Storage:** Confirmed available and working in-repo (`services/document_storage.py`) — Pro plan supports up to 500 GB per object [Supabase Docs](https://supabase.com/docs/guides/storage/uploads/file-limits). But for **sub-megabyte bundles that ship on every skill fetch**, Storage adds a **second auth hop (service-role signed URL)**, a **second network roundtrip** (sign → download), and **two places to keep in sync** (DB row for metadata + Storage object for bytes). A single `SELECT bundle FROM skill_assets WHERE skill_id = ?` is simpler and atomic with the skill catalog. Revisit if any single bundle crosses ~20 MB.
+
+**Why not a `bundle` column on `skill_definitions` itself:** Every `GET /skills/` list call would need to explicitly avoid `SELECT *` to skip the bundle column, and the hot-path `list_skills` endpoint already returns the row (see `api/skills.py:125-175` `_get_available_skills_db`). Forgetting `defer(SkillDefinition.bundle)` once would pull megabytes into every list response. Separate table = no such footgun.
+
+**Migration path (one-way, new milestone):** Standard Alembic migration — `CREATE TABLE skill_assets (...)` + indexes. Uses the **existing PgBouncer DDL workaround** (per-statement `op.execute()` commits, see `alembic/versions/063_skill_protected_default.py:36-38` for the pattern). No data backfill needed on first deploy — the seed pipeline populates on first run.
+
+### 2. Bundling format — stdlib `zipfile` writing in-memory via `io.BytesIO`
+
+| Choice | Module | Version | Purpose | Why |
+|---|---|---|---|---|
+| `zipfile.ZipFile` | Python stdlib | 3.12 (backend), 3.10+ (CLI) | Pack/unpack skill directories | Python stdlib. Supports `BytesIO` as `fileobj` for fully in-memory round-trip. **DEFLATE built-in** — no zstd/lz4 dependency needed |
+| `io.BytesIO` | Python stdlib | — | In-memory buffer for the zip | Same — stdlib |
+| `hashlib.sha256` | Python stdlib | — | Content hash for `bundle_sha256` | Same — stdlib |
+
+**Why zip over tar.gz:**
+1. **Random access** — `zipfile.ZipFile(...).read("api_client.py")` without decompressing the whole archive. Not critical today (CC extracts the whole thing) but useful for future selective loading.
+2. **Cross-platform filename handling** — zip handles UTF-8 filenames uniformly; tarfile has legacy encoding quirks on mixed platforms.
+3. **Security** — `zipfile` has no tar-style symlink attacks. (Still need path-traversal check on extract; see Pitfalls research.)
+4. **Developer familiarity** — every dev can open a .zip with Finder / Explorer for debugging.
+
+**Why not plain multi-file (array of `{path, content}` JSON):**
+- Binary files (future: fonts, images shipped with skills) force base64, inflating payload ~33% before the wire compresses it.
+- No built-in integrity/manifest concept; we'd reinvent zip poorly.
+- JSON parse cost scales with file count, not byte count — hurts if skills eventually bundle 100+ files.
+
+**Existing multi-file blob patterns in flywheel-v2:** Grep confirms **none** — the closest is encrypted OAuth-credentials-in-LargeBinary (`api_key_encrypted`, `credentials_encrypted`, `portal_credentials`). Those are single secrets, not archives. This milestone establishes the archive pattern.
+
+### 3. MCP asset-fetch tool — `fastmcp.utilities.types.File` return
+
+| Choice | Package | Version | Purpose | Why |
+|---|---|---|---|---|
+| `fastmcp.utilities.types.File` | fastmcp | **3.2.2+** (already pinned `>=3.2.2,<4` in `cli/pyproject.toml:39`) | Return binary bundle from MCP tool with MIME + name | **Verified locally**: `File(path=None, data=bytes|None, format=str|None, name=str|None, annotations=...)` in `cli/.venv/lib/python3.12/site-packages/fastmcp/utilities/types.py`. FastMCP base64-encodes `data` and wraps it as `BlobResourceContents` inside `EmbeddedResource` per MCP spec [FastMCP docs](https://gofastmcp.com/servers/tools). No extra dependency. No extra version bump. |
+
+**Exact return pattern (new tool in `cli/flywheel_mcp/server.py`):**
+
+```python
+from fastmcp.utilities.types import File
+
+@mcp.tool(output_schema=None)
+def flywheel_fetch_skill_assets(skill_name: str) -> File | str:
+    """Fetch the Python asset bundle for a skill as a ZIP archive.
+
+    Returns the bundle bytes wrapped as a File resource (MCP base64-encodes
+    automatically). Returns a string error message on failure so the tool
+    contract matches the existing MCP tools in this server.
+    """
+    try:
+        client = FlywheelClient()
+        payload = client.fetch_skill_assets(skill_name)  # returns {"bundle_b64": "...", "sha256": "...", "size": N, "format": "zip"}
+        import base64
+        data = base64.b64decode(payload["bundle_b64"])
+        return File(data=data, format=payload.get("format", "zip"), name=f"{skill_name}.zip")
+    except FlywheelAPIError as exc:
+        return str(exc)
 ```
 
-```bash
-# On broker's machine only
-uv sync --group portals
-playwright install chromium
+**Why not stream raw `bytes` return:** FastMCP accepts bare `bytes` too, but the `File` helper gives us a **named archive** (`{skill_name}.zip`) visible to Claude Code's side, which matters for the ephemeral temp-dir unpack flow. Negligible code difference.
+
+**Precedent for binary in existing MCP tools:** Grep confirms **none** — all 40+ existing tools in `cli/flywheel_mcp/server.py` return plain strings or dicts. This is the first binary-returning tool. Low risk because FastMCP does the base64 wrapping transparently.
+
+**Server endpoint shape (new in `backend/src/flywheel/api/skills.py`):**
+- `GET /api/v1/skills/{skill_name}/assets` — returns JSON `{"skill_name": "...", "bundle_b64": "...", "sha256": "...", "size": N, "format": "zip", "version": "..."}`.
+- Reuses the **exact same auth + tenant-access query pattern** as `get_skill_prompt` (see `api/skills.py:283-344`) — same `require_tenant` dep, same `has_overrides` / `tenant_skills` branching, same 404 behavior.
+- Base64-in-JSON (not raw `application/zip` response) because: (a) keeps one JSON-only HTTP client in the MCP layer (existing `_request` in `cli/flywheel_mcp/api_client.py:50-75` always calls `.json()`), (b) avoids a second code path for binary handling in the CLI, (c) 33% inflation is irrelevant at sub-MB payloads.
+
+### 4. CC-side ephemeral temp-dir — `tempfile.TemporaryDirectory` context manager
+
+| Choice | Module | Version | Purpose | Why |
+|---|---|---|---|---|
+| `tempfile.TemporaryDirectory` | Python stdlib | 3.10+ | Secure, auto-cleanup directory | Creates dir with random suffix in system temp (`$TMPDIR` / `/tmp`) with secure perms (0o700), `__exit__` recursively deletes [Python docs](https://docs.python.org/3/library/tempfile.html#tempfile.TemporaryDirectory) |
+| `with ... as tmpdir:` context manager | Python stdlib | — | Guarantee cleanup even on exception | Documented best practice; failsafe against leaked dirs |
+| `ignore_cleanup_errors=True` | Python stdlib | Python 3.10+ | Best-effort cleanup on weird FS states | Pass this to tolerate macOS APFS races and file locks during tests |
+| `zipfile.ZipFile(...).extractall()` with **path-traversal guard** | Python stdlib | — | Unpack into tmpdir | Stdlib. **Must** validate each member name to reject `../` or absolute paths (tracked in PITFALLS) |
+
+**Canonical pattern (goes wherever CC executes skill Python — probably a helper in `cli/flywheel_mcp/`):**
+
+```python
+import base64, io, tempfile, zipfile
+from pathlib import Path
+
+def materialize_skill_bundle(bundle_bytes: bytes) -> tempfile.TemporaryDirectory:
+    """Extract bundle into a new secure temp dir. Caller uses as context manager:
+
+        with materialize_skill_bundle(data) as tmpdir:
+            subprocess.run(["python", Path(tmpdir) / "main.py"], cwd=tmpdir)
+        # tmpdir and contents auto-deleted here
+    """
+    tmp = tempfile.TemporaryDirectory(prefix="flywheel-skill-", ignore_cleanup_errors=True)
+    with zipfile.ZipFile(io.BytesIO(bundle_bytes), "r") as zf:
+        # Path-traversal guard BEFORE extractall (see PITFALLS)
+        for member in zf.namelist():
+            if member.startswith("/") or ".." in Path(member).parts:
+                raise ValueError(f"Refusing unsafe zip member: {member}")
+        zf.extractall(tmp.name)
+    return tmp
 ```
 
-**Confidence: HIGH** -- Playwright 1.58.0 confirmed on PyPI (Jan 2026). Python >=3.9 required, project uses 3.12. Async API (`async_playwright`) already used in existing code.
+**Why not `atexit.register`:** Works, but couples cleanup to process lifetime rather than scope — if CC holds the dir for the full MCP session, a crashed MCP server leaves it behind. The context-manager scope is bounded by a single skill invocation, which is the correct lifetime. Use `atexit` only as a **backup sweeper** for orphaned `flywheel-skill-*` dirs on MCP server startup (optional hardening, Phase 2).
 
-### 2. AG Grid Enterprise -- Row Grouping
+**Why not `/tmp/flywheel-skills/<skill>`:** Shared parent dir across skill runs creates cleanup races and security issues (one skill could see another's partially-extracted files). `TemporaryDirectory` gives each run a unique random-suffix dir — no sharing.
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| ag-grid-enterprise | >=35.2.0 | Row grouping, grouped column rendering, aggregation | Row Grouping is Enterprise-only. Community edition does NOT include it. Current codebase uses ag-grid-community 35.2.0 |
-| ag-grid-react | >=35.2.0 | React wrapper (already installed) | Already present, version stays the same |
+### 5. Auth boundary — reuse existing Bearer token + tenant RLS
 
-**Critical finding:** Row Grouping is an Enterprise-only feature. AG Grid's official Community vs Enterprise comparison explicitly lists "Row Grouping" under Enterprise Features only. The current codebase uses `ag-grid-community@35.2.0` which does NOT support row grouping.
+**No new primitives needed.** The new asset endpoint reuses the existing auth stack end-to-end:
 
-**Decision required:** If row grouping is essential (e.g., grouping quotes by carrier, coverages by type), AG Grid Enterprise license is needed. If not, client-side "visual grouping" can be faked using custom row rendering with Community edition.
+| Layer | Existing primitive | Reuse unchanged? |
+|---|---|---|
+| Token storage | `~/.flywheel/credentials.json` via `flywheel_cli.auth.save_credentials` (600 perms, see `cli/flywheel_cli/auth.py:19-36`) | **Yes** |
+| Token retrieval | `flywheel_cli.auth.get_token()` with auto-refresh on near-expiry | **Yes** |
+| HTTP header | `Authorization: Bearer {token}` set by `FlywheelClient.__init__` in `cli/flywheel_mcp/api_client.py:33-37` | **Yes** |
+| Auto-refresh on 401 | `_ensure_token()` + `clear_credentials()` on 401 in `api_client.py:43-62` | **Yes** |
+| Server-side tenant auth | `Depends(require_tenant)` → `TokenPayload` with `tenant_id` | **Yes** |
+| Tenant-scoped skill query | `has_overrides` + `tenant_skills` branching (see `api/skills.py:296-323`) | **Yes — copy verbatim from `get_skill_prompt`** |
+| `protected` skill handling | Stub response when `skill.protected == True` (see `api/skills.py:337-342`) | **Yes — but decision: return the bundle OR refuse?** Flagged in PITFALLS. Current Phase-95-corrected posture: `protected` applies to the **prompt**, not the code. Code contains no LLM instructions, so fetching assets for a non-protected (default) skill should just work. Protected skills don't need assets shipped client-side anyway (they execute server-side by definition), so returning 403 for protected-skill asset fetches is the right default. |
 
-**Alternative -- No Enterprise license:**
-- Use `pinnedTopRowData` for group headers (Community feature)
-- Sort data by group key and insert visual separator rows
-- Custom cell renderers can show expand/collapse UI without actual grouping API
-- This is a workaround, not a replacement -- no built-in aggregation, no drag-to-group
+**Two environment-variable paths, both already supported:**
+- **Interactive users:** `flywheel login` populates `credentials.json`. No change.
+- **CI / headless:** `FLYWHEEL_API_TOKEN` env var read by `get_token()`. No change.
 
-**Custom cell renderers and theming:** Both are Community features. The codebase already has:
-- Shared renderers: `frontend/src/shared/grid/cell-renderers/` (4 renderers)
-- Pipeline renderers: `frontend/src/features/pipeline/components/cell-renderers/` (8 renderers)
-- Theme: `frontend/src/shared/grid/theme.ts` using `themeQuartz.withParams()`
+---
 
-No new library needed for custom cell renderers or theming -- these are Community features already in use.
+## Integration Points
 
-```bash
-# Only if Enterprise license acquired:
-npm install ag-grid-enterprise@35.2.0
+### Extends (modify existing)
 
-# In code, add module registration:
-import { LicenseManager } from 'ag-grid-enterprise'
-LicenseManager.setLicenseKey('YOUR-KEY')
-```
+| File | Change | Why |
+|---|---|---|
+| `backend/src/flywheel/db/models.py` | Add `SkillAsset` ORM class (new table) | One-to-one with `SkillDefinition`; keeps hot-path skill listing fast |
+| `backend/src/flywheel/db/seed.py` | Extend `scan_skills()` to collect `.py` files in the skill dir; extend `seed_skills()` to build zip in-memory + upsert into `skill_assets` | Same pipeline already walks the skill dir tree; adding a `_build_bundle(entry_path) -> bytes` helper and a second upsert is low-risk. Reuse `on_conflict_do_update` + `sha256`-based skip-if-unchanged |
+| `backend/src/flywheel/api/skills.py` | Add `GET /{skill_name}/assets` endpoint | Copy the exact auth/tenant-access shape of `get_skill_prompt` (lines 283-344) |
+| `cli/flywheel_mcp/api_client.py` | Add `fetch_skill_assets(skill_name) -> dict` method | Single new wrapper around `self._request("get", f"/api/v1/skills/{skill_name}/assets")`. Matches the existing 44-method shape |
+| `cli/flywheel_mcp/server.py` | Add `flywheel_fetch_skill_assets` MCP tool | Returns `fastmcp.utilities.types.File` (new — first binary tool in this server). Add to `_GTM_TOOLS` set (line 81) so onboarding guard recognizes it |
+| `cli/pyproject.toml` | **No change** (fastmcp already pinned ≥3.2.2) | — |
+| `backend/pyproject.toml` | **No change** | — |
 
-**Confidence: HIGH** -- Verified via official AG Grid docs that Row Grouping is Enterprise-only. Custom cell renderers and theming are confirmed Community.
+### New files
 
-### 3. Claude Code Hooks -- Configuration Only (No Library)
+| File | Purpose |
+|---|---|
+| `backend/alembic/versions/064_skill_assets_table.py` | `CREATE TABLE skill_assets` + indexes, PgBouncer-safe (per-statement `op.execute()`) |
+| `cli/flywheel_mcp/bundle.py` (or similar) | Pure-stdlib `materialize_skill_bundle(bytes) -> TemporaryDirectory` helper + path-traversal guard |
 
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| Claude Code hooks | Current | PreToolUse, PostToolUse, Stop event automation | Built into Claude Code, configured via `.claude/settings.json` or `.claude/settings.local.json`. No library to install |
+### Does NOT touch
 
-**No dependency needed.** Hooks are a Claude Code built-in feature configured via JSON in settings files.
+- Frontend (no UI surface for asset bundles — server-to-CC only).
+- MCP server process lifecycle / transport (still stdio).
+- Existing `flywheel_fetch_skill_prompt` — orthogonal tool.
+- Skill execution engine (`backend/services/skill_executor.py`) — assets are for **CC-side** execution, not server-side.
+- User's local `~/.claude/skills/` directory — bundles go to ephemeral `/tmp`, never pollute `~/.claude`.
 
-**Configuration location:** `.claude/settings.json` (project-level, shareable) or `.claude/settings.local.json` (local-only).
-
-**Relevant hook events for broker skills:**
-
-| Event | Use Case | Can Block? |
-|-------|----------|-----------|
-| `PreToolUse` | Validate portal automation commands before execution, block destructive DB ops | Yes (exit code 2) |
-| `PostToolUse` | Log portal submission results, trigger notifications after skill completion | No |
-| `Stop` | Ensure all portal changes are saved/committed before Claude stops | Yes (exit code 2) |
-| `SubagentStop` | Validate sub-agent skill output before accepting | Yes |
-
-**Handler types available:** `command` (shell script), `http` (webhook), `prompt` (LLM check), `agent` (sub-agent verification).
-
-**Hook scripts location:** `.claude/hooks/` directory with executable bash scripts.
-
-```json
-{
-  "hooks": {
-    "PreToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/validate-portal-cmd.sh",
-            "statusMessage": "Validating portal command..."
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/ensure-saved.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**Confidence: HIGH** -- Verified via official Claude Code docs at code.claude.com/docs/en/hooks.
-
-### 4. Claude Code Skills -- SKILL.md Format (No Library)
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| SKILL.md format | N/A | Skill definitions for contract parsing, quote extraction, portal automation | File-based convention, no library. Skills live in `~/.claude/skills/` or project `skills/` directory |
-
-**No dependency needed.** Skills are markdown files with frontmatter following the 14 engineering standards already defined in the project's `SKILL-REVIEW-SPEC.md`.
-
-**Existing skill infrastructure:**
-- Skill router: `~/.claude/skills/skill-router/SKILL.md` (30+ skills catalogued)
-- Shared references: `~/.claude/skills/_shared/` (advisors, protocols)
-- GTM skills: `skills/gtm-web-scraper-extractor/`, `skills/gtm-outbound-messenger/`
-
-**New broker skills to create (file-only, no packages):**
-1. `skills/broker-contract-parser/SKILL.md` -- Parse uploaded contract PDFs
-2. `skills/broker-quote-extractor/SKILL.md` -- Extract structured quote data from carrier responses
-3. `skills/broker-portal-submitter/SKILL.md` -- Orchestrate Playwright portal automation
-4. `skills/broker-recommendation-builder/SKILL.md` -- Generate client recommendation letters
-
-**Confidence: HIGH** -- Existing skill system verified in codebase. No new tooling needed.
-
-### 5. CSS Animations -- Already In Place (No Library)
-
-| Technology | Version | Purpose | Why |
-|------------|---------|---------|-----|
-| tw-animate-css | ^1.4.0 | Tailwind animation utilities | Already installed and imported in index.css |
-| Custom keyframes | N/A | fadeUp, shimmer, stagger, page transitions | Already defined in `frontend/src/index.css` and `frontend/src/lib/animations.ts` |
-
-**No dependency needed.** The animation system is already comprehensive:
-
-**Already defined in `index.css`:**
-- `@keyframes fade-slide-up` -- 12px translateY + opacity
-- `@keyframes shimmer` -- skeleton loading effect
-- `@keyframes page-fade-in` -- page entry animation
-- `.stagger-1` through `.stagger-5` -- 50ms stagger delays
-- Task exit animations (confirm/dismiss/later)
-- Focus card animations (enter/exit with rotation)
-- `.animate-shimmer` with CSS custom properties for theming
-
-**Already defined in `lib/animations.ts`:**
-- `fadeSlideUp` object with initial/animate/transition
-- `staggerDelay(index)` function
-- `animationClasses` constants
-
-**What to add for the redesign (CSS-only, no library):**
-- New keyframes can be added directly to `index.css` `@layer utilities` block
-- `prefers-reduced-motion` media query already handled (line 313)
-- Dark mode shimmer variables already defined (lines 130-131)
-
-**Confidence: HIGH** -- All verified in codebase. No new animation library needed.
-
-## Summary: What to Install
-
-| Layer | Package | Required? | Notes |
-|-------|---------|-----------|-------|
-| Python | `playwright>=1.58.0` | YES | Optional dep group for portal scripts |
-| Frontend | `ag-grid-enterprise@35.2.0` | CONDITIONAL | Only if row grouping feature is required. Needs license |
-| Frontend | N/A for animations | NO | Already have tw-animate-css + custom keyframes |
-| Claude Code | N/A for hooks | NO | JSON configuration only |
-| Claude Code | N/A for skills | NO | SKILL.md files only |
+---
 
 ## What NOT to Add
 
-| Package | Why Not |
-|---------|---------|
-| framer-motion | Overkill. CSS keyframes + Tailwind classes handle all needed animations. The codebase already uses pure CSS animations extensively (20+ keyframes defined). Framer adds 32KB gzipped for spring physics not needed here |
-| puppeteer | Playwright is already chosen, architected, and coded. Portal engine imports Playwright. Switching would rewrite existing code for no benefit |
-| ag-grid-enterprise (without license) | Enterprise watermark + console warnings in production. Either get the license or use Community workarounds for grouping |
-| react-spring / motion | Same rationale as framer-motion. CSS animations are performant and already established |
-| Selenium | Playwright is the modern standard. Already in use. Selenium would be a downgrade |
-| animate.css | tw-animate-css already provides this and integrates with Tailwind v4 |
-| Any animation orchestration library | CSS stagger delays + animation-delay handle sequencing. No JS animation runtime needed |
+| Do not add | Why |
+|---|---|
+| **Supabase Storage bucket for skills** (e.g., `skill-bundles` bucket) | Adds a second auth hop (service-role signed URL), a second network roundtrip, and two-places-to-keep-in-sync (DB row + Storage object) for what is a sub-MB payload today. `services/document_storage.py` pattern works for user documents (up to 500 GB) but is overkill here. Revisit only if any single bundle crosses ~20 MB. |
+| **`tarfile` / `.tar.gz`** | Zip is already stdlib, has random access, handles Windows filenames better, and has no symlink-attack surface. No perf win from tar for sub-MB bundles. |
+| **`zstandard`, `lz4`, `brotli`** or any 3rd-party compressor | DEFLATE (stdlib zip default) gives ~3-5× on Python source. A better ratio on sub-MB payload saves milliseconds — not worth a new dep. |
+| **`python-frontmatter`** (already declared in backend deps but unused) | The existing `seed.py` uses `yaml.safe_load` + `_simple_yaml_parse` fallback and works fine. Don't introduce a second parser. |
+| **`pydantic` model for the asset payload** on the wire | The payload is `{"bundle_b64": str, "sha256": str, "size": int, "format": str}` — four fields. A `TypedDict` or plain dict matches every other endpoint in `api_client.py` (all 44 methods return `dict`). |
+| **A new MCP resource (not tool)** for bundles | MCP resources are addressable URIs, which brings resource-listing semantics, change notifications, caching subscriptions, etc. We want a **parameterized RPC call** (`skill_name -> bundle`), which is exactly what a tool is. Also: no other Flywheel MCP primitive is a resource — keep the surface uniform. |
+| **Auto-download on MCP startup** | Lazy per-skill fetch only. Startup-time download would block MCP handshake on a multi-MB transfer if we ever have many skills. The temp-dir lifecycle per invocation is the right grain. |
+| **Signing / signature verification of bundles** | `sha256` stored in DB is integrity-over-transport, not integrity-over-server-compromise. Bundle trust inherits from Bearer-token trust of the tenant's Flywheel API endpoint. Full code-signing is a different milestone (if ever). |
+| **A `skills` subdomain / separate service** | Single FastAPI process handles it. One more endpoint on the existing `api/skills.py` router. |
+| **WebSocket / SSE streaming for bundle download** | Sub-MB payload, one HTTP GET. SSE is already used for long-running skill runs (see `stream_run` in `api/skills.py:477-578`); that pattern doesn't apply here. |
 
-## Alternatives Considered
+---
 
-| Category | Recommended | Alternative | Why Not |
-|----------|-------------|-------------|---------|
-| Portal automation | Playwright (Python async) | Puppeteer, Selenium | Playwright already architected and coded in the engine. Python async API matches backend patterns |
-| Row grouping | AG Grid Enterprise (if licensed) OR Community visual grouping workaround | TanStack Table | AG Grid already deeply integrated (30+ files use it). Migration cost is prohibitive |
-| CSS animations | Custom keyframes in index.css | framer-motion | Existing pattern works. 20+ keyframes already defined. No JS animation runtime overhead |
-| Hooks | Claude Code built-in hooks | Custom MCP tool wrappers | Hooks are the official mechanism. MCP tools serve a different purpose (data access, not workflow control) |
-| Skills | SKILL.md file format | Backend-managed skill definitions | SKILL.md is the established pattern with 30+ skills. Backend stores execution results, not skill definitions |
+## Versions (exact, verified)
 
-## Installation
+| Component | Version | Verification |
+|---|---|---|
+| FastMCP (CLI/MCP server) | **3.2.2** installed, `>=3.2.2,<4` pinned; latest on PyPI is **3.2.4** | Verified local: `cli/.venv/lib/python3.12/site-packages/fastmcp/__init__.py` reports `3.2.2`. `File(path, data, format, name, annotations)` signature confirmed via `inspect.signature`. Pin range in `cli/pyproject.toml:39`. **Recommend: bump to `>=3.2.4,<4`** along with this milestone to pick up recent bytes-handling fixes (see FastMCP release notes mentioning "materialize generators before result conversion, handle bytes gracefully"). MEDIUM risk — no breaking changes across 3.2.x. |
+| `supabase-py` (backend, currently unused for this path) | 2.28.3 on PyPI; backend pins `>=2.28.2` | Not needed for this milestone. Only relevant if we reverse direction and use Storage. |
+| PostgreSQL `bytea` | 1 GB hard limit per value (PostgreSQL TOAST, 30-bit size) | [PostgreSQL docs](https://www.postgresql.org/docs/current/limits.html). Bundles are ~160 KB today — 4+ orders of magnitude of headroom. |
+| Python stdlib: `zipfile`, `io.BytesIO`, `tempfile.TemporaryDirectory`, `hashlib.sha256`, `base64` | Ships with Python 3.10+ (CLI) / 3.12 (backend) | No version pinning needed — stdlib. `TemporaryDirectory(ignore_cleanup_errors=...)` requires 3.10+, already satisfied by both `requires-python` constraints. |
+| Supabase Storage (**not used, reference only**) | 50 MB free / 500 GB Pro per-object | [Supabase file-limits docs](https://supabase.com/docs/guides/storage/uploads/file-limits) |
+| Alembic | `>=1.14` (existing pin in `backend/pyproject.toml:9`) | No change. Use the existing per-statement `op.execute()` PgBouncer workaround (see `063_skill_protected_default.py`). |
 
-```bash
-# Python (portal automation -- optional group, broker machine only)
-cd backend
-# Add to pyproject.toml under [dependency-groups]:
-# portals = ["playwright>=1.58.0"]
-uv sync --group portals
-playwright install chromium
+---
 
-# Frontend (only if AG Grid Enterprise license acquired)
-cd frontend
-npm install ag-grid-enterprise@35.2.0
+## Confidence Assessment
 
-# Claude Code hooks (configuration only)
-mkdir -p .claude/hooks
-# Add hooks configuration to .claude/settings.json
+| Claim | Confidence | Evidence |
+|---|---|---|
+| `bytea` column is the right storage layer for sub-MB bundles | **HIGH** | PostgreSQL 1 GB bytea limit verified in PG docs; flywheel-v2 already has 4 `LargeBinary` columns in production (`models.py:80, 402, 1981`, plus `profiles` api_key_encrypted); single-query atomicity matches the existing `skill_definitions` access pattern |
+| FastMCP `File(data=bytes, format="zip")` works on our pinned version | **HIGH** | Verified via local `inspect.signature` on `fastmcp 3.2.2` in `cli/.venv`; confirmed via official FastMCP docs [gofastmcp.com/servers/tools](https://gofastmcp.com/servers/tools) |
+| `tempfile.TemporaryDirectory` + `zipfile.ZipFile.extractall` is the right CC-side pattern | **HIGH** | Python stdlib; documented as the canonical secure pattern [Python docs](https://docs.python.org/3/library/tempfile.html#tempfile.TemporaryDirectory); matches OpenStack's secure-temp-files guidance |
+| Reusing `get_skill_prompt` auth+tenant-access shape is correct | **HIGH** | Read the endpoint line-by-line (`api/skills.py:283-344`); the access-control logic is already factored cleanly and handles the tenant-override-vs-default case |
+| PgBouncer DDL workaround still applies for the new migration | **HIGH** | Documented in user memory + `063_skill_protected_default.py:1-13`; pattern is in active use |
+| Skill bundle sizes stay well under limits | **HIGH** for today (160 KB measured), **MEDIUM** for future growth (no projections exist) |
+| Protected-skill asset endpoint should return 403 | **MEDIUM** | Logic-derived from Phase-95 + today's 063 migration, not explicitly specced anywhere. Flagged in PITFALLS research for roadmap discussion. |
+| Bumping fastmcp to 3.2.4 has no breaking changes | **MEDIUM** | Semver suggests none; confirmed search results reference 3.2.x improvements only. Should be verified in the implementation phase via a smoke test. |
 
-# Skills (file creation only)
-mkdir -p skills/broker-contract-parser
-mkdir -p skills/broker-quote-extractor
-mkdir -p skills/broker-portal-submitter
-mkdir -p skills/broker-recommendation-builder
-```
+---
+
+## Integration Summary for Planner
+
+**Phase sketch (4 planner-sized chunks):**
+1. **DB migration + model** — `skill_assets` table, `SkillAsset` ORM, Alembic migration using PgBouncer workaround.
+2. **Seed pipeline extension** — `_build_bundle(entry_path) -> bytes` (zip of .py files, skip `SKILL.md`, skip `__pycache__`, skip `.pytest_cache`, skip `tests/` if we don't want to ship tests), sha256 skip-if-unchanged, upsert into `skill_assets`.
+3. **Backend endpoint + tests** — `GET /api/v1/skills/{name}/assets`, copy auth shape from `get_skill_prompt`, decide 403-for-protected, integration tests.
+4. **MCP tool + unpack helper + tests** — `flywheel_fetch_skill_assets` tool returning `File(...)`, `materialize_skill_bundle` helper with path-traversal guard, smoke test that full round-trips a real skill dir.
+
+**Zero new dependencies.** Zero new frameworks. Zero new architecture. The only wire-format novelty is "first MCP tool in this server that returns binary content", and FastMCP's `File` helper handles the base64 wrapping transparently.
+
+---
 
 ## Sources
 
-- [AG Grid Community vs Enterprise](https://www.ag-grid.com/react-data-grid/community-vs-enterprise/) -- Row Grouping confirmed Enterprise-only (HIGH confidence)
-- [Claude Code Hooks Reference](https://code.claude.com/docs/en/hooks) -- Full hook event list, configuration format, exit codes (HIGH confidence)
-- [Playwright on PyPI](https://pypi.org/project/playwright/) -- v1.58.0 latest, Python >=3.9 (HIGH confidence)
-- Codebase: `backend/src/flywheel/engines/portal_submitter.py` -- Playwright already architected (HIGH confidence)
-- Codebase: `backend/scripts/portals/mapfre_mx.py` -- Carrier script pattern established (HIGH confidence)
-- Codebase: `frontend/src/shared/grid/theme.ts` -- AG Grid theming with themeQuartz (HIGH confidence)
-- Codebase: `frontend/src/index.css` lines 187-293 -- 20+ keyframes already defined (HIGH confidence)
-- Codebase: `frontend/src/lib/animations.ts` -- Animation utilities established (HIGH confidence)
-- Codebase: `frontend/package.json` -- ag-grid-community@35.2.0, tw-animate-css@1.4.0 confirmed (HIGH confidence)
-- Codebase: `~/.claude/skills/skill-router/SKILL.md` -- 30+ skills catalogued (HIGH confidence)
+- [PostgreSQL Limits (bytea 1 GB)](https://www.postgresql.org/docs/current/limits.html)
+- [FastMCP Tools docs — binary content handling](https://gofastmcp.com/servers/tools)
+- [FastMCP GitHub](https://github.com/jlowin/fastmcp)
+- [Supabase Storage file-limits](https://supabase.com/docs/guides/storage/uploads/file-limits)
+- [Python tempfile docs](https://docs.python.org/3/library/tempfile.html)
+- [Python zipfile docs](https://docs.python.org/3/library/zipfile.html)
+- [OpenStack secure-temp-files guidance](https://security.openstack.org/guidelines/dg_using-temporary-files-securely.html)
+- Local codebase (HIGH-priority evidence):
+  - `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/db/models.py` (lines 80, 402, 811-884, 1981 — existing `LargeBinary` + `SkillDefinition`)
+  - `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/db/seed.py` (existing skill seed pipeline to extend)
+  - `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/api/skills.py` (lines 283-344 — auth+tenant-access shape to copy)
+  - `/Users/sharan/Projects/flywheel-v2/backend/src/flywheel/services/document_storage.py` (Supabase Storage reference pattern — not used here)
+  - `/Users/sharan/Projects/flywheel-v2/cli/flywheel_mcp/server.py` (MCP tool registration pattern)
+  - `/Users/sharan/Projects/flywheel-v2/cli/flywheel_mcp/api_client.py` (lines 43-75 — auth refresh + error handling to reuse)
+  - `/Users/sharan/Projects/flywheel-v2/cli/flywheel_cli/auth.py` (credentials.json pattern)
+  - `/Users/sharan/Projects/flywheel-v2/backend/alembic/versions/063_skill_protected_default.py` (PgBouncer DDL workaround pattern)
+  - `/Users/sharan/Projects/flywheel-v2/cli/.venv/lib/python3.12/site-packages/fastmcp/utilities/types.py` (File class signature verified)

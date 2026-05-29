@@ -1,6 +1,8 @@
 ---
+public: true
+cc_executable: true
 name: broker-compare-quotes
-version: "1.0"
+version: "1.2"
 web_tier: 3
 description: Quote comparison workflow — from received quote PDFs to client recommendation
 context-aware: true
@@ -12,13 +14,18 @@ tags:
   - pipeline
   - quotes
   - comparison
+assets: []
+depends_on: ["broker"]
 dependencies:
   skills:
     - broker-extract-quote
     - broker-draft-recommendation
-  files:
-    - "~/.claude/skills/broker/api_client.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
+
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
 
 # Broker Pipeline: compare-quotes
 
@@ -76,9 +83,15 @@ For each quote PDF, execute:
 
 ```
 Now executing Step 1 (quote {N} of {total}): extract-quote.
-Follow the instructions in ~/.claude/skills/broker/steps/extract-quote.md
+Invoke the `/broker:extract-quote` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id} and PDF_PATH={pdf_path}.
 ```
+
+**v1.2 Pattern 3a note:** `broker-extract-quote` v1.2 runs the text extraction
+in THIS conversation via `broker_api.extract_quote_extraction` →
+inline-analyze → `broker_api.save_quote_extraction` (no backend LLM call,
+no polling). The pipeline sentinel + sequencing below are unchanged — only
+the per-PDF step internals changed.
 
 After each extraction, confirm success (extracted premium, carrier matched) before proceeding
 to the next PDF. If extraction fails for a quote, ask the broker whether to skip it or retry.
@@ -102,10 +115,8 @@ print("Pipeline mode OFF — running comparison")
 Call the comparison endpoint directly (this is not a separate step skill):
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 comparison = api_client.run(api_client.get(f"projects/{project_id}/comparison"))
 carriers = comparison.get("carriers", [])
 ```
@@ -139,9 +150,25 @@ Execute:
 
 ```
 Now executing Step 3: draft-recommendation.
-Follow the instructions in ~/.claude/skills/broker/steps/draft-recommendation.md
+Invoke the `/broker:draft-recommendation` skill (router dispatches via MCP fetch)
 for PROJECT_ID={project_id}.
 ```
+
+**v1.2 Pattern 3a note:** `broker-draft-recommendation` v1.2 runs the
+narrative drafting in THIS conversation via
+`broker_api.extract_recommendation_draft` → inline-analyze →
+`broker_api.save_recommendation_draft`. Same recommendation row written to
+the same DB, backend makes zero LLM calls. No observable change for the
+broker — the draft shows up in the same recommendations tab as before.
+
+### Why this is different from v1.1
+
+v1.1 chained two server-side Anthropic calls (quote extraction +
+recommendation narrative) through the backend's subsidy key. v1.2 keeps the
+pipeline shape but has THIS conversation run both steps inline via
+Pattern 3a helpers. Same outputs, same DB rows, zero backend LLM spend.
+See `skills/broker/MIGRATION-NOTES.md` for the full v1.1 → v1.2 migration
+record.
 
 Wait for the draft creation confirmation.
 
@@ -166,12 +193,26 @@ Next step: Review and send the recommendation in the Flywheel web app
 
 ## Memory Update (Standard 1)
 
-After pipeline completion, append to `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## compare-quotes -- {today}\n"
+        "- Project {PROJECT_ID}: compared {n_quotes} quotes across {n_coverages} coverages for project {PROJECT_ID}\n"
+    ),
+)
 ```
-[{date}] compare-quotes pipeline completed for project {project_id}.
-Quotes processed: {N}. Recommended: {recommended_carrier}.
-```
+
+Do NOT append to any local file -- the context store is the durable home for skill memory.
 
 ---
 

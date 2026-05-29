@@ -570,6 +570,7 @@ def load_agent_contract(agent_id: str) -> dict:
     frontmatter to extract context.reads and context.writes lists.
     If no SKILL.md found, returns development default with full access.
     """
+    # DEPRECATED (Phase 152 — 2026-04-19): legacy ~/.claude/skills/ path; skills are served via flywheel_fetch_skill_assets. Retained for developer tooling only; no runtime impact.
     skill_path = Path.home() / ".claude" / "skills" / agent_id / "SKILL.md"
 
     if not skill_path.exists():

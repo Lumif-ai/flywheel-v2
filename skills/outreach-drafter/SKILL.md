@@ -1,4 +1,6 @@
 ---
+public: true
+cc_executable: true
 name: outreach-drafter
 version: "1.1"
 description: >
@@ -14,6 +16,9 @@ description: >
   quality gate in the GTM pipeline.
 web_tier: 3
 ---
+
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
 
 # outreach-drafter v1.1
 

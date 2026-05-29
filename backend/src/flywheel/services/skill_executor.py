@@ -521,9 +521,19 @@ async def execute_run(run: SkillRun) -> None:
         # Retrieve and decrypt user's BYOK API key
         api_key = await _get_user_api_key(factory, run.user_id)
         if api_key is None:
-            # Fall back to subsidy key for onboarding skills and background engine skills
+            # Subsidy fallback is restricted to onboarding skills only. All other
+            # skills should run through Claude Code (prompt served to CC, inference
+            # on user's CC subscription) — this is the platform architecture.
+            # Landing here for a non-onboarding skill means the skill was invoked
+            # server-side (cron/web) instead of via CC — fail fast.
+            #
+            # Phase 150.1: allowlist sourced from settings.subsidy_allowed_skills
+            # (single source of truth in backend/src/flywheel/config.py). The
+            # separate web-exec path at _execute_web_run (line ~3273) is ALREADY
+            # BYOK-gated — it receives api_key from the request and does not hit
+            # this allowlist fallback. This gate only tightens the subsidy path.
             from flywheel.config import settings
-            if run.skill_name in ("company-intel", "meeting-prep", "email-scorer", "meeting-processor", "flywheel") and settings.flywheel_subsidy_api_key:
+            if run.skill_name in settings.subsidy_allowed_skills and settings.flywheel_subsidy_api_key:
                 api_key = settings.flywheel_subsidy_api_key
             else:
                 raise ValueError(

@@ -162,6 +162,7 @@ def list_available_skills(skills_dir: Path = None) -> list:
         List of dicts with keys: name, description, dir_name. Sorted by name.
     """
     if skills_dir is None:
+        # DEPRECATED (Phase 152 — 2026-04-19): legacy ~/.claude/skills/ path; skills are served via flywheel_fetch_skill_assets. Retained for developer tooling only; no runtime impact.
         skills_dir = Path.home() / ".claude" / "skills"
 
     if not skills_dir.exists():

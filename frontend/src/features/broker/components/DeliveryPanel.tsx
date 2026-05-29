@@ -5,6 +5,7 @@ import { Input } from '@/components/ui/input'
 import { CheckCircle, Mail, Send, AlertTriangle } from 'lucide-react'
 import { useProjectRecommendation, useDraftRecommendation, useEditRecommendation, useSendRecommendation } from '../hooks/useDelivery'
 import { useBrokerQuotes } from '../hooks/useBrokerQuotes'
+import { ClaudeCommandModal } from './shared/ClaudeCommandModal'
 import type { BrokerProjectDetail } from '../types/broker'
 
 interface DeliveryPanelProps {
@@ -20,10 +21,13 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
   const [subject, setSubject] = useState('')
   const [body, setBody] = useState('')
   const [showConfirm, setShowConfirm] = useState(false)
+  const [handoffCommand, setHandoffCommand] = useState<string | null>(null)
 
   const { data: recommendation, isLoading: recLoading } = useProjectRecommendation(project.id)
   const { data: quotes } = useBrokerQuotes(project.id)
-  const draftMutation = useDraftRecommendation(project.id)
+  const draftMutation = useDraftRecommendation(project.id, {
+    onHandoff: (command) => setHandoffCommand(command),
+  })
   const editMutation = useEditRecommendation(project.id)
   const sendMutation = useSendRecommendation(project.id)
 
@@ -251,6 +255,16 @@ export function DeliveryPanel({ project }: DeliveryPanelProps) {
       >
         {draftMutation.isPending ? 'Generating...' : 'Generate Recommendation'}
       </Button>
+
+      <ClaudeCommandModal
+        open={handoffCommand !== null}
+        onOpenChange={(open) => {
+          if (!open) setHandoffCommand(null)
+        }}
+        command={handoffCommand ?? ''}
+        skillName="broker-draft-recommendation"
+        actionLabel="Draft Client Recommendation"
+      />
     </div>
   )
 }

@@ -10,7 +10,6 @@ Endpoints:
 """
 from __future__ import annotations
 
-import asyncio
 import logging
 from datetime import datetime, timezone
 from typing import Any
@@ -21,6 +20,11 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from flywheel.api.broker._enforcement import (
+    SubsidyDecision,
+    raise_endpoint_deprecated,
+    require_subsidy_decision,
+)
 from flywheel.api.broker._shared import validate_transition
 from flywheel.api.deps import get_tenant_db, require_module
 from flywheel.auth.jwt import TokenPayload
@@ -385,83 +389,22 @@ async def portal_confirm(
 
 
 # ---------------------------------------------------------------------------
-# POST /broker/quotes/{quote_id}/extract
+# POST /broker/quotes/{quote_id}/extract — DEPRECATED (Phase 150.1 Plan 04)
+#
+# Flipped to HTTP 410 Gone. Replaced by Pattern 3a pair:
+#   POST /api/v1/broker/extract/quote-extraction
+#   POST /api/v1/broker/save/quote-extraction
 # ---------------------------------------------------------------------------
 
 
-@quotes_router.post("/quotes/{quote_id}/extract", status_code=202)
-async def extract_quote_endpoint(
-    quote_id: UUID,
-    force: bool = Query(False),
-    user: TokenPayload = Depends(require_module("broker")),
-    db: AsyncSession = Depends(get_tenant_db),
-) -> dict[str, Any]:
-    """Trigger async PDF extraction for a carrier quote."""
-    from flywheel.engines.quote_extractor import extract_quote
+@quotes_router.post("/quotes/{quote_id}/extract")
+async def extract_quote_deprecated(quote_id: UUID):
+    """DEPRECATED (Phase 150.1): returns 410 Gone.
 
-    result = await db.execute(
-        select(CarrierQuote).where(
-            CarrierQuote.id == quote_id,
-            CarrierQuote.tenant_id == user.tenant_id,
-        )
-    )
-    quote = result.scalar_one_or_none()
-    if quote is None:
-        raise HTTPException(status_code=404, detail="Quote not found")
-
-    if quote.status in ("extracted", "reviewed") and not force:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Quote already {quote.status}. Use ?force=true to re-extract.",
-        )
-
-    pdf_content = None
-    if quote.source_document_id:
-        pdf_content = await _get_quote_pdf_from_document(db, quote, user.tenant_id)
-    elif quote.source_email_id:
-        pdf_content = await _get_quote_pdf_from_email(db, quote, user.tenant_id)
-
-    if pdf_content is None:
-        raise HTTPException(
-            status_code=422,
-            detail="No PDF source found for this quote (no source_document_id or source_email_id)",
-        )
-
-    cov_result = await db.execute(
-        select(ProjectCoverage).where(
-            ProjectCoverage.broker_project_id == quote.broker_project_id
-        )
-    )
-    coverages = cov_result.scalars().all()
-    coverages_dicts = [
-        {
-            "id": str(c.id),
-            "coverage_type": c.coverage_type,
-            "coverage_type_key": c.coverage_type_key,
-            "category": c.category,
-            "required_limit": float(c.required_limit) if c.required_limit else None,
-        }
-        for c in coverages
-    ]
-
-    tenant_id = user.tenant_id
-
-    async def _run_extraction():
-        from flywheel.db.session import get_session_factory
-        factory = get_session_factory()
-        try:
-            async with factory() as session:
-                await session.execute(text(f"SET LOCAL app.tenant_id = '{tenant_id}'"))
-                await extract_quote(
-                    session, tenant_id, quote_id, pdf_content, coverages_dicts, force=force
-                )
-                await session.commit()
-        except Exception as exc:
-            logger.error("Quote extraction failed for %s: %s", quote_id, exc)
-
-    asyncio.create_task(_run_extraction())
-
-    return {"status": "extracting", "quote_id": str(quote_id)}
+    Use POST /api/v1/broker/extract/quote-extraction +
+    POST /api/v1/broker/save/quote-extraction (Pattern 3a).
+    """
+    raise_endpoint_deprecated(operation="quote-extraction")
 
 
 # ---------------------------------------------------------------------------
@@ -538,3 +481,209 @@ async def _get_quote_pdf_from_email(
         return None
 
     return await get_attachment(creds, email_row.gmail_message_id, pdfs[0]["attachment_id"])
+
+
+# ===========================================================================
+# Phase 150.1 Plan 02 — Pattern 3a extract/save endpoint pair for quote-extraction.
+#
+# Replaces backend Anthropic LLM call at quote_extractor.py:339.
+# Blocker-2 invariant: BOTH endpoints carry require_subsidy_decision.
+# ===========================================================================
+
+
+class ExtractQuoteExtractionBody(BaseModel):
+    quote_id: UUID
+    api_key: str | None = None  # BYOK per _enforcement.py
+
+
+class QuoteDocumentRef(BaseModel):
+    file_id: str
+    filename: str
+    pdf_base64: str
+
+
+class ExtractQuoteExtractionResponse(BaseModel):
+    prompt: str
+    tool_schema: dict
+    documents: list[QuoteDocumentRef]
+    metadata: dict
+
+
+class QuoteCriticalExclusionInput(BaseModel):
+    exclusion: str
+    conflicts_with: str
+    reason: str
+
+
+class QuoteLineItemInput(BaseModel):
+    coverage_type: str
+    premium: float | None = None
+    deductible: float | None = None
+    limit_amount: float | None = None
+    coinsurance: float | None = None
+    term_months: int | None = None
+    validity_date: str | None = None
+    exclusions: list[str] = []
+    conditions: list[str] = []
+    endorsements: list[str] = []
+    confidence: Literal["high", "medium", "low"] = "medium"
+    critical_exclusions: list[QuoteCriticalExclusionInput] = []
+
+
+class SaveQuoteExtractionBody(BaseModel):
+    quote_id: UUID
+    tool_schema_version: str = "1.0"
+    api_key: str | None = None
+    carrier_name: str
+    quote_date: str | None = None
+    quote_reference: str | None = None
+    currency: str | None = None
+    total_premium: float | None = None
+    line_items: list[QuoteLineItemInput]
+
+
+# Literal needed above — inline import at module top would be cleaner but
+# this file already imports from typing at line 16.
+from typing import Literal  # noqa: E402
+
+
+@quotes_router.post(
+    "/extract/quote-extraction",
+    response_model=ExtractQuoteExtractionResponse,
+)
+async def extract_quote_extraction(
+    body: ExtractQuoteExtractionBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),
+) -> ExtractQuoteExtractionResponse:
+    """Return {prompt, tool_schema, documents, metadata} for quote extraction."""
+    import base64
+
+    from flywheel.engines.quote_extractor import (
+        QUOTE_EXTRACTION_TOOL,
+        build_quote_extraction_prompt,
+    )
+
+    result = await db.execute(
+        select(CarrierQuote).where(
+            CarrierQuote.id == body.quote_id,
+            CarrierQuote.tenant_id == user.tenant_id,
+        )
+    )
+    quote = result.scalar_one_or_none()
+    if quote is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    # Load project coverages for critical-exclusion detection.
+    cov_result = await db.execute(
+        select(ProjectCoverage).where(
+            ProjectCoverage.broker_project_id == quote.broker_project_id
+        )
+    )
+    coverages = cov_result.scalars().all()
+    coverage_dicts = [
+        {
+            "id": str(c.id),
+            "coverage_type": c.coverage_type,
+            "coverage_type_key": c.coverage_type_key,
+            "category": c.category,
+            "required_limit": float(c.required_limit)
+            if c.required_limit is not None
+            else None,
+        }
+        for c in coverages
+    ]
+
+    prompt = build_quote_extraction_prompt(coverage_dicts)
+
+    # Retrieve PDF bytes from document / email source.
+    pdf_bytes: bytes | None = None
+    pdf_filename = ""
+    if quote.source_document_id:
+        pdf_bytes = await _get_quote_pdf_from_document(db, quote, user.tenant_id)
+        # Look up filename.
+        file_result = await db.execute(
+            select(UploadedFile.filename).where(
+                UploadedFile.id == quote.source_document_id
+            )
+        )
+        fname_row = file_result.scalar_one_or_none()
+        pdf_filename = fname_row or "quote.pdf"
+    elif quote.source_email_id:
+        pdf_bytes = await _get_quote_pdf_from_email(db, quote, user.tenant_id)
+        pdf_filename = "quote.pdf"
+
+    documents: list[QuoteDocumentRef] = []
+    if pdf_bytes:
+        documents.append(
+            QuoteDocumentRef(
+                file_id=str(quote.source_document_id) if quote.source_document_id else str(quote.id),
+                filename=pdf_filename,
+                pdf_base64=base64.standard_b64encode(pdf_bytes).decode("utf-8"),
+            )
+        )
+
+    return ExtractQuoteExtractionResponse(
+        prompt=prompt,
+        tool_schema=QUOTE_EXTRACTION_TOOL,
+        documents=documents,
+        metadata={
+            "quote_id": str(quote.id),
+            "carrier_config_id": str(quote.carrier_config_id)
+            if quote.carrier_config_id
+            else None,
+            "broker_project_id": str(quote.broker_project_id),
+            "project_coverage_count": len(coverage_dicts),
+            "tool_schema_version": "1.0",
+        },
+    )
+
+
+@quotes_router.post("/save/quote-extraction")
+async def save_quote_extraction(
+    body: SaveQuoteExtractionBody,
+    user: TokenPayload = Depends(require_module("broker")),
+    db: AsyncSession = Depends(get_tenant_db),
+    _subsidy: SubsidyDecision = Depends(require_subsidy_decision),  # Blocker-2: MANDATORY
+):
+    """Persist Claude's quote-extraction tool_use output."""
+    if body.tool_schema_version != "1.0":
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"tool_schema_version mismatch: got {body.tool_schema_version}, "
+                f"expected 1.0"
+            ),
+        )
+
+    from flywheel.engines.quote_extractor import persist_quote_extraction
+
+    result = await db.execute(
+        select(CarrierQuote).where(
+            CarrierQuote.id == body.quote_id,
+            CarrierQuote.tenant_id == user.tenant_id,
+        )
+    )
+    quote = result.scalar_one_or_none()
+    if quote is None:
+        raise HTTPException(status_code=404, detail="Quote not found")
+
+    tool_use_output = body.model_dump(
+        exclude={"quote_id", "tool_schema_version", "api_key"}
+    )
+
+    persist_result = await persist_quote_extraction(
+        db, user.tenant_id, body.quote_id, tool_use_output
+    )
+    await db.commit()
+
+    return {
+        "quote_id": str(body.quote_id),
+        "line_items_extracted": persist_result.get("line_items_extracted", 0),
+        "carrier_name": persist_result.get("carrier_name"),
+        "critical_exclusions_found": persist_result.get(
+            "critical_exclusions_found", 0
+        ),
+        "status": "extracted",
+    }

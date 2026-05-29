@@ -10,6 +10,7 @@ import { gridTheme, GRID_SHADOW, GRID_BORDER_RADIUS } from '@/shared/grid/theme'
 import { CarrierCell } from '@/shared/grid/cell-renderers/CarrierCell'
 import { useCarrierMatches } from '../hooks/useCarrierMatches'
 import { useDraftSolicitations } from '../hooks/useSolicitations'
+import { ClaudeCommandModal } from './shared/ClaudeCommandModal'
 import type { CarrierMatch } from '../types/broker'
 
 interface CarrierSelectionProps {
@@ -83,7 +84,10 @@ function AvgResponseCell(props: ICellRendererParams) {
 export function CarrierSelection({ projectId }: CarrierSelectionProps) {
   const { data, isLoading, isError } = useCarrierMatches(projectId)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
-  const draftMutation = useDraftSolicitations(projectId)
+  const [handoffCommand, setHandoffCommand] = useState<string | null>(null)
+  const draftMutation = useDraftSolicitations(projectId, {
+    onHandoff: (command) => setHandoffCommand(command),
+  })
   const [skipped, setSkipped] = useState<Array<{ carrier: string; reason: string }>>([])
 
   const rowData = useMemo<GridRow[]>(() => {
@@ -244,7 +248,7 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
           onClick={() =>
             draftMutation.mutate(Array.from(selectedIds), {
               onSuccess: (resp) => {
-                if (resp.skipped.length > 0) setSkipped(resp.skipped)
+                if (resp?.skipped && resp.skipped.length > 0) setSkipped(resp.skipped)
               },
             })
           }
@@ -254,6 +258,16 @@ export function CarrierSelection({ projectId }: CarrierSelectionProps) {
             : `Proceed to Solicitation${selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}`}
         </Button>
       </div>
+
+      <ClaudeCommandModal
+        open={handoffCommand !== null}
+        onOpenChange={(open) => {
+          if (!open) setHandoffCommand(null)
+        }}
+        command={handoffCommand ?? ''}
+        skillName="broker-draft-emails"
+        actionLabel="Draft Carrier Solicitation Emails"
+      />
     </div>
   )
 }

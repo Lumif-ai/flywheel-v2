@@ -1,6 +1,8 @@
 ---
+public: true
+cc_executable: true
 name: broker-extract-quote
-version: "1.0"
+version: "1.2"
 web_tier: 3
 description: Map a carrier quote PDF to an existing quote row, upload the PDF, trigger async extraction, poll until done, and report premium breakdown with critical exclusions
 context-aware: true
@@ -12,11 +14,15 @@ tags:
   - quote
   - extraction
   - pdf
+assets: []
+depends_on: ["broker"]
 dependencies:
-  files:
-    - "~/.claude/skills/broker/api_client.py"
-    - "~/.claude/skills/broker/field_validator.py"
+  python_packages:
+    - "flywheel-ai>=0.4.0"
 ---
+
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
 
 # /broker:extract-quote — Upload Carrier Quote PDF and Extract Premium Breakdown
 
@@ -31,23 +37,20 @@ an existing quote and triggers extraction.
 ## Step 1: Dependency Check
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
+import os
+from flywheel.broker import api_client, field_validator
 import httpx
 
 missing = []
-if not os.environ.get("FLYWHEEL_API_URL"):
-    missing.append("FLYWHEEL_API_URL")
-if not os.environ.get("FLYWHEEL_API_TOKEN"):
-    missing.append("FLYWHEEL_API_TOKEN")
+# Auth: api_client.py auto-reads ~/.flywheel/credentials.json (written by `flywheel login`)
+creds_file = os.path.expanduser("~/.flywheel/credentials.json")
+if not os.path.exists(creds_file):
+    missing.append("~/.flywheel/credentials.json (run: flywheel login)")
 if missing:
-    raise RuntimeError(f"Missing required environment variables: {', '.join(missing)}\n"
-                       "Run: export FLYWHEEL_API_URL=https://... && export FLYWHEEL_API_TOKEN=<jwt>")
+    raise RuntimeError(f"Missing dependencies: {', '.join(missing)}\n"
+                       "If auth is missing, run: flywheel login")
 
 print("OK: All dependencies satisfied.")
-print(f"API URL: {os.environ.get('FLYWHEEL_API_URL')}")
 ```
 
 If anything fails, stop and report the missing dependency. Do not proceed.
@@ -61,11 +64,8 @@ Ask the user for:
 Validate both inputs using field_validator:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-import field_validator
-
+import os
+from flywheel.broker import api_client, field_validator
 # Replace with actual user-provided values
 PROJECT_ID = "<user-provided-project-id>"
 PDF_PATH = "<user-provided-pdf-path>"
@@ -84,10 +84,8 @@ Fetch existing quotes for the project and display them so the broker can choose 
 quote this PDF belongs to:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 result = api_client.run(api_client.get(f"projects/{PROJECT_ID}/quotes"))
@@ -129,10 +127,8 @@ Ask the broker which quote this PDF belongs to:
 Wait for broker to select. Store the selected QUOTE_ID:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 
 result = api_client.run(api_client.get(f"projects/{PROJECT_ID}/quotes"))
@@ -160,10 +156,8 @@ print(f"Selected: {CARRIER_NAME} (ID: {QUOTE_ID})")
 Upload the quote PDF to the project's document store:
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 PDF_PATH = "<validated-pdf-path>"
 
@@ -175,59 +169,79 @@ for f in files:
     print(f"  - {f.get('filename', f.get('id', 'unknown'))}")
 ```
 
-## Step 6: Trigger Async Extraction
+## Step 6: Extract Quote via Pattern 3a (Claude-in-conversation)
 
-Call the backend extract endpoint to start async quote extraction for the selected quote:
+v1.2 (Phase 150.1) has THIS conversation run the quote-text extraction using
+the prompt + tool_schema the backend returns. The backend owns prompt
+assembly, quote-row lookup, PDF retrieval, and persistence; it does NOT
+call Anthropic.
 
-```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
-QUOTE_ID = "<selected-quote-id>"
-
-print(f"Triggering extraction for quote {QUOTE_ID}...")
-trigger = api_client.run(api_client.post(f"quotes/{QUOTE_ID}/extract"))
-print(f"Extraction triggered: {trigger.get('status', 'accepted')}")
-print("Polling for completion...")
-```
-
-The backend returns 202 Accepted. Proceed immediately to polling.
-
-## Step 7: Poll for Completion
-
-Poll GET /broker/projects/{project_id}/quotes every 2 seconds until the selected quote
-status changes to "extracted" or "error". Maximum 30 polls (60 seconds).
+### 6a. Fetch extraction prompt + quote PDFs
 
 ```python
-import sys, os, time
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
-PROJECT_ID = "<validated-project-id>"
+import os
+from flywheel.broker import api_client
 QUOTE_ID = "<selected-quote-id>"
-MAX_POLLS = 30
 
-target = None
-for i in range(MAX_POLLS):
-    result = api_client.run(api_client.get(f"projects/{PROJECT_ID}/quotes"))
-    quotes = result.get("quotes", [])
-    target = next((q for q in quotes if q["id"] == QUOTE_ID), None)
-    if target and target.get("status") == "extracted":
-        print(f"Extraction completed after {(i+1)*2} seconds.")
-        break
-    if target and target.get("status") == "error":
-        print(f"ERROR: Extraction failed for quote {QUOTE_ID}")
-        print(f"  Reason: {target.get('extraction_error', 'unknown')}")
-        break
-    print(f"  Waiting for extraction... ({i+1}/{MAX_POLLS})")
-    time.sleep(2)
-else:
-    print("ERROR: Extraction timed out after 60 seconds")
-    print("Check backend logs for quote", QUOTE_ID)
+extract = api_client.run(api_client.extract_quote_extraction(QUOTE_ID))
+# extract = {prompt, tool_schema, documents, metadata}
+# documents = quote PDFs attached to this quote row.
+print(f"  prompt: {len(extract['prompt'])} chars")
+print(f"  tool: {extract['tool_schema'].get('name', 'unknown')}")
+print(f"  documents: {len(extract['documents'])} quote PDF(s)")
+print(f"  tool_schema_version: {extract['metadata']['tool_schema_version']}")
 ```
 
-If extraction failed or timed out, report the error and stop. Do not proceed to reporting.
+### 6b. Analyze inline using the returned prompt + tool_schema
+
+**YOU (Claude) now run the extraction.** For each document in
+`extract["documents"]`, decode `pdf_base64` and attach via the Anthropic
+document content-block protocol. Use `extract["prompt"]` as the system
+message and `extract["tool_schema"]` as the single `tools=` entry.
+
+Expected tool-use output keys (from `extract_quote_terms` schema):
+`carrier_name`, `quote_date` (ISO date or null), `quote_reference` (string
+or null), `currency` (ISO 4217), `total_premium` (number), `line_items`
+(list of coverage-level premium rows).
+
+### 6c. Persist the extraction
+
+The backend's `persist_quote_extraction` helper writes the quote row, builds
+the exclusion cross-check against the project's MSA contract requirements,
+and populates `critical_exclusions` — no client-side work needed.
+
+```python
+import os
+from flywheel.broker import api_client
+QUOTE_ID = "<selected-quote-id>"
+
+analysis = {
+    "carrier_name": "",                      # from tool_use.input.carrier_name
+    "quote_date": None,
+    "quote_reference": None,
+    "currency": "USD",
+    "total_premium": 0.0,
+    "line_items": [],
+    "tool_schema_version": extract["metadata"]["tool_schema_version"],
+}
+
+save_result = api_client.run(api_client.save_quote_extraction(QUOTE_ID, analysis))
+print(f"Saved quote {QUOTE_ID}: status={save_result.get('status')}")
+```
+
+### Why this is different from v1.1
+
+v1.1 called `/quotes/{id}/extract` which ran Anthropic server-side with the
+backend's subsidy key, then persisted the result. The broker had to poll
+`/projects/{id}/quotes` for up to 60 seconds waiting for completion. v1.2
+returns the SAME prompt + SAME tool_schema + SAME PDFs and has THIS
+conversation's Claude run the extraction, so the flow is synchronous (no
+polling) and the backend cost is zero LLM calls. Details in
+`skills/broker/MIGRATION-NOTES.md`.
+
+## Step 7 [REMOVED in v1.2]
+
+Polling is gone — Pattern 3a is synchronous. Proceed to Step 8.
 
 ## Step 8: Print Extraction Results
 
@@ -238,10 +252,8 @@ cross-references extracted exclusion clauses against the MSA contract's required
 to flag conflicts. This field must always be displayed — it surfaces contract compliance issues.
 
 ```python
-import sys, os
-sys.path.insert(0, os.path.expanduser("~/.claude/skills/broker/"))
-import api_client
-
+import os
+from flywheel.broker import api_client
 PROJECT_ID = "<validated-project-id>"
 QUOTE_ID = "<selected-quote-id>"
 CARRIER_NAME = "<selected-carrier-name>"
@@ -289,15 +301,24 @@ elif exclusion_count == 0:
 
 ## Step 9: Memory Update
 
-After successful extraction, update `~/.claude/skills/broker/auto-memory/broker.md`:
+After this step succeeds, persist a session summary to the Flywheel context store
+via the MCP tool `mcp__flywheel__flywheel_write_context`:
 
-```
-## Extract Quote History
-- Project {PROJECT_ID}, Quote {QUOTE_ID} ({CARRIER_NAME}): extraction run on {today's date}
-  - Total Premium: {total_premium} {currency}
-  - Critical Exclusions flagged: {exclusion_count}
+- `file_name="broker"`
+- `content` = a short markdown summary of what was done (project id, key metrics,
+  and the skill-specific signals -- see example below)
+
+Example call shape:
+
+```python
+mcp__flywheel__flywheel_write_context(
+    file_name="broker",
+    content=(
+        "## extract-quote -- {today}\n"
+        "- Project {PROJECT_ID}: {n_line_items} line items extracted from {carrier} quote ({total_premium} {currency})\n"
+    ),
+)
 ```
 
-Done. The quote PDF has been uploaded and extracted. Run `/broker:compare-quotes` to see
-the full comparison matrix, or `/broker:draft-recommendation` to generate a client
-recommendation narrative.
+Do NOT append to any local file -- the context store is the durable home for skill memory.
+

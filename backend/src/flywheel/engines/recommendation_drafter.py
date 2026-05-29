@@ -1,27 +1,35 @@
 """
-recommendation_drafter.py - AI-powered recommendation email generation.
+recommendation_drafter.py - Pattern 3a helpers for recommendation email drafts.
 
-Generates a client-facing recommendation email from quote comparison results
-using Claude. Takes plain dicts (not ORM objects) so it can be tested
-independently without a database.
+Phase 150.1 Plan 04 completed the CC-as-Brain migration by deleting the
+legacy `draft_recommendation_email` function (which constructed an async
+Anthropic client via a module-local import binding).
+Backend no longer runs any LLM call for recommendation drafts;
+Claude-in-conversation owns inference. The module exposes only Pattern 3a
+public helpers:
 
-Functions:
-  draft_recommendation_email(project, comparison, summary, language)
-    -> {"subject": str, "body_html": str}
+  * `build_recommendation_prompt(project, comparison, summary, language)`
+    → rendered prompt string for /extract/recommendation-draft.
+  * `RECOMMENDATION_TOOL` — Anthropic tool schema declaring the expected
+    {subject, body_html} output shape.
+  * `persist_recommendation_draft(db, ..., tool_use_output)`
+    → BrokerRecommendation ORM row (for /save/recommendation-draft).
+
+CC-as-Brain invariant (Phase 150.1): this module MUST NOT import or
+construct an Anthropic async client. The `test_broker_zero_anthropic.py`
+regression grep-guards enforce this at CI time.
 """
 
-import json
-import logging
+from __future__ import annotations
 
-from anthropic import AsyncAnthropic
+import logging
+from datetime import datetime, timezone
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
-
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-
-DEFAULT_MODEL = "claude-sonnet-4-20250514"
 
 
 # ---------------------------------------------------------------------------
@@ -127,59 +135,131 @@ Return ONLY the JSON object, no other text."""
 
 
 # ---------------------------------------------------------------------------
-# Main entry point
+# Phase 150.1 Plan 04 — legacy `draft_recommendation_email` DELETED.
+# Backend owns zero LLM calls for recommendation drafts. Claude-in-conversation
+# consumes `build_recommendation_prompt` + `RECOMMENDATION_TOOL` (Pattern 3a).
 # ---------------------------------------------------------------------------
 
 
-async def draft_recommendation_email(
-    project: dict,
-    comparison: dict,
-    summary: dict,
-    language: str = "en",
-) -> dict:
-    """Generate a recommendation email draft using AI.
+# ---------------------------------------------------------------------------
+# Phase 150.1 Plan 02 — Pattern 3a public helpers for extract/save endpoints.
+# ---------------------------------------------------------------------------
+
+
+# Public alias — Pattern 3a prompt builder.
+build_recommendation_prompt = _build_recommendation_prompt
+
+
+# Anthropic tool schema for structured recommendation-draft generation.
+RECOMMENDATION_TOOL = {
+    "name": "draft_recommendation_email",
+    "description": (
+        "Generate a professional insurance recommendation email from broker "
+        "to client presenting quote comparison results. Returns structured "
+        "{subject, body_html}."
+    ),
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "subject": {
+                "type": "string",
+                "description": (
+                    "Email subject line (concise, professional, "
+                    "mentions the project name)."
+                ),
+            },
+            "body_html": {
+                "type": "string",
+                "description": (
+                    "Email body as HTML content tags only "
+                    "(use <p>, <ul>, <li>, <strong>, <table>, <h3> — no <html>/<head>/<body>)."
+                ),
+            },
+        },
+        "required": ["subject", "body_html"],
+    },
+}
+
+
+async def persist_recommendation_draft(
+    db: AsyncSession,
+    tenant_id: UUID,
+    project_id: UUID,
+    tool_use_output: dict,
+    recipient_email: str | None = None,
+    created_by_user_id: UUID | None = None,
+):
+    """Persist Claude's recommendation-draft tool_use output as a BrokerRecommendation row.
 
     Args:
-        project: Dict with project details (name, project_type, contract_value, currency).
-        comparison: Output of compare_quotes() — per-coverage ranked quotes.
-        summary: Output of summarize_comparison() — counts and highlights.
-        language: Language code for the email ("en", "es", etc.).
+        db: Async SQLAlchemy session.
+        tenant_id: Tenant UUID.
+        project_id: BrokerProject UUID.
+        tool_use_output: Dict matching RECOMMENDATION_TOOL.input_schema —
+            {subject: str, body_html: str}.
+        recipient_email: Optional — the email address the recommendation
+            will be sent to.
+        created_by_user_id: Optional — the user who triggered the save.
 
     Returns:
-        {"subject": str, "body_html": str}
+        BrokerRecommendation ORM instance (flushed, not committed).
     """
-    prompt = _build_recommendation_prompt(project, comparison, summary, language)
-
-    client = AsyncAnthropic()
-    message = await client.messages.create(
-        model=DEFAULT_MODEL,
-        max_tokens=3000,
-        messages=[{"role": "user", "content": prompt}],
+    from flywheel.db.models import (
+        BrokerActivity,
+        BrokerProject,
+        BrokerRecommendation,
     )
 
-    # Extract text content from the response
-    response_text = ""
-    for block in message.content:
-        if block.type == "text":
-            response_text += block.text
+    subject = tool_use_output.get("subject", "") or ""
+    body_html = tool_use_output.get("body_html", "") or ""
 
-    # Parse JSON response
-    try:
-        # Handle potential markdown code fences around JSON
-        cleaned = response_text.strip()
-        if cleaned.startswith("```"):
-            # Remove code fence
-            lines = cleaned.split("\n")
-            lines = [l for l in lines if not l.strip().startswith("```")]
-            cleaned = "\n".join(lines)
+    # Load project for status transition.
+    project_result = await db.execute(
+        select(BrokerProject).where(
+            BrokerProject.id == project_id,
+            BrokerProject.tenant_id == tenant_id,
+            BrokerProject.deleted_at.is_(None),
+        )
+    )
+    project = project_result.scalar_one_or_none()
+    if project is None:
+        raise ValueError(
+            f"BrokerProject not found for persist_recommendation_draft: "
+            f"project_id={project_id} tenant_id={tenant_id}"
+        )
 
-        result = json.loads(cleaned)
-        subject = result.get("subject", "Insurance Recommendation")
-        body_html = result.get("body_html", "<p>Error generating recommendation body.</p>")
-    except (json.JSONDecodeError, KeyError) as e:
-        logger.error("Failed to parse recommendation draft response: %s", e)
-        # Fallback: use raw text as body
-        subject = f"Insurance Recommendation - {project.get('name', 'Project')}"
-        body_html = f"<p>{response_text}</p>"
+    # Status transition if project is at quotes_complete.
+    if project.status == "quotes_complete":
+        from flywheel.api.broker._shared import validate_transition
 
-    return {"subject": subject, "body_html": body_html}
+        validate_transition(
+            project.status, "recommended", client_id=project.client_id
+        )
+        project.status = "recommended"
+        project.updated_at = datetime.now(timezone.utc)
+
+    recommendation = BrokerRecommendation(
+        tenant_id=tenant_id,
+        broker_project_id=project_id,
+        subject=subject,
+        body=body_html,
+        recipient_email=recipient_email,
+        status="draft",
+        created_by_user_id=created_by_user_id,
+    )
+    db.add(recommendation)
+
+    activity = BrokerActivity(
+        tenant_id=tenant_id,
+        broker_project_id=project_id,
+        activity_type="recommendation_drafted",
+        actor_type="system",
+        description=f"AI recommendation drafted (CC-as-Brain) for {project.name}",
+        metadata_={
+            "recipient": recipient_email,
+            "model": "claude-in-conversation",
+        },
+    )
+    db.add(activity)
+    await db.flush()
+    return recommendation

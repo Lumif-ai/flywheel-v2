@@ -1,4 +1,6 @@
 ---
+public: true
+cc_executable: true
 name: meeting-processor
 version: "2.3"
 description: >
@@ -40,6 +42,9 @@ parameters:
   input_description: "Requires a meeting UUID. Use flywheel_fetch_meetings to find meeting IDs."
 ---
 
+> **⚠ DEPRECATED (Phase 152 — 2026-04-19):** This file is retained for historical reference only. The authoritative skill bundle is served via `flywheel_fetch_skill_assets` from the `skill_assets` table. Do not edit; edits here have no runtime effect.
+
+
 # meeting-processor
 
 You are processing meeting notes using the **flywheel-powered** meeting intelligence pipeline. Your job is to classify each meeting by type, extract structured data with deep insight analysis, write it to the context store, and produce an enriched standalone report that leverages cross-references from compounded context store data.
@@ -47,6 +52,22 @@ You are processing meeting notes using the **flywheel-powered** meeting intellig
 This skill is context-aware. Follow the protocol in `~/.claude/skills/_shared/context-protocol.md` for pre-read, post-write, and knowledge overflow handling.
 
 **Trigger phrases:** "process meetings", "pull from Granola", "update insights", "process my calls", "add meeting notes", "update the expert tracker", "what did we learn from calls", "sync meeting notes", "process latest notes", "process my notes", "update the tracker", or any reference to extracting insights from meetings. Also trigger when the user uploads meeting notes or transcripts.
+
+---
+
+## Data Gathering (MCP Mode)
+
+When running in MCP mode (in-context execution via Claude Code or Desktop), use the composite
+data-gathering tool to load meeting context in a single call:
+
+1. Call `flywheel_gather_meeting_context(meeting_id="<meeting_id>")` to load meeting data
+2. The tool returns: meeting metadata (title, date, type), attendees list, AI summary,
+   linked pipeline entry (company, stage), and related context entries — all in one response,
+   capped at 16k chars
+3. Use this data as the foundation for classification, insight extraction, and context store writes
+4. For batch processing, call the tool once per meeting_id
+
+This replaces the multi-step context pre-read when running in-context.
 
 ---
 

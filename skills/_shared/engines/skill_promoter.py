@@ -49,6 +49,7 @@ PROMOTION_MAP = [
 ]
 
 # Default paths
+# DEPRECATED (Phase 152 — 2026-04-19): legacy ~/.claude/skills/ path; skills are served via flywheel_fetch_skill_assets. Retained for developer tooling only; no runtime impact.
 DEFAULT_SKILLS_ROOT = Path.home() / ".claude" / "skills"
 DEFAULT_CONTEXT_ROOT = Path.home() / ".claude" / "context"
 

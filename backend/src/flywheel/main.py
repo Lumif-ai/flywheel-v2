@@ -52,8 +52,10 @@ from flywheel.api.relationships import router as relationships_router
 from flywheel.api.signals import router as signals_router
 from flywheel.api.meetings import router as meetings_router
 from flywheel.api.tasks import router as tasks_router
+from flywheel.api.gather import router as gather_router
 from flywheel.config import settings
 from flywheel.middleware.rate_limit import limiter
+from flywheel.middleware.timing import TimingMiddleware
 
 
 @asynccontextmanager
@@ -164,6 +166,13 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
+    # Per-request timing + DB-roundtrip profiling (Phase 151.1).
+    # Register FIRST so LIFO middleware order puts it INNERMOST on
+    # request — measures handler + DB time only, excluding GZip / CORS /
+    # security-header overhead. See flywheel.middleware.timing module
+    # docstring + Phase 151.1 research §5 Pattern 1 / Pitfall 4.
+    app.add_middleware(TimingMiddleware)
+
     # Security headers
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
@@ -240,6 +249,7 @@ def create_app() -> FastAPI:
     app.include_router(pipeline_router, prefix="/api/v1")
     app.include_router(leads_router, prefix="/api/v1")
     app.include_router(broker_router, prefix="/api/v1")
+    app.include_router(gather_router, prefix="/api/v1")
 
     return app
 

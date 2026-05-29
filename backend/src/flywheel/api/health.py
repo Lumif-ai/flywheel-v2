@@ -8,6 +8,17 @@ from flywheel.config import settings
 router = APIRouter()
 
 
+@router.get("/ping")
+async def ping():
+    """Clean network baseline -- NO database query, NO external calls.
+
+    Phase 151.1 uses this endpoint to isolate network + tunnel + TLS cost
+    from handler + DB cost. See research Pitfall 8: /health is NOT a clean
+    baseline because it does SELECT 1. This is.
+    """
+    return {"ok": True}
+
+
 @router.get("/health")
 async def health_check():
     """Return service health status with database and storage checks."""
