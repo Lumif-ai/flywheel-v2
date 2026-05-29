@@ -15,6 +15,7 @@ Authenticated endpoints:
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import re
 
@@ -36,6 +37,20 @@ from flywheel.utils.domains import is_generic_domain
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+
+async def _maybe_await(value):
+    """Await ``value`` if it is awaitable, otherwise return it as-is.
+
+    ``get_supabase_admin()`` may return either the async Supabase client
+    (auth methods return coroutines) or the sync client fallback (auth methods
+    return plain result objects). This lets call sites work with both without
+    raising ``TypeError: object ... can't be used in 'await' expression``.
+    """
+    if inspect.isawaitable(value):
+        return await value
+    return value
+
 
 # ---------------------------------------------------------------------------
 # Request / Response models
@@ -108,7 +123,7 @@ def compute_lifecycle_state(
 
 
 @router.post("/magic-link")
-@limiter.limit("3/hour")
+@limiter.limit(settings.rate_limit_magic_link)
 async def magic_link(request: Request, body: MagicLinkRequest):
     """Send a magic link email. Never reveals whether email exists."""
     if not _EMAIL_RE.match(body.email):
@@ -124,8 +139,10 @@ async def magic_link(request: Request, body: MagicLinkRequest):
         options: dict = {}
         if body.redirect_to:
             options["email_redirect_to"] = body.redirect_to
-        await supabase.auth.sign_in_with_otp(
-            {"email": body.email, "options": options}
+        await _maybe_await(
+            supabase.auth.sign_in_with_otp(
+                {"email": body.email, "options": options}
+            )
         )
     except Exception:
         # Swallow errors to avoid leaking whether the email exists
@@ -148,7 +165,14 @@ async def magic_link(request: Request, body: MagicLinkRequest):
 async def anonymous():
     """Create an anonymous Supabase session (no credentials required)."""
     supabase = await get_supabase_admin()
-    result = await supabase.auth.sign_in_anonymously()
+    try:
+        result = await _maybe_await(supabase.auth.sign_in_anonymously())
+    except Exception:
+        logger.exception("anonymous_signin_error")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Failed to create anonymous session",
+        )
 
     session = result.session
     user = result.user
