@@ -19,7 +19,7 @@
 """Add last_briefing_visit column to profiles.
 
 Revision ID: 052_add_last_briefing_visit
-Revises: 051_create_waitlist_table
+Revises: 050_add_skill_protected
 Create Date: 2026-04-08
 """
 
@@ -29,7 +29,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision: str = "052_add_last_briefing_visit"
-down_revision: Union[str, None] = "051_create_waitlist_table"
+down_revision: Union[str, None] = "050_add_skill_protected"
 branch_labels: Union[str, None] = None
 depends_on: Union[str, None] = None
 

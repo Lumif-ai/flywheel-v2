@@ -4,6 +4,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { CheckCircle, Mail, Loader2, ChevronDown, ChevronUp, Download, FileText } from 'lucide-react'
 import { format, differenceInDays } from 'date-fns'
+import { apiUrl } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import {
   useBrokerQuotes,
@@ -274,7 +275,7 @@ function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor, cove
               <FileText className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="text-xs text-muted-foreground">Source:</span>
               <a
-                href={`/api/v1/files/${quote.source_document_id}/download`}
+                href={apiUrl(`/api/v1/files/${quote.source_document_id}/download`)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="text-xs text-[#E94D35] hover:underline flex items-center gap-1"
@@ -282,7 +283,7 @@ function QuoteLineItem({ quote, projectId, showManualFor, setShowManualFor, cove
                   e.preventDefault()
                   try {
                     const token = useAuthStore.getState().token
-                    const res = await fetch(`/api/v1/files/${quote.source_document_id}/download`, {
+                    const res = await fetch(apiUrl(`/api/v1/files/${quote.source_document_id}/download`), {
                       headers: token ? { Authorization: `Bearer ${token}` } : {},
                     })
                     if (res.ok) {

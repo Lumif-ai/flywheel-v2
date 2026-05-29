@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import { useAuthStore } from '@/stores/auth'
 import type { SSEEvent } from '@/types/events'
@@ -319,7 +319,7 @@ export function useOnboarding() {
       const runId = res.run_id
       setState((s) => ({
         ...s,
-        sseUrl: `/api/v1/onboarding/crawl/${runId}/stream`,
+        sseUrl: apiUrl(`/api/v1/onboarding/crawl/${runId}/stream`),
       }))
     } catch (err) {
       setState((s) => ({
@@ -575,7 +575,7 @@ export function useOnboarding() {
           const crawlRes = await api.post<{ run_id: string }>('/onboarding/crawl', { url })
           setState(s => ({
             ...s,
-            sseUrl: `/api/v1/onboarding/crawl/${crawlRes.run_id}/stream`,
+            sseUrl: apiUrl(`/api/v1/onboarding/crawl/${crawlRes.run_id}/stream`),
           }))
         } catch (err) {
           isMergeModeRef.current = false

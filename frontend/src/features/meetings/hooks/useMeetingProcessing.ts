@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
+import { apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import { processMeeting, queryKeys } from '../api'
 
@@ -62,7 +63,7 @@ export function useMeetingProcessing(meetingId: string) {
     try {
       // POST first to get run_id, then set SSE URL
       const res = await processMeeting(meetingId)
-      setSseUrl(`/api/v1/skills/runs/${res.run_id}/stream`)
+      setSseUrl(apiUrl(`/api/v1/skills/runs/${res.run_id}/stream`))
     } catch (err) {
       setPhase('error')
       setCurrentStage(null)

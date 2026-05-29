@@ -16,6 +16,7 @@ import {
 } from 'lucide-react'
 import { useQueryClient, useMutation } from '@tanstack/react-query'
 import { Skeleton } from '@/components/ui/skeleton'
+import { apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import { useMeetingDetail } from '../hooks/useMeetingDetail'
 import { useMeetingProcessing } from '../hooks/useMeetingProcessing'
@@ -281,7 +282,7 @@ function PrepTrigger({ meetingId }: { meetingId: string }) {
       setStatusMsg(null)
       setErrorMsg(null)
       setBriefingHtml(null)
-      setStreamUrl(`/api/v1/skills/runs/${res.run_id}/stream`)
+      setStreamUrl(apiUrl(`/api/v1/skills/runs/${res.run_id}/stream`))
     },
     onError: (err: Error) => {
       // 400 = no account linkable

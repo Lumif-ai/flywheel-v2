@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 
 interface SkillRunResponse {
@@ -69,7 +69,7 @@ export function useSkillExecution() {
         runIdRef.current = response.run_id
 
         // Connect to SSE stream for real-time updates
-        setStreamUrl(`/api/v1/skills/runs/${response.run_id}/stream`)
+        setStreamUrl(apiUrl(`/api/v1/skills/runs/${response.run_id}/stream`))
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : 'Failed to start skill execution'

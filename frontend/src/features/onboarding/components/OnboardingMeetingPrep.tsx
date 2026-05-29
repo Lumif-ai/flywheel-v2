@@ -9,7 +9,7 @@
 import { useState, useCallback } from 'react'
 import { Linkedin, Calendar, ArrowRight, Loader2, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import type { SSEEvent } from '@/types/events'
 
@@ -96,7 +96,7 @@ export function OnboardingMeetingPrep({ onComplete, onSkip }: OnboardingMeetingP
         meeting_type: 'discovery',
       })
 
-      setSseUrl(`/api/v1/onboarding/run/${res.run_id}/stream`)
+      setSseUrl(apiUrl(`/api/v1/onboarding/run/${res.run_id}/stream`))
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to start meeting prep')
       setPhase('input')

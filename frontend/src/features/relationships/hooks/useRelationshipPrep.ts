@@ -1,4 +1,5 @@
 import { useState, useCallback } from 'react'
+import { apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import { triggerRelationshipPrep } from '../api'
 
@@ -60,7 +61,7 @@ export function useRelationshipPrep(accountId: string) {
       setStatus(null)
       try {
         const res = await triggerRelationshipPrep(accountId, meetingId)
-        setSseUrl(`/api/v1/skills/runs/${res.run_id}/stream`)
+        setSseUrl(apiUrl(`/api/v1/skills/runs/${res.run_id}/stream`))
       } catch {
         setPhase('error')
         setError('Failed to start prep')

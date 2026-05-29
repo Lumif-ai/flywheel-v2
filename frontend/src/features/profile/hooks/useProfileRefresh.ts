@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useSSE } from '@/lib/sse'
 import type { CrawlItem } from '@/features/onboarding/hooks/useOnboarding'
 
@@ -117,7 +117,7 @@ export function useProfileRefresh() {
 
     try {
       const res = await api.post<{ run_id: string }>('/profile/refresh', {})
-      setSseUrl(`/api/v1/skills/runs/${res.run_id}/stream`)
+      setSseUrl(apiUrl(`/api/v1/skills/runs/${res.run_id}/stream`))
     } catch (err) {
       setPhase('error')
       setError({
@@ -163,7 +163,7 @@ export function useProfileRefresh() {
     setCrawlTotal(0)
     setCrawlStatus(null)
     setError(null)
-    setSseUrl(`/api/v1/skills/runs/${runId}/stream`)
+    setSseUrl(apiUrl(`/api/v1/skills/runs/${runId}/stream`))
   }, [])
 
   const dismiss = useCallback(() => {

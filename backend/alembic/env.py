@@ -1,5 +1,4 @@
 import asyncio
-import os
 from logging.config import fileConfig
 
 from sqlalchemy import pool
@@ -8,14 +7,15 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
+from flywheel.config import settings
+
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from DATABASE_URL env var if set
-database_url = os.environ.get("DATABASE_URL")
-if database_url:
-    config.set_main_option("sqlalchemy.url", database_url)
+# Use the same URL the app uses — handles DATABASE_URL or assembled DB_* parts.
+# Escape % so ConfigParser interpolation doesn't choke on URL-encoded passwords.
+config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

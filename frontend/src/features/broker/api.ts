@@ -1,4 +1,4 @@
-import { api } from '@/lib/api'
+import { api, apiUrl } from '@/lib/api'
 import { useAuthStore } from '@/stores/auth'
 import type {
   BrokerClient,
@@ -185,7 +185,7 @@ export function fetchComparison(projectId: string): Promise<ComparisonMatrix> {
 
 export async function exportComparison(projectId: string, quoteIds?: string[]): Promise<void> {
   const token = useAuthStore.getState().token
-  const res = await fetch(`/api/v1/broker/projects/${projectId}/export-comparison`, {
+  const res = await fetch(apiUrl(`/api/v1/broker/projects/${projectId}/export-comparison`), {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
@@ -330,7 +330,7 @@ export async function uploadProjectDocuments(
   files.forEach((f) => formData.append('files', f))
   // Phase 145: single scalar document_type per request (research Pitfall 4).
   formData.append('document_type', documentType)
-  const res = await fetch(`/api/v1/broker/projects/${projectId}/documents`, {
+  const res = await fetch(apiUrl(`/api/v1/broker/projects/${projectId}/documents`), {
     method: 'POST',
     headers: token ? { Authorization: `Bearer ${token}` } : {},
     // DO NOT set Content-Type — browser sets multipart/form-data boundary automatically
