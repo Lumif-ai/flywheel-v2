@@ -354,7 +354,7 @@ export async function patchProjectDocument(
 ): Promise<{ file_id: string; document_type: DocumentZoneKind }> {
   const token = useAuthStore.getState().token
   const res = await fetch(
-    `/api/v1/broker/projects/${projectId}/documents/${fileId}`,
+    apiUrl(`/api/v1/broker/projects/${projectId}/documents/${fileId}`),
     {
       method: 'PATCH',
       headers: {
